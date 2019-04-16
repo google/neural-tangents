@@ -29,24 +29,16 @@ convolutional layers in the NTK parameterization.
 In weight space, we view functions as maps from pairs of parameters and inputs
 to outputs. As such, we keep track of inputs (training and test points) as
 well as the parameters of the network. In this case we take the first order
-taylor series of a function about some initial parameters,
-
-$$
-f_{\text{lin}}(\theta, x) = f(\theta_0, x) + J(\theta_0, x)(\theta - \theta_0)
-$$
-
-where $$J_{ij}(\theta, x) = \partial_{\theta_i} f_j(\theta, x)$$ is the Jacobian
-of the realization function, $$F:\mathbb R^P\to\mathcal F$$ that associates
-parameters with specific realizations of the neural network. The Jacobian
-evaluated on a single input will have shape `[output_dim, parameters]`. Often we
-will compute the Jacobian over a batch of data in which case it will have shape
-`[datapoints, output_dim, parameters]`. This is implemented by the function
-`linearize(f, params_0)` which converts a function `f(params, x)` into its
-linearization, `f_lin(params, x)`, about some initial parameters, `params_0`.
+taylor series of a function about some initial parameters. This is implemented
+by the function `linearize(f, params_0)` which converts a function
+`f(params, x)` into its linearization, `f_lin(params, x)`, about some initial parameters, `params_0`.
 
 One can use `f_lin(params, x)` exactly as you would any other function
 (including as an input to JAX optimizers). This makes it easy to compare the
 training trajectory of neural networks with that of its linearization.
+Previous theory and experiments have examined the linearization of neural 
+networks from inputs to logits or pre-activations, rather than from inputs to
+post-activations which are substantially more nonlinear.
 
 #### Example:
 
@@ -73,17 +65,8 @@ logits = f_lin((W, b), x)
 Instead of tracking the function parameters and inputs, we can instead look at
 the values that the function takes on training and test points. In this case one
 can describe the evolution of the function values during training using an
-object called the Neural Tangent Kernel,
-
-$$G_\theta(x_1, x_2) = J(\theta, x_1) J(\theta, x_2)^T.$$
-
-Since the Jacobian has shape `[output_dim, parameters]`, the NTK will have shape
-`[output_dim, output_dim]`. As in the case of the Jacobian we will usually
-compute the NTK over two batches of inputs, $$X_1$$ and $$X_2$$, of size $$N_1$$ and $$N_2$$ respectively. In this case we generalize the NTK to have shape
-`[N_1, output_dim, N_2, output_dim]` though we will typically deal with a
-flattened version whose shape is `[N_1 * output_dim, N_2 * output_dim]`. We
-compute the NTK using the function `ntk(f, batch_size)` which returns a function that will compute the NTK for different datasets and parameters. Once the NTK is computed, there are solutions to certain learning algorithms in the small
-learning-rate limit.
+object called the Neural Tangent Kernel.  We compute the NTK using the function `ntk(f, batch_size)` which returns a function that will compute the NTK for different datasets and parameters. Once the NTK is computed, there are solutions
+to certain learning algorithms in the small learning-rate limit.
 
 1.  With an MSE loss under gradient descent, there is an analytic solution to
     the dynamics which we implement using the `analytic_mse_predictor(G_DD,
@@ -157,7 +140,9 @@ Sohl-Dickstein, Jeffrey Pennington
 
 ## Getting Started
 
-Installing Neural Tangents should be as easy as:
+To install Neural Tangents, first follow [JAX's](https://www.github.com/google/jax/)
+installation instructions. With JAX installed, using Neural Tangents should be
+as easy as:
 
 ```
 git clone https://github.com/google/neural-tangents
