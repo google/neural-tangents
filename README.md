@@ -164,8 +164,8 @@ python neural-tangents/neural_tangents/tangents_test.py
 If you would prefer, you can get started without installing by checking out our
 colab examples:
 
-- [Weight Space Linearization](https://colab.research.google.com/github/google/neural-tangents/notebooks/weight_space_linearization.ipynb)
-- [Function Space Linearization](https://colab.research.google.com/github/google/neural-tangents/notebooks/function_space_linearization.ipynb)
+- [Weight Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/weight_space_linearization.ipynb)
+- [Function Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/function_space_linearization.ipynb)
 
 
 ## Papers
