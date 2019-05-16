@@ -50,16 +50,22 @@ OUTPUT_LOGITS = [1, 2, 3]
 @opt.optimizer
 def momentum(learning_rate, momentum=0.9):
   """A standard momentum optimizer for testing.
+
+  Different from `jax.experimental.optimizers.momentum` (Nesterov).
   """
   learning_rate = opt.make_schedule(learning_rate)
   def init_fun(x0):
     v0 = np.zeros_like(x0)
     return x0, v0
-  def update_fun(i, g, x, velocity):
+  def update_fun(i, g, state):
+    x, velocity = state
     velocity = momentum * velocity + g
     x = x - learning_rate(i) * velocity
     return x, velocity
-  return init_fun, update_fun
+  def get_params(state):
+    x, _ = state
+    return x
+  return init_fun, update_fun, get_params
 
 
 class NeuralTangentsTest(jtu.JaxTestCase):
@@ -208,7 +214,7 @@ class NeuralTangentsTest(jtu.JaxTestCase):
     train_time = 100.0
     steps = int(train_time / step_size)
 
-    opt_init, opt_update = opt.sgd(step_size)
+    opt_init, opt_update, get_params = opt.sgd(step_size)
     opt_state = opt_init(params)
 
     fx_initial_train = f(params, data_train)
@@ -223,10 +229,10 @@ class NeuralTangentsTest(jtu.JaxTestCase):
     self.assertAllClose(fx_initial_test, fx_pred_test, False)
 
     for i in range(steps):
-      params = opt.get_params(opt_state)
+      params = get_params(opt_state)
       opt_state = opt_update(i, grad(loss)(params, data_train), opt_state)
 
-    params = opt.get_params(opt_state)
+    params = get_params(opt_state)
     fx_train = f(params, data_train)
     fx_test = f(params, data_test)
 
@@ -286,7 +292,7 @@ class NeuralTangentsTest(jtu.JaxTestCase):
     train_time = 100.0
     steps = int(train_time / step_size)
 
-    opt_init, opt_update = opt.sgd(step_size)
+    opt_init, opt_update, get_params = opt.sgd(step_size)
     opt_state = opt_init(params)
 
     fx_initial_train = f(params, data_train)
@@ -301,10 +307,10 @@ class NeuralTangentsTest(jtu.JaxTestCase):
     self.assertAllClose(fx_initial_test, fx_pred_test, False)
 
     for i in range(steps):
-      params = opt.get_params(opt_state)
+      params = get_params(opt_state)
       opt_state = opt_update(i, grad_loss(params, data_train), opt_state)
 
-    params = opt.get_params(opt_state)
+    params = get_params(opt_state)
     fx_train = f(params, data_train)
     fx_test = f(params, data_test)
 
@@ -366,7 +372,7 @@ class NeuralTangentsTest(jtu.JaxTestCase):
     init_fn, predict_fn, get_fn = tangents.momentum_predictor(
         g_dd, data_labels, loss, step_size, g_td)
 
-    opt_init, opt_update = momentum(step_size)
+    opt_init, opt_update, get_params = momentum(step_size, 0.9)
     opt_state = opt_init(params)
 
     fx_initial_train = f(params, data_train)
@@ -375,10 +381,10 @@ class NeuralTangentsTest(jtu.JaxTestCase):
     lin_state = init_fn(fx_initial_train, fx_initial_test)
 
     for i in range(steps):
-      params = opt.get_params(opt_state)
+      params = get_params(opt_state)
       opt_state = opt_update(i, grad_loss(params, data_train), opt_state)
 
-    params = opt.get_params(opt_state)
+    params = get_params(opt_state)
     fx_train = f(params, data_train)
     fx_test = f(params, data_test)
 
@@ -398,5 +404,7 @@ class NeuralTangentsTest(jtu.JaxTestCase):
         fx_error_train, np.zeros_like(fx_error_train), False, 0.1, 0.1)
     self.assertAllClose(
         fx_error_test, np.zeros_like(fx_error_test), False, 0.1, 0.1)
+
+
 if __name__ == '__main__':
   absltest.main()
