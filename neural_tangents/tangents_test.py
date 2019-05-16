@@ -37,7 +37,6 @@ from jax.tree_util import tree_reduce
 
 from neural_tangents import tangents
 
-import numpy as onp
 
 jax_config.parse_flags_with_absl()
 FLAGS = jax_config.FLAGS
