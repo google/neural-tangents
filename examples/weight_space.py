@@ -72,7 +72,7 @@ def main(unused_argv):
   f_lin = tangents.linearize(f, params)
 
   # Create and initialize an optimizer for both f and f_lin.
-  opt_init, opt_apply = optimizers.momentum(FLAGS.learning_rate, 0.9)
+  opt_init, opt_apply, get_params = optimizers.momentum(FLAGS.learning_rate, 0.9)
   opt_apply = jit(opt_apply)
 
   state = opt_init(params)
@@ -97,10 +97,10 @@ def main(unused_argv):
   for i, (x, y) in enumerate(datasets.minibatch(
       x_train, y_train, FLAGS.batch_size, FLAGS.train_epochs)):
 
-    params = optimizers.get_params(state)
+    params = get_params(state)
     state = opt_apply(i, grad_loss(params, x, y), state)
 
-    params_lin = optimizers.get_params(state_lin)
+    params_lin = get_params(state_lin)
     state_lin = opt_apply(i, grad_loss_lin(params_lin, x, y), state_lin)
 
     if i % steps_per_epoch == 0:

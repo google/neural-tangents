@@ -5,7 +5,6 @@ MSE loss and SGD. We compare this training with the analytic function space
 prediction using the NTK. Data is loaded using tensorflow datasets.
 """
 
-
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -13,26 +12,28 @@ from __future__ import print_function
 from absl import app
 from absl import flags
 
-from jax.api import jit
-from jax.api import grad
 from jax import random
 
-import jax.numpy as np
-from jax.experimental import stax
+from jax.api import grad
+from jax.api import jit
+
 from jax.experimental import optimizers
+from jax.experimental import stax
 
-from neural_tangents import tangents
+import jax.numpy as np
+
 from neural_tangents import layers
+from neural_tangents import tangents
 
-import util
 import datasets
+import util
 
 flags.DEFINE_float('learning_rate', 1.0,
                    'Learning rate to use during training.')
 flags.DEFINE_integer('train_size', 128,
-                     'Dataset size to use both for training.')
+                     'Dataset size to use for training.')
 flags.DEFINE_integer('test_size', 128,
-                     'Dataset size to use both for testing.')
+                     'Dataset size to use for testing.')
 flags.DEFINE_float('train_time', 1000.0,
                    'Continuous time denoting duration of training.')
 
@@ -55,7 +56,7 @@ def main(unused_argv):
   _, params = init_fn(key, (-1, 784))
 
   # Create and initialize an optimizer.
-  opt_init, opt_apply = optimizers.sgd(FLAGS.learning_rate)
+  opt_init, opt_apply, get_params = optimizers.sgd(FLAGS.learning_rate)
   state = opt_init(params)
 
   # Create an mse loss function and a gradient function.
@@ -77,7 +78,7 @@ def main(unused_argv):
   print('Training for {} steps'.format(train_steps))
 
   for i in range(train_steps):
-    params = optimizers.get_params(state)
+    params = get_params(state)
     state = opt_apply(i, grad_loss(params, x_train, y_train), state)
 
   # Get predictions from analytic computation.
