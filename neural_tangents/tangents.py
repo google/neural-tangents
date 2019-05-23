@@ -34,7 +34,7 @@ from jax.tree_util import tree_multimap
 
 import numpy as onp
 
-from scipy.integrate import ode
+from scipy.integrate._ode import ode
 
 
 def linearize(f, params):
@@ -171,7 +171,7 @@ def ntk(f, batch_size=None):
   """
   # NOTE(schsam): Can we move the jit outside?
   kernel_fn = jit(functools.partial(_compute_ntk, f))
-  if batch_size is None:
+  if batch_size is None or batch_size <= 0:
 
     def ntk_fun(params, x1, x2=None):
       if x2 is None: x2 = x1
