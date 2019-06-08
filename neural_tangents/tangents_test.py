@@ -20,9 +20,6 @@ from __future__ import print_function
 
 import operator
 
-from absl.testing import absltest
-from absl.testing import parameterized
-
 from jax import test_util as jtu
 from jax.api import grad
 from jax.api import jacobian
@@ -39,7 +36,6 @@ from neural_tangents import tangents
 
 
 jax_config.parse_flags_with_absl()
-FLAGS = jax_config.FLAGS
 
 
 MATRIX_SHAPES = [(3, 3), (4, 4)]
@@ -68,7 +64,7 @@ def momentum(learning_rate, momentum=0.9):
 
 
 class NeuralTangentsTest(jtu.JaxTestCase):
-  @parameterized.named_parameters(
+  @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_{}'.format(shape),
           'shape': shape
@@ -90,7 +86,7 @@ class NeuralTangentsTest(jtu.JaxTestCase):
       w = random.normal(split, shape)
       self.assertAllClose(f(w, x), f_lin(w, x), True)
 
-  @parameterized.named_parameters(
+  @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_shape_{}_logits_{}'.format(shape, out_logits),
           'shape': shape,
@@ -140,7 +136,7 @@ class NeuralTangentsTest(jtu.JaxTestCase):
     g_direct = ntk_direct(f, params, data_other, data_self)
     self.assertAllClose(g, g_direct, check_dtypes=False)
 
-  @parameterized.named_parameters(
+  @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_shape_{}_logits_{}'.format(shape, out_logits),
           'shape': shape,
@@ -171,7 +167,7 @@ class NeuralTangentsTest(jtu.JaxTestCase):
     g_batched = g_batched_fn(params, data_other, data_self)
     self.assertAllClose(g, g_batched, check_dtypes=False)
 
-  @parameterized.named_parameters(
+  @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_shape_{}_logits_{}'.format(shape, out_logits),
           'shape': shape,
@@ -249,7 +245,7 @@ class NeuralTangentsTest(jtu.JaxTestCase):
     self.assertAllClose(
         fx_error_test, np.zeros_like(fx_error_test), False, 0.1, 0.1)
 
-  @parameterized.named_parameters(
+  @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_shape_{}_logits_{}'.format(shape, out_logits),
           'shape': shape,
@@ -329,7 +325,7 @@ class NeuralTangentsTest(jtu.JaxTestCase):
     self.assertAllClose(
         fx_error_test, np.zeros_like(fx_error_test), False, 0.1, 0.1)
 
-  @parameterized.named_parameters(
+  @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_shape_{}_logits_{}'.format(shape, out_logits),
           'shape': shape,
@@ -406,4 +402,4 @@ class NeuralTangentsTest(jtu.JaxTestCase):
 
 
 if __name__ == '__main__':
-  absltest.main()
+  jtu.absltest.main()
