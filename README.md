@@ -135,7 +135,7 @@ Arthur Jacot, Franck Gabriel, Clément Hongler
 
 [2] [Wide Neural Networks of Any Depth Evolve as Linear Models Under Gradient
 Descent.](https://arxiv.org/abs/1902.06720) \
-Jaehoon Lee*, Lechao Xiao*, Samuel S. Schoenholz, Yasaman Bahri, Jascha
+Jaehoon Lee*, Lechao Xiao*, Samuel S. Schoenholz, Yasaman Bahri, Roman Novak, Jascha
 Sohl-Dickstein, Jeffrey Pennington
 
 ## Getting Started
@@ -174,8 +174,11 @@ Neural tangents has been used in the following papers:
 
 [1] [Wide Neural Networks of Any Depth Evolve as Linear Models Under Gradient
 Descent.](https://arxiv.org/abs/1902.06720) \
-Jaehoon Lee*, Lechao Xiao*, Samuel S. Schoenholz, Yasaman Bahri, Jascha
+Jaehoon Lee*, Lechao Xiao*, Samuel S. Schoenholz, Yasaman Bahri, Roman Novak, Jascha
 Sohl-Dickstein, Jeffrey Pennington
+
+[2] [Training Dynamics of Deep Networks using Stochastic Gradient Descent via Neural Tangent Kernel.](https://arxiv.org/abs/1905.13654) \
+Soufiane Hayou, Arnaud Doucet, Judith Rousseau
 
 If you use the code in a publication, please cite the repo using the .bib,
 
