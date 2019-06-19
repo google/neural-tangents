@@ -26,6 +26,7 @@ from jax.api import jacobian
 from jax.api import jit
 from jax.api import jvp
 from jax.api import vjp
+from jax.api import eval_shape
 
 import jax.numpy as np
 
@@ -98,7 +99,7 @@ def _batch_kernel(kernel_fn, x1, x2, batch_size):
   return np.vstack([np.hstack(k) for k in kernel])
 
 
-def _compute_ntk(f, fx_dummy, params, x1, x2):
+def _compute_ntk(f, output_dim, params, x1, x2):
   """Computes the ntk without batching for inputs x1 and x2.
 
   The Neural Tangent Kernel is defined as J(X_1)^T J(X_2) where J is the
@@ -119,11 +120,7 @@ def _compute_ntk(f, fx_dummy, params, x1, x2):
     f: The function whose NTK we are computing. f should have the signature
        f(params, inputs) and should return an ndarray of outputs with shape
        [|inputs|, output_dim].
-    fx_dummy: A dummy evaluation of f on a single input that we use to
-       instantiate an ndarray with the correct shape
-       (aka [|inputs|, output_dim]).
-       It should be possible at some point to use JAX's tracing mechanism to do
-       this more efficiently.
+    output_dim: An integer giving the output dimension of f(params, x).
     params: A set of parameters about which we would like to compute the neural
        tangent kernel. This should be any structure that can be mapped over by
        JAX's tree utilities.
@@ -135,8 +132,7 @@ def _compute_ntk(f, fx_dummy, params, x1, x2):
   Returns:
     An ndarray containing the NTK with shape [n * output_dim, m * output_dim].
   """
-  fx_dummy = np.concatenate([fx_dummy] * len(x2))
-  output_dim = fx_dummy.shape[1]
+  fx_dummy = np.ones((len(x2), output_dim))
   def dzdt(delta):
     _, dfdw = vjp(lambda p: f(p, x2), params)
     dfdw, = dfdw(delta)
@@ -170,24 +166,22 @@ def ntk(f, batch_size=None):
     an ndarray of shape [n1 * output_dim, n2 * output_dim].
   """
   # NOTE(schsam): Can we move the jit outside?
-  kernel_fn = jit(functools.partial(_compute_ntk, f))
+  kernel_fn = jit(functools.partial(_compute_ntk, f), static_argnums=(0,))
   if batch_size is None or batch_size <= 0:
 
     def ntk_fun(params, x1, x2=None):
       if x2 is None: x2 = x1
-      # @Optimization
-      # Can we compute this using a shaped array or some other jax magic?
-      fx_dummy = f(params, x2[:1])
-      return kernel_fn(fx_dummy, params, x1, x2)
+      output_dim = eval_shape(f, params, x2)[-1]
+      return kernel_fn(output_dim, params, x1, x2)
     return ntk_fun
 
   def ntk_fun_batched(params, x1, x2=None):
     if x2 is None:
-      fx_dummy = f(params, x1[:1])
+      output_dim = eval_shape(f, params, x1)[-1]
     else:
-      fx_dummy = f(params, x2[:1])
+      output_dim = eval_shape(f, params, x2)[-1]
 
-    n = functools.partial(kernel_fn, fx_dummy, params)
+    n = functools.partial(kernel_fn, output_dim, params)
     return _batch_kernel(n, x1, x2, batch_size)
 
   return ntk_fun_batched
