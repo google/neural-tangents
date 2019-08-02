@@ -26,14 +26,12 @@ from jax.api import jacobian
 from jax.api import jit
 from jax.api import jvp
 from jax.api import vjp
-from jax.api import eval_shape
+from jax.lib import xla_bridge
 
 import jax.numpy as np
 
 from jax.tree_util import tree_map
 from jax.tree_util import tree_multimap
-
-import numpy as onp
 
 from scipy.integrate._ode import ode
 
@@ -253,11 +251,16 @@ def analytic_mse_predictor(g_dd, y_train, g_td=None):
   """
 
   # TODO(schsam): Eventually, we may want to handle non-symmetric kernels for
-  # e.g. masking. Additionally, once JAX supports eigh on GPU, we probably want
+  # e.g. masking. Additionally, once JAX supports eigh on TPU, we probably want
   # to switch to JAX's eigh.
-  evals, evecs = onp.linalg.eigh(g_dd)
+  if xla_bridge.get_backend().platform == 'tpu':
+    eigh = np.onp.linalg.eigh
+  else:
+    eigh = np.linalg.eigh
+
+  evals, evecs = eigh(g_dd)
   ievecs = np.transpose(evecs)
-  inverse = onp.linalg.inv(g_dd)
+  inverse = np.linalg.inv(g_dd)
   normalization = g_dd.shape[1]
 
   def fl(fx):
