@@ -30,10 +30,19 @@ from jax.lib import xla_bridge
 
 import jax.numpy as np
 
+from jax.tree_util import register_pytree_node
 from jax.tree_util import tree_map
 from jax.tree_util import tree_multimap
 
 from scipy.integrate._ode import ode
+
+
+try:
+  register_pytree_node(type(None),
+                       lambda x: ((), None),
+                       lambda _, xs: None)
+except ValueError as e:
+  print(e)
 
 
 def linearize(f, params):
