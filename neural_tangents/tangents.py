@@ -37,14 +37,6 @@ from jax.tree_util import tree_multimap
 from scipy.integrate._ode import ode
 
 
-try:
-  register_pytree_node(type(None),
-                       lambda x: ((), None),
-                       lambda _, xs: None)
-except ValueError as e:
-  print(e)
-
-
 def linearize(f, params):
   """Returns a function f_lin, the first order taylor approximation to f.
 
