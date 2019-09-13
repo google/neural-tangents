@@ -18,22 +18,16 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-
 import functools
-
 from jax.api import grad
 from jax.api import jacobian
 from jax.api import jit
 from jax.api import jvp
 from jax.api import vjp
 from jax.lib import xla_bridge
-
 import jax.numpy as np
-
-from jax.tree_util import register_pytree_node
 from jax.tree_util import tree_map
 from jax.tree_util import tree_multimap
-
 from scipy.integrate._ode import ode
 
 
@@ -47,8 +41,8 @@ def linearize(f, params):
 
   Args:
     f: A function that we would like to linearize. It should have the signature
-       f(params, inputs) where params and inputs are ndarrays and f should
-       return an ndarray.
+       f(params, inputs) where params and inputs are `np.ndarray`s and f should
+       return an `np.ndarray`.
     params: Initial parameters to the function that we would like to take the
             Taylor series about. This can be any structure that is compatible
             with the JAX tree operations.
@@ -64,27 +58,27 @@ def linearize(f, params):
   return f_lin
 
 
-def _batch_kernel(kernel_fn, x1, x2, batch_size):
+def _batch_kernel(ker_fun, x1, x2, batch_size):
   """Takes a kernel function and computes it over a dataset in batches.
 
   Args:
-    kernel_fn: A function that computes a kernel between two datasets,
-               kernel_fn(x1, x2)
-    x1: A first ndarray of inputs of shape [n1, ...] over which we would like to
-        compute the kernel.
-    x2: A second ndarray of inputs of shape [n2, ...] to use in the kernel
+    ker_fun: A function that computes a kernel between two datasets,
+               ker_fun(x1, x2)
+    x1: A first `np.ndarray` of inputs of shape [n1, ...] over which we would
+      like to compute the kernel.
+    x2: A second `np.ndarray` of inputs of shape [n2, ...] to use in the kernel
         computation. Can be None in which case x2 = x1.
     batch_size: The size of batches in which to split the data.
 
   Returns:
-    An ndarray of size [n1 * output_dim, n2 * output_dim].
+    A `np.ndarray` of size [n1 * output_dim, n2 * output_dim].
   """
   x1s = np.split(x1, range(batch_size, x1.shape[0], batch_size))
   if x2 is None:
     batches = len(x1s)
     # pylint: disable=g-complex-comprehension
     kernel = [[
-        kernel_fn(xi, xj) for xj in x1s[:i + 1]] for i, xi in enumerate(x1s)]
+        ker_fun(xi, xj) for xj in x1s[:i + 1]] for i, xi in enumerate(x1s)]
     kernel = [[
         kernel[i][j]  if j <= i else
         np.transpose(kernel[j][i])
@@ -93,7 +87,7 @@ def _batch_kernel(kernel_fn, x1, x2, batch_size):
   else:
     x2s = np.split(x2, range(batch_size, x2.shape[0], batch_size))
     # pylint: disable=g-complex-comprehension
-    kernel = [[kernel_fn(x1, x2) for x2 in x2s] for x1 in x1s]
+    kernel = [[ker_fun(x1, x2) for x2 in x2s] for x1 in x1s]
 
   return np.vstack([np.hstack(k) for k in kernel])
 
@@ -117,23 +111,24 @@ def _compute_ntk(f, fx_dummy, params, x1, x2):
 
   Args:
     f: The function whose NTK we are computing. f should have the signature
-       f(params, inputs) and should return an ndarray of outputs with shape
+       f(params, inputs) and should return an `np.ndarray` of outputs with shape
        [|inputs|, output_dim].
     fx_dummy: A dummy evaluation of f on a single input that we use to
-       instantiate an ndarray with the correct shape
+       instantiate an `np.ndarray` with the correct shape
        (aka [|inputs|, output_dim]).
        It should be possible at some point to use JAX's tracing mechanism to do
        this more efficiently.
     params: A set of parameters about which we would like to compute the neural
        tangent kernel. This should be any structure that can be mapped over by
        JAX's tree utilities.
-    x1: A first ndarray of inputs, of shape [n1, ...], over which we would like
-       to compute the NTK.
-    x2: A second ndarray of inputs, of shape [n2, ...], over which we would like
-       to compute the NTK.
+    x1: A first `np.ndarray` of inputs, of shape [n1, ...], over which we would
+      like to compute the NTK.
+    x2: A second `np.ndarray` of inputs, of shape [n2, ...], over which we would
+     like to compute the NTK.
 
   Returns:
-    An ndarray containing the NTK with shape [n * output_dim, m * output_dim].
+    A `np.ndarray` containing the NTK with shape
+      [n * output_dim, m * output_dim].
   """
   fx_dummy = np.concatenate([fx_dummy] * len(x2))
   output_dim = fx_dummy.shape[1]
@@ -146,17 +141,17 @@ def _compute_ntk(f, fx_dummy, params, x1, x2):
       return f(p, x1)
     _, dzdot = jvp(z, (0.0,), (1.0,))
     return dzdot
-  theta = jacobian(dzdt)(fx_dummy)
-  return np.reshape(theta, (len(x1) * output_dim, len(x2) * output_dim))
+  ntk = jacobian(dzdt)(fx_dummy)
+  return np.reshape(ntk, (len(x1) * output_dim, len(x2) * output_dim))
 
 
-def ntk(f, batch_size=None):
+def get_ntk_fun(f, batch_size=None):
   """Computes the neural tangent kernel.
 
   Example:
-    >>> theta = ntk(f, batch_size=64)
-    >>> k_dd = theta(params, x_train)
-    >>> k_td = theta(params, x_test, x_train)
+    >>> ntk = get_ntk_fun(f, batch_size=64)
+    >>> k_dd = ntk(params, x_train)
+    >>> k_td = ntk(params, x_test, x_train)
 
   Args:
     f: A function whose NTK we would like to compute.
@@ -164,13 +159,13 @@ def ntk(f, batch_size=None):
 
   Returns:
     A function ntk_fun(params, x1, x2) that computes the NTK for a
-    specific choice of parameters and inputs. Here x1 and x2 are ndarrays of
-    shape [n1, ...] and [n2, ...] respectively and f(params, xi) has shape
+    specific choice of parameters and inputs. Here x1 and x2 are `np.ndarray`s
+    of shape [n1, ...] and [n2, ...] respectively and f(params, xi) has shape
     [ni, output_dim]; params should be a PyTree. The function will return an
-    an ndarray of shape [n1 * output_dim, n2 * output_dim].
+    an `np.ndarray` of shape [n1 * output_dim, n2 * output_dim].
   """
   # NOTE(schsam): Can we move the jit outside?
-  kernel_fn = jit(functools.partial(_compute_ntk, f))
+  ker_fun = jit(functools.partial(_compute_ntk, f))
   if batch_size is None or batch_size <= 0:
 
     def ntk_fun(params, x1, x2=None):
@@ -178,7 +173,7 @@ def ntk(f, batch_size=None):
       # @Optimization
       # Can we compute this using a shaped array or some other jax magic?
       fx_dummy = f(params, x2[:1])
-      return kernel_fn(fx_dummy, params, x1, x2)
+      return ker_fun(fx_dummy, params, x1, x2)
     return ntk_fun
 
   def ntk_fun_batched(params, x1, x2=None):
@@ -187,7 +182,7 @@ def ntk(f, batch_size=None):
     else:
       fx_dummy = f(params, x2[:1])
 
-    n = functools.partial(kernel_fn, fx_dummy, params)
+    n = functools.partial(ker_fun, fx_dummy, params)
     return _batch_kernel(n, x1, x2, batch_size)
 
   return ntk_fun_batched
@@ -209,9 +204,9 @@ def analytic_mse_predictor(g_dd, y_train, g_td=None):
 
   Example:
     >>> train_time = 1e-7
-    >>> kernel_fn = ntk(f)
-    >>> g_dd = compute_spectrum(kernel_fn(params, x_train))
-    >>> g_td = kernel_fn(params, x_test, x_train)
+    >>> ker_fun = get_ntk_fun(f)
+    >>> g_dd = compute_spectrum(ker_fun(params, x_train))
+    >>> g_td = ker_fun(params, x_test, x_train)
     >>>
     >>> predict_fn = analytic_mse_predictor(g_dd, train_y, g_td)
     >>>
@@ -222,23 +217,23 @@ def analytic_mse_predictor(g_dd, y_train, g_td=None):
     >>>          fx_train_initial, fx_test_initial, train_time)
 
   Args:
-    g_dd: A kernel on the training data. The kernel should be an ndarray of
+    g_dd: A kernel on the training data. The kernel should be an `np.ndarray` of
       shape [n_train * output_dim, n_train * output_dim].
-    y_train: An ndarray of shape [n_train, output_dim] of targets for the
+    y_train: A `np.ndarray` of shape [n_train, output_dim] of targets for the
       training data.
     g_td: A Kernel relating training data with test data. The kernel should be
-      an ndarray of shape [n_test * output_dim, n_train * output_dim].
+      an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim].
       Note: g_td should have been created in the convention
-      kernel_fn(params, x_train, x_test).
+      ker_fun(params, x_train, x_test).
 
   Returns:
     A function that predicts outputs after t = learning_rate * steps of
     training.
 
     If g_td is None:
-      The function returned is predict(fx, t). Here fx is an ndarray of network
-      outputs and has shape [n_train, output_dim], t is a floating point time.
-      predict(fx, t) returns an ndarray of predictions of shape
+      The function returned is predict(fx, t). Here fx is an `np.ndarray` of
+      network outputs and has shape [n_train, output_dim], t is a floating point
+      time. predict(fx, t) returns an `np.ndarray` of predictions of shape
       [n_train, output_dim].
 
     If g_td is not None:
@@ -309,9 +304,9 @@ def gradient_descent_predictor(g_dd, y_train, loss, g_td=None):
 
   Example:
     >>> train_time = 1e-7
-    >>> kernel_fn = ntk(f)
-    >>> g_dd = compute_spectrum(kernel_fn(params, x_train))
-    >>> g_td = kernel_fn(params, x_test, x_train)
+    >>> ker_fun = get_ntk_fun(f)
+    >>> g_dd = compute_spectrum(ker_fun(params, x_train))
+    >>> g_td = ker_fun(params, x_test, x_train)
     >>>
     >>> from jax.experimental import stax
     >>> cross_entropy = lambda fx, y_hat: -np.mean(stax.logsoftmax(fx) * y_hat)
@@ -325,30 +320,30 @@ def gradient_descent_predictor(g_dd, y_train, loss, g_td=None):
     >>>          fx_train_initial, fx_test_initial, train_time)
 
   Args:
-    g_dd: A Kernel on the training data. The kernel should be an ndarray of
+    g_dd: A Kernel on the training data. The kernel should be an `np.ndarray` of
       shape [n_train * output_dim, n_train * output_dim].
-    y_train: An ndarray of shape [n_train, output_dim] of labels for the
+    y_train: A `np.ndarray` of shape [n_train, output_dim] of labels for the
       training data.
     loss: A loss function whose signature is loss(fx, y_hat) where fx is an
-      ndarray of function space output_dim of the network and y_hat are
+      `np.ndarray` of function space output_dim of the network and y_hat are
       targets.
 
       Note: the loss function should treat the batch and output dimensions
       symmetrically.
     g_td: A Kernel relating training data with test data. The kernel should be
-      an ndarray of shape [n_test * output_dim, n_train * output_dim].
+      an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim].
 
       Note: g_td should have been created in the convention
-      kernel_fn(params, x_test, x_train).
+      ker_fun(params, x_test, x_train).
 
   Returns:
     A function that predicts outputs after t = learning_rate * steps of
     training.
 
     If g_td is None:
-      The function returned is predict(fx, t). Here fx is an ndarray of network
-      outputs and has shape [n_train, output_dim], t is a floating point time.
-      predict(fx, t) returns an ndarray of predictions of shape
+      The function returned is predict(fx, t). Here fx is an `np.ndarray` of
+      network outputs and has shape [n_train, output_dim], t is a floating point
+      time. predict(fx, t) returns an `np.ndarray` of predictions of shape
       [n_train, output_dim].
 
     If g_td is not None:
@@ -423,9 +418,9 @@ def momentum_predictor(
     >>> train_time = 1e-7
     >>> learning_rate = 1e-2
     >>>
-    >>> kernel_fn = ntk(f)
-    >>> g_dd = compute_spectrum(kernel_fn(params, x_train))
-    >>> g_td = kernel_fn(params, x_test, x_train)
+    >>> ker_fun = get_ntk_fun(f)
+    >>> g_dd = compute_spectrum(ker_fun(params, x_train))
+    >>> g_td = ker_fun(params, x_test, x_train)
     >>>
     >>> from jax.experimental import stax
     >>> cross_entropy = lambda fx, y_hat: -np.mean(stax.logsoftmax(fx) * y_hat)
@@ -440,20 +435,21 @@ def momentum_predictor(
     >>> fx_train_final, fx_test_final = get_fn(lin_state)
 
   Args:
-    g_dd: Kernel on the training data. The kernel should be an ndarray of shape
-      [n_train * output_dim, n_train * output_dim].
-    y_train: An ndarray of shape [n_train, output_dim] of labels for the
+    g_dd: Kernel on the training data. The kernel should be an `np.ndarray` of
+      shape [n_train * output_dim, n_train * output_dim].
+    y_train: A `np.ndarray` of shape [n_train, output_dim] of labels for the
        training data.
-    loss: A loss function whose signature is loss(fx, y_hat) where fx an ndarray
-      of function space outputs of the network and y_hat are labels.
+    loss: A loss function whose signature is loss(fx, y_hat) where fx an
+      `np.ndarray` of function space outputs of the network and y_hat are
+      labels.
 
       Note: the loss function should treat the batch and output dimensions
       symmetrically.
     learning_rate:  A float specifying the learning rate.
-    g_td: Kernel relating training data with test data. Should be an ndarray of
-      shape [n_test * output_dim, n_train * output_dim]. Note: g_td should
-      have been created in the convention
-      g_td = kernel_fn(params, x_test, x_train).
+    g_td: Kernel relating training data with test data. Should be an
+      `np.ndarray` of shape [n_test * output_dim, n_train * output_dim]. Note:
+      g_td should have been created in the convention
+      g_td = ker_fun(params, x_test, x_train).
     momentum: float specifying the momentum.
 
   Returns:
@@ -464,27 +460,27 @@ def momentum_predictor(
     for some dt, and a get_fn that extracts the predictions from the state.
 
     If g_td is None:
-      init_fn(fx_train): Takes a single ndarray of shape [n_train, output_dim]
-        and returns a tuple containing the output_dim as an int and an ndarray
-        of shape [2 * n_train * output_dim].
+      init_fn(fx_train): Takes a single `np.ndarray` of shape
+        [n_train, output_dim] and returns a tuple containing the output_dim as
+        an int and an `np.ndarray` of shape [2 * n_train * output_dim].
 
       predict_fn(state, dt): Takes a state described above and a floating point
         time. Returns a new state with the same type and shape.
 
-      get_fn(state): Takes a state and returns an ndarray of shape
+      get_fn(state): Takes a state and returns an `np.ndarray` of shape
         [n_train, output_dim].
 
     If g_td is not None:
-      init_fn(fx_train, fx_test): Takes two ndarrays of shape
+      init_fn(fx_train, fx_test): Takes two `np.ndarray`s of shape
         [n_train, output_dim] and [n_test, output_dim] respectively. Returns a
         tuple with an int giving 2 * n_train * output_dim, an int containing the
-        output_dim, and an ndarray of shape
+        output_dim, and an `np.ndarray` of shape
         [2 * (n_train + n_test) * output_dim].
 
       predict_fn(state, dt): Takes a state described above and a floating point
         time. Returns a new state with the same type and shape.
 
-      get_fn(state): Takes a state and returns two ndarray of shape
+      get_fn(state): Takes a state and returns two `np.ndarray`s of shape
         [n_train, output_dim] and [n_test, output_dim] respectively.
   """
   momentum = (momentum - 1.0) / np.sqrt(learning_rate)

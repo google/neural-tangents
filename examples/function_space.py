@@ -64,9 +64,9 @@ def main(unused_argv):
   grad_loss = jit(grad(lambda params, x, y: loss(f(params, x), y)))
 
   # Create an MSE predictor to solve the NTK equation in function space.
-  theta = tangents.ntk(f, batch_size=32)
-  g_dd = theta(params, x_train)
-  g_td = theta(params, x_test, x_train)
+  ntk = tangents.get_ntk_fun(f, batch_size=32)
+  g_dd = ntk(params, x_train)
+  g_td = ntk(params, x_test, x_train)
   predictor = tangents.analytic_mse_predictor(g_dd, y_train, g_td)
 
   # Get initial values of the network in function space.

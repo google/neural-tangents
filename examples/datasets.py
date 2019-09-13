@@ -48,7 +48,7 @@ def _download(url, filename):
     print("downloaded {} to {}".format(url, _DATA))
 
 def _partial_flatten_and_normalize(x):
-  """Flatten all but the first dimension of an ndarray."""
+  """Flatten all but the first dimension of an `np.ndarray`."""
   x = np.reshape(x, (x.shape[0], -1))
   return (x - np.mean(x)) / np.std(x)
 

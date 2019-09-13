@@ -17,21 +17,16 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-
 import operator
-
 from jax import test_util as jtu
 from jax.api import grad
 from jax.api import jacobian
 from jax.config import config as jax_config
-
 from jax.experimental import optimizers as opt
-
 import jax.numpy as np
 import jax.random as random
 from jax.tree_util import tree_multimap
 from jax.tree_util import tree_reduce
-
 from neural_tangents import tangents
 
 
@@ -126,7 +121,7 @@ class NeuralTangentsTest(jtu.JaxTestCase):
       w, b = params
       return np.dot(x, w) / shape[-1] + b
 
-    g_fn = tangents.ntk(f)
+    g_fn = tangents.get_ntk_fun(f)
 
     g = g_fn(params, data_self)
     g_direct = ntk_direct(f, params, data_self, data_self)
@@ -156,8 +151,8 @@ class NeuralTangentsTest(jtu.JaxTestCase):
       w, b = params
       return np.dot(x, w) / shape[-1] + b
 
-    g_fn = tangents.ntk(f)
-    g_batched_fn = tangents.ntk(f, batch_size=2)
+    g_fn = tangents.get_ntk_fun(f)
+    g_batched_fn = tangents.get_ntk_fun(f, batch_size=2)
 
     g = g_fn(params, data_self)
     g_batched = g_batched_fn(params, data_self)
@@ -199,9 +194,9 @@ class NeuralTangentsTest(jtu.JaxTestCase):
     loss = lambda params, x: \
         0.5 * np.mean((f(params, x) - data_labels) ** 2)
 
-    theta = tangents.ntk(f)
-    g_dd = theta(params, data_train)
-    g_td = theta(params, data_test, data_train)
+    ntk = tangents.get_ntk_fun(f)
+    g_dd = ntk(params, data_train)
+    g_td = ntk(params, data_test, data_train)
 
     predictor = tangents.analytic_mse_predictor(g_dd, data_labels, g_td)
 
@@ -276,9 +271,9 @@ class NeuralTangentsTest(jtu.JaxTestCase):
     loss = lambda y, y_hat: 0.5 * np.mean((y - y_hat) ** 2)
     grad_loss = grad(lambda params, x: loss(f(params, x), data_labels))
 
-    theta = tangents.ntk(f)
-    g_dd = theta(params, data_train)
-    g_td = theta(params, data_test, data_train)
+    ntk = tangents.get_ntk_fun(f)
+    g_dd = ntk(params, data_train)
+    g_td = ntk(params, data_test, data_train)
 
     predictor = tangents.gradient_descent_predictor(
         g_dd, data_labels, loss, g_td)
@@ -356,9 +351,9 @@ class NeuralTangentsTest(jtu.JaxTestCase):
     loss = lambda y, y_hat: 0.5 * np.mean((y - y_hat) ** 2)
     grad_loss = grad(lambda params, x: loss(f(params, x), data_labels))
 
-    theta = tangents.ntk(f)
-    g_dd = theta(params, data_train)
-    g_td = theta(params, data_test, data_train)
+    ntk = tangents.get_ntk_fun(f)
+    g_dd = ntk(params, data_train)
+    g_td = ntk(params, data_test, data_train)
 
     step_size = 1.0
     train_time = 100.0
