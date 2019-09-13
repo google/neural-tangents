@@ -32,8 +32,8 @@ import jax.numpy as np
 
 def Dense(
     out_dim,
-    W_gain=1.0, W_init=stax.randn(1.0),
-    b_gain=0.0, b_init=stax.randn(1.0)):
+    W_std=1.0, W_init=stax.randn(1.0),
+    b_std=0.0, b_init=stax.randn(1.0)):
   """Layer constructor function for a dense (fully-connected) layer.
 
   Uses jax.experimental.stax.Dense as a base.
@@ -41,15 +41,15 @@ def Dense(
   init_fun, _ = stax.Dense(out_dim, W_init, b_init)
   def apply_fun(params, inputs, **kwargs):
     W, b = params
-    norm = W_gain / np.sqrt(inputs.shape[-1])
-    return norm * np.dot(inputs, W) + b_gain * b
+    norm = W_std / np.sqrt(inputs.shape[-1])
+    return norm * np.dot(inputs, W) + b_std * b
   return init_fun, apply_fun
 
 
 def GeneralConv(dimension_numbers, out_chan, filter_shape,
                 strides=None, padding='VALID',
-                W_gain=1.0, W_init=stax.randn(1.0),
-                b_gain=0.0, b_init=stax.randn(1.0)):
+                W_std=1.0, W_init=stax.randn(1.0),
+                b_std=0.0, b_init=stax.randn(1.0)):
   """Layer construction function for a general convolution layer.
 
   Uses jax.experimental.stax.GeneralConv as a base.
@@ -63,8 +63,8 @@ def GeneralConv(dimension_numbers, out_chan, filter_shape,
     W, b = params
     norm = inputs.shape[lhs_spec.index('C')]
     norm *= functools.reduce(op.mul, filter_shape)
-    norm = W_gain / np.sqrt(norm)
+    norm = W_std / np.sqrt(norm)
     return norm * lax.conv_general_dilated(
-        inputs, W, strides, padding, one, one, dimension_numbers) + b_gain * b
+        inputs, W, strides, padding, one, one, dimension_numbers) + b_std * b
   return init_fun, apply_fun
 Conv = functools.partial(GeneralConv, ('NHWC', 'HWIO', 'NHWC'))
