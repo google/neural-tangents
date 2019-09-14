@@ -13,5 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 
-from neural_tangents import stax
 from neural_tangents import api
+from neural_tangents import predict
+from neural_tangents import stax

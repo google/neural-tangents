@@ -14,12 +14,12 @@
 
 """Public library API."""
 
-from neural_tangents.utils.monte_carlo import get_ker_fun_monte_carlo
-from neural_tangents.utils.empirical import get_ntk_fun_empirical
-from neural_tangents.utils.empirical import get_nngp_fun_empirical
+from neural_tangents import stax
+from neural_tangents import predict
+from neural_tangents.utils.batch import batch
 from neural_tangents.utils.empirical import get_ker_fun_empirical
+from neural_tangents.utils.empirical import get_nngp_fun_empirical
+from neural_tangents.utils.empirical import get_ntk_fun_empirical
 from neural_tangents.utils.empirical import linearize
 from neural_tangents.utils.empirical import taylor_expand
-from neural_tangents.utils.batch import batch
-from neural_tangents.utils import predict
-from neural_tangents import stax
+from neural_tangents.utils.monte_carlo import get_ker_fun_monte_carlo

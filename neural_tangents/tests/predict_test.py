@@ -26,9 +26,10 @@ from jax.experimental import optimizers
 from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.random as random
-from neural_tangents.utils import empirical
-from neural_tangents.utils import predict
+from neural_tangents import predict
 from neural_tangents import stax
+from neural_tangents.utils import empirical
+
 
 config.parse_flags_with_absl()
 

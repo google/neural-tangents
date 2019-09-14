@@ -26,10 +26,10 @@ from jax.api import grad
 from jax.api import jit
 from jax.experimental import optimizers
 import jax.numpy as np
+from neural_tangents import predict
 from neural_tangents import stax
 from neural_tangents.api import batch
 from neural_tangents.api import get_ntk_fun_empirical
-from neural_tangents.api import predict
 import datasets
 import util
 
