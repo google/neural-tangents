@@ -1,0 +1,310 @@
+# Copyright 2019 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Compute the empirical NTK and approximate functions via Taylor series."""
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+import operator
+from absl import flags
+from jax.api import eval_shape
+from jax.api import jacobian
+from jax.api import jvp
+from jax.api import vjp
+from jax.config import config
+import jax.numpy as np
+from jax.tree_util import tree_multimap
+from jax.tree_util import tree_reduce
+from neural_tangents.utils.kernel import Kernel
+from neural_tangents.utils import flags as internal_flags
+
+
+config.parse_flags_with_absl()  # NOTE(schsam): Is this safe?
+
+
+FLAGS = flags.FLAGS
+
+
+def linearize(f, params):
+  """Returns a function f_lin, the first order taylor approximation to f.
+
+  Example:
+    >>> # Compute the MSE of the first order Taylor series of a function.
+    >>> f_lin = linearize(f, params)
+    >>> mse = np.mean((f(new_params, x) - f_lin(new_params, x)) ** 2)
+
+  Args:
+    f: A function that we would like to linearize. It should have the signature
+       f(params, inputs) where params and inputs are `np.ndarray`s and f should
+       return an `np.ndarray`.
+    params: Initial parameters to the function that we would like to take the
+            Taylor series about. This can be any structure that is compatible
+            with the JAX tree operations.
+
+  Returns:
+    A function f_lin(new_params, inputs) whose signature is the same as f.
+    Here f_lin implements the first-order taylor series of f about params.
+  """
+  def f_lin(p, x):
+    dparams = tree_multimap(lambda x, y: x - y, p, params)
+    f_params_x, proj = jvp(lambda param: f(param, x), (params,), (dparams,))
+    return f_params_x + proj
+  return f_lin
+
+
+def taylor_expand(f, params, degree):
+  """Returns a function f_tayl, the Taylor approximation to f of degree degree.
+
+  Example:
+    >>> # Compute the MSE of the third order Taylor series of a function.
+    >>> f_tayl = taylor_expand(f, params, 3)
+    >>> mse = np.mean((f(new_params, x) - f_tayl(new_params, x)) ** 2)
+
+  Args:
+    f: A function that we would like to Taylor expand. It should have the
+       signature f(params, inputs) where params is a PyTree, inputs is an
+       `np.ndarray`, and f returns an `np.ndarray`.
+    params: Initial parameters to the function that we would like to take the
+            Taylor series about. This can be any structure that is compatible
+            with the JAX tree operations.
+    degree: The degree of the Taylor expansion.
+
+  Returns:
+    A function f_tayl(new_params, inputs) whose signature is the same as f.
+    Here f_tayl implements the degree-order taylor series of f about params.
+  """
+
+  def taylorize_r(f, params, dparams, degree, current_degree):
+    """Recursive function to accumulate contributions to the Taylor series."""
+    if current_degree == degree:
+      return f(params)
+
+    def f_jvp(p):
+      _, val_jvp = jvp(f, (p,), (dparams,))
+      return val_jvp
+
+    df = taylorize_r(f_jvp, params, dparams, degree, current_degree+1)
+    return f(params) + df / (current_degree + 1)
+
+  def f_tayl(p, x):
+    dparams = tree_multimap(lambda x, y: x - y, p, params)
+    return taylorize_r(lambda param: f(param, x), params, dparams, degree, 0)
+
+  return f_tayl
+
+
+# Empirical Kernel
+
+
+def flatten_features(kernel):
+  """Flatten an empirical kernel."""
+  if kernel.ndim == 2:
+    return kernel
+  assert kernel.ndim % 2 == 0
+  half_shape = (kernel.ndim - 1) // 2
+  n1, n2 = kernel.shape[:2]
+  feature_size = int(np.prod(kernel.shape[2 + half_shape:]))
+  transposition = ((0,) + tuple(i + 2 for i in range(half_shape)) +
+                   (1,) + tuple(i + 2 + half_shape for i in range(half_shape)))
+  kernel = np.transpose(kernel, transposition)
+  return np.reshape(kernel, (feature_size *  n1, feature_size * n2))
+
+
+def get_ntk_fun_empirical_implicit(f):
+  """Computes the ntk without batching for inputs x1 and x2.
+
+  The Neural Tangent Kernel is defined as J(X_1)^T J(X_2) where J is the
+  jacobian df/dparams. Computing the NTK directly involves directly
+  instantiating the jacobian which takes
+  O(dataset_size * output_dim * parameters) memory. It turns out it is
+  substantially more efficient (especially as the number of parameters grows)
+  to compute the NTK implicitly.
+
+  This involves using JAX's autograd to compute derivatives of linear functions
+  (which do not depend on the inputs). Thus, we find it more efficient to refer
+  to fx_dummy for the outputs of the network. fx_dummy has the same shape as
+  the output of the network on a single piece of input data.
+
+  TODO(schsam): Write up a better description of the implicit method.
+
+  Args:
+    f: The function whose NTK we are computing. f should have the signature
+       f(params, inputs) and should return an `np.ndarray` of outputs with shape
+       [|inputs|, output_dim].
+
+  Returns:
+    A function ntk_fun that computes the empirical ntk.
+  """
+
+  def ntk_fun(x1, x2, params):
+    """Computes the empirical ntk.
+
+    Args:
+      x1: A first `np.ndarray` of inputs, of shape [n1, ...], over which we
+        would like to compute the NTK.
+      x2: A second `np.ndarray` of inputs, of shape [n2, ...], over which we
+        would like to compute the NTK.
+      params: A PyTree of parameters about which we would like to compute the
+        neural tangent kernel.
+
+    Returns:
+      A `np.ndarray` of shape [n1, n2] + output_shape + output_shape.
+    """
+    if x2 is None:
+      x2 = x1
+    fx2_struct = eval_shape(f, params, x2)
+    fx_dummy = np.ones(fx2_struct.shape, fx2_struct.dtype)
+
+    def delta_vjp_jvp(delta):
+      def delta_vjp(delta):
+        return vjp(lambda p: f(p, x2), params)[1](delta)
+      return jvp(lambda p: f(p, x1), (params,), delta_vjp(delta))[1]
+
+    ntk = jacobian(delta_vjp_jvp)(fx_dummy)
+    ndim = len(fx2_struct.shape)
+    ordering = (0, ndim) + tuple(range(1, ndim)) + \
+        tuple(x + ndim for x in range(1, ndim))
+    return np.transpose(ntk, ordering)
+
+  return ntk_fun
+
+
+def get_ntk_fun_empirical_direct(f):
+  """Computes the ntk without batching for inputs x1 and x2.
+
+  The Neural Tangent Kernel is defined as J(X_1)^T J(X_2) where J is the
+  jacobian df/dparams.
+
+  Args:
+    f: The function whose NTK we are computing. f should have the signature
+       f(params, inputs) and should return an `np.ndarray` of outputs with shape
+       [|inputs|, output_dim].
+
+  Returns:
+    A function `ntk_fun` that computes the empirical ntk.
+  """
+  jac_fn = jacobian(f)
+
+  def sum_and_contract(j1, j2):
+    def contract(x, y):
+      param_count = int(np.prod(x.shape[2:]))
+      x = np.reshape(x, x.shape[:2] + (param_count,))
+      y = np.reshape(y, y.shape[:2] + (param_count,))
+      return np.dot(x, np.transpose(y, (0, 2, 1)))
+
+    return tree_reduce(operator.add, tree_multimap(contract, j1, j2))
+
+  def ntk_fun(x1, x2, params):
+    """Computes the empirical ntk.
+
+    Args:
+      x1: A first `np.ndarray` of inputs, of shape [n1, ...], over which we
+        would like to compute the NTK.
+      x2: A second `np.ndarray` of inputs, of shape [n2, ...], over which we
+        would like to compute the NTK.
+      params: A PyTree of parameters about which we would like to compute the
+        neural tangent kernel.
+    Returns:
+      A `np.ndarray` of shape [n1, n2] + output_shape + output_shape.
+    """
+    j1 = jac_fn(params, x1)
+
+    if x2 is None:
+      j2 = j1
+    else:
+      j2 = jac_fn(params, x2)
+
+    ntk = sum_and_contract(j1, j2)
+    # TODO(schsam): If we care, this will not work if the output is not of
+    # shape [n, output_dim].
+    return np.transpose(ntk, (0, 2, 1, 3))
+
+  return ntk_fun
+
+
+get_ntk_fun_empirical = (get_ntk_fun_empirical_implicit
+                         if FLAGS.tangents_optimized else
+                         get_ntk_fun_empirical_direct)
+
+
+def get_nngp_fun_empirical(f):
+  """Returns a function to draw a single sample the NNGP of a given network `f`.
+
+  This method assumes that slices of the random network outputs along the last
+    dimension are i.i.d. (which is true for e.g. classifiers with a dense
+    readout layer, or true for outputs of a CNN layer with the `NHWC` data
+    format. As a result it treats outputs along that dimension as independent
+    samples and only reports covariance along other dimensions.
+
+  Note that the `ntk_monte_carlo` makes no such assumption and returns the full
+    covariance.
+
+  Args:
+    f: a function computing the output of the neural network.
+      From `jax.experimental.stax`: "takes params, inputs, and an rng key and
+      applies the layer".
+
+  Returns:
+     A function to draw a single sample the NNGP of a given network `f`.
+  """
+  def nngp_fun(x1, x2, params):
+    """Sample a single NNGP of a given network `f` on given inputs and `params`.
+
+    This method assumes that slices of the random network outputs along the last
+      dimension are i.i.d. (which is true for e.g. classifiers with a dense
+      readout layer, or true for outputs of a CNN layer with the `NHWC` data
+      format. As a result it treats outputs along that dimension as independent
+      samples and only reports covariance along other dimensions.
+
+    Note that the `ntk` method makes no such assumption and returns the full
+      covariance.
+
+    Args:
+      x1: a `np.ndarray` of shape `[batch_size_1] + input_shape`.
+      x2: an optional `np.ndarray` with shape `[batch_size_2] + input_shape`.
+        `None` means `x2 == x1`.
+      params: A PyTree of parameters about which we would like to compute the
+        NNGP.
+
+    Returns:
+      A Monte Carlo estimate of the NNGP, a `np.ndarray` of shape
+      `[batch_size_1] + output_shape[:-1] + [batch_size_2] + output_shape[:-1]`.
+    """
+    out1 = f(params, x1)
+    out2 = f(params, x2) if x2 is not None else out1
+
+    out2 = np.expand_dims(out2, -1)
+    nngp_12 = np.dot(out1, out2) / out1.shape[-1]
+    return np.squeeze(nngp_12, -1)
+
+  return nngp_fun
+
+
+def get_ker_fun_empirical(f, compute_nngp=True, compute_ntk=True):
+  if compute_nngp:
+    nngp_fun = get_nngp_fun_empirical(f)
+  else:
+    nngp_fun = lambda x1, x2, params: None
+
+  if compute_ntk:
+    ntk_fun = get_ntk_fun_empirical(f)
+  else:
+    ntk_fun = lambda x1, x2, params: None
+
+  def ker_fun(x1, x2, params):
+    return Kernel(None, nngp_fun(x1, x2, params),
+                  None, ntk_fun(x1, x2, params), None, None)
+
+  return ker_fun

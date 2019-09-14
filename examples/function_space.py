@@ -1,3 +1,17 @@
+# Copyright 2019 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """An example comparing training a neural network with the NTK dynamics.
 
 In this example, we train a neural network on a small subset of MNIST using an
@@ -5,28 +19,20 @@ MSE loss and SGD. We compare this training with the analytic function space
 prediction using the NTK. Data is loaded using tensorflow datasets.
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 from absl import app
 from absl import flags
-
 from jax import random
-
 from jax.api import grad
 from jax.api import jit
-
 from jax.experimental import optimizers
-from jax.experimental import stax
-
 import jax.numpy as np
-
-from neural_tangents import layers
-from neural_tangents import tangents
-
+from neural_tangents import stax
+from neural_tangents.api import batch
+from neural_tangents.api import get_ntk_fun_empirical
+from neural_tangents.api import predict
 import datasets
 import util
+
 
 flags.DEFINE_float('learning_rate', 1.0,
                    'Learning rate to use during training.')
@@ -36,6 +42,7 @@ flags.DEFINE_integer('test_size', 128,
                      'Dataset size to use for testing.')
 flags.DEFINE_float('train_time', 1000.0,
                    'Continuous time denoting duration of training.')
+
 
 FLAGS = flags.FLAGS
 
@@ -47,10 +54,10 @@ def main(unused_argv):
       datasets.mnist(FLAGS.train_size, FLAGS.test_size)
 
   # Build the network
-  init_fn, f = stax.serial(
-      layers.Dense(4096),
-      stax.Tanh,
-      layers.Dense(10))
+  init_fn, f, _ = stax.serial(
+      stax.Dense(4096, 1., 0.),
+      stax.Erf(),
+      stax.Dense(10, 1., 0.))
 
   key = random.PRNGKey(0)
   _, params = init_fn(key, (-1, 784))
@@ -64,10 +71,10 @@ def main(unused_argv):
   grad_loss = jit(grad(lambda params, x, y: loss(f(params, x), y)))
 
   # Create an MSE predictor to solve the NTK equation in function space.
-  ntk = tangents.get_ntk_fun(f, batch_size=32)
-  g_dd = ntk(params, x_train)
-  g_td = ntk(params, x_test, x_train)
-  predictor = tangents.analytic_mse_predictor(g_dd, y_train, g_td)
+  ntk = batch(get_ntk_fun_empirical(f), batch_size=32, device_count=1)
+  g_dd = ntk(x_train, None, params)
+  g_td = ntk(x_test, x_train, params)
+  predictor = predict.analytic_mse(g_dd, y_train, g_td)
 
   # Get initial values of the network in function space.
   fx_train = f(params, x_train)

@@ -21,16 +21,14 @@ https://github.com/google/jax/examples/datasets.py [Visited on 04/10/2019]
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-
 import array
 import gzip
 import os
 from os import path
 import struct
-from six.moves.urllib.request import urlretrieve
-
-import numpy as np
 from jax import random
+import numpy as np
+from six.moves.urllib.request import urlretrieve
 
 
 # NOTE(schsam): We could change this, but is there really a point? This
@@ -47,14 +45,17 @@ def _download(url, filename):
     urlretrieve(url, out_file)
     print("downloaded {} to {}".format(url, _DATA))
 
+
 def _partial_flatten_and_normalize(x):
   """Flatten all but the first dimension of an `np.ndarray`."""
   x = np.reshape(x, (x.shape[0], -1))
   return (x - np.mean(x)) / np.std(x)
 
+
 def _one_hot(x, k, dtype=np.float32):
   """Create a one-hot encoding of x of size k."""
   return np.array(x[:, None] == np.arange(k), dtype)
+
 
 def mnist_raw():
   """Download and parse the raw MNIST dataset."""
@@ -83,6 +84,7 @@ def mnist_raw():
 
   return train_images, train_labels, test_images, test_labels
 
+
 def mnist(n_train=None, n_test=None, permute_train=False):
   """Download, parse and process MNIST data to unit scale and one-hot labels."""
   train_images, train_labels, test_images, test_labels = mnist_raw()
@@ -105,6 +107,7 @@ def mnist(n_train=None, n_test=None, permute_train=False):
     train_labels = train_labels[perm]
 
   return train_images, train_labels, test_images, test_labels
+
 
 def minibatch(x_train, y_train, batch_size, train_epochs):
   """Generate minibatches of data for a set number of epochs."""

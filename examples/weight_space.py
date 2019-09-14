@@ -24,25 +24,18 @@ datasets.
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-
 from absl import app
 from absl import flags
-
 from jax import random
-
 from jax.api import grad
 from jax.api import jit
-
 from jax.experimental import optimizers
 from jax.experimental import stax
-
 import jax.numpy as np
-
-from neural_tangents import layers
-from neural_tangents import tangents
-
+from neural_tangents.api import linearize
 import datasets
 import util
+
 
 flags.DEFINE_float('learning_rate', 1.0,
                    'Learning rate to use during training.')
@@ -50,6 +43,7 @@ flags.DEFINE_integer('batch_size', 128,
                      'Batch size to use during training.')
 flags.DEFINE_integer('train_epochs', 10,
                      'Number of epochs to train for.')
+
 
 FLAGS = flags.FLAGS
 
@@ -61,18 +55,19 @@ def main(unused_argv):
 
   # Build the network
   init_fn, f = stax.serial(
-      layers.Dense(2048),
+      stax.Dense(2048),
       stax.Tanh,
-      layers.Dense(10))
+      stax.Dense(10))
 
   key = random.PRNGKey(0)
   _, params = init_fn(key, (-1, 784))
 
   # Linearize the network about its initial parameters.
-  f_lin = tangents.linearize(f, params)
+  f_lin = linearize(f, params)
 
   # Create and initialize an optimizer for both f and f_lin.
-  opt_init, opt_apply, get_params = optimizers.momentum(FLAGS.learning_rate, 0.9)
+  opt_init, opt_apply, get_params = optimizers.momentum(FLAGS.learning_rate,
+                                                        0.9)
   opt_apply = jit(opt_apply)
 
   state = opt_init(params)

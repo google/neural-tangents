@@ -12,186 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Code to linearize neural networks and compute empirical kernels.
-"""
+"""Functions to make predictions on the test set using NTK kernel."""
 
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 import functools
 from jax.api import grad
-from jax.api import jacobian
-from jax.api import jit
-from jax.api import jvp
-from jax.api import vjp
 from jax.lib import xla_bridge
 import jax.numpy as np
-from jax.tree_util import tree_map
-from jax.tree_util import tree_multimap
+import jax.scipy as sp
+
+from neural_tangents.utils import empirical
 from scipy.integrate._ode import ode
 
 
-def linearize(f, params):
-  """Returns a function f_lin, the first order taylor approximation to f.
-
-  Example:
-    >>> # Compute the MSE of the first order Taylor series of a function.
-    >>> f_lin = linearize(f, params)
-    >>> mse = np.mean((f(new_params, x) - f_lin(new_params, x)) ** 2)
-
-  Args:
-    f: A function that we would like to linearize. It should have the signature
-       f(params, inputs) where params and inputs are `np.ndarray`s and f should
-       return an `np.ndarray`.
-    params: Initial parameters to the function that we would like to take the
-            Taylor series about. This can be any structure that is compatible
-            with the JAX tree operations.
-
-  Returns:
-    A function f_lin(new_params, inputs) whose signature is the same as f.
-    Here f_lin implements the first-order taylor series of f about params.
-  """
-  def f_lin(p, x):
-    dparams = tree_multimap(lambda x, y: x - y, p, params)
-    f_params_x, proj = jvp(lambda param: f(param, x), (params,), (dparams,))
-    return f_params_x + proj
-  return f_lin
-
-
-def _batch_kernel(ker_fun, x1, x2, batch_size):
-  """Takes a kernel function and computes it over a dataset in batches.
-
-  Args:
-    ker_fun: A function that computes a kernel between two datasets,
-               ker_fun(x1, x2)
-    x1: A first `np.ndarray` of inputs of shape [n1, ...] over which we would
-      like to compute the kernel.
-    x2: A second `np.ndarray` of inputs of shape [n2, ...] to use in the kernel
-        computation. Can be None in which case x2 = x1.
-    batch_size: The size of batches in which to split the data.
-
-  Returns:
-    A `np.ndarray` of size [n1 * output_dim, n2 * output_dim].
-  """
-  x1s = np.split(x1, range(batch_size, x1.shape[0], batch_size))
-  if x2 is None:
-    batches = len(x1s)
-    # pylint: disable=g-complex-comprehension
-    kernel = [[
-        ker_fun(xi, xj) for xj in x1s[:i + 1]] for i, xi in enumerate(x1s)]
-    kernel = [[
-        kernel[i][j]  if j <= i else
-        np.transpose(kernel[j][i])
-        for j in range(batches)]
-              for i in range(batches)]
-  else:
-    x2s = np.split(x2, range(batch_size, x2.shape[0], batch_size))
-    # pylint: disable=g-complex-comprehension
-    kernel = [[ker_fun(x1, x2) for x2 in x2s] for x1 in x1s]
-
-  return np.vstack([np.hstack(k) for k in kernel])
-
-
-def _compute_ntk(f, fx_dummy, params, x1, x2):
-  """Computes the ntk without batching for inputs x1 and x2.
-
-  The Neural Tangent Kernel is defined as J(X_1)^T J(X_2) where J is the
-  jacobian df/dparams. Computing the NTK directly involves directly
-  instantiating the jacobian which takes
-  O(dataset_size * output_dim * parameters) memory. It turns out it is
-  substantially more efficient (especially as the number of parameters grows)
-  to compute the NTK implicitly.
-
-  This involves using JAX's autograd to compute derivatives of linear functions
-  (which do not depend on the inputs). Thus, we find it more efficient to refer
-  to fx_dummy for the outputs of the network. fx_dummy has the same shape as
-  the output of the network on a single piece of input data.
-
-  TODO(schsam): Write up a better description of the implicit method.
-
-  Args:
-    f: The function whose NTK we are computing. f should have the signature
-       f(params, inputs) and should return an `np.ndarray` of outputs with shape
-       [|inputs|, output_dim].
-    fx_dummy: A dummy evaluation of f on a single input that we use to
-       instantiate an `np.ndarray` with the correct shape
-       (aka [|inputs|, output_dim]).
-       It should be possible at some point to use JAX's tracing mechanism to do
-       this more efficiently.
-    params: A set of parameters about which we would like to compute the neural
-       tangent kernel. This should be any structure that can be mapped over by
-       JAX's tree utilities.
-    x1: A first `np.ndarray` of inputs, of shape [n1, ...], over which we would
-      like to compute the NTK.
-    x2: A second `np.ndarray` of inputs, of shape [n2, ...], over which we would
-     like to compute the NTK.
-
-  Returns:
-    A `np.ndarray` containing the NTK with shape
-      [n * output_dim, m * output_dim].
-  """
-  fx_dummy = np.concatenate([fx_dummy] * len(x2))
-  output_dim = fx_dummy.shape[1]
-  def dzdt(delta):
-    _, dfdw = vjp(lambda p: f(p, x2), params)
-    dfdw, = dfdw(delta)
-    def z(t):
-      p = tree_multimap(
-          np.add, params, tree_map(lambda x: t * x, dfdw))
-      return f(p, x1)
-    _, dzdot = jvp(z, (0.0,), (1.0,))
-    return dzdot
-  ntk = jacobian(dzdt)(fx_dummy)
-  return np.reshape(ntk, (len(x1) * output_dim, len(x2) * output_dim))
-
-
-def get_ntk_fun(f, batch_size=None):
-  """Computes the neural tangent kernel.
-
-  Example:
-    >>> ntk = get_ntk_fun(f, batch_size=64)
-    >>> k_dd = ntk(params, x_train)
-    >>> k_td = ntk(params, x_test, x_train)
-
-  Args:
-    f: A function whose NTK we would like to compute.
-    batch_size: int. Size of batches of inputs to use in computing the NTK.
-
-  Returns:
-    A function ntk_fun(params, x1, x2) that computes the NTK for a
-    specific choice of parameters and inputs. Here x1 and x2 are `np.ndarray`s
-    of shape [n1, ...] and [n2, ...] respectively and f(params, xi) has shape
-    [ni, output_dim]; params should be a PyTree. The function will return an
-    an `np.ndarray` of shape [n1 * output_dim, n2 * output_dim].
-  """
-  # NOTE(schsam): Can we move the jit outside?
-  ker_fun = jit(functools.partial(_compute_ntk, f))
-  if batch_size is None or batch_size <= 0:
-
-    def ntk_fun(params, x1, x2=None):
-      if x2 is None: x2 = x1
-      # @Optimization
-      # Can we compute this using a shaped array or some other jax magic?
-      fx_dummy = f(params, x2[:1])
-      return ker_fun(fx_dummy, params, x1, x2)
-    return ntk_fun
-
-  def ntk_fun_batched(params, x1, x2=None):
-    if x2 is None:
-      fx_dummy = f(params, x1[:1])
-    else:
-      fx_dummy = f(params, x2[:1])
-
-    n = functools.partial(ker_fun, fx_dummy, params)
-    return _batch_kernel(n, x1, x2, batch_size)
-
-  return ntk_fun_batched
-
-
-
-
-
-def analytic_mse_predictor(g_dd, y_train, g_td=None):
+def analytic_mse(g_dd, y_train, g_td=None):
   """Predicts the outcome of function space training with an MSE loss.
 
   Uses the analytic solution for gradient descent on an MSE loss in function
@@ -204,11 +40,10 @@ def analytic_mse_predictor(g_dd, y_train, g_td=None):
 
   Example:
     >>> train_time = 1e-7
-    >>> ker_fun = get_ntk_fun(f)
-    >>> g_dd = compute_spectrum(ker_fun(params, x_train))
-    >>> g_td = ker_fun(params, x_test, x_train)
+    >>> ker_fun = empirical(f)
+    >>> g_td = ker_fun(x_test, x_train, params)
     >>>
-    >>> predict_fn = analytic_mse_predictor(g_dd, train_y, g_td)
+    >>> predict_fn = analytic_mse_predictor(g_dd, y_train, g_td)
     >>>
     >>> fx_train_initial = f(params, x_train)
     >>> fx_test_initial = f(params, x_test)
@@ -218,13 +53,16 @@ def analytic_mse_predictor(g_dd, y_train, g_td=None):
 
   Args:
     g_dd: A kernel on the training data. The kernel should be an `np.ndarray` of
-      shape [n_train * output_dim, n_train * output_dim].
+      shape [n_train * output_dim, n_train * output_dim] or [n_train, n_train].
+      In the latter case, the kernel is assumed to be block diagonal over the
+      logits.
     y_train: A `np.ndarray` of shape [n_train, output_dim] of targets for the
       training data.
     g_td: A Kernel relating training data with test data. The kernel should be
-      an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim].
-      Note: g_td should have been created in the convention
-      ker_fun(params, x_train, x_test).
+      an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim] or
+      [n_test, n_train].
+      Note: g_td should have been created in the convention ker_fun(x_train,
+        x_test, params).
 
   Returns:
     A function that predicts outputs after t = learning_rate * steps of
@@ -246,6 +84,8 @@ def analytic_mse_predictor(g_dd, y_train, g_td=None):
       respectively.
   """
 
+  g_dd = empirical.flatten_features(g_dd)
+
   # TODO(schsam): Eventually, we may want to handle non-symmetric kernels for
   # e.g. masking. Additionally, once JAX supports eigh on TPU, we probably want
   # to switch to JAX's eigh.
@@ -256,40 +96,51 @@ def analytic_mse_predictor(g_dd, y_train, g_td=None):
 
   evals, evecs = eigh(g_dd)
   ievecs = np.transpose(evecs)
-  inverse = np.linalg.inv(g_dd)
-  normalization = g_dd.shape[1]
+
+  normalization = y_train.size
+  output_dimension = y_train.shape[-1]
 
   def fl(fx):
     """Flatten outputs."""
     return np.reshape(fx, (-1,))
 
-  def ufl(fx, output_dim):
+  def ufl(fx):
     """Unflatten outputs."""
-    return np.reshape(fx, (-1, output_dim))
+    return np.reshape(fx, (-1, output_dimension))
+
+  # Check to see whether the kernel has a logit dimension.
+  if y_train.size > g_dd.shape[-1]:
+    out_dim, ragged = divmod(y_train.size, g_dd.shape[-1])
+    if ragged or out_dim != y_train.shape[-1]:
+      raise ValueError()
+    fl = lambda x: x
+    ufl = lambda x: x
 
   def predict(gx, dt):
-    gx_ = np.diag(np.exp(-evals * dt / normalization))
+    gx_ = 0. if dt == np.inf else np.diag(np.exp(-evals * dt / normalization))
     gx_ = np.dot(evecs, gx_)
     gx_ = np.dot(gx_, ievecs)
     gx_ = np.dot(gx_, gx)
     return gx_
 
   if g_td is None:
-    return lambda fx, dt: \
-        ufl(predict(fl(fx - y_train), dt), fx.shape[-1]) + y_train
+    return lambda fx, dt: ufl(predict(fl(fx - y_train), dt)) + y_train
+
+  g_td = empirical.flatten_features(g_td)
+  mevals = np.diag(1.0 / evals)
+  inverse = np.dot(np.dot(evecs, mevals), ievecs)
 
   def predict_using_kernel(fx_train, fx_test, dt):
-    output_dim = fx_train.shape[-1]
     gx_train = fl(fx_train - y_train)
     dgx = predict(gx_train, dt) - gx_train
     dfx = np.dot(inverse, dgx)
     dfx = np.dot(g_td, dfx)
-    return ufl(dgx, output_dim) + fx_train, fx_test + ufl(dfx, output_dim)
+    return ufl(dgx) + fx_train, fx_test + ufl(dfx)
 
   return predict_using_kernel
 
 
-def gradient_descent_predictor(g_dd, y_train, loss, g_td=None):
+def gradient_descent(g_dd, y_train, loss, g_td=None):
   """Predicts the outcome of function space training using gradient descent.
 
   Solves the function space ODE for gradient descent with a given loss (detailed
@@ -304,14 +155,13 @@ def gradient_descent_predictor(g_dd, y_train, loss, g_td=None):
 
   Example:
     >>> train_time = 1e-7
-    >>> ker_fun = get_ntk_fun(f)
-    >>> g_dd = compute_spectrum(ker_fun(params, x_train))
-    >>> g_td = ker_fun(params, x_test, x_train)
+    >>> ker_fun = empirical(f)
+    >>> g_td = ker_fun(x_test, x_train, params)
     >>>
     >>> from jax.experimental import stax
     >>> cross_entropy = lambda fx, y_hat: -np.mean(stax.logsoftmax(fx) * y_hat)
     >>> predict_fn = gradient_descent_predictor(
-    >>>                   g_dd, train_y, cross_entropy, g_td)
+    >>>                   g_dd, y_train, cross_entropy, g_td)
     >>>
     >>> fx_train_initial = f(params, x_train)
     >>> fx_test_initial = f(params, x_test)
@@ -321,20 +171,20 @@ def gradient_descent_predictor(g_dd, y_train, loss, g_td=None):
 
   Args:
     g_dd: A Kernel on the training data. The kernel should be an `np.ndarray` of
-      shape [n_train * output_dim, n_train * output_dim].
+      shape [n_train * output_dim, n_train * output_dim] or [n_train, n_train].
+      In the latter case it is assumed that the kernel is block diagonal over
+      the logits.
     y_train: A `np.ndarray` of shape [n_train, output_dim] of labels for the
       training data.
     loss: A loss function whose signature is loss(fx, y_hat) where fx is an
       `np.ndarray` of function space output_dim of the network and y_hat are
-      targets.
-
-      Note: the loss function should treat the batch and output dimensions
-      symmetrically.
+      targets. Note: the loss function should treat the batch and output
+      dimensions symmetrically.
     g_td: A Kernel relating training data with test data. The kernel should be
-      an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim].
-
-      Note: g_td should have been created in the convention
-      ker_fun(params, x_test, x_train).
+      an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim] or
+      [n_test, n_train].
+      Note: g_td should have been created in the convention ker_fun(x_test,
+        x_train, params).
 
   Returns:
     A function that predicts outputs after t = learning_rate * steps of
@@ -355,30 +205,50 @@ def gradient_descent_predictor(g_dd, y_train, loss, g_td=None):
       [n_train, output_dim] and [n_test, output_dim] for train and test points
       respectively.
   """
-  y_train = np.reshape(y_train, (-1))
-  grad_loss = grad(functools.partial(loss, y_hat=y_train))
+  output_dimension = y_train.shape[-1]
+
+  g_dd = empirical.flatten_features(g_dd)
 
   def fl(fx):
     """Flatten outputs."""
     return np.reshape(fx, (-1,))
 
-  def ufl(fx, output_dim):
+  def ufl(fx):
     """Unflatten outputs."""
-    return np.reshape(fx, (-1, output_dim))
+    return np.reshape(fx, (-1, output_dimension))
+
+  # These functions are used inside the integrator only if the kernel is
+  # diagonal over the logits.
+  ifl = lambda x: x
+  iufl = lambda x: x
+
+  # Check to see whether the kernel has a logit dimension.
+  if y_train.size > g_dd.shape[-1]:
+    out_dim, ragged = divmod(y_train.size, g_dd.shape[-1])
+    if ragged or out_dim != y_train.shape[-1]:
+      raise ValueError()
+    ifl = fl
+    iufl = ufl
+
+  y_train = np.reshape(y_train, (-1))
+  grad_loss = grad(functools.partial(loss, y_hat=y_train))
 
   if g_td is None:
-    dfx_dt = lambda unused_t, fx: -np.dot(g_dd, grad_loss(fx))
+    dfx_dt = lambda unused_t, fx: -ifl(np.dot(g_dd, iufl(grad_loss(fx))))
+
     def predict(fx, dt):
       r = ode(dfx_dt).set_integrator('dopri5')
       r.set_initial_value(fl(fx), 0)
       r.integrate(dt)
 
-      return ufl(r.y, fx.shape[-1])
+      return ufl(r.y)
   else:
+    g_td = empirical.flatten_features(g_td)
+
     def dfx_dt(unused_t, fx, train_size):
       fx_train = fx[:train_size]
-      dfx_train = -np.dot(g_dd, grad_loss(fx_train))
-      dfx_test = -np.dot(g_td, grad_loss(fx_train))
+      dfx_train = -ifl(np.dot(g_dd, iufl(grad_loss(fx_train))))
+      dfx_test = -ifl(np.dot(g_td, iufl(grad_loss(fx_train))))
       return np.concatenate((dfx_train, dfx_test), axis=0)
 
     def predict(fx_train, fx_test, dt):
@@ -388,15 +258,14 @@ def gradient_descent_predictor(g_dd, y_train, loss, g_td=None):
       train_size, output_dim = fx_train.shape
       r.set_initial_value(fx, 0).set_f_params(train_size * output_dim)
       r.integrate(dt)
-      fx = ufl(r.y, output_dim)
+      fx = ufl(r.y)
 
       return fx[:train_size], fx[train_size:]
 
   return predict
 
 
-def momentum_predictor(
-    g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
+def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
   r"""Predicts the outcome of function space training using momentum.
 
   Solves the function space ODE for momentum with a given loss (detailed
@@ -418,9 +287,8 @@ def momentum_predictor(
     >>> train_time = 1e-7
     >>> learning_rate = 1e-2
     >>>
-    >>> ker_fun = get_ntk_fun(f)
-    >>> g_dd = compute_spectrum(ker_fun(params, x_train))
-    >>> g_td = ker_fun(params, x_test, x_train)
+    >>> ker_fun = empirical(f)
+    >>> g_td = ker_fun(x_test, x_train, params)
     >>>
     >>> from jax.experimental import stax
     >>> cross_entropy = lambda fx, y_hat: -np.mean(stax.logsoftmax(fx) * y_hat)
@@ -438,18 +306,16 @@ def momentum_predictor(
     g_dd: Kernel on the training data. The kernel should be an `np.ndarray` of
       shape [n_train * output_dim, n_train * output_dim].
     y_train: A `np.ndarray` of shape [n_train, output_dim] of labels for the
-       training data.
+      training data.
     loss: A loss function whose signature is loss(fx, y_hat) where fx an
       `np.ndarray` of function space outputs of the network and y_hat are
-      labels.
-
-      Note: the loss function should treat the batch and output dimensions
-      symmetrically.
+      labels. Note: the loss function should treat the batch and output
+      dimensions symmetrically.
     learning_rate:  A float specifying the learning rate.
     g_td: Kernel relating training data with test data. Should be an
       `np.ndarray` of shape [n_test * output_dim, n_train * output_dim]. Note:
       g_td should have been created in the convention
-      g_td = ker_fun(params, x_test, x_train).
+      g_td = ker_fun(x_test, x_train, params).
     momentum: float specifying the momentum.
 
   Returns:
@@ -480,81 +346,196 @@ def momentum_predictor(
       predict_fn(state, dt): Takes a state described above and a floating point
         time. Returns a new state with the same type and shape.
 
-      get_fn(state): Takes a state and returns two `np.ndarray`s of shape
+      get_fn(state): Takes a state and returns two `np.ndarray` of shape
         [n_train, output_dim] and [n_test, output_dim] respectively.
   """
+  output_dimension = y_train.shape[-1]
+
+  g_dd = empirical.flatten_features(g_dd)
+
   momentum = (momentum - 1.0) / np.sqrt(learning_rate)
-  y_train = np.reshape(y_train, (-1))
-  grad_loss = grad(functools.partial(loss, y_hat=y_train))
 
   def fl(fx):
     """Flatten outputs."""
     return np.reshape(fx, (-1,))
 
-  def ufl(fx, output_dim):
+  def ufl(fx):
     """Unflatten outputs."""
-    return np.reshape(fx, (-1, output_dim))
+    return np.reshape(fx, (-1, output_dimension))
+
+  # These functions are used inside the integrator only if the kernel is
+  # diagonal over the logits.
+  ifl = lambda x: x
+  iufl = lambda x: x
+
+  # Check to see whether the kernel has a logit dimension.
+  if y_train.size > g_dd.shape[-1]:
+    out_dim, ragged = divmod(y_train.size, g_dd.shape[-1])
+    if ragged or out_dim != y_train.shape[-1]:
+      raise ValueError()
+    ifl = fl
+    iufl = ufl
+
+  y_train = np.reshape(y_train, (-1))
+  grad_loss = grad(functools.partial(loss, y_hat=y_train))
 
   if g_td is None:
     def dr_dt(unused_t, r):
       fx, qx = np.split(r, 2)
       dfx = qx
-      dqx = momentum * qx - np.dot(g_dd, grad_loss(fx))
+      dqx = momentum * qx - ifl(np.dot(g_dd, iufl(grad_loss(fx))))
       return np.concatenate((dfx, dqx), axis=0)
 
     def init_fn(fx_train):
-      output_dim = fx_train.shape[-1]
       fx_train = fl(fx_train)
       qx_train = np.zeros_like(fx_train)
-      return output_dim, np.concatenate((fx_train, qx_train), axis=0)
+      return np.concatenate((fx_train, qx_train), axis=0)
 
     def predict_fn(state, dt):
-      output_dim, state = state
+      state = state
 
       solver = ode(dr_dt).set_integrator('dopri5')
       solver.set_initial_value(state, 0)
       solver.integrate(dt)
 
-      return output_dim, solver.y
+      return solver.y
 
     def get_fn(state):
-      output_dim, state = state
-      return ufl(np.split(state, 2)[0], output_dim)
+      return ufl(np.split(state, 2)[0])
 
   else:
+    g_td = empirical.flatten_features(g_td)
+
     def dr_dt(unused_t, r, train_size):
       train, test = r[:train_size], r[train_size:]
       fx_train, qx_train = np.split(train, 2)
       _, qx_test = np.split(test, 2)
       dfx_train = qx_train
-      dqx_train = momentum * qx_train - np.dot(g_dd, grad_loss(fx_train))
+      dqx_train = \
+          momentum * qx_train - ifl(np.dot(g_dd, iufl(grad_loss(fx_train))))
       dfx_test = qx_test
-      dqx_test = momentum * qx_test - np.dot(g_td, grad_loss(fx_train))
+      dqx_test = \
+          momentum * qx_test - ifl(np.dot(g_td, iufl(grad_loss(fx_train))))
       return np.concatenate((dfx_train, dqx_train, dfx_test, dqx_test), axis=0)
 
     def init_fn(fx_train, fx_test):
-      train_size, output_dim = fx_train.shape
+      train_size = fx_train.shape[0]
       fx_train, fx_test = fl(fx_train), fl(fx_test)
       qx_train = np.zeros_like(fx_train)
       qx_test = np.zeros_like(fx_test)
-      return (
-          2 * train_size * output_dim, output_dim,
-          np.concatenate((fx_train, qx_train, fx_test, qx_test), axis=0))
+      return (2 * train_size * output_dimension,
+              np.concatenate((fx_train, qx_train, fx_test, qx_test), axis=0))
 
     def predict_fn(state, dt):
-      train_size, output_dim, state = state
+      train_size, state = state
       solver = ode(dr_dt).set_integrator('dopri5')
       solver.set_initial_value(state, 0).set_f_params(train_size)
       solver.integrate(dt)
 
-      return train_size, output_dim, solver.y
+      return train_size, solver.y
 
     def get_fn(state):
-      train_size, output_dim, state = state
+      train_size, state = state
       train, test = state[:train_size], state[train_size:]
-      return (
-          ufl(np.split(train, 2)[0], output_dim),
-          ufl(np.split(test, 2)[0], output_dim)
-          )
+      return ufl(np.split(train, 2)[0]), ufl(np.split(test, 2)[0])
 
   return init_fn, predict_fn, get_fn
+
+
+def gp_inference(ker_fun, x_train, y_train, x_test, diag_reg=0., mode='NNGP',
+                 compute_var=False):
+  """Compute the mean and variance of the `posterior` of NNGP and NTK.
+
+  Args:
+    ker_fun: A kernel function that computes NNGP and NTK.
+    x_train: A `np.ndarray`, representing the training data.
+    y_train: A `np.ndarray`, representing the labels of the training data.
+    x_test: A `np.ndarray`, representing the test data.
+    diag_reg: A float, representing the strength of the regularization.
+    mode: The mode of the Gaussian process, either 'NNGP' or `NTK`.
+    compute_var: A boolean. If `True` computing both `mean` and `variance` and
+      only `mean` othorwise.
+  Returns:
+    Either `mean, variance` or `mean` of the GP posterior.
+  """
+  if mode not in ['NNGP', 'NTK']:
+    raise ValueError('The `mode` must be either `NNGP` or `NTK`.')
+
+  kdd, ktd = ker_fun(x_train, None), ker_fun(x_test, x_train)
+  if mode == 'NNGP':
+    pred_mean = _mean_prediction(kdd.nngp, ktd.nngp, y_train, diag_reg)
+  else:
+    pred_mean = _mean_prediction(kdd.ntk, ktd.ntk, y_train, diag_reg)
+  if not compute_var:
+    return pred_mean
+
+  ktt = ker_fun(x_test, None)
+  if mode == 'NNGP':
+    var = _nngp_var(kdd.nngp, ktd.nngp, ktt.nngp, diag_reg)
+  else:
+    var = _ntk_var(kdd.ntk, ktd.ntk, kdd.nngp, ktd.nngp, ktt.nngp, diag_reg)
+
+  return pred_mean, var
+
+
+def _add_diagonal_regularizer(covariance, diag_reg=0.):
+  dimension = covariance.shape[0]
+  reg = np.trace(covariance) / dimension
+  return covariance + diag_reg * reg * np.eye(dimension)
+
+
+def _mean_prediction(g_dd, g_td, y_train, diag_reg=0.):
+  """Compute the mean prediction of a Gaussian process.
+
+  Args:
+    g_dd: A kernel on the training data. The kernel should be an `np.ndarray` of
+      shape [n_train * output_dim, n_train * output_dim] or [n_train, n_train].
+      In the latter case, the kernel is assumed to be block diagonal over the
+      logits.
+    g_td: A kernel relating training data with test data. The kernel should be
+      an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim] or
+      [n_test, n_train].
+    y_train: An `np.ndarray` of shape [n_train, output_dim] of targets for the
+      training data.
+    diag_reg: strength of regularization.
+  Returns:
+    The mean prediction of the GP. When `diag_reg=0.`, returns
+    `g_td * g_dd^{-1} * y_train`.
+  """
+  output_dimension = y_train.shape[-1]
+  def fl(fx):
+    """Flatten outputs."""
+    return np.reshape(fx, (-1,))
+
+  def ufl(fx):
+    """Unflatten outputs."""
+    return np.reshape(fx, (-1, output_dimension))
+
+  if y_train.size > g_dd.shape[-1]:
+    out_dim, ragged = divmod(y_train.size, g_dd.shape[-1])
+    if ragged or out_dim != output_dimension:
+      raise ValueError('The batch size of `y_train` must be the same as the'
+                       ' last dimension of `g_dd`')
+    fl = lambda x: x
+    ufl = lambda x: x
+  g_dd_plus_reg = _add_diagonal_regularizer(g_dd, diag_reg)
+  mean_pred = sp.linalg.solve(g_dd_plus_reg, fl(y_train), sym_pos=True)
+  mean_pred = np.dot(g_td, mean_pred)
+  return ufl(mean_pred)
+
+
+def _ntk_var(ntk_dd, ntk_td, nngp_dd, nngp_td, nngp_tt, diag_reg=0.):
+  ntk_dd_plus_reg = _add_diagonal_regularizer(ntk_dd, diag_reg)
+  var = sp.linalg.solve(ntk_dd_plus_reg, np.transpose(ntk_td), sym_pos=True)
+  var = np.dot(nngp_dd, var)
+  var -= 2. * np.transpose(nngp_td)
+  var = sp.linalg.solve(ntk_dd_plus_reg, var, sym_pos=True)
+  var = np.dot(ntk_td, var) + nngp_tt
+  return var
+
+
+def _nngp_var(g_dd, g_td, g_tt, diag_reg=0.):
+  g_dd_plus_reg = _add_diagonal_regularizer(g_dd, diag_reg)
+  var = sp.linalg.solve(g_dd_plus_reg, np.transpose(g_td), sym_pos=True)
+  return g_tt - np.dot(g_td, var)
+
