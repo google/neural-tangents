@@ -17,7 +17,9 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+
 from functools import partial
+
 from jax import test_util as jtu
 from jax.api import grad
 from jax.api import jit
@@ -26,9 +28,9 @@ from jax.experimental import optimizers
 from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.random as random
-from neural_tangents import predict
 from neural_tangents import stax
 from neural_tangents.utils import empirical
+from neural_tangents import predict
 
 
 config.parse_flags_with_absl()
@@ -89,13 +91,9 @@ def _empirical_kernel(key, input_shape, network, out_logits):
 
 
 def _theoretical_kernel(key, input_shape, network, out_logits):
-  init_fn, f, _ker_fun = _build_network(input_shape, network, out_logits)
+  init_fn, f, ker_fun = _build_network(input_shape, network, out_logits)
   _, params = init_fn(key, (-1,) + input_shape)
-  @jit
-  def ker_fun(x1, x2=None):
-    k = _ker_fun(x1, x2)
-    return k.ntk
-  return params, f, ker_fun
+  return params, jit(f), jit(ker_fun)
 
 
 KERNELS = {
@@ -186,7 +184,7 @@ class PredictTest(jtu.JaxTestCase):
     fx_initial_test = f(params, data_test)
 
     fx_pred_train, fx_pred_test = predictor(
-        fx_initial_train, fx_initial_test, 0.0)
+        0.0, fx_initial_train, fx_initial_test)
 
     self.assertAllClose(fx_initial_train, fx_pred_train, True)
     self.assertAllClose(fx_initial_test, fx_pred_test, True)
@@ -200,7 +198,7 @@ class PredictTest(jtu.JaxTestCase):
     fx_test = f(params, data_test)
 
     fx_pred_train, fx_pred_test = predictor(
-        fx_initial_train, fx_initial_test, train_time)
+        train_time, fx_initial_train, fx_initial_test)
 
     fx_disp_train = np.sqrt(np.mean((fx_train - fx_initial_train) ** 2))
     fx_disp_test = np.sqrt(np.mean((fx_test - fx_initial_test) ** 2))
@@ -270,7 +268,7 @@ class PredictTest(jtu.JaxTestCase):
     fx_initial_test = f(params, data_test)
 
     fx_pred_train, fx_pred_test = predictor(
-        fx_initial_train, fx_initial_test, 0.0)
+        0.0, fx_initial_train, fx_initial_test)
 
     self.assertAllClose(fx_initial_train, fx_pred_train, True)
     self.assertAllClose(fx_initial_test, fx_pred_test, True)
@@ -284,7 +282,7 @@ class PredictTest(jtu.JaxTestCase):
     fx_test = f(params, data_test)
 
     fx_pred_train, fx_pred_test = predictor(
-        fx_initial_train, fx_initial_test, train_time)
+        train_time, fx_initial_train, fx_initial_test)
 
     fx_disp_train = np.sqrt(np.mean((fx_train - fx_initial_train) ** 2))
     fx_disp_test = np.sqrt(np.mean((fx_test - fx_initial_test) ** 2))
@@ -444,7 +442,7 @@ class PredictTest(jtu.JaxTestCase):
         fx_initial_train = f(params, data_train)
         fx_initial_test = f(params, data_test)
 
-        _, fx_pred_test = predictor(fx_initial_train, fx_initial_test, np.inf)
+        _, fx_pred_test = predictor(1.0e8, fx_initial_train, fx_initial_test)
         empirical_mean += fx_pred_test
       return empirical_mean / count
     atol = ATOL

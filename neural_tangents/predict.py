@@ -24,7 +24,19 @@ import jax.numpy as np
 import jax.scipy as sp
 
 from neural_tangents.utils import empirical
+from neural_tangents.utils.kernel import Kernel
 from scipy.integrate._ode import ode
+
+
+def _canonicalize_kernel_to_ntk(k):
+  if isinstance(k, Kernel):
+    return k.ntk
+  elif isinstance(k, np.ndarray):
+    return k
+  else:
+    raise ValueError(
+        'Expected kernel to either be a Kernel or an ndarry. Found {}.'.format(
+            type(k)))
 
 
 def analytic_mse(g_dd, y_train, g_td=None):
@@ -84,6 +96,9 @@ def analytic_mse(g_dd, y_train, g_td=None):
       respectively.
   """
 
+  g_dd = _canonicalize_kernel_to_ntk(g_dd)
+  g_td = _canonicalize_kernel_to_ntk(g_td)
+
   g_dd = empirical.flatten_features(g_dd)
 
   # TODO(schsam): Eventually, we may want to handle non-symmetric kernels for
@@ -117,20 +132,20 @@ def analytic_mse(g_dd, y_train, g_td=None):
     ufl = lambda x: x
 
   def predict(gx, dt):
-    gx_ = 0. if dt == np.inf else np.diag(np.exp(-evals * dt / normalization))
+    gx_ = np.diag(np.exp(-evals * dt / normalization))
     gx_ = np.dot(evecs, gx_)
     gx_ = np.dot(gx_, ievecs)
     gx_ = np.dot(gx_, gx)
     return gx_
 
   if g_td is None:
-    return lambda fx, dt: ufl(predict(fl(fx - y_train), dt)) + y_train
+    return lambda dt, fx=0.: ufl(predict(fl(fx - y_train), dt)) + y_train
 
   g_td = empirical.flatten_features(g_td)
   mevals = np.diag(1.0 / evals)
   inverse = np.dot(np.dot(evecs, mevals), ievecs)
 
-  def predict_using_kernel(fx_train, fx_test, dt):
+  def predict_using_kernel(dt, fx_train=0., fx_test=0.):
     gx_train = fl(fx_train - y_train)
     dgx = predict(gx_train, dt) - gx_train
     dfx = np.dot(inverse, dgx)
@@ -205,6 +220,10 @@ def gradient_descent(g_dd, y_train, loss, g_td=None):
       [n_train, output_dim] and [n_test, output_dim] for train and test points
       respectively.
   """
+
+  g_dd = _canonicalize_kernel_to_ntk(g_dd)
+  g_td = _canonicalize_kernel_to_ntk(g_td)
+
   output_dimension = y_train.shape[-1]
 
   g_dd = empirical.flatten_features(g_dd)
@@ -236,7 +255,7 @@ def gradient_descent(g_dd, y_train, loss, g_td=None):
   if g_td is None:
     dfx_dt = lambda unused_t, fx: -ifl(np.dot(g_dd, iufl(grad_loss(fx))))
 
-    def predict(fx, dt):
+    def predict(dt, fx=0.):
       r = ode(dfx_dt).set_integrator('dopri5')
       r.set_initial_value(fl(fx), 0)
       r.integrate(dt)
@@ -251,7 +270,7 @@ def gradient_descent(g_dd, y_train, loss, g_td=None):
       dfx_test = -ifl(np.dot(g_td, iufl(grad_loss(fx_train))))
       return np.concatenate((dfx_train, dfx_test), axis=0)
 
-    def predict(fx_train, fx_test, dt):
+    def predict(dt, fx_train=0., fx_test=0.):
       r = ode(dfx_dt).set_integrator('dopri5')
 
       fx = fl(np.concatenate((fx_train, fx_test), axis=0))
@@ -349,6 +368,9 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
       get_fn(state): Takes a state and returns two `np.ndarray` of shape
         [n_train, output_dim] and [n_test, output_dim] respectively.
   """
+  g_dd = _canonicalize_kernel_to_ntk(g_dd)
+  g_td = _canonicalize_kernel_to_ntk(g_td)
+
   output_dimension = y_train.shape[-1]
 
   g_dd = empirical.flatten_features(g_dd)
@@ -386,7 +408,7 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
       dqx = momentum * qx - ifl(np.dot(g_dd, iufl(grad_loss(fx))))
       return np.concatenate((dfx, dqx), axis=0)
 
-    def init_fn(fx_train):
+    def init_fn(fx_train=0.):
       fx_train = fl(fx_train)
       qx_train = np.zeros_like(fx_train)
       return np.concatenate((fx_train, qx_train), axis=0)
@@ -418,7 +440,7 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
           momentum * qx_test - ifl(np.dot(g_td, iufl(grad_loss(fx_train))))
       return np.concatenate((dfx_train, dqx_train, dfx_test, dqx_test), axis=0)
 
-    def init_fn(fx_train, fx_test):
+    def init_fn(fx_train=0., fx_test=0.):
       train_size = fx_train.shape[0]
       fx_train, fx_test = fl(fx_train), fl(fx_test)
       qx_train = np.zeros_like(fx_train)

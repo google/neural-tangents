@@ -90,7 +90,7 @@ def main(unused_argv):
 
   # Get predictions from analytic computation.
   print('Computing analytic prediction.')
-  fx_train, fx_test = predictor(fx_train, fx_test, FLAGS.train_time)
+  fx_train, fx_test = predictor(FLAGS.train_time, fx_train, fx_test)
 
   # Print out summary data comparing the linear / nonlinear model.
   util.print_summary('train', y_train, f(params, x_train), fx_train, loss)
