@@ -16,12 +16,10 @@
 
 from __future__ import absolute_import
 from __future__ import division
-from __future__ import google_type_annotations
 from __future__ import print_function
+from jax.api import device_get
 from jax.api import jit
 from jax.api import pmap
-from jax.api import device_get
-from jax.api import soft_pmap
 from jax.lib import xla_bridge
 import jax.numpy as np
 from jax.tree_util import tree_map
@@ -187,71 +185,6 @@ def _serial(ker_fun, batch_size, store_on_device=True):
 
     return flatten(kernel)
   return serial_fn
-
-
-def _soft_parallel(ker_fun, batch_size):
-  """Returns a function that computes a kernel in batches in parallel.
-
-  The current implementation uses jax.soft_pmap to simulate a given batch size.
-  However, it is possible that larger batches will be chosen if
-    (n1 * n2 // batch_size ** 2) > physical_device_count
-  In this case soft_pmap will attempt implicitly use a larger batch size. To
-  use a fixed batch size independent of the physical device count, one should
-  compose this function with serial.
-
-  In a future CL, it might be a good idea to introduce an `auto` batching
-  function that composes serial and parallel automatically.
-
-  Args:
-    ker_fun: A function that computes a kernel between two datasets,
-        ker_fun(x1, x2). Here x1 and x2 are `np.ndarray`s of floats of shape
-        [n1,] + input_shape and [n2,] + input_shape. The kernel function
-        should return a PyTree.
-    batch_size: Integer specifying the size of batches in which to split the
-        data.
-
-  Returns:
-    A new function with the same signature as ker_fun that computes the kernel
-    by batching over the dataset in parallel with the specified batch_size.
-  """
-
-  ker_fun = soft_pmap(soft_pmap(ker_fun))
-
-  def parallel_fn(x1, x2=None, *args, **kwargs):
-    if x2 is None:
-      # TODO(schsam): Only compute the upper triangular part of the kernel.
-      x2 = x1
-
-    n1 = x1.shape[0]
-    n2 = x2.shape[0]
-    input_shape = x1.shape[1:]
-
-    n1_batches, ragged = divmod(n1, batch_size)
-    if ragged:
-      # TODO(schsam): Relax this constraint.
-      raise ValueError((
-          'Number of examples in x1 must divide batch size. Found |x1| = {} '
-          'and batch size = {}').format(n1, batch_size))
-
-    n2_batches, ragged = divmod(n2, batch_size)
-    if ragged:
-      # TODO(schsam): Relax this constraint.
-      raise ValueError((
-          'Number of examples in x2 must divide batch size. Found |x2| = {} '
-          'and batch size = {}').format(n2, batch_size))
-
-    x1s = np.reshape(x1, (n1_batches, 1, batch_size,) + input_shape)
-    x1s = np.broadcast_to(
-        x1s, (n1_batches, n2_batches, batch_size,) + input_shape)
-
-    x2s = np.reshape(x2, (1, n2_batches, batch_size,) + input_shape)
-    x2s = np.broadcast_to(
-        x2s, (n1_batches, n2_batches, batch_size,) + input_shape)
-
-    kernel = ker_fun(x1s, x2s, *args, **kwargs)
-
-    return _flatten_kernel(kernel)
-  return parallel_fn
 
 
 def _parallel(ker_fun, device_count=-1):
