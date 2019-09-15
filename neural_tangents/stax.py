@@ -134,39 +134,6 @@ def _double_tuple(x):
   return tuple(v for v in x for _ in range(2))
 
 
-def orthogonal_init(stddev, dtype):
-  """An initializer function for random orthogonal matrix.
-
-  Adapted from `tf.initializers.orthogonal`.
-  """
-  def init(rng, shape):
-    # Check the shape
-    std = lax.convert_element_type(stddev, dtype)
-    if len(shape) < 2:
-      raise ValueError('The array to initialize must be '
-                       'at least two-dimensional')
-    # Flatten the input shape with the last dimension remaining
-    # its original shape so it works for conv2d
-    num_rows = 1
-    for dim in shape[:-1]:
-      num_rows *= dim
-    num_cols = shape[-1]
-    flat_shape = (num_cols, num_rows) if num_rows < num_cols else (num_rows,
-                                                                   num_cols)
-
-    # Generate a random matrix
-    a = random.normal(rng, flat_shape, dtype=dtype)
-    # Compute the qr factorization
-    q, r = np.linalg.qr(a)
-    # Make Q uniform
-    d = np.diag(r)
-    q *= np.sign(d)
-    if num_rows < num_cols:
-      q = np.transpose(q)
-    return  std * np.reshape(q, shape)
-  return init
-
-
 def _get_variance(x):
   return np.sum(x**2, axis=-1, keepdims=False) / x.shape[-1]
 
