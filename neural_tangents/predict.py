@@ -22,21 +22,9 @@ from jax.api import grad
 from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.scipy as sp
-
 from neural_tangents.utils import empirical
 from neural_tangents.utils.kernel import Kernel
 from scipy.integrate._ode import ode
-
-
-def _canonicalize_kernel_to_ntk(k):
-  if isinstance(k, Kernel):
-    return k.ntk
-  elif isinstance(k, np.ndarray):
-    return k
-  else:
-    raise ValueError(
-        'Expected kernel to either be a Kernel or an ndarry. Found {}.'.format(
-            type(k)))
 
 
 def analytic_mse(g_dd, y_train, g_td=None):
@@ -462,6 +450,16 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
       return ufl(np.split(train, 2)[0]), ufl(np.split(test, 2)[0])
 
   return init_fn, predict_fn, get_fn
+
+
+def _canonicalize_kernel_to_ntk(k):
+  if k is None or isinstance(k, np.ndarray):
+    return k
+  if isinstance(k, Kernel):
+    return k.ntk
+  raise ValueError(
+      'Expected kernel to either be a `Kernel`, a `np.ndarry`, or `None`. '
+      'Found {}.'.format(type(k)))
 
 
 def gp_inference(ker_fun, x_train, y_train, x_test, diag_reg=0., mode='NNGP',
