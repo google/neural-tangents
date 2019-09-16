@@ -32,37 +32,32 @@ This library contains layer constructors mimicking those in
 
 Example:
   ```python
-  >>> import jax.numpy as np
-  >>> import jax.scipy as sp
-  >>>
-  >>> x_train = np.ones((20, 32, 32, 3))
-  >>> y_train = np.ones((20, 10))
-  >>> x_test = np.ones((10, 32, 32, 3))
-  >>>
-  >>> init_fun, apply_fun, ker_fun = serial(
-  >>>     Conv(128, (3, 3)),
-  >>>     Relu(),
-  >>>     Conv(256, (3, 3)),
-  >>>     Relu(),
-  >>>     Conv(512, (3, 3)),
-  >>>     Flatten(),
-  >>>     Dense(10)
+  >>> from jax import random
+  >>> from neural_tangents import stax
+  >>> from neural_tangents import predict
+  >>> 
+  >>> key1, key2 = random.split(random.PRNGKey(1), 2)
+  >>> x_train = random.normal(key1, (20, 32, 32, 3))
+  >>> y_train = random.uniform(key1, (20, 10))
+  >>> x_test = random.normal(key2, (5, 32, 32, 3))
+  >>> 
+  >>> init_fun, apply_fun, ker_fun = stax.serial(
+  >>>     stax.Conv(128, (3, 3)),
+  >>>     stax.Relu(),
+  >>>     stax.Conv(256, (3, 3)),
+  >>>     stax.Relu(),
+  >>>     stax.Conv(512, (3, 3)),
+  >>>     stax.Flatten(),
+  >>>     stax.Dense(10)
   >>> )
-  >>>
-  >>> K_train_train = ker_fun(x_train)
-  >>> K_test_train = ker_fun(x_test, x_train)
-  >>>
-  >>> # NNGP prediction
-  >>> y_test_nngp = np.matmul(
-  >>>     K_test_train.nngp,
-  >>>     sp.linalg.solve(K_train_train.nngp, y_train, sym_pos=True)
-  >>> )
-  >>> # NTK prediction
-  >>> y_test_ntk = np.matmul(
-  >>>     K_test_train.ntk,
-  >>>     sp.linalg.solve(K_train_train.ntk, y_train, sym_pos=True)
-  >>> )
-  >>> # TODO(romann): improve this example.
+  >>> 
+  >>> # (5, 10) np.ndarray NNGP test prediction
+  >>> y_test_nngp = predict.gp_inference(ker_fun, x_train, y_train, x_test, 
+  >>>                                    mode='NNGP')
+  >>> 
+  >>> # (5, 10) np.ndarray NTK prediction
+  >>> y_test_ntk = predict.gp_inference(ker_fun, x_train, y_train, x_test, 
+  >>>                                   mode='NTK')
   ```
 """
 
@@ -535,7 +530,7 @@ def _affine(nngp, W_std, b_std):
 
 
 @_layer
-def Dense(out_dim, W_std, b_std, W_init=_randn(1.0), b_init=_randn(1.0)):
+def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0)):
   """Layer constructor function for a dense (fully-connected) layer.
 
   Based on `jax.experimental.stax.Dense`. Has a similar API.
