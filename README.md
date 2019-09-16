@@ -25,16 +25,16 @@ from jax import random
 from jax.experimental import stax
 
 init_fun, apply_fun = stax.serial(
-    stax.Dense(512, W_std=1.5, b_std=0.05), stax.Relu,
-    stax.Dense(512, W_std=1.5, b_std=0.05), stax.Relu,
-    stax.Dense(1, W_std=1.5, b_std=0.05)
+    stax.Dense(512), stax.Relu,
+    stax.Dense(512), stax.Relu,
+    stax.Dense(1)
 )
 
 key = random.PRNGKey(1)
 x = random.normal(key, (10, 100))
 _, params = init_fun(key, input_shape=x.shape)
 
-y = apply_fun(params, x)  # [10, 1] outputs of the neural network
+y = apply_fun(params, x)  # (10, 1) np.ndarray outputs of the neural network
 ```
 
 Neural Tangents is designed to serve as a drop-in replacement for `stax`, extending the `(init_fun, apply_fun)` tuple to a triple `(init_fun, apply_fun, ker_fun)`, where `ker_fun` is the kernel function of the infinite network (GP) of the given architecture. Below is an example of computing the covariances of the GP between two batches of inputs `x1` and `x2`.
@@ -58,8 +58,8 @@ kernel = ker_fun(x1, x2)
 Note that `kernel` contains _two_ covariance matrices: `kernel.nngp` and `kernel.ntk`. `kernel.nngp` corresponds to the _Bayesian_ infinite neural network, and is commonly referred to as "NNGP" (Neural Network Gaussian Process, [[1]](1)). `kernel.ntk` corresponds to the _gradient-flow trained_ infinite network, and is commonly referred to as "NTK" (Neural Tangent Kernel [[5]](5)). These matrices can be accessed as follows:
 
 ```python
-nngp = kernel.nngp  # a [10, 20] matrix
-ntk = kernel.ntk  # a [10, 20] matrix
+nngp = kernel.nngp  # (10, 20) np.ndarray
+ntk = kernel.ntk  # (10, 20) np.ndarray
 ```
 
 Doing inference with infinite networks trained on MSE loss reduces to classical GP inference, for which we also provide convenient tools:
@@ -68,13 +68,13 @@ Doing inference with infinite networks trained on MSE loss reduces to classical 
 from neural_tangents import predict
 
 x_train, x_test = x1, x2
-y_train = random.bernoulli(key1, shape=(10, 1))  # training targets
+y_train = random.uniform(key1, shape=(10, 1))  # training targets
 
 y_test_nngp = predict.gp_inference(ker_fun, x_train, y_train, x_test, mode='NNGP')
-# [20, 1] test predictions of an infinite Bayesian network
+# (20, 1) np.ndarray test predictions of an infinite Bayesian network
 
 y_test_ntk = predict.gp_inference(ker_fun, x_train, y_train, x_test, mode='NTK')
-# [20, 1] test predictions of an infinite gradient-flow trained network at convergence (t = inf)
+# (20, 1) np.ndarray test predictions of an infinite gradient-flow trained network at convergence (t = inf)
 ```
 
 
@@ -168,18 +168,19 @@ post-activations which are substantially more nonlinear.
 import jax.numpy as np
 from neural_tangents.api import linearize
 
-def apply_fun(params, X):
+def apply_fun(params, x):
   W, b = params
-  return np.dot(X, W) + b
+  return np.dot(x, W) + b
 
-W_0 = np.array([[1, 0], [0, 1]])
+W_0 = np.array([[1., 0.], [0., 1.]])
 b_0 = np.zeros((2,))
 
 apply_fun_lin = linearize(apply_fun, (W_0, b_0))
 W = np.array([[1.5, 0.2], [0.1, 0.9]])
 b = b_0 + 0.2
 
-logits = apply_fun_lin((W, b), x)
+x = np.array([[0.3, 0.2], [0.4, 0.5], [1.2, 0.2]])
+logits = apply_fun_lin((W, b), x)  # (3, 2) np.ndarray
 ```
 
 ### Function Space:
@@ -197,18 +198,25 @@ def apply_fun(params, x):
   W, b = params
   return np.dot(x, W) + b
 
-W_0 = np.array([[1, 0], [0, 1]])
+W_0 = np.array([[1., 0.], [0., 1.]])
 b_0 = np.zeros((2,))
 params = (W_0, b_0)
 
+key1, key2 = random.split(random.PRNGKey(1), 2)
+x_train = random.normal(key1, (3, 2))
+x_test = random.normal(key2, (4, 2))
+y_train = random.uniform(key1, shape=(3, 2))
+
 ker_fun = get_ker_fun_empirical(apply_fun)
 ntk_train_train = ker_fun(x_train, x_train, params).ntk
-mse_predictor = predict.analytic_mse(ntk_train_train, y_train)
+ntk_test_train = ker_fun(x_test, x_train, params).ntk
+mse_predictor = predict.analytic_mse(ntk_train_train, y_train, ntk_test_train)
 
 t = 5.
 y_train_0 = apply_fun(params, x_train)
 y_test_0 = apply_fun(params, x_test)
 y_train_t, y_test_t = mse_predictor(t, y_train_0, y_test_0)
+# (3, 2) and (4, 2) np.ndarray train and test outputs after `t` units of time training with gradient flow
 ```
 
 ### What to Expect
