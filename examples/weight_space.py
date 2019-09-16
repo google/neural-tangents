@@ -30,8 +30,9 @@ from jax import random
 from jax.api import grad
 from jax.api import jit
 from jax.experimental import optimizers
-from jax.experimental import stax
+from jax.experimental.stax import logsoftmax
 import jax.numpy as np
+from neural_tangents import stax
 from neural_tangents.api import linearize
 import datasets
 import util
@@ -54,10 +55,10 @@ def main(unused_argv):
   x_train, y_train, x_test, y_test = datasets.mnist(permute_train=True)
 
   # Build the network
-  init_fn, f = stax.serial(
-      stax.Dense(2048),
-      stax.Tanh,
-      stax.Dense(10))
+  init_fn, f, _ = stax.serial(
+      stax.Dense(2048, 1., 0.05),
+      stax.Erf(),
+      stax.Dense(10, 1., 0.05))
 
   key = random.PRNGKey(0)
   _, params = init_fn(key, (-1, 784))
@@ -74,7 +75,7 @@ def main(unused_argv):
   state_lin = opt_init(params)
 
   # Create a cross-entropy loss function.
-  loss = lambda fx, y_hat: -np.mean(stax.logsoftmax(fx) * y_hat)
+  loss = lambda fx, y_hat: -np.mean(logsoftmax(fx) * y_hat)
 
   # Specialize the loss function to compute gradients for both linearized and
   # full networks.

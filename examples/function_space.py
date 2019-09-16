@@ -55,9 +55,9 @@ def main(unused_argv):
 
   # Build the network
   init_fn, f, _ = stax.serial(
-      stax.Dense(4096, 1., 0.),
+      stax.Dense(2048, 1., 0.05),
       stax.Erf(),
-      stax.Dense(10, 1., 0.))
+      stax.Dense(10, 1., 0.05))
 
   key = random.PRNGKey(0)
   _, params = init_fn(key, (-1, 784))
