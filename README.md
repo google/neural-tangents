@@ -44,9 +44,9 @@ from jax import random
 from neural_tangents import stax
 
 init_fun, apply_fun, ker_fun = stax.serial(
-    stax.Dense(512, W_std=1.5, b_std=0.05), stax.Relu(),
-    stax.Dense(512, W_std=1.5, b_std=0.05), stax.Relu(),
-    stax.Dense(1, W_std=1.5, b_std=0.05)
+    stax.Dense(512), stax.Relu(),
+    stax.Dense(512), stax.Relu(),
+    stax.Dense(1)
 )
 
 key1, key2 = random.split(random.PRNGKey(1))
