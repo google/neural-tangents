@@ -16,7 +16,7 @@ We happily welcome contributions!
 
 ## 5-Minute Intro
 
-<b>Below is a very quick introduction. For a detailed, in-depth interactive walkthrough please see the following [Colab](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/neural_tangents_cookbook.ipynb).</b>
+<b>See this [Colab](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/neural_tangents_cookbook.ipynb) for a detailed tutorial. Below is a very quick introduction.</b>
 
 Our library closely follows JAX's API for specifying neural networks,  [`stax`](https://github.com/google/jax/blob/master/jax/experimental/stax.py). In `stax` a network is defined by a pair of functions `(init_fun, apply_fun)` initializing the trainable parameters and computing the outputs of the network respectively. Below is an example of defining a 3-layer network and computing it's outputs `y` given inputs `x`.
 
@@ -252,11 +252,7 @@ python neural-tangents/examples/function_space.py
 Finally, you can run tests by calling:
 
 ```
-python neural-tangents/tests/stax_test.py
-python neural-tangents/tests/predict_test.py
-python neural-tangents/tests/empirical_test.py
-python neural-tangents/tests/batch_test.py
-python neural-tangents/tests/monte_carlo_test.py
+for f in neural-tangents/neural_tangents/tests/*.py; do python $f; done
 ```
 
 If you would prefer, you can get started without installing by checking out our
