@@ -80,7 +80,7 @@ y_test_ntk = predict.gp_inference(ker_fun, x_train, y_train, x_test, mode='NTK')
 
 ### Infinitely WideResnet
 
-We can define a more compex, (infinite) Wide Residual Network [[8](8)] using the same `neural_tangents.stax` building blocks:
+We can define a more compex, (infinitely) Wide Residual Network [[8](8)] using the same `neural_tangents.stax` building blocks:
 
 ```python
 from neural_tangents import stax
@@ -320,7 +320,7 @@ Adrià Garriga-Alonso, Carl Edward Rasmussen, Laurence Aitchison
 Arthur Jacot, Franck Gabriel, Clément Hongler
 
 <a name="6"></a>[6] [Wide Neural Networks of Any Depth Evolve as Linear Models Under Gradient
-Descent.](https://arxiv.org/abs/1902.06720) \
+Descent.](https://arxiv.org/abs/1902.06720)
 *NeurIPS 2019.* \
 Jaehoon Lee*, Lechao Xiao*, Samuel S. Schoenholz, Yasaman Bahri, Roman Novak, Jascha
 Sohl-Dickstein, Jeffrey Pennington
