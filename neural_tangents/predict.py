@@ -27,8 +27,10 @@ from neural_tangents.utils.kernel import Kernel
 from scipy.integrate._ode import ode
 
 
-def analytic_mse(g_dd, y_train, g_td=None):
-  """Predicts the outcome of function space training with an MSE loss.
+def gradient_descent_mse(g_dd, y_train, g_td=None):
+  """Predicts the outcome of function space gradient descent training on MSE.
+
+  Analytically solves for the continuous-time version of gradient descent.
 
   Uses the analytic solution for gradient descent on an MSE loss in function
   space detailed in [*] given a Neural Tangent Kernel over the dataset. Given
@@ -39,17 +41,21 @@ def analytic_mse(g_dd, y_train, g_td=None):
   [*] https://arxiv.org/abs/1806.07572
 
   Example:
+    ```python
+    >>> from neural_tangents import predict
+    >>>
     >>> train_time = 1e-7
     >>> ker_fun = empirical(f)
     >>> g_td = ker_fun(x_test, x_train, params)
     >>>
-    >>> predict_fn = analytic_mse_predictor(g_dd, y_train, g_td)
+    >>> predict_fn = predict.gradient_descent_mse(g_dd, y_train, g_td)
     >>>
     >>> fx_train_initial = f(params, x_train)
     >>> fx_test_initial = f(params, x_test)
     >>>
     >>> fx_train_final, fx_test_final = predict_fn(
     >>>          fx_train_initial, fx_test_initial, train_time)
+    ```
 
   Args:
     g_dd: A kernel on the training data. The kernel should be an `np.ndarray` of
@@ -144,34 +150,40 @@ def analytic_mse(g_dd, y_train, g_td=None):
 
 
 def gradient_descent(g_dd, y_train, loss, g_td=None):
-  """Predicts the outcome of function space training using gradient descent.
+  """Predicts the outcome of function space gradient descent training on `loss`.
 
-  Solves the function space ODE for gradient descent with a given loss (detailed
-  in [*]) given a Neural Tangent Kernel over the dataset. This function returns
-  a function that predicts the time evolution for function space points at
-  arbitrary times. Note that times are continuous and are measured in units of
-  the learning rate so that t = learning_rate * steps.
+  Solves for continuous-time gradient descent using an ODE solver.
+
+  Solves the function space ODE for continuous gradient descent with a given
+  loss (detailed in [*]) given a Neural Tangent Kernel over the dataset. This
+  function returns a function that predicts the time evolution for function
+  space points at arbitrary times. Note that times are continuous and are
+  measured in units of the learning rate so that t = learning_rate * steps.
 
   This function uses the scipy ode solver with the 'dopri5' algorithm.
 
   [*] https://arxiv.org/abs/1806.07572
 
   Example:
+    ```python
+    >>> from jax.experimental import stax
+    >>> from neural_tangents import predict
+    >>>
     >>> train_time = 1e-7
     >>> ker_fun = empirical(f)
     >>> g_td = ker_fun(x_test, x_train, params)
     >>>
     >>> from jax.experimental import stax
     >>> cross_entropy = lambda fx, y_hat: -np.mean(stax.logsoftmax(fx) * y_hat)
-    >>> predict_fn = gradient_descent_predictor(
-    >>>                   g_dd, y_train, cross_entropy, g_td)
+    >>> predict_fn = predict.gradient_descent(
+    >>>     g_dd, y_train, cross_entropy, g_td)
     >>>
     >>> fx_train_initial = f(params, x_train)
     >>> fx_test_initial = f(params, x_test)
     >>>
     >>> fx_train_final, fx_test_final = predict_fn(
-    >>>          fx_train_initial, fx_test_initial, train_time)
-
+    >>>     fx_train_initial, fx_test_initial, train_time)
+    ```
   Args:
     g_dd: A Kernel on the training data. The kernel should be an `np.ndarray` of
       shape [n_train * output_dim, n_train * output_dim] or [n_train, n_train].
@@ -185,9 +197,8 @@ def gradient_descent(g_dd, y_train, loss, g_td=None):
       dimensions symmetrically.
     g_td: A Kernel relating training data with test data. The kernel should be
       an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim] or
-      [n_test, n_train].
-      Note: g_td should have been created in the convention ker_fun(x_test,
-        x_train, params).
+      [n_test, n_train]. Note: g_td should have been created in the convention
+      ker_fun(x_test, x_train, params).
 
   Returns:
     A function that predicts outputs after t = learning_rate * steps of
@@ -273,7 +284,10 @@ def gradient_descent(g_dd, y_train, loss, g_td=None):
 
 
 def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
-  r"""Predicts the outcome of function space training using momentum.
+  r"""Predicts the outcome of function space training using momentum descent.
+
+  Solves a continuous-time version of standard momentum instead of
+  Nesterov momentum using an ODE solver.
 
   Solves the function space ODE for momentum with a given loss (detailed
   in [*]) given a Neural Tangent Kernel over the dataset. This function returns
@@ -283,14 +297,12 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
   measured in units of the learning rate so that
   t = \sqrt(learning_rate) * steps.
 
-  Note: this solves a continuous version of standard momentum instead of
-  Nesterov momentum.
-
   This function uses the scipy ode solver with the 'dopri5' algorithm.
 
   [*] https://arxiv.org/abs/1806.07572
 
   Example:
+    ```python
     >>> train_time = 1e-7
     >>> learning_rate = 1e-2
     >>>
@@ -299,7 +311,7 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
     >>>
     >>> from jax.experimental import stax
     >>> cross_entropy = lambda fx, y_hat: -np.mean(stax.logsoftmax(fx) * y_hat)
-    >>> init_fn, predict_fn, get_fn = momentum_predictor(
+    >>> init_fn, predict_fn, get_fn = predict.momentum(
     >>>                   g_dd, y_train, cross_entropy, learning_rate, g_td)
     >>>
     >>> fx_train_initial = f(params, x_train)
@@ -308,6 +320,7 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
     >>> lin_state = init_fn(fx_train_initial, fx_test_initial)
     >>> lin_state = predict_fn(lin_state, train_time)
     >>> fx_train_final, fx_test_final = get_fn(lin_state)
+    ```python
 
   Args:
     g_dd: Kernel on the training data. The kernel should be an `np.ndarray` of

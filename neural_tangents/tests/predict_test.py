@@ -162,7 +162,7 @@ class PredictTest(jtu.JaxTestCase):
     g_dd = ntk(data_train, None)
     g_td = ntk(data_test, data_train)
 
-    predictor = predict.analytic_mse(g_dd, data_labels, g_td)
+    predictor = predict.gradient_descent_mse(g_dd, data_labels, g_td)
 
     atol = ATOL
     rtol = RTOL
@@ -437,7 +437,7 @@ class PredictTest(jtu.JaxTestCase):
                                              network, out_logits)
         g_dd = theta(data_train, None)
         g_td = theta(data_test, data_train)
-        predictor = predict.analytic_mse(g_dd, data_labels, g_td)
+        predictor = predict.gradient_descent_mse(g_dd, data_labels, g_td)
 
         fx_initial_train = f(params, data_train)
         fx_initial_test = f(params, data_test)

@@ -162,8 +162,8 @@ def _inputs_to_kernel(x1, x2, use_pooling, compute_ntk):
 
    The kernel contains the empirical covariances between different inputs and
      their entries (pixels) necessary to compute the covariance of the Gaussian
-     Process corresponding to an infinite Bayesian or gradient-flow-trained
-     neural network.
+     Process corresponding to an infinite Bayesian or continuous gradient
+     descent trained neural network.
 
    The smallest necessary number of covariance entries is tracked. For example,
      all networks are assumed to have i.i.d. weights along the channel / feature

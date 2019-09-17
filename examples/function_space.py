@@ -74,7 +74,7 @@ def main(unused_argv):
   ntk = batch(get_ntk_fun_empirical(f), batch_size=32, device_count=1)
   g_dd = ntk(x_train, None, params)
   g_td = ntk(x_test, x_train, params)
-  predictor = predict.analytic_mse(g_dd, y_train, g_td)
+  predictor = predict.gradient_descent_mse(g_dd, y_train, g_td)
 
   # Get initial values of the network in function space.
   fx_train = f(params, x_train)

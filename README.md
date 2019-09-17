@@ -55,7 +55,7 @@ x2 = random.normal(key2, (20, 100))
 
 kernel = ker_fun(x1, x2)
 ```
-Note that `kernel` contains _two_ covariance matrices: `kernel.nngp` and `kernel.ntk`. `kernel.nngp` corresponds to the _Bayesian_ infinite neural network, and is commonly referred to as "NNGP" (Neural Network Gaussian Process, [[1]](1)). `kernel.ntk` corresponds to the _gradient-flow trained_ infinite network, and is commonly referred to as "NTK" (Neural Tangent Kernel [[5]](5)). These matrices can be accessed as follows:
+Note that `kernel` contains _two_ covariance matrices: `kernel.nngp` and `kernel.ntk`. `kernel.nngp` corresponds to the _Bayesian_ infinite neural network, and is commonly referred to as "NNGP" (Neural Network Gaussian Process, [[1]](1)). `kernel.ntk` corresponds to the _(continuous) gradient descent trained_ infinite network, and is commonly referred to as "NTK" (Neural Tangent Kernel [[5]](5)). These matrices can be accessed as follows:
 
 ```python
 nngp = kernel.nngp  # (10, 20) np.ndarray
@@ -74,7 +74,7 @@ y_test_nngp = predict.gp_inference(ker_fun, x_train, y_train, x_test, mode='NNGP
 # (20, 1) np.ndarray test predictions of an infinite Bayesian network
 
 y_test_ntk = predict.gp_inference(ker_fun, x_train, y_train, x_test, mode='NTK')
-# (20, 1) np.ndarray test predictions of an infinite gradient-flow trained network at convergence (t = inf)
+# (20, 1) np.ndarray test predictions of an infinite continuous gradient descent trained network at convergence (t = inf)
 ```
 
 
@@ -122,13 +122,13 @@ The `neural_tangents` package contains two modules:
 
 * `predict` - predictions with infinite networks:
 
-  * `predict.gp_inference` - either fully Bayesian inference (`mode="NNGP"`) or inference with a network trained to full convergence (infinite time) on MSE loss using gradient flow (`mode="NTK"`).
+  * `predict.gp_inference` - either fully Bayesian inference (`mode="NNGP"`) or inference with a network trained to full convergence (infinite time) on MSE loss using continuous gradient descent (`mode="NTK"`).
 
-  * `predict.analytic_mse` - inference with a network trained on MSE loss with gradient flow for an arbitrary finite time.
+  * `predict.gradient_descent_mse` - inference with a network trained on MSE loss with continuous gradient descent for an arbitrary finite time.
   
-  * `predict.gradient_descent` - a network trained on cross-entropy loss with gradient flow for an arbitrary finite time (using an ODE solver).
+  * `predict.gradient_descent` - inference with a network trained on arbitrary loss with continuous gradient descent for an arbitrary finite time (using an ODE solver).
   
-  * `predict.momentum` - a network trained on MSE loss with momentum gradient flow for an arbitrary finite time (using an ODE solver).
+  * `predict.momentum_flow` - inference with a network trained on arbitrary loss with continuous momentum gradient descent for an arbitrary finite time (using an ODE solver).
 
 * `api` - various methods useful for working with infinite networks, including (but not limited to!):
     * `batch` - makes any kernel function `ker_fun` compute the kernel in batches over inputs, in parallel over available GPUs or TPU cores.
@@ -142,7 +142,7 @@ The `neural_tangents` package contains two modules:
 
 ## <a name="wide"></a>Training Dynamics of Wide but Finite Networks
 
-The kernel of an infinite network `ker_fun(x1, x2).ntk` combined with  `neural_tangents.predict.analytic_mse` together allow to analytically track the outputs of an infinitely wide neural network trained on MSE loss througout training. Here we discuss the implications for _wide but finite_ neural networks and present tools to study their evolution in _weight space_ (trainable parameters of the network) and _function space_ (outputs of the network).
+The kernel of an infinite network `ker_fun(x1, x2).ntk` combined with  `neural_tangents.predict.gradient_descent_mse` together allow to analytically track the outputs of an infinitely wide neural network trained on MSE loss througout training. Here we discuss the implications for _wide but finite_ neural networks and present tools to study their evolution in _weight space_ (trainable parameters of the network) and _function space_ (outputs of the network).
 
 ### Weight Space
 
@@ -210,13 +210,13 @@ y_train = random.uniform(key1, shape=(3, 2))
 ker_fun = get_ker_fun_empirical(apply_fun)
 ntk_train_train = ker_fun(x_train, x_train, params).ntk
 ntk_test_train = ker_fun(x_test, x_train, params).ntk
-mse_predictor = predict.analytic_mse(ntk_train_train, y_train, ntk_test_train)
+mse_predictor = predict.gradient_descent_mse(ntk_train_train, y_train, ntk_test_train)
 
 t = 5.
 y_train_0 = apply_fun(params, x_train)
 y_test_0 = apply_fun(params, x_test)
 y_train_t, y_test_t = mse_predictor(t, y_train_0, y_test_0)
-# (3, 2) and (4, 2) np.ndarray train and test outputs after `t` units of time training with gradient flow
+# (3, 2) and (4, 2) np.ndarray train and test outputs after `t` units of time training with continuous gradient descent
 ```
 
 ### What to Expect
