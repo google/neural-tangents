@@ -128,7 +128,7 @@ The `neural_tangents` package contains two modules:
   
   * `predict.gradient_descent` - inference with a network trained on arbitrary loss with continuous gradient descent for an arbitrary finite time (using an ODE solver).
   
-  * `predict.momentum_flow` - inference with a network trained on arbitrary loss with continuous momentum gradient descent for an arbitrary finite time (using an ODE solver).
+  * `predict.momentum` - inference with a network trained on arbitrary loss with continuous momentum gradient descent for an arbitrary finite time (using an ODE solver).
 
 * `api` - various methods useful for working with infinite networks, including (but not limited to!):
     * `batch` - makes any kernel function `ker_fun` compute the kernel in batches over inputs, in parallel over available GPUs or TPU cores.
@@ -253,6 +253,8 @@ pip install -e neural-tangents
 You can then run the examples by calling:
 
 ```
+pip install tensorflow-datasets
+
 python neural-tangents/examples/weight_space.py
 python neural-tangents/examples/function_space.py
 ```
