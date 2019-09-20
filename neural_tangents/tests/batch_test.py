@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Tests for the Neural Tangents library."""
 
 from __future__ import absolute_import
@@ -21,7 +20,9 @@ from functools import partial
 from jax import test_util as jtu
 from jax.api import jit
 from jax.config import config as jax_config
+import jax.numpy as np
 import jax.random as random
+from jax.tree_util import tree_map
 from neural_tangents import stax
 from neural_tangents.utils import batch
 from neural_tangents.utils import empirical
@@ -263,6 +264,64 @@ class BatchTest(jtu.JaxTestCase):
     kernel_batched = batch.batch(ker_fun, batch_size=2, store_on_device=False)
     _test_kernel_against_batched(self, ker_fun, kernel_batched, data_self,
                                  data_other)
+
+  def test_jit_or_pmap_broadcast(self):
+    def ker_fun(x1, x2, do_flip, keys, do_square, params, _unused=None, p=0.65):
+      res = np.abs(np.matmul(x1, x2))
+      if do_square:
+        res *= res
+      if do_flip:
+        res = -res
+
+      res *= random.uniform(keys) * p
+      return [res, params]
+
+    params = (np.array([1., 0.3]), (np.array([1.2]), np.array([0.5])))
+    x2 = np.arange(0, 10).reshape((10,))
+    keys = random.PRNGKey(1)
+
+    ker_fun_pmapped = batch._jit_or_pmap_broadcast(ker_fun, device_count=0)
+    x1 = np.arange(0, 10).reshape((1, 10))
+    for do_flip in [True, False]:
+      for do_square in [True, False]:
+        with self.subTest(do_flip=do_flip, do_square=do_square, device_count=0):
+          res_1 = ker_fun(
+              x1, x2, do_flip, keys, do_square, params, _unused=True, p=0.65)
+          res_2 = ker_fun_pmapped(
+              x1, x2, do_flip, keys, do_square, params, _unused=True)
+          self.assertAllClose(res_1, res_2, True)
+
+    utils.stub_out_pmap(batch, 1)
+    x1 = np.arange(0, 10).reshape((1, 10))
+    ker_fun_pmapped = batch._jit_or_pmap_broadcast(ker_fun, device_count=1)
+    for do_flip in [True, False]:
+      for do_square in [True, False]:
+        with self.subTest(do_flip=do_flip, do_square=do_square, device_count=1):
+          res_1 = ker_fun(
+              x1, x2, do_flip, keys, do_square, params, _unused=False, p=0.65)
+          res_2 = ker_fun_pmapped(
+              x1, x2, do_flip, keys, do_square, params, _unused=None)
+          self.assertAllClose(res_1[0], res_2[0], True)
+          self.assertAllClose(
+              tree_map(partial(np.expand_dims, axis=0), res_1[1]), res_2[1],
+              True)
+
+    ker_fun_pmapped = batch._jit_or_pmap_broadcast(ker_fun, device_count=2)
+    x1 = np.arange(0, 20).reshape((2, 10))
+    utils.stub_out_pmap(batch, 2)
+
+    def broadcast(arg):
+      return np.broadcast_to(arg, (2,) + arg.shape)
+
+    for do_flip in [True, False]:
+      for do_square in [True, False]:
+        with self.subTest(do_flip=do_flip, do_square=do_square, device_count=2):
+          res_1 = ker_fun(x1, x2, do_flip, keys, do_square, params, p=0.2)
+          res_2 = ker_fun_pmapped(
+              x1, x2, do_flip, keys, do_square, params, _unused=None, p=0.2)
+          self.assertAllClose(res_1[0][0], res_2[0][0], True)
+          self.assertAllClose(res_1[0][1], res_2[0][1], True)
+          self.assertAllClose(tree_map(broadcast, res_1[1]), res_2[1], True)
 
 
 if __name__ == '__main__':
