@@ -146,7 +146,7 @@ The kernel of an infinite network `ker_fun(x1, x2).ntk` combined with  `neural_t
 
 ### Weight Space
 
-Gradient flow in an infinite network has been shown in [[6]](6) to correspond to training a _linear_ (in trainable parameters) model, which makes linearized neural networks an important subject of study for understanding the behavior of parameters in wide models.
+Continuous gradient descent in an infinite network has been shown in [[6]](6) to correspond to training a _linear_ (in trainable parameters) model, which makes linearized neural networks an important subject of study for understanding the behavior of parameters in wide models.
 
 For this, we provide two convenient methods:
 
