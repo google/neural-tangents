@@ -303,7 +303,7 @@ Coming soon.
 
 <a name="1"></a>[1] [Deep Neural Networks as Gaussian Processes.](https://arxiv.org/abs/1806.07572)
 *ICLR 2018.* \
-Jaehoon Lee, Yasaman Bahri, Roman Novak, Samuel S. Schoenholz, Jeffrey Pennington, Jascha Sohl-Dickstein
+Jaehoon Lee,* Yasaman Bahri*, Roman Novak, Samuel S. Schoenholz, Jeffrey Pennington, Jascha Sohl-Dickstein
 
 <a name="2"></a>[2] [Gaussian Process Behaviour in Wide Deep Neural Networks.](https://arxiv.org/abs/1804.11271)
 *ICLR 2018.* \
@@ -311,7 +311,7 @@ Alexander G. de G. Matthews, Mark Rowland, Jiri Hron, Richard E. Turner, Zoubin 
 
 <a name="3"></a>[3] [Bayesian Deep Convolutional Networks with Many Channels are Gaussian Processes.](https://arxiv.org/abs/1810.05148)
 *ICLR 2019.* \
-Roman Novak, Lechao Xiao, Jaehoon Lee, Yasaman Bahri, Greg Yang, Jiri Hron, Daniel A. Abolafia, Jeffrey Pennington, Jascha Sohl-Dickstein
+Roman Novak*, Lechao Xiao*, Jaehoon Lee, Yasaman Bahri, Greg Yang, Jiri Hron, Daniel A. Abolafia, Jeffrey Pennington, Jascha Sohl-Dickstein
 
 <a name="4"></a>[4] [Deep Convolutional Networks as shallow Gaussian Processes.](https://arxiv.org/abs/1808.05587)
 *ICLR 2019.* \
