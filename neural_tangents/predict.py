@@ -545,32 +545,60 @@ def gradient_descent_mse_gp(ker_fun,
 
   if mode == 'NNGP':
     k_dd_plus_reg = _add_diagonal_regularizer(kdd.nngp, diag_reg)
-    op_dt, = _eigenfuncs(k_dd_plus_reg, (op_func,))
+    evals, evecs = _eigh(k_dd_plus_reg)
 
     def prediction(t):
-      op = lambda vec: -op_dt(vec, 2 * t)
-      pred_mean = _mean_prediction(op, ktd.nngp, y_train)
+      """The Gaussian prediction at finite time for the NNGP."""
+      op_evals = -op_func(evals, 2 * t)
+      pred_mean = _mean_prediction_einsum(evecs, op_evals, ktd.nngp, y_train)
       if not compute_var:
         return pred_mean
-      var = _nngp_var(op, ktd.nngp, ktt.nngp)
+      # inline the variance calculation with an einsum.
+      var = ktt.nngp - np.einsum(
+          'mj,ji,i,ki,lk->ml',
+          ktd.nngp, evecs, op_evals, evecs, ktd.nngp, optimize=True)
+
       return Gaussian(pred_mean, var)
 
   else:  # mode == 'NTK'
     g_dd_plus_reg = _add_diagonal_regularizer(kdd.ntk, diag_reg)
-    op_dt, = _eigenfuncs(g_dd_plus_reg, (op_func,))
+    evals, evecs = _eigh(g_dd_plus_reg)
 
     def prediction(t):
-      op = lambda vec: -op_dt(vec, t)
-      pred_mean = _mean_prediction(op, ktd.ntk, y_train)
+      """The Gaussian prediction at finite time for the NTK."""
+      op_evals = -op_func(evals, t)
+      pred_mean = _mean_prediction_einsum(evecs, op_evals, ktd.ntk, y_train)
       if not compute_var:
         return pred_mean
-      var = _ntk_var(op, ktd.ntk, kdd.nngp, ktd.nngp, ktt.nngp)
+      # inline the covariance calculation with einsum.
+      var = np.einsum(
+          'mj,ji,i,ki,lk->ml',
+          kdd.nngp, evecs, op_evals, evecs, ktd.ntk, optimize=True)
+      var -= 2. * np.transpose(ktd.nngp)
+      var = np.einsum(
+          'mj,ji,i,ki,kl->ml',
+          ktd.ntk, evecs, op_evals, evecs, var, optimize=True)
+      var = var + ktt.nngp
+
       return Gaussian(pred_mean, var)
 
   return prediction
 
 
 ## Utility functions
+
+
+def _eigh(mat):
+  """Platform specific eigh."""
+  # TODO(schsam): Eventually, we may want to handle non-symmetric kernels for
+  # e.g. masking. Additionally, once JAX supports eigh on TPU, we probably want
+  # to switch to JAX's eigh.
+  if xla_bridge.get_backend().platform == 'tpu':
+    eigh = np.onp.linalg.eigh
+  else:
+    eigh = np.linalg.eigh
+
+  return eigh(mat)
 
 
 def _eigenfuncs(mat, funcs):
@@ -586,27 +614,14 @@ def _eigenfuncs(mat, funcs):
       acting on vectors:
         transform(vec, dt) = func(mat, dt) @ vec
   """
-
-  # TODO(schsam): Eventually, we may want to handle non-symmetric kernels for
-  # e.g. masking. Additionally, once JAX supports eigh on TPU, we probably want
-  # to switch to JAX's eigh.
-  if xla_bridge.get_backend().platform == 'tpu':
-    eigh = np.onp.linalg.eigh
-  else:
-    eigh = np.linalg.eigh
-
-  evals, evecs = eigh(mat)
+  evals, evecs = _eigh(mat)
 
   def transform(func):
     """Generates a transform given a function on the eigenvalues."""
     def _(vec, dt):
       return np.einsum(
           'ji,i,ki,k...->j...',
-          evecs,
-          func(evals, dt),
-          evecs,
-          vec,
-          optimize=True)
+          evecs, func(evals, dt), evecs, vec, optimize=True)
 
     return _
 
@@ -634,22 +649,8 @@ def _inv_operator(g_dd, diag_reg=0.0):
   return lambda vec: sp.linalg.solve(g_dd_plus_reg, vec, sym_pos=True)
 
 
-def _mean_prediction(op, g_td, y_train):
-  """Compute the mean prediction of a Gaussian process.
-
-  Args:
-    op: Some vector operator that projects the data along the relevant
-      directions, op(vec, dt) = M^{-1} @ (I - E^(-M dt)) @ vec
-    g_td: A kernel relating training data with test data. The kernel should be
-      an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim] or
-      [n_test, n_train].
-    y_train: An `np.ndarray` of shape [n_train, output_dim] of targets for the
-      training data.
-
-  Returns:
-    The mean prediction of the GP. When `diag_reg=0.`, returns
-    `g_td @ op @ y_train`.
-  """
+def _make_flatten_uflatten(g_td, y_train):
+  """Create the flatten and unflatten utilities."""
   output_dimension = y_train.shape[-1]
 
   def fl(fx):
@@ -667,9 +668,38 @@ def _mean_prediction(op, g_td, y_train):
                        ' last dimension of `g_td`')
     fl = lambda x: x
     ufl = lambda x: x
+  return fl, ufl
+
+
+def _mean_prediction(op, g_td, y_train):
+  """Compute the mean prediction of a Gaussian process.
+
+  Args:
+    op: Some vector operator that projects the data along the relevant
+      directions, op(vec, dt) = M^{-1} @ (I - E^(-M dt)) @ vec
+    g_td: A kernel relating training data with test data. The kernel should be
+      an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim] or
+      [n_test, n_train].
+    y_train: An `np.ndarray` of shape [n_train, output_dim] of targets for the
+      training data.
+
+  Returns:
+    The mean prediction of the GP.  `g_td @ op @ y_train`.
+  """
+  fl, ufl = _make_flatten_uflatten(g_td, y_train)
 
   mean_pred = op(fl(y_train))
   mean_pred = np.dot(g_td, mean_pred)
+  return ufl(mean_pred)
+
+
+def _mean_prediction_einsum(evecs, op_evals, g_td, y_train):
+  """Einsum powered version of _mean_prediction."""
+  fl, ufl = _make_flatten_uflatten(g_td, y_train)
+
+  mean_pred = np.einsum(
+      'lj,ji,i,ki,k...->l...',
+      g_td, evecs, op_evals, evecs, fl(y_train), optimize=True)
   return ufl(mean_pred)
 
 
