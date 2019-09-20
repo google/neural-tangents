@@ -39,6 +39,8 @@ config.parse_flags_with_absl()
 MATRIX_SHAPES = [(3, 3), (4, 4)]
 OUTPUT_LOGITS = [1, 2, 3]
 
+MODES = ('NTK', 'NNGP')
+
 RTOL = 0.1
 ATOL = 0.1
 
@@ -450,6 +452,56 @@ class PredictTest(jtu.JaxTestCase):
     mean_emp = mc_sampling(100)
 
     self.assertAllClose(mean_pred, mean_emp, True, rtol, atol)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              '_train={}_test={}_network={}_logits={}_mode={}'.format(
+                  train, test, network, out_logits, mode),
+          'train_shape':
+              train,
+          'test_shape':
+              test,
+          'network':
+              network,
+          'out_logits':
+              out_logits,
+          'mode':
+              mode,
+      }
+                          for train, test, network in zip(
+                              TRAIN_SHAPES[:-1], TEST_SHAPES[:-1], NETWORK[:-1])
+                          for out_logits in OUTPUT_LOGITS for mode in MODES))
+
+  def testInfiniteTimeAgreement(
+      self, train_shape, test_shape, network, out_logits, mode):
+    # TODO(alemi): Add some finite time tests.
+
+    key = random.PRNGKey(0)
+
+    key, split = random.split(key)
+    data_train = np.cos(random.normal(split, train_shape))
+
+    key, split = random.split(key)
+    data_labels = np.array(
+        random.bernoulli(split, shape=(train_shape[0], out_logits)), np.float32)
+
+    key, split = random.split(key)
+    data_test = np.cos(random.normal(split, test_shape))
+    _, _, ker_fun = _build_network(train_shape[1:], network, out_logits)
+
+    reg = 1e-7
+    mean_pred, var = predict.gp_inference(
+        ker_fun, data_train, data_labels, data_test,
+        diag_reg=reg, mode=mode, compute_var=True)
+    prediction = predict.gradient_descent_mse_gp(
+        ker_fun, data_train, data_labels, data_test,
+        diag_reg=reg, mode=mode, compute_var=True)
+
+    inf_mean_pred, inf_var = prediction(np.inf)
+
+    self.assertAllClose(mean_pred, inf_mean_pred, True)
+    self.assertAllClose(var, inf_var, True)
 
 
 if __name__ == '__main__':

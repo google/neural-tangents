@@ -11,12 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Functions to make predictions on the test set using NTK kernel."""
 
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+import collections
 import functools
 from jax.api import grad
 from jax.lib import xla_bridge
@@ -26,8 +26,10 @@ from neural_tangents.utils import empirical
 from neural_tangents.utils.kernel import Kernel
 from scipy.integrate._ode import ode
 
+Gaussian = collections.namedtuple('Gaussian', 'mean covariance')
 
-def gradient_descent_mse(g_dd, y_train, g_td=None):
+
+def gradient_descent_mse(g_dd, y_train, g_td=None, diag_reg=0.):
   """Predicts the outcome of function space gradient descent training on MSE.
 
   Analytically solves for the continuous-time version of gradient descent.
@@ -66,9 +68,9 @@ def gradient_descent_mse(g_dd, y_train, g_td=None):
       training data.
     g_td: A Kernel relating training data with test data. The kernel should be
       an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim] or
-      [n_test, n_train].
-      Note: g_td should have been created in the convention ker_fun(x_train,
-        x_test, params).
+      [n_test, n_train]. Note; g_td should have been created in the convention
+      ker_fun(x_train, x_test, params).
+    diag_reg: A float, representing the strength of the regularization.
 
   Returns:
     A function that predicts outputs after t = learning_rate * steps of
@@ -95,19 +97,10 @@ def gradient_descent_mse(g_dd, y_train, g_td=None):
 
   g_dd = empirical.flatten_features(g_dd)
 
-  # TODO(schsam): Eventually, we may want to handle non-symmetric kernels for
-  # e.g. masking. Additionally, once JAX supports eigh on TPU, we probably want
-  # to switch to JAX's eigh.
-  if xla_bridge.get_backend().platform == 'tpu':
-    eigh = np.onp.linalg.eigh
-  else:
-    eigh = np.linalg.eigh
-
-  evals, evecs = eigh(g_dd)
-  ievecs = np.transpose(evecs)
-
   normalization = y_train.size
   output_dimension = y_train.shape[-1]
+  expm1_func, inv_expm1_func = (_make_expm1_func(normalization),
+                                _make_inv_expm1_func(normalization))
 
   def fl(fx):
     """Flatten outputs."""
@@ -125,24 +118,27 @@ def gradient_descent_mse(g_dd, y_train, g_td=None):
     fl = lambda x: x
     ufl = lambda x: x
 
-  def predict(gx, dt):
-    gx_ = np.diag(np.exp(-evals * dt / normalization))
-    gx_ = np.dot(evecs, gx_)
-    gx_ = np.dot(gx_, ievecs)
-    gx_ = np.dot(gx_, gx)
-    return gx_
+  g_dd_plus_reg = _add_diagonal_regularizer(g_dd, diag_reg)
+  expm1_dot_vec, inv_expm1_dot_vec = _eigenfuncs(g_dd_plus_reg,
+                                                 (expm1_func, inv_expm1_func))
 
   if g_td is None:
-    return lambda dt, fx=0.: ufl(predict(fl(fx - y_train), dt)) + y_train
+
+    def train_predict(dt, fx=0.0):
+      gx_train = fl(fx - y_train)
+      dgx = expm1_dot_vec(gx_train, dt)
+      return ufl(dgx) + y_train
+
+    return train_predict
 
   g_td = empirical.flatten_features(g_td)
-  mevals = np.diag(1.0 / evals)
-  inverse = np.dot(np.dot(evecs, mevals), ievecs)
 
   def predict_using_kernel(dt, fx_train=0., fx_test=0.):
     gx_train = fl(fx_train - y_train)
-    dgx = predict(gx_train, dt) - gx_train
-    dfx = np.dot(inverse, dgx)
+    dgx = expm1_dot_vec(gx_train, dt)
+    # Note: consider use a linalg solve instead of the eigeninverse
+    # dfx = sp.linalg.solve(g_dd, dgx, sym_pos=True)
+    dfx = inv_expm1_dot_vec(gx_train, dt)
     dfx = np.dot(g_td, dfx)
     return ufl(dgx) + fx_train, fx_test + ufl(dfx)
 
@@ -194,11 +190,11 @@ def gradient_descent(g_dd, y_train, loss, g_td=None):
     loss: A loss function whose signature is loss(fx, y_hat) where fx is an
       `np.ndarray` of function space output_dim of the network and y_hat are
       targets. Note: the loss function should treat the batch and output
-      dimensions symmetrically.
+        dimensions symmetrically.
     g_td: A Kernel relating training data with test data. The kernel should be
       an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim] or
       [n_test, n_train]. Note: g_td should have been created in the convention
-      ker_fun(x_test, x_train, params).
+        ker_fun(x_test, x_train, params).
 
   Returns:
     A function that predicts outputs after t = learning_rate * steps of
@@ -330,12 +326,12 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
     loss: A loss function whose signature is loss(fx, y_hat) where fx an
       `np.ndarray` of function space outputs of the network and y_hat are
       labels. Note: the loss function should treat the batch and output
-      dimensions symmetrically.
+        dimensions symmetrically.
     learning_rate:  A float specifying the learning rate.
     g_td: Kernel relating training data with test data. Should be an
       `np.ndarray` of shape [n_test * output_dim, n_train * output_dim]. Note:
-      g_td should have been created in the convention
-      g_td = ker_fun(x_test, x_train, params).
+        g_td should have been created in the convention g_td = ker_fun(x_test,
+        x_train, params).
     momentum: float specifying the momentum.
 
   Returns:
@@ -403,6 +399,7 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
   grad_loss = grad(functools.partial(loss, y_hat=y_train))
 
   if g_td is None:
+
     def dr_dt(unused_t, r):
       fx, qx = np.split(r, 2)
       dfx = qx
@@ -465,17 +462,12 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
   return init_fn, predict_fn, get_fn
 
 
-def _canonicalize_kernel_to_ntk(k):
-  if k is None or isinstance(k, np.ndarray):
-    return k
-  if isinstance(k, Kernel):
-    return k.ntk
-  raise ValueError(
-      'Expected kernel to either be a `Kernel`, a `np.ndarry`, or `None`. '
-      'Found {}.'.format(type(k)))
-
-
-def gp_inference(ker_fun, x_train, y_train, x_test, diag_reg=0., mode='NNGP',
+def gp_inference(ker_fun,
+                 x_train,
+                 y_train,
+                 x_test,
+                 diag_reg=0.,
+                 mode='NNGP',
                  compute_var=False):
   """Compute the mean and variance of the `posterior` of NNGP and NTK.
 
@@ -487,28 +479,148 @@ def gp_inference(ker_fun, x_train, y_train, x_test, diag_reg=0., mode='NNGP',
     diag_reg: A float, representing the strength of the regularization.
     mode: The mode of the Gaussian process, either 'NNGP' or `NTK`.
     compute_var: A boolean. If `True` computing both `mean` and `variance` and
-      only `mean` othorwise.
+      only `mean` otherwise.
+
   Returns:
-    Either `mean, variance` or `mean` of the GP posterior.
+    Either a Gaussian(`mean`, `variance`) namedtuple or `mean` of the GP
+    posterior.
   """
   if mode not in ['NNGP', 'NTK']:
     raise ValueError('The `mode` must be either `NNGP` or `NTK`.')
 
   kdd, ktd = ker_fun(x_train, None), ker_fun(x_test, x_train)
   if mode == 'NNGP':
-    pred_mean = _mean_prediction(kdd.nngp, ktd.nngp, y_train, diag_reg)
+    op = _inv_operator(kdd.nngp, diag_reg)
+    pred_mean = _mean_prediction(op, ktd.nngp, y_train)
   else:
-    pred_mean = _mean_prediction(kdd.ntk, ktd.ntk, y_train, diag_reg)
+    op = _inv_operator(kdd.ntk, diag_reg)
+    pred_mean = _mean_prediction(op, ktd.ntk, y_train)
   if not compute_var:
     return pred_mean
 
   ktt = ker_fun(x_test, None)
   if mode == 'NNGP':
-    var = _nngp_var(kdd.nngp, ktd.nngp, ktt.nngp, diag_reg)
+    var = _nngp_var(op, ktd.nngp, ktt.nngp)
   else:
-    var = _ntk_var(kdd.ntk, ktd.ntk, kdd.nngp, ktd.nngp, ktt.nngp, diag_reg)
+    var = _ntk_var(op, ktd.ntk, kdd.nngp, ktd.nngp, ktt.nngp)
 
-  return pred_mean, var
+  return Gaussian(pred_mean, var)
+
+
+def gradient_descent_mse_gp(ker_fun,
+                            x_train,
+                            y_train,
+                            x_test,
+                            diag_reg=0.0,
+                            mode='NTK',
+                            compute_var=False):
+  """Predicts the gaussian embedding induced by gradient descent with mse loss.
+
+  This is equivalent to an infinite ensemble of networks after marginalizing
+  out the initialization.
+
+  Args:
+    ker_fun: A kernel function that computes NNGP and NTK.
+    x_train: A `np.ndarray`, representing the training data.
+    y_train: A `np.ndarray`, representing the labels of the training data.
+    x_test: A `np.ndarray`, representing the test data.
+    diag_reg: A float, representing the strength of the regularization.
+    mode: The mode of the Gaussian process, either 'NNGP' or `NTK`.
+    compute_var: A boolean. If `True` computing both `mean` and `variance` and
+      only `mean` otherwise.
+
+  Returns:
+    A function that predicts the gaussian parameters at t:
+      prediction(t) -> Gaussian(mean, variance).
+      If compute_var is False, only returns the mean.
+  """
+  if mode not in ['NNGP', 'NTK']:
+    raise ValueError('The `mode` must be either `NNGP` or `NTK`.')
+
+  kdd = ker_fun(x_train, None)
+  ktd = ker_fun(x_test, x_train)
+  ktt = ker_fun(x_test, None)
+  normalization = y_train.size
+  op_func = _make_inv_expm1_func(normalization)
+
+  if mode == 'NNGP':
+    k_dd_plus_reg = _add_diagonal_regularizer(kdd.nngp, diag_reg)
+    op_dt, = _eigenfuncs(k_dd_plus_reg, (op_func,))
+
+    def prediction(t):
+      op = lambda vec: -op_dt(vec, 2 * t)
+      pred_mean = _mean_prediction(op, ktd.nngp, y_train)
+      if not compute_var:
+        return pred_mean
+      var = _nngp_var(op, ktd.nngp, ktt.nngp)
+      return Gaussian(pred_mean, var)
+
+  else:  # mode == 'NTK'
+    g_dd_plus_reg = _add_diagonal_regularizer(kdd.ntk, diag_reg)
+    op_dt, = _eigenfuncs(g_dd_plus_reg, (op_func,))
+
+    def prediction(t):
+      op = lambda vec: -op_dt(vec, t)
+      pred_mean = _mean_prediction(op, ktd.ntk, y_train)
+      if not compute_var:
+        return pred_mean
+      var = _ntk_var(op, ktd.ntk, kdd.nngp, ktd.nngp, ktt.nngp)
+      return Gaussian(pred_mean, var)
+
+  return prediction
+
+
+## Utility functions
+
+
+def _eigenfuncs(mat, funcs):
+  """Build functions of a matrix in its eigenbasis.
+
+  Args:
+    mat: an n x n matrix
+    funcs: a sequence of functions that add on the eigenvalues (evals, dt) ->
+      modified_evals
+
+  Returns:
+    A tuple of functions that act as functions of the matrix mat
+      acting on vectors:
+        transform(vec, dt) = func(mat, dt) @ vec
+  """
+
+  # TODO(schsam): Eventually, we may want to handle non-symmetric kernels for
+  # e.g. masking. Additionally, once JAX supports eigh on TPU, we probably want
+  # to switch to JAX's eigh.
+  if xla_bridge.get_backend().platform == 'tpu':
+    eigh = np.onp.linalg.eigh
+  else:
+    eigh = np.linalg.eigh
+
+  evals, evecs = eigh(mat)
+
+  def transform(func):
+    """Generates a transform given a function on the eigenvalues."""
+    def _(vec, dt):
+      return np.einsum(
+          'ji,i,ki,k...->j...',
+          evecs,
+          func(evals, dt),
+          evecs,
+          vec,
+          optimize=True)
+
+    return _
+
+  return tuple(transform(func) for func in funcs)
+
+
+def _canonicalize_kernel_to_ntk(k):
+  if k is None or isinstance(k, np.ndarray):
+    return k
+  if isinstance(k, Kernel):
+    return k.ntk
+  raise ValueError(
+      'Expected kernel to either be a `Kernel`, a `np.ndarry`, or `None`. '
+      'Found {}.'.format(type(k)))
 
 
 def _add_diagonal_regularizer(covariance, diag_reg=0.):
@@ -517,25 +629,29 @@ def _add_diagonal_regularizer(covariance, diag_reg=0.):
   return covariance + diag_reg * reg * np.eye(dimension)
 
 
-def _mean_prediction(g_dd, g_td, y_train, diag_reg=0.):
+def _inv_operator(g_dd, diag_reg=0.0):
+  g_dd_plus_reg = _add_diagonal_regularizer(g_dd, diag_reg)
+  return lambda vec: sp.linalg.solve(g_dd_plus_reg, vec, sym_pos=True)
+
+
+def _mean_prediction(op, g_td, y_train):
   """Compute the mean prediction of a Gaussian process.
 
   Args:
-    g_dd: A kernel on the training data. The kernel should be an `np.ndarray` of
-      shape [n_train * output_dim, n_train * output_dim] or [n_train, n_train].
-      In the latter case, the kernel is assumed to be block diagonal over the
-      logits.
+    op: Some vector operator that projects the data along the relevant
+      directions, op(vec, dt) = M^{-1} @ (I - E^(-M dt)) @ vec
     g_td: A kernel relating training data with test data. The kernel should be
       an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim] or
       [n_test, n_train].
     y_train: An `np.ndarray` of shape [n_train, output_dim] of targets for the
       training data.
-    diag_reg: strength of regularization.
+
   Returns:
     The mean prediction of the GP. When `diag_reg=0.`, returns
-    `g_td * g_dd^{-1} * y_train`.
+    `g_td @ op @ y_train`.
   """
   output_dimension = y_train.shape[-1]
+
   def fl(fx):
     """Flatten outputs."""
     return np.reshape(fx, (-1,))
@@ -544,31 +660,59 @@ def _mean_prediction(g_dd, g_td, y_train, diag_reg=0.):
     """Unflatten outputs."""
     return np.reshape(fx, (-1, output_dimension))
 
-  if y_train.size > g_dd.shape[-1]:
-    out_dim, ragged = divmod(y_train.size, g_dd.shape[-1])
+  if y_train.size > g_td.shape[-1]:
+    out_dim, ragged = divmod(y_train.size, g_td.shape[-1])
     if ragged or out_dim != output_dimension:
       raise ValueError('The batch size of `y_train` must be the same as the'
-                       ' last dimension of `g_dd`')
+                       ' last dimension of `g_td`')
     fl = lambda x: x
     ufl = lambda x: x
-  g_dd_plus_reg = _add_diagonal_regularizer(g_dd, diag_reg)
-  mean_pred = sp.linalg.solve(g_dd_plus_reg, fl(y_train), sym_pos=True)
+
+  mean_pred = op(fl(y_train))
   mean_pred = np.dot(g_td, mean_pred)
   return ufl(mean_pred)
 
 
-def _ntk_var(ntk_dd, ntk_td, nngp_dd, nngp_td, nngp_tt, diag_reg=0.):
-  ntk_dd_plus_reg = _add_diagonal_regularizer(ntk_dd, diag_reg)
-  var = sp.linalg.solve(ntk_dd_plus_reg, np.transpose(ntk_td), sym_pos=True)
+def _ntk_var(op, ntk_td, nngp_dd, nngp_td, nngp_tt):
+  """Compute the covariance in the ntk approximation."""
+  # op(vec) here should compute \Theta^{-1} @ (I - e^{-\Theta dt}) @ vec
+  # for the time dependent case and
+  # op(vec) = \Theta^{-1} @ vec for the infinite time case.
+  # below implements Equation 15 from 1902.06720
+  var = op(np.transpose(ntk_td))
   var = np.dot(nngp_dd, var)
   var -= 2. * np.transpose(nngp_td)
-  var = sp.linalg.solve(ntk_dd_plus_reg, var, sym_pos=True)
+  var = op(var)
   var = np.dot(ntk_td, var) + nngp_tt
   return var
 
 
-def _nngp_var(g_dd, g_td, g_tt, diag_reg=0.):
-  g_dd_plus_reg = _add_diagonal_regularizer(g_dd, diag_reg)
-  var = sp.linalg.solve(g_dd_plus_reg, np.transpose(g_td), sym_pos=True)
+def _nngp_var(op, g_td, g_tt):
+  """Compute the covariance in the nngp approximation."""
+  # op(vec) here should compute K^{-1} @ (I - e^{-2 K dt}) @ vec
+  # for the time dependent case or
+  # op(vec) = K^{-1} @ vec
+  # for infinite time.
+  # below implements Equation S23 from 1902.06720
+  var = op(np.transpose(g_td))
   return g_tt - np.dot(g_td, var)
 
+
+def _make_expm1_func(normalization):
+
+  def expm1_func(evals, dt):
+    # Since our maxtrix really should be positive semidefinite,
+    # we can threshold the eigenvalues to squash ones that are negative
+    # for numerical reasons.
+    return np.expm1(-np.maximum(evals, 0.) * dt / normalization)
+
+  return expm1_func
+
+
+def _make_inv_expm1_func(normalization):
+  expm1_func = _make_expm1_func(normalization)
+
+  def _inv_expm1_func(evals, dt):
+    return expm1_func(evals, dt) / np.abs(evals)
+
+  return _inv_expm1_func
