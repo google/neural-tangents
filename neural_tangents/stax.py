@@ -66,7 +66,7 @@ from __future__ import division
 from __future__ import print_function
 from functools import wraps
 import warnings
-import enum
+import aenum
 from jax import lax
 from jax import random
 from jax.experimental import stax
@@ -74,14 +74,15 @@ from jax.lib import xla_bridge
 import jax.numpy as np
 from jax.scipy.special import erf
 from neural_tangents.utils.kernel import Kernel
+from neural_tangents.utils.kernel import Marginalisation
 
 
 _CONV_DIMENSION_NUMBERS = ('NHWC', 'HWIO', 'NHWC')
 _CONV_QAB_DIMENSION_NUMBERS = ('NCHW', 'HWIO', 'NCHW')
-_USE_POOLING = 'use_pooling'
+_COVARIANCES_REQ = 'covariances_req'
 
 
-class Padding(enum.Enum):
+class Padding(aenum.Enum):
   CIRCULAR = 'CIRCULAR'
   SAME = 'SAME'
   VALID = 'VALID'
@@ -91,12 +92,22 @@ def _is_array(x):
   return isinstance(x, np.ndarray) and hasattr(x, 'shape') and x.shape
 
 
-def _set_pooling_attr(combinator_ker_fun, ker_funs):
-  """Labels whether `combinator_ker_fun` uses pooling based on `ker_funs`.
+def _set_covariances_req_attr(combinator_ker_fun, ker_funs):
+  """Labels which covariances are required by the individual layers
+  combinded in `combinator_ker_fun` based on `ker_funs`.
 
-  Specifically, sets it's `_USE_POOLING` attribute to `True` if any of the
-    `ker_funs` has it set to `True`, otherwise to `False` if any of them has it
-    set to `False`, and does not set the attribute otherwise.
+  Specifically, sets `combinator_ker_fun`'s attribute `covariances_req`
+  to a dictionary with keys `marginal` and `cross` which respectively correspond
+  to the types of covariances tracked in `var1`/`var2` and `nngp`/`ntk`.
+  The current combinations for `marginal` and `cross` are:
+    (`Marginalisation.OVER_ALL`, `Marginalisation.OVER_ALL`) if only Dense
+      layers are use
+    (`Marginalisation.OVER_PIXELS`, `Marginalisation.OVER_PIXELS`) if CNN but no
+      average pooling is used
+    (`Marginalisation.OVER_POINTS`, `Marginalisation.NO`) if CNN and average
+      pooling is used
+  #TODO(jirihron): after adding attention layers, 2nd option also for attention
+  #TODO(jirihron): make `NO` marginalisation the default
 
   Args:
     combinator_ker_fun: a 'ker_fun` of a `serial` or `parallel` combinator.
@@ -105,16 +116,28 @@ def _set_pooling_attr(combinator_ker_fun, ker_funs):
       `serial` combinator).
 
   Returns:
-    `ker_funs` with the `_USE_POOLING` attribute set to `True`
+    `ker_funs` with the `_COVARIANCES_REQ` attribute set accordingly to
+      the needs of their corresponding layer
   """
-  for f in ker_funs:
-    if hasattr(f, _USE_POOLING):
-      if getattr(f, _USE_POOLING):
-        setattr(combinator_ker_fun, _USE_POOLING, True)
-        break
+  def _get_maximal_element(covs_req, comparison_op):
+    for f in ker_funs:
+      if hasattr(f, _COVARIANCES_REQ):
+        marginal = getattr(f, _COVARIANCES_REQ)['marginal']
+        cross = getattr(f, _COVARIANCES_REQ)['cross']
 
-      setattr(combinator_ker_fun, _USE_POOLING, False)
+        if comparison_op(marginal, covs_req['marginal']):
+          covs_req['marginal'] = getattr(f, _COVARIANCES_REQ)['marginal']
+        if comparison_op(cross, covs_req['cross']):
+          covs_req['cross'] = getattr(f, _COVARIANCES_REQ)['cross']
 
+    return covs_req
+
+  # `_get_maximal_element` sets up the code for `NO` marginalisation by default
+  covs_req = _get_maximal_element(
+      {'marginal': Marginalisation.OVER_ALL,'cross': Marginalisation.OVER_ALL},
+      lambda x, y: x > y)
+
+  setattr(combinator_ker_fun, _COVARIANCES_REQ, covs_req)
   return combinator_ker_fun
 
 
@@ -129,33 +152,70 @@ def _double_tuple(x):
   return tuple(v for v in x for _ in range(2))
 
 
-def _get_variance(x):
-  return np.sum(x**2, axis=-1, keepdims=False) / x.shape[-1]
+def _ids_to_marginalisation_types(marginal, cross):
+  return Marginalisation(marginal), Marginalisation(cross)
 
 
-def _batch_uncentered_covariance(x1, x2):
-  """Batch uncentered covariance of `x1` and `x2` with batch inner dimensions.
+def _point_marg(x):
+  n, X, Y, channels = x.shape
+  x_flat = np.reshape(x, (n, -1, channels))
+  x_flat_t = np.transpose(x_flat, (0, 2, 1))
+  ret = np.matmul(x_flat, x_flat_t)
+  return np.swapaxes(np.reshape(ret, (n, X, Y, X, Y)), 3, 2)
+
+
+def _get_variance(x, marginal_type):
+  if marginal_type in (Marginalisation.OVER_ALL, Marginalisation.OVER_PIXELS):
+    ret = np.sum(x**2, axis=-1, keepdims=False)
+  elif marginal_type == Marginalisation.OVER_POINTS:
+    ret = _point_marg(x)
+  elif marginal_type == Marginalisation.NO:
+    ret = np.squeeze(np.dot(x, x[..., None]), -1)
+    ret = np.transpose(ret, (0, 3, 1, 4, 2, 5))
+  else:
+    raise NotImplementedError(
+        "Only implemented for `OVER_ALL`, `OVER_PIXELS`, `OVER_POINTS` "
+        "and `NO`; supplied {}".format(marginal_type))
+
+  return ret / x.shape[-1]
+
+
+def _get_covariance(x1, x2, marginal_type):
+  """Computes uncentred covariance (nngp) between two sets of inputs
 
   Args:
-    x1: a (2+k)D (k >= 0) `np.ndarray` of shape
-      `[batch_size_1, <k inner dimensions>, n_observations]`.
-    x2: an optional `np.ndarray` that has the same shape as `a` apart from
-      possibly different leading (`batch_size_2`) dimension. `None` means
-      `x1 == x2`.
+    a: a (2+k)D (k = 0, 2) `np.ndarray` of shape
+      `[n1, <k inner dimensions>, n_features]`.
+    b: an optional `np.ndarray` that has the same shape as `a` apart from
+      possibly different leading (`n2`) dimension. `None` means `x2 == x1`.
+    marginal_type: an instance of `Marginalisation` specifying between which
+      dimensions should the covariances be computed.
 
   Returns:
-    an (2+k)D `np.ndarray` empirical uncentered batch covariance with shape
-      `[batch_size_1, batch_size_2, <k inner dimensions>]`.
+    an `np.ndarray` with uncentred batch covariance with shape
+    `[n1, n2]`
+    `+ [<k inner dimensions>]` (if `covar_type` is `OVER_PIXELS`)
+    `+ [<k inner dimensions>, <k spatial dimensions>]` (if `covar_type` is
+    `OVER_POINTS` or `NO`)
   """
-  if x2 is None:
-    x2 = x1
+  x2 = x1 if x2 is None else x2
 
-  prod = np.matmul(np.moveaxis(x1, 0, -2), np.moveaxis(x2, 0, -1))
-  prod = np.moveaxis(prod, (-2, -1), (0, 1)) / x1.shape[-1]
-  return prod
+  if marginal_type in (Marginalisation.OVER_ALL, Marginalisation.OVER_PIXELS):
+    ret = np.matmul(np.moveaxis(x1, 0, -2), np.moveaxis(x2, 0, -1))
+    ret = np.moveaxis(ret, (-2, -1), (0, 1))
+  elif marginal_type in (Marginalisation.OVER_POINTS, Marginalisation.NO):
+    # OVER_POINTS and NO coincide for the cross term
+    ret = np.squeeze(np.dot(x1, x2[..., None]), -1)
+    ret = np.transpose(ret, (0, 3, 1, 4, 2, 5))
+  else:
+    raise NotImplementedError(
+        "Only implemented for `OVER_ALL`, `OVER_PIXELS`, `OVER_POINTS` "
+        "and `NO`; supplied {}".format(marginal_type))
+
+  return ret / x1.shape[-1]
 
 
-def _inputs_to_kernel(x1, x2, use_pooling, compute_ntk):
+def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk):
   """Transforms (batches of) inputs to a `Kernel`.
 
   This is a private method. Docstring and example are for internal reference.
@@ -177,74 +237,79 @@ def _inputs_to_kernel(x1, x2, use_pooling, compute_ntk):
     x2: an optional `np.ndarray` with the same shape as `x1` apart
       from possibly different leading batch size. `None` means
       `x2 == x1`.
-    use_pooling: a boolean, indicating whether pooling will be used somewhere in
-      the model. If so, more covariance entries need to be tracked. Is set
-      automatically based on the network topology. Specifically, is set to
-      `False` if a `serial` or `parallel` networks contain a `Flatten` layer
-      and no pooling layers (`AvgPool` or `GlobalAvgPool`). Has no effect for
-      non-convolutional models.
+    marginal: an instance of `Marginalisation` specifying for which spatial
+      dimensions should the covariances be tracked in `var1`/`var2`.
+    cross: an instance of `Marginalisation` specifying for which spatial
+      dimensions should the covariances be tracked in `nngp`/`ntk`.
     compute_ntk: a boolean, `True` to compute both NTK and NNGP kernels,
         `False` to only compute NNGP.
 
     Example:
       ```python
           >>> x = np.ones((10, 32, 16, 3))
-          >>> _inputs_to_kernel(x, None, use_pooling=True,
-          >>>                   compute_ntk=True).ntk.shape
-          (10, 10, 32, 32, 16, 16)
-          >>> _inputs_to_kernel(x, None, use_pooling=False,
-          >>>                   compute_ntk=True).ntk.shape
-          (10, 10, 32, 16)
+          >>> o = _inputs_to_kernel(x, None,
+          >>>                       marginal=Marginalisation.OVER_POINTS,
+          >>>                       cross=Marginalisation.NO,
+          >>>                       compute_ntk=True)
+          >>> o.var1.shape, o.ntk.shape
+          (10, 32, 32, 16, 16), (10, 10, 32, 32, 16, 16)
+          >>> o = _inputs_to_kernel(x, None,
+          >>>                       marginal=Marginalisation.OVER_PIXELS,
+          >>>                       cross=Marginalisation.OVER_PIXELS,
+          >>>                       compute_ntk=True)
+          >>> o.var1.shape, o.ntk.shape
+          (10, 32, 16), (10, 10, 32, 16)
           >>> x1 = np.ones((10, 128))
           >>> x2 = np.ones((20, 128))
-          >>> _inputs_to_kernel(x, None, use_pooling=True,
-          >>>                   compute_ntk=False).nngp.shape
-          (10, 20)
-          >>> _inputs_to_kernel(x, None, use_pooling=False,
-          >>>                   compute_ntk=False).nngp.shape
-          (10, 20)
-          >>> _inputs_to_kernel(x, None, use_pooling=False,
-          >>>                   compute_ntk=False).ntk
+          >>> o = _inputs_to_kernel(x1, x2,
+          >>>                       marginal=Marginalisation.OVER_ALL,
+          >>>                       cross=Marginalisation.OVER_ALL,
+          >>>                       compute_ntk=False)
+          >>> o.var1.shape, o.nngp.shape
+          (10,), (10, 20)
+          >>> o.ntk
           None
       ```
 
   Returns:
     a `Kernel` object.
   """
+  if x1.ndim not in (2, 4):
+    raise ValueError('Inputs must be 2D or 4D `np.ndarray`s of shape '
+                     '`[batch_size, n_features]` or '
+                     '`[batch_size, height, width, channels]`, '
+                     'got %s.' % str(x1.shape))
+  if x1.ndim == 2 and not (marginal == cross == Marginalisation.OVER_ALL):
+    raise ValueError("`OVER_ALL` marginalisation should be used for 2D inputs; "
+                     "was: `marginal`={}, `cross`={}".format(marginal, cross))
+  if cross == Marginalisation.OVER_POINTS:
+    raise ValueError("Required `OVER_POINTS` to be computed for `nngp`/`ntk`. "
+                     "`OVER_POINTS` is only meant for `var1`/`var2`. "
+                     "Use `NO` instead to compute all covariances.")
+
   x1 = x1.astype(xla_bridge.canonicalize_dtype(np.float64))
-  var1 = _get_variance(x1)
+  var1 = _get_variance(x1, marginal_type=marginal)
 
   if x2 is None:
     x2 = x1
     var2 = None
   else:
     if x1.shape[1:] != x2.shape[1:]:
-      raise ValueError('`x1` and `x2` are expected to be batches of'
-                       ' inputs with the same shape (apart from the batch size),'
+      raise ValueError('`x1` and `x2` are expected to be batches of inputs'
+                       ' with the same shape (apart from the batch size),'
                        ' got %s and %s.' %
                        (str(x1.shape), str(x2.shape)))
 
     x2 = x2.astype(xla_bridge.canonicalize_dtype(np.float64))
-    var2 = _get_variance(x2)
+    var2 = _get_variance(x2, marginal_type=marginal)
 
-  if use_pooling and x1.ndim == 4:
-    x2 = np.expand_dims(x2, -1)
-    nngp = np.dot(x1, x2) / x1.shape[-1]
-    nngp = np.transpose(np.squeeze(nngp, -1), (0, 3, 1, 4, 2, 5))
-
-  elif x1.ndim == 4 or x1.ndim == 2:
-    nngp = _batch_uncentered_covariance(x1, x2)
-
-  else:
-    raise ValueError('Inputs must be 2D or 4D `np.ndarray`s of shape '
-                     '`[batch_size, n_features]` or '
-                     '`[batch_size, height, width, channels]`, '
-                     'got %s.' % str(x1.shape))
-
+  nngp = _get_covariance(x1, x2, marginal_type=cross)
   ntk = 0. if compute_ntk else None
   is_gaussian = False
   is_height_width = True
-  return Kernel(var1, nngp, var2, ntk, is_gaussian, is_height_width)
+
+  return Kernel(var1, nngp, var2, ntk, is_gaussian, is_height_width,
+                marginal, cross)
 
 
 def _preprocess_ker_fun(ker_fun):
@@ -253,10 +318,6 @@ def _preprocess_ker_fun(ker_fun):
                   compute_nngp=True,
                   compute_ntk=True):
     """Returns the `Kernel` resulting from applying `ker_fun` to given inputs.
-
-    Inputs can be either a pair of `np.ndarray`s, or a `Kernel'. If `n_samples`
-      is positive, `ker_fun` is estimated by Monte Carlo sampling of random
-      networks defined by `(init_fun, apply_fun)`.
 
     Args:
       x1_or_kernel: either a `np.ndarray` with shape
@@ -281,10 +342,13 @@ def _preprocess_ker_fun(ker_fun):
             raise ValueError('NNGP has to be computed to compute NTK. Please '
                              'set `compute_nngp=True`.')
           else:
-            return Kernel(None, None, None, None, None, None)
+            return Kernel(None, None, None, None, None, None, None, None)
 
-        use_pooling = getattr(ker_fun, _USE_POOLING, True)
-        kernel = _inputs_to_kernel(x1_or_kernel, x2, use_pooling, compute_ntk)
+        covs_req = getattr(
+            ker_fun, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_ALL,
+                                        'cross': Marginalisation.OVER_ALL})
+        kernel = _inputs_to_kernel(
+            x1_or_kernel, x2, compute_ntk=compute_ntk, **covs_req)
 
       else:
         raise TypeError('`x2` to a kernel propagation function '
@@ -300,8 +364,8 @@ def _preprocess_ker_fun(ker_fun):
 
     return ker_fun(kernel)
 
-  if hasattr(ker_fun, _USE_POOLING):
-    setattr(new_ker_fun, _USE_POOLING, getattr(ker_fun, _USE_POOLING))
+  if hasattr(ker_fun, _COVARIANCES_REQ):
+    setattr(new_ker_fun, _COVARIANCES_REQ, getattr(ker_fun, _COVARIANCES_REQ))
 
   return new_ker_fun
 
@@ -374,31 +438,6 @@ def Abs(do_backprop=False, do_stabilize=False):
                       do_stabilize=do_stabilize)
 
 
-def _get_var_prod(var1, nngp, var2):
-  if var2 is not None:
-    if var1.shape[1:] != var2.shape[1:]:
-      raise ValueError(var1.shape, var2.shape)
-  else:
-    var2 = var1
-
-  if nngp.ndim == 2 or nngp.ndim == 4:
-    prod = np.expand_dims(var1, 1) * np.expand_dims(var2, 0)
-
-  elif nngp.ndim == 6:
-    # conv + pooling.
-    var2 = np.reshape(var2,
-                      (1, var2.shape[0], 1, var2.shape[1], 1, var2.shape[2]))
-    var1 = np.reshape(var1,
-                      (var1.shape[0], 1, var1.shape[1], 1, var1.shape[2], 1))
-    prod = var1 * var2
-
-  else:
-    raise ValueError('NNGP should be either a rank-2, -4 or -6 array, got %d.'
-                     % nngp.ndim)
-
-  return prod
-
-
 def _arccos(x, do_backprop):
   if do_backprop:
     # https://github.com/google/jax/issues/654
@@ -426,12 +465,91 @@ def _arcsin(x, do_backprop):
   return np.arcsin(x)
 
 
+def _get_dimensionwise_marg_var(var, marginal):
+  """Extracts `OVER_ALL`/`OVER_PIXELS` marginal covariance from `var1`/`var2` of
+  either of the `OVER_POINTS` or `NO` types.
+  """
+  if marginal in (Marginalisation.OVER_ALL, Marginalisation.OVER_PIXELS):
+    return var
+  elif marginal == Marginalisation.NO:
+    var = np.moveaxis(np.diagonal(var, axis1=0, axis2=1), -1, 0)
+
+  var = np.swapaxes(var, -3, -2)  # [..., X, X, Y, Y] -> [..., X, Y, X, Y]
+  X, Y = var.shape[-2:]
+
+  sqnorms = np.diagonal(var.reshape((-1, X * Y, X * Y)), axis1=-2, axis2=-1)
+  sqnorms = sqnorms.reshape((-1,) + (X, Y))
+
+  return sqnorms
+
+
+def _get_var_prod(var1, var2, marginal):
+  """Returns a 6D tensor where an entry (x1, x2, a, b, c, d) equals
+  k_{ab}(x1, x1) * k_{cd} (x2, x2).
+  """
+  same_input = var2 is None
+  if same_input:
+    var2 = var1
+  else:
+    if var1.shape[1:] != var2.shape[1:]:
+      raise ValueError(var1.shape, var2.shape)
+
+  prod11, prod22 = None, None
+  if marginal in (Marginalisation.OVER_ALL, Marginalisation.OVER_PIXELS):
+    prod12 = np.expand_dims(var1, 1) * np.expand_dims(var2, 0)
+  elif marginal in [Marginalisation.OVER_POINTS, Marginalisation.NO]:
+    def outer_prod_full(sqnorms1, sqnorms2):
+      sqnorms1 = sqnorms1[:, None, :, None, :, None]
+      sqnorms2 = sqnorms2[None, :, None, :, None, :]
+      return sqnorms1 * sqnorms2
+
+    sqnorms1 = _get_dimensionwise_marg_var(var1, marginal)
+    sqnorms2 = sqnorms1 if same_input else _get_dimensionwise_marg_var(var2,
+                                                                       marginal)
+    prod12 = outer_prod_full(sqnorms1, sqnorms2)
+
+    if marginal == Marginalisation.OVER_POINTS:
+      def outer_prod_pixel(sqnorms1, sqnorms2):
+        sqnorms1 = sqnorms1[:, :, None, :, None]
+        sqnorms2 = sqnorms2[:, None, :, None, :]
+        return sqnorms1 * sqnorms2
+
+      prod11 = outer_prod_pixel(sqnorms1, sqnorms1)
+      if not same_input:
+        prod22 = outer_prod_pixel(sqnorms2, sqnorms2)
+    else:
+      prod11 = outer_prod_full(sqnorms1, sqnorms1)
+      if not same_input:
+        prod22 = outer_prod_full(sqnorms2, sqnorms2)
+  else:
+    raise NotImplementedError(
+        "Only implemented for `OVER_ALL`, `OVER_PIXELS`, `OVER_POINTS` "
+        "and `NO`; supplied {}".format(marginal))
+
+  return prod11, prod12, prod22
+
+
+def _get_ab_relu_kernel(ker_mat, prod, a, b, do_backprop, ntk=None):
+  cosines = ker_mat / np.sqrt(prod)
+  angles = _arccos(cosines, do_backprop)
+
+  dot_sigma = (a**2 + b**2 - (a - b)**2 * angles / np.pi) / 2
+  ker_mat = ((a - b)**2 * _sqrt(prod - ker_mat**2, do_backprop) / (2 * np.pi) +
+             dot_sigma * ker_mat)
+
+  if ntk is not None:
+    ntk *= dot_sigma
+
+  return ker_mat, ntk
+
+
 def _transform_kernels_ab_relu(kernels, a, b, do_backprop, do_stabilize):
   """Compute new kernels after an `ABRelu` layer.
 
   See https://arxiv.org/pdf/1711.09090.pdf for the leaky ReLU derivation.
   """
-  var1, nngp, var2, ntk, _, is_height_width = kernels
+  var1, nngp, var2, ntk, _, is_height_width, marginal, cross = kernels
+  marginal, cross = _ids_to_marginalisation_types(marginal, cross)
 
   if do_stabilize:
     factor = np.max([np.max(np.abs(nngp)), 1e-12])
@@ -440,47 +558,67 @@ def _transform_kernels_ab_relu(kernels, a, b, do_backprop, do_stabilize):
     if var2 is not None:
       var2 /= factor
 
-  prod = _get_var_prod(var1, nngp, var2)
-  cosines = nngp / np.sqrt(prod)
-  angles = _arccos(cosines, do_backprop)
-  dot_sigma = (a**2 + b**2 - (a - b)**2 * angles / np.pi) / 2
-  if ntk is not None:
-    ntk *= dot_sigma
-
-  nngp = ((a - b)**2 * _sqrt(prod - nngp**2, do_backprop)
-         / (2 * np.pi) + dot_sigma * nngp)
+  prod11, prod12, prod22 = _get_var_prod(var1, var2, marginal)
+  nngp, ntk = _get_ab_relu_kernel(nngp, prod12, a, b, do_backprop, ntk=ntk)
   if do_stabilize:
     nngp *= factor
 
-  var1 *= (a**2 + b**2) / 2
-  if var2 is not None:
-    var2 *= (a**2 + b**2) / 2
+  if marginal in (Marginalisation.OVER_ALL, Marginalisation.OVER_PIXELS):
+    var1 *= (a**2 + b**2) / 2
+    if var2 is not None:
+      var2 *= (a**2 + b**2) / 2
+  elif marginal in (Marginalisation.OVER_POINTS, Marginalisation.NO):
+    var1, _ = _get_ab_relu_kernel(var1, prod11, a, b, do_backprop)
+    if var2 is not None:
+      var2, _ = _get_ab_relu_kernel(var2, prod22, a, b, do_backprop)
+  else:
+    raise NotImplementedError(
+        "Only implemented for `OVER_ALL`, `OVER_PIXELS`, `OVER_POINTS` "
+        "and `NO`; supplied {}".format(marginal))
 
   if do_stabilize:
     var1 *= factor
-    var2 *= factor
+    if var2 is not None:
+      var2 *= factor
 
-  return Kernel(var1, nngp, var2, ntk, a == b, is_height_width)
+  return Kernel(var1, nngp, var2, ntk, a == b, is_height_width, marginal, cross)
+
+
+def _get_erf_kernel(ker_mat, prod, do_backprop, ntk=None):
+  dot_sigma = 4 / (np.pi * np.sqrt(prod - 4 * ker_mat**2))
+  ker_mat = _arcsin(2 * ker_mat / np.sqrt(prod), do_backprop) * 2 / np.pi
+
+  if ntk is not None:
+    ntk *= dot_sigma
+
+  return ker_mat, ntk
 
 
 def _transform_kernels_erf(kernels, do_backprop):
   """Compute new kernels after an `Erf` layer."""
-  var1, nngp, var2, ntk, _, is_height_width = kernels
+  var1, nngp, var2, ntk, _, is_height_width, marginal, cross = kernels
+  marginal, cross = _ids_to_marginalisation_types(marginal, cross)
+
   _var1_denom = 1 + 2 * var1
   _var2_denom = None if var2 is None else 1 + 2 * var2
-  prod = _get_var_prod(_var1_denom, nngp, _var2_denom)
 
-  dot_sigma = 4 / (np.pi * np.sqrt(prod - 4 * nngp ** 2))
-  if ntk is not None:
-    ntk *= dot_sigma
+  prod11, prod12, prod22 = _get_var_prod(_var1_denom, _var2_denom, marginal)
+  nngp, ntk = _get_erf_kernel(nngp, prod12, do_backprop, ntk=ntk)
 
-  nngp = _arcsin(2 * nngp / np.sqrt(prod), do_backprop) * 2 / np.pi
+  if marginal in (Marginalisation.OVER_ALL, Marginalisation.OVER_PIXELS):
+    var1 = np.arcsin(2 * var1 / _var1_denom) * 2 / np.pi
+    if var2 is not None:
+      var2 = np.arcsin(2 * var2 / _var2_denom) * 2 / np.pi
+  elif marginal in [Marginalisation.OVER_POINTS, Marginalisation.NO]:
+    var1, _ = _get_erf_kernel(var1, prod11, do_backprop)
+    if var2 is not None:
+      var2, _ = _get_erf_kernel(var2, prod22, do_backprop)
+  else:
+    raise NotImplementedError(
+        "Only implemented for `OVER_ALL`, `OVER_PIXELS`, `OVER_POINTS` "
+        "and `NO`; supplied {}".format(marginal))
 
-  var1 = np.arcsin(2 * var1 / _var1_denom) * 2 / np.pi
-  if var2 is not None:
-    var2 = np.arcsin(2 * var2 / _var2_denom) * 2 / np.pi
-
-  return Kernel(var1, nngp, var2, ntk, False, is_height_width)
+  return Kernel(var1, nngp, var2, ntk, False, is_height_width, marginal, cross)
 
 
 def _transform_kernels(kernels, fun, **fun_kwargs):
@@ -544,7 +682,7 @@ def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0)):
 
   def ker_fun(kernels):
     """Compute the transformed kernels after a dense layer."""
-    var1, nngp, var2, ntk, _, _ = kernels
+    var1, nngp, var2, ntk, _, _, marginal, cross = kernels
 
     def fc(x):
       return _affine(x, W_std, b_std)
@@ -553,7 +691,10 @@ def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0)):
     if ntk is not None:
       ntk += nngp - b_std**2
 
-    return Kernel(var1, nngp, var2, ntk, True, True)
+    return Kernel(var1, nngp, var2, ntk, True, True, marginal, cross)
+
+  setattr(ker_fun, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_ALL,
+                                      'cross': Marginalisation.OVER_ALL})
 
   return init_fun, apply_fun, ker_fun
 
@@ -579,7 +720,7 @@ def serial(*layers):
       kernels = f(kernels)
     return kernels
 
-  _set_pooling_attr(ker_fun, ker_funs)
+  _set_covariances_req_attr(ker_fun, ker_funs)
   return init_fun, apply_fun, ker_fun
 
 
@@ -620,6 +761,16 @@ def FanInSum():
                                 '-zero gaussian, i.e. having all `is_gaussian'
                                 'set to `True`.')
 
+    marginal, cross = kernels[0].marginal, kernels[0].cross
+    marginal, cross = _ids_to_marginalisation_types(marginal, cross)
+    if not all(Marginalisation(k.marginal) == marginal and
+               Marginalisation(k.cross) == cross
+               for k in kernels):
+      raise NotImplementedError('`FanInSum` layer is only implemented for the '
+                                'case if all input layers output the same type'
+                                'of covariance matrices, i.e. having all '
+                                'matching `marginal` and `cross` attributes')
+
     # If kernels have different height/width order, transpose some of them.
     n_kernels = len(kernels)
     n_height_width = sum(ker.is_height_width for ker in kernels)
@@ -641,7 +792,7 @@ def FanInSum():
 
     kers = tuple(None if all(ker[i] is None for ker in kernels) else
                  sum(ker[i] for ker in kernels) for i in range(4))
-    return Kernel(*(kers + (is_gaussian, is_height_width)))
+    return Kernel(*(kers + (is_gaussian, is_height_width, marginal, cross)))
 
   return init_fun, apply_fun, ker_fun
 
@@ -659,12 +810,32 @@ def _flip_height_width(kernels):
     `_flip_height_width(kernels).nngp` has shape
     `[batch_size_1, batch_size_2, width, width, height, height]`.
   """
-  var1, nngp, var2, ntk, is_gaussian, is_height_width = kernels
-  var1 = np.transpose(var1, (0, 2, 1))
-  var2 = np.transpose(var2, (0, 2, 1)) if var2 is not None else var2
-  nngp = np.transpose(nngp, (0, 1, 4, 5, 2, 3))
-  ntk = np.transpose(ntk, (0, 1, 4, 5, 2, 3)) if ntk is not None else ntk
-  return Kernel(var1, nngp, var2, ntk, is_gaussian, not is_height_width)
+  var1, nngp, var2, ntk, is_gaussian, is_height_width, marginal, cross = kernels
+  marginal, cross = _ids_to_marginalisation_types(marginal, cross)
+
+  def flip_5or6d(mat):
+    return np.moveaxis(mat, (-2, -1), (-4, -3))
+
+  if marginal == Marginalisation.OVER_PIXELS:
+    var1 = np.transpose(var1, (0, 2, 1))
+    var2 = np.transpose(var2, (0, 2, 1)) if var2 is not None else var2
+  elif marginal in [Marginalisation.OVER_POINTS, Marginalisation.NO]:
+    var1 = flip_5or6d(var1)
+    var2 = flip_5or6d(var2) if var2 is not None else var2
+  else:
+    raise NotImplementedError(
+        "Only implemented for `OVER_PIXELS`, `OVER_POINTS` and `NO`;"
+        " supplied {}".format(marginal))
+
+  if cross == Marginalisation.OVER_PIXELS:
+    nngp = np.moveaxis(nngp, -1, -2)
+    ntk = np.moveaxis(ntk, -1, -2) if _is_array(ntk) else ntk
+  elif cross in [Marginalisation.OVER_POINTS, Marginalisation.NO]:
+    nngp = flip_5or6d(nngp)
+    ntk = flip_5or6d(ntk) if _is_array(ntk) else ntk
+
+  return Kernel(var1, nngp, var2, ntk, is_gaussian, not is_height_width,
+                marginal, cross)
 
 
 @_layer
@@ -690,7 +861,7 @@ def parallel(*layers):
   def ker_fun(kernels):
     return [f(ker) for ker, f in zip(kernels, ker_funs)]
 
-  _set_pooling_attr(ker_fun, ker_funs)
+  _set_covariances_req_attr(ker_fun, ker_funs)
   return init_fun, apply_fun, ker_fun
 
 
@@ -721,7 +892,7 @@ def _same_pad_for_filter_shape(x, filter_shape, strides, axes, mode):
 
   axes_shape = tuple(np.size(x, axis) for axis in axes)
   axes_pads = lax.padtype_to_pads(axes_shape, filter_shape, strides,
-                                  Padding.SAME.value)
+                                  Padding.SAME.name)
 
   pads = [(0, 0),] * x.ndim
   for i, axis in enumerate(axes):
@@ -756,14 +927,15 @@ def _pad_one_side(x, pads, axes, mode):
   return x
 
 
-def _conv_nngp_6d_double_conv(nngp, filter_shape, strides, padding):
+def _conv_nngp_5or6d_double_conv(mat, filter_shape, strides, padding):
   """Compute covariances of the CNN outputs given inputs with covariances `nngp`.
 
   Uses 2D convolution and works on any hardware platform.
 
   Args:
-    nngp: a 6D `np.ndarray` containing sample-sample-pixel-pixel covariances.
-      Has shape `[batch_size_1, batch_size_2, height, height, width, width]`.
+    mat: a 5D or 6D `np.ndarray` containing sample-(sample-)pixel-pixel
+      covariances. Has shape
+      `[batch_size_1, (batch_size_2,) height, height, width, width]`.
     filter_shape: tuple of positive integers, the convolutional filters spatial
       shape (e.g. `(3, 3)` for a 2D convolution).
     strides: tuple of positive integers, the CNN strides (e.g. `(1, 1)` for a
@@ -771,14 +943,15 @@ def _conv_nngp_6d_double_conv(nngp, filter_shape, strides, padding):
     padding: a `Padding` enum, e.g. `Padding.CIRCULAR`.
 
   Returns:
-    a 6D `np.ndarray` containing sample-sample-pixel-pixel covariances of CNN
-      outputs. Has shape `[batch_size_1, batch_size_2, new_width, new_width,
-                           new_height, new_height]`.
+    a 5D or 6D `np.ndarray` containing sample-(sample-)pixel-pixel covariances
+    of CNN outputs. Has shape
+    `[batch_size_1, (batch_size_2,) new_width, new_width,
+      new_height, new_height]`.
   """
   if padding == Padding.CIRCULAR:
-    pixel_axes = tuple(range(2, nngp.ndim))
-    nngp = _same_pad_for_filter_shape(
-        nngp,
+    pixel_axes = tuple(range(mat.ndim)[-4:])
+    mat = _same_pad_for_filter_shape(
+        mat,
         _double_tuple(filter_shape),
         _double_tuple(strides),
         pixel_axes,
@@ -786,33 +959,33 @@ def _conv_nngp_6d_double_conv(nngp, filter_shape, strides, padding):
     )
     padding = Padding.VALID
 
-  batch_size_1, batch_size_2, X, _, Y, _ = nngp.shape
+  data_dim, X, Y = mat.shape[:-4], mat.shape[-3], mat.shape[-1]
   filter_x, filter_y = filter_shape
   stride_x, stride_y = strides
 
-  ker_y = np.diag(np.full((filter_y,), 1. / filter_y, nngp.dtype))
+  ker_y = np.diag(np.full((filter_y,), 1. / filter_y, mat.dtype))
   ker_y = np.reshape(ker_y, (filter_y, filter_y, 1, 1))
 
   channel_axis = _CONV_QAB_DIMENSION_NUMBERS[0].index('C')
-  nngp = lax.conv_general_dilated(
-      np.expand_dims(nngp.reshape((-1, Y, Y)), channel_axis),
-      ker_y, (stride_y, stride_y), padding.value,
+  mat = lax.conv_general_dilated(
+      np.expand_dims(mat.reshape((-1, Y, Y)), channel_axis),
+      ker_y, (stride_y, stride_y), padding.name,
       dimension_numbers=_CONV_QAB_DIMENSION_NUMBERS)
-  out_Y = nngp.shape[-2]
-  nngp = nngp.reshape((batch_size_1, batch_size_2, X, X, out_Y, out_Y))
+  out_Y = mat.shape[-2]
+  mat = mat.reshape(data_dim + (X, X, out_Y, out_Y))
 
-  ker_x = np.diag(np.full((filter_x,), 1. / filter_x, nngp.dtype))
+  ker_x = np.diag(np.full((filter_x,), 1. / filter_x, mat.dtype))
   ker_x = np.reshape(ker_x, (filter_x, filter_x, 1, 1))
 
-  nngp = np.transpose(nngp, (0, 1, 4, 5, 2, 3))
-  nngp = lax.conv_general_dilated(
-      np.expand_dims(nngp.reshape((-1, X, X)), channel_axis),
-      ker_x, (stride_x, stride_x), padding.value,
+  mat = np.moveaxis(mat, (-2, -1), (-4, -3))
+  mat = lax.conv_general_dilated(
+      np.expand_dims(mat.reshape((-1, X, X)), channel_axis),
+      ker_x, (stride_x, stride_x), padding.name,
       dimension_numbers=_CONV_QAB_DIMENSION_NUMBERS)
-  out_X = nngp.shape[-2]
-  nngp = nngp.reshape((batch_size_1, batch_size_2, out_Y, out_Y, out_X, out_X))
+  out_X = mat.shape[-2]
+  mat = mat.reshape(data_dim + (out_Y, out_Y, out_X, out_X))
 
-  return nngp
+  return mat
 
 
 def _conv_nngp_4d(nngp, filter_shape, strides, padding):
@@ -835,20 +1008,21 @@ def _conv_nngp_4d(nngp, filter_shape, strides, padding):
       outputs. Has shape `[batch_size_1, batch_size_2, new_height, new_width]`.
   """
   if padding == Padding.CIRCULAR:
-    nngp = _same_pad_for_filter_shape(nngp, filter_shape, strides, (2, 3), 'wrap')
+    nngp = _same_pad_for_filter_shape(nngp, filter_shape, strides,
+                                      (2, 3), 'wrap')
     padding = Padding.VALID
 
   ker_nngp = np.full(filter_shape + (1, 1), 1. / np.prod(filter_shape),
-                    nngp.dtype)
+                     nngp.dtype)
 
   channel_axis = _CONV_QAB_DIMENSION_NUMBERS[0].index('C')
-  batch_1, batch_b, X, Y = nngp.shape
+  batch1, batch2, X, Y = nngp.shape
   nngp = np.reshape(nngp, (-1, X, Y))
   nngp = np.expand_dims(nngp, channel_axis)
-  nngp = lax.conv_general_dilated(nngp, ker_nngp, strides, padding.value,
-                                 dimension_numbers=_CONV_QAB_DIMENSION_NUMBERS)
+  nngp = lax.conv_general_dilated(nngp, ker_nngp, strides, padding.name,
+                                  dimension_numbers=_CONV_QAB_DIMENSION_NUMBERS)
   nngp = np.squeeze(nngp, channel_axis)
-  nngp = nngp.reshape((batch_1, batch_b,) + nngp.shape[1:])
+  nngp = nngp.reshape((batch1, batch2,) + nngp.shape[1:])
   return nngp
 
 
@@ -872,22 +1046,23 @@ def _conv_var_3d(var1, filter_shape, strides, padding):
     return var1
 
   if padding == Padding.CIRCULAR:
-    var1 = _same_pad_for_filter_shape(var1, filter_shape, strides, (1, 2), 'wrap')
+    var1 = _same_pad_for_filter_shape(var1, filter_shape, strides,
+                                      (1, 2), 'wrap')
     padding = Padding.VALID
 
   channel_axis = _CONV_QAB_DIMENSION_NUMBERS[0].index('C')
   var1 = np.expand_dims(var1, channel_axis)
-  ker__var1 = np.full(filter_shape + (1, 1), 1. / np.prod(filter_shape),
-                    var1.dtype)
-  var1 = lax.conv_general_dilated(var1, ker__var1, strides, padding.value,
-                                 dimension_numbers=_CONV_QAB_DIMENSION_NUMBERS)
+  ker_var1 = np.full(filter_shape + (1, 1), 1. / np.prod(filter_shape),
+                     var1.dtype)
+  var1 = lax.conv_general_dilated(var1, ker_var1, strides, padding.name,
+                                  dimension_numbers=_CONV_QAB_DIMENSION_NUMBERS)
   var1 = np.squeeze(var1, channel_axis)
   return var1
 
 
 @_layer
 def _GeneralConv(dimension_numbers, out_chan, filter_shape,
-                 strides=None, padding=Padding.VALID.value,
+                 strides=None, padding=Padding.VALID.name,
                  W_std=1.0, W_init=_randn(1.0),
                  b_std=0.0, b_init=_randn(1.0)):
   """Layer construction function for a general convolution layer.
@@ -913,82 +1088,89 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape,
     init_padding = Padding.SAME
 
   init_fun, _ = stax.GeneralConv(dimension_numbers, out_chan, filter_shape,
-                                 strides, init_padding.value, W_init, b_init)
+                                 strides, init_padding.name, W_init, b_init)
 
   def apply_fun(params, inputs, **kwargs):
     W, b = params
+
     norm = inputs.shape[lhs_spec.index('C')]
     norm *= np.prod(filter_shape)
+    norm = W_std / np.sqrt(norm)
+
     apply_padding = padding
     if padding == Padding.CIRCULAR:
       apply_padding = Padding.VALID
       inputs = _same_pad_for_filter_shape(inputs, filter_shape, strides, (1, 2),
                                           'wrap')
-    norm = W_std / np.sqrt(norm)
 
     return norm * lax.conv_general_dilated(
-        inputs, W, strides, apply_padding.value,
+        inputs, W, strides, apply_padding.name,
         dimension_numbers=dimension_numbers) + b_std * b
 
   def ker_fun(kernels):
     """Compute the transformed kernels after a conv layer."""
-    # var1: batch_1 * height * width
-    # var2: batch_2 * height * width
-    # nngp, ntk: batch_1 * batch_2 * height * height * width * width (pooling)
-    #  or batch_1 * batch_2 * height * width (flattening)
-    var1, nngp, var2, ntk, _, is_height_width = kernels
+    var1, nngp, var2, ntk, _, is_height_width, marginal, cross = kernels
+    marginal, cross = _ids_to_marginalisation_types(marginal, cross)
 
-    if nngp.ndim == 4:
-      def conv_var(x):
-        x = _conv_var_3d(x, filter_shape, strides, padding)
-        x = _affine(x, W_std, b_std)
-        return x
+    if cross > Marginalisation.OVER_PIXELS and not is_height_width:
+      filter_shape_nngp = filter_shape[::-1]
+      strides_nngp = strides[::-1]
+    else:
+      filter_shape_nngp = filter_shape
+      strides_nngp = strides
 
+    if cross == Marginalisation.OVER_PIXELS:
       def conv_nngp(x):
         if _is_array(x):
-          x = _conv_nngp_4d(x, filter_shape, strides, padding)
+          x = _conv_nngp_4d(x, filter_shape_nngp, strides_nngp, padding)
         x = _affine(x, W_std, b_std)
         return x
-
-    elif nngp.ndim == 6:
-      if not is_height_width:
-        filter_shape_nngp = filter_shape[::-1]
-        strides_nngp = strides[::-1]
-      else:
-        filter_shape_nngp = filter_shape
-        strides_nngp = strides
-
-      def conv_var(x):
-        x = _conv_var_3d(x, filter_shape_nngp, strides_nngp, padding)
-        if x is not None:
-          x = np.transpose(x, (0, 2, 1))
-        x = _affine(x, W_std, b_std)
-        return x
-
+    elif cross in [Marginalisation.OVER_POINTS, Marginalisation.NO]:
       def conv_nngp(x):
         if _is_array(x):
-          x = _conv_nngp_6d_double_conv(x, filter_shape_nngp, strides_nngp,
-                                        padding)
+          x = _conv_nngp_5or6d_double_conv(x, filter_shape_nngp,
+                                           strides_nngp, padding)
         x = _affine(x, W_std, b_std)
         return x
 
       is_height_width = not is_height_width
-
     else:
-      raise ValueError('`nngp` array must be either 4d or 6d, got %d.'
-                       % nngp.ndim)
+      raise NotImplementedError(
+          "Only implemented for `OVER_PIXELS`, `OVER_POINTS` and `NO`;"
+          " supplied {}".format(cross))
+
+    if marginal == Marginalisation.OVER_PIXELS:
+      def conv_var(x):
+        x = _conv_var_3d(x, filter_shape_nngp, strides_nngp, padding)
+        x = _affine(x, W_std, b_std)
+        return x
+    elif marginal in [Marginalisation.OVER_POINTS, Marginalisation.NO]:
+      def conv_var(x):
+        if _is_array(x):
+          x = _conv_nngp_5or6d_double_conv(x, filter_shape_nngp,
+                                           strides_nngp, padding)
+        x = _affine(x, W_std, b_std)
+        return x
+    else:
+      raise NotImplementedError(
+          "Only implemented for `OVER_PIXELS`, `OVER_POINTS` and `NO`;"
+          " supplied {}".format(marginal))
 
     var1 = conv_var(var1)
     var2 = conv_var(var2)
     nngp = conv_nngp(nngp)
     ntk = conv_nngp(ntk) + nngp - b_std**2 if ntk is not None else ntk
-    return Kernel(var1, nngp, var2, ntk, True, is_height_width)
+
+    return Kernel(var1, nngp, var2, ntk, True, is_height_width, marginal, cross)
+
+  setattr(ker_fun, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_PIXELS,
+                                      'cross': Marginalisation.OVER_PIXELS})
 
   return init_fun, apply_fun, ker_fun
 
 
 def Conv(out_chan, filter_shape,
-         strides=None, padding=Padding.VALID.value,
+         strides=None, padding=Padding.VALID.name,
          W_std=1.0, W_init=_randn(1.0),
          b_std=0.0, b_init=_randn(1.0)):
   """Layer construction function for a convolution layer.
@@ -1003,43 +1185,46 @@ def Conv(out_chan, filter_shape,
                       strides, padding, W_std, W_init, b_std, b_init)
 
 
-def _average_pool_nngp_6d(nngp, window_shape, strides, padding):
-  """Get covariances of average pooling outputs given inputs covariances `nngp`.
+def _average_pool_nngp_5or6d(mat, window_shape, strides, padding):
+  """Get covariances of average pooling outputs given inputs covariances `mat`.
 
   Args:
-    nngp: a 6D `np.ndarray` containing sample-sample-pixel-pixel covariances.
-      Has shape `[batch_size_1, batch_size_2, height, height, width, width]`.
+    mat: a 5D or 6D `np.ndarray` containing sample-(sample-)pixel-pixel
+      covariances. Has shape
+      `[batch_size_1, (batch_size_2,) height, height, width, width]`.
     window_shape: tuple of two positive integers, the pooling spatial shape
       (e.g. `(3, 3)`).
     strides: tuple of two positive integers, the pooling strides, e.g. `(1, 1)`.
     padding: a `Padding` enum, e.g. `Padding.CIRCULAR`.
 
   Returns:
-    a 6D `np.ndarray` containing sample-sample-pixel-pixel covariances of the
-      average pooling outputs. Has shape `[batch_size_1, new_height, new_width,
-                                          batch_size_2, new_height, new_width]`.
+    a 5D or 6D `np.ndarray` containing sample-(sample-)pixel-pixel covariances
+    of the average pooling outputs. Has shape
+    `[batch_size_a, (batch_size_b,) new_height, new_height,
+      new_width, new_width]`.
   """
-  if not _is_array(nngp):
-    return nngp
+  #TODO(jirihron): shape [n1, (n2,) h, h, w, w] or [n1, (n2,) w, w, h, h]
+  if not _is_array(mat):
+    return mat
 
   if padding == Padding.CIRCULAR:
-    pixel_axes = tuple(range(2, nngp.ndim))
-    nngp = _same_pad_for_filter_shape(nngp, _double_tuple(window_shape),
+    pixel_axes = tuple(range(mat.ndim)[-4:])
+    mat = _same_pad_for_filter_shape(mat, _double_tuple(window_shape),
                                      _double_tuple(strides), pixel_axes, 'wrap')
     padding = Padding.VALID
 
-  window_shape = _double_tuple((1,) + window_shape)
-  strides = _double_tuple((1,) + strides)
+  window_shape = (1,) * (mat.ndim - 4) + _double_tuple(window_shape)
+  strides = (1,) * (mat.ndim - 4) + _double_tuple(strides)
 
-  nngp_out = lax.reduce_window(nngp, 0., lax.add, window_shape, strides,
-                              padding.value)
+  nngp_out = lax.reduce_window(mat, 0., lax.add, window_shape, strides,
+                               padding.name)
 
   if padding == Padding.SAME:
     # `SAME` padding in `jax.experimental.stax.AvgPool` normalizes by actual
     # window size, which is smaller at the edges.
-    one = np.ones(nngp.shape, nngp.dtype)
+    one = np.ones(mat.shape, mat.dtype)
     window_sizes = lax.reduce_window(one, 0., lax.add, window_shape, strides,
-                                     padding.value)
+                                     padding.name)
     nngp_out /= window_sizes
   else:
     nngp_out /= np.prod(window_shape)
@@ -1047,26 +1232,8 @@ def _average_pool_nngp_6d(nngp, window_shape, strides, padding):
   return nngp_out
 
 
-def _diagonal_nngp_6d(nngp):
-  """Get all sample-pixel variances from the covariances `nngp`.
-
-  Args:
-    nngp: a 6D `np.ndarray` containing sample-sample-pixel--pixel covariances.
-      Has shape `[batch_size, batch_size, height, height, width, width]`.
-
-  Returns:
-    a 3D `np.ndarray` with sample-pixel variances on the diagonal of `nngp`. Has
-    shape `[batch_size, height, width]`.
-  """
-  batch_idx = np.reshape(np.arange(nngp.shape[0]), (-1, 1, 1))
-  X_idx = np.reshape(np.arange(nngp.shape[2]), (1, -1, 1))
-  Y_idx = np.reshape(np.arange(nngp.shape[4]), (1, 1, -1))
-  var1 = nngp[batch_idx, batch_idx, X_idx, X_idx, Y_idx, Y_idx]
-  return var1
-
-
 @_layer
-def AvgPool(window_shape, strides=None, padding=Padding.VALID.value):
+def AvgPool(window_shape, strides=None, padding=Padding.VALID.name):
   """Layer construction function for a 2D average pooling layer.
 
   Based on `jax.experimental.stax.AvgPool`. Has a similar API apart from:
@@ -1079,8 +1246,8 @@ def AvgPool(window_shape, strides=None, padding=Padding.VALID.value):
   padding = Padding(padding)
 
   if padding == Padding.CIRCULAR:
-    init_fun, _ = stax.AvgPool(window_shape, strides, Padding.SAME.value)
-    _, apply_fun_0 = stax.AvgPool(window_shape, strides, Padding.VALID.value)
+    init_fun, _ = stax.AvgPool(window_shape, strides, Padding.SAME.name)
+    _, apply_fun_0 = stax.AvgPool(window_shape, strides, Padding.VALID.name)
 
     def apply_fun(params, inputs, **kwargs):
       inputs = _same_pad_for_filter_shape(inputs, window_shape, strides, (1, 2),
@@ -1088,35 +1255,35 @@ def AvgPool(window_shape, strides=None, padding=Padding.VALID.value):
       res = apply_fun_0(params, inputs, **kwargs)
       return res
   else:
-    init_fun, apply_fun = stax.AvgPool(window_shape, strides, padding.value)
+    init_fun, apply_fun = stax.AvgPool(window_shape, strides, padding.name)
 
   def ker_fun(kernels):
     """Kernel transformation."""
-    var1, nngp, var2, ntk, is_gaussian, is_height_width = kernels
+    var1, nngp, var2, ntk, is_gaussian, is_height_width, marginal, cross = kernels
+    marginal, cross = _ids_to_marginalisation_types(marginal, cross)
 
-    if not is_height_width:
-      window_shape_nngp = window_shape[::-1]
-      strides_nngp = strides[::-1]
-    else:
+    if is_height_width:
       window_shape_nngp = window_shape
       strides_nngp = strides
-
-    nngp = _average_pool_nngp_6d(nngp, window_shape_nngp, strides_nngp, padding)
-    ntk = _average_pool_nngp_6d(ntk, window_shape_nngp, strides_nngp, padding)
-
-    if var2 is None:
-      var1 = _diagonal_nngp_6d(nngp)
     else:
-      # TODO(romann)
-      warnings.warn('Pooling for different inputs `x1` and `x2` is not '
-                    'implemented and will only work if there are no '
-                    'nonlinearities in the network anywhere after the pooling '
-                    'layer. `var1` and `var2` will have wrong values. '
-                    'This will be fixed soon.')
+      window_shape_nngp = window_shape[::-1]
+      strides_nngp = strides[::-1]
 
-    return Kernel(var1, nngp, var2, ntk, is_gaussian, is_height_width)
+    nngp = _average_pool_nngp_5or6d(nngp, window_shape_nngp,
+                                    strides_nngp, padding)
+    ntk = _average_pool_nngp_5or6d(ntk, window_shape_nngp,
+                                   strides_nngp, padding)
+    var1 = _average_pool_nngp_5or6d(var1, window_shape_nngp,
+                                    strides_nngp, padding)
+    if var2 is not None:
+      var2 = _average_pool_nngp_5or6d(var2, window_shape_nngp,
+                                      strides_nngp, padding)
 
-  setattr(ker_fun, _USE_POOLING, True)
+    return Kernel(var1, nngp, var2, ntk, is_gaussian, is_height_width,
+                  marginal, cross)
+
+  setattr(ker_fun, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_POINTS,
+                                      'cross': Marginalisation.NO})
   return init_fun, apply_fun, ker_fun
 
 
@@ -1136,25 +1303,24 @@ def GlobalAvgPool():
     return np.mean(inputs, axis=pixel_axes)
 
   def ker_fun(kernels):
-    var1, nngp, var2, ntk, is_gaussian, _ = kernels
+    var1, nngp, var2, ntk, is_gaussian, _, marginal, cross = kernels
+    marginal, cross = _ids_to_marginalisation_types(marginal, cross)
 
-    pixel_axes = tuple(range(2, nngp.ndim))
-    nngp = np.mean(nngp, axis=pixel_axes)
-    ntk = np.mean(ntk, axis=pixel_axes) if _is_array(ntk) else ntk
+    def _average_pool(ker_mat):
+      pixel_axes = tuple(range(ker_mat.ndim)[-4:])
+      return np.mean(ker_mat, axis=pixel_axes)
 
-    if var2 is None:
-      var1 = np.diagonal(nngp)
-    else:
-      # TODO(romann)
-      warnings.warn('Pooling for different inputs `x1` and `x2` is not '
-                    'implemented and will only work if there are no '
-                    'nonlinearities in the network anywhere after the pooling '
-                    'layer. `var1` and `var2` will have wrong values. '
-                    'This will be fixed soon.')
+    nngp = _average_pool(nngp)
+    ntk = _average_pool(ntk) if _is_array(ntk) else ntk
+    var1 = _average_pool(var1)
+    if var2 is not None:
+      var2 = _average_pool(var2)
 
-    return Kernel(var1, nngp, var2, ntk, is_gaussian, True)
+    return Kernel(var1, nngp, var2, ntk, is_gaussian, True,
+                  Marginalisation.OVER_PIXELS, Marginalisation.OVER_PIXELS)
 
-  setattr(ker_fun, _USE_POOLING, True)
+  setattr(ker_fun, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_POINTS,
+                                       'cross': Marginalisation.NO})
   return init_fun, apply_fun, ker_fun
 
 
@@ -1163,35 +1329,58 @@ def Flatten():
   """Layer construction function for flattening all but the leading dim.
 
   Based on `jax.experimental.stax.Flatten`. Has a similar API.
+
+  Warnings: assumes the next layer will be Dense (optionally preceded by
+   a nonlinearity), otherwise the kernels will not be correct
   """
+  warnings.warn("Flatten assumes the next layer will be Dense"
+                " (optionally preceded by a nonlinearity),"
+                " otherwise the kernels will not be correct!")
+
   init_fun, apply_fun = stax.Flatten
+
   def ker_fun(kernels):
     """Compute kernels."""
-    var1, nngp, var2, ntk, is_gaussian, _ = kernels
+    var1, nngp, var2, ntk, is_gaussian, _, marginal, cross = kernels
+    marginal, cross = _ids_to_marginalisation_types(marginal, cross)
+
     if nngp.ndim == 2:
       return kernels
 
-    var1 = np.mean(var1, axis=(1, 2))
-    var2 = var2 if var2 is None else np.mean(var2, axis=(1, 2))
+    def trace(x):
+      count = x.shape[-4] * x.shape[-2]
+      y = np.trace(x, axis1=-2, axis2=-1)
+      z = np.trace(y, axis1=-2, axis2=-1)
+      return z / count
 
-    if nngp.ndim == 4:
+    if marginal == Marginalisation.OVER_PIXELS:
+      var1 = np.mean(var1, axis=(1, 2))
+      var2 = var2 if var2 is None else np.mean(var2, axis=(1, 2))
+    elif marginal in [Marginalisation.OVER_POINTS, Marginalisation.NO]:
+      if marginal == Marginalisation.NO:
+        var1 = np.moveaxis(np.diagonal(var1, axis1=0, axis2=1), -1, 0)
+        if var2 is not None:
+          var2 = np.moveaxis(np.diagonal(var2, axis1=0, axis2=1), -1, 0)
+
+      var1 = trace(var1)
+      var2 = var2 if var2 is None else trace(var2)
+    else:
+      raise NotImplementedError(
+          "Only implemented for `OVER_PIXELS`, `OVER_POINTS` and `NO`;"
+          " supplied {}".format(marginal))
+
+    if cross == Marginalisation.OVER_PIXELS:
       nngp = np.mean(nngp, axis=(2, 3))
-      if _is_array(ntk):
-        ntk = np.mean(ntk, axis=(2, 3))
-      return Kernel(var1, nngp, var2, ntk, is_gaussian, True)
-
-    if nngp.ndim == 6:
-      def trace(x):
-        count = x.shape[2] * x.shape[4]
-        y = np.trace(x, axis1=4, axis2=5)
-        z = np.trace(y, axis1=2, axis2=3)
-        return z / count
+      ntk =  np.mean(ntk, axis=(2, 3)) if _is_array(ntk) else ntk
+    elif cross in [Marginalisation.OVER_POINTS, Marginalisation.NO]:
       nngp = trace(nngp)
-      if _is_array(ntk):
-        ntk = trace(ntk)
-      return Kernel(var1, nngp, var2, ntk, is_gaussian, True)
+      ntk = trace(ntk) if _is_array(ntk) else ntk
+    else:
+      raise NotImplementedError(
+          "Only implemented for `OVER_PIXELS`, `OVER_POINTS` and `NO`;"
+          " supplied {}".format(cross))
 
-    raise ValueError('`nngp` array must be 2d or 6d.')
+    return Kernel(var1, nngp, var2, ntk, is_gaussian, True,
+                  Marginalisation.OVER_PIXELS, Marginalisation.OVER_PIXELS)
 
-  setattr(ker_fun, _USE_POOLING, False)
   return init_fun, apply_fun, ker_fun

@@ -81,7 +81,9 @@ def _flatten_kernel(k):
         _flatten_batch_dimensions(k.var2, discard_axis=0),
         _flatten_batch_dimensions(k.ntk),
         np.all(k.is_gaussian) if k.is_gaussian is not None else None,
-        np.all(k.is_height_width) if k.is_height_width  is not None else None)
+        np.all(k.is_height_width) if k.is_height_width is not None else None,
+        np.reshape(k.marginal, (-1,))[0] if k.marginal is not None else None,
+        np.reshape(k.cross, (-1,))[0] if k.cross is not None else None)
   elif isinstance(k, np.ndarray):
     return _flatten_batch_dimensions(k)
   else:
@@ -100,7 +102,9 @@ def _move_kernel_to_cpu(kernel):
         device_get(kernel.var2),
         device_get(kernel.ntk),
         kernel.is_gaussian,
-        kernel.is_height_width)
+        kernel.is_height_width,
+        kernel.marginal,
+        kernel.cross)
   else:
     return device_get(kernel)
 

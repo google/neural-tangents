@@ -66,7 +66,9 @@ def _get_ker_fun_sample_many(ker_fun_sample_once,
                          var2=None,
                          ntk=0. if compute_ntk else None,
                          is_gaussian=None,
-                         is_height_width=None)
+                         is_height_width=None,
+                         marginal=None,
+                         cross=None)
     for subkey in key:
       ker_sampled += ker_fun_sample_once(x1, x2, subkey)
 
