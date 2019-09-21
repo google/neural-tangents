@@ -25,6 +25,7 @@ import jax.numpy as np
 import jax.random as random
 from neural_tangents import stax
 from neural_tangents.utils import monte_carlo
+from neural_tangents.utils import kernel
 from neural_tangents.utils import utils
 
 jax_config.parse_flags_with_absl()
@@ -142,7 +143,8 @@ class StaxTest(jtu.JaxTestCase):
       } for model in MODELS for width in WIDTHS
                           for phi, phi_name in ACTIVATIONS.items()
                           for same_inputs in [False, True]
-                          for padding in PADDINGS for strides in STRIDES
+                          for padding in PADDINGS
+                          for strides in STRIDES
                           for filter_size in FILTER_SIZES
                           for use_pooling in [False, True]
                           for is_ntk in [False, True]
@@ -155,10 +157,6 @@ class StaxTest(jtu.JaxTestCase):
     if is_conv:
       if xla_bridge.get_backend().platform == 'cpu':
         raise jtu.SkipTest('Not running CNN models on CPU to save time.')
-
-      if use_pooling and not same_inputs:
-        raise jtu.SkipTest('Pooling layers for different inputs or for same '
-                           'padding not implemented.')
 
       if (is_res and is_conv and ((strides is not None and strides != (1, 1)) or
                                   (padding == 'VALID' and filter_size !=
@@ -206,8 +204,11 @@ class ABReluTest(jtu.JaxTestCase):
 
   def assertAllClose(self, x, y, check_dtypes, atol=None, rtol=None):
     if x is None and y is None:
-      return
-    super(ABReluTest, self).assertAllClose(x, y, check_dtypes, atol, rtol)
+      pass
+    elif isinstance(x, kernel.Marginalisation) and isinstance(x, kernel.Marginalisation):
+      assert x == y
+    else:
+      super(ABReluTest, self).assertAllClose(x, y, check_dtypes, atol, rtol)
 
   def test_ab_relu_relu(self, same_inputs):
     key = random.PRNGKey(1)

@@ -103,6 +103,11 @@ def _test_kernel_against_batched(cls, ker_fun, batched_ker_fun, train, test):
     cls.assertAllClose(g.var1, g_b.var1, check_dtypes=True)
     cls.assertAllClose(g.nngp, g_b.nngp, check_dtypes=True)
     cls.assertAllClose(g.ntk, g_b.ntk, check_dtypes=True)
+    cls.assertAllClose(g.is_gaussian, g_b.is_gaussian, check_dtypes=True)
+    cls.assertAllClose(
+        g.is_height_width, g_b.is_height_width, check_dtypes=True)
+    cls.assertAllClose(g.marginal, g_b.marginal, check_dtypes=True)
+    cls.assertAllClose(g.cross, g_b.cross, check_dtypes=True)
   else:
     cls.assertAllClose(g, g_b, check_dtypes=True)
 
@@ -114,6 +119,11 @@ def _test_kernel_against_batched(cls, ker_fun, batched_ker_fun, train, test):
     cls.assertAllClose(g.var2, g_b.var2, check_dtypes=True)
     cls.assertAllClose(g.nngp, g_b.nngp, check_dtypes=True)
     cls.assertAllClose(g.ntk, g_b.ntk, check_dtypes=True)
+    cls.assertAllClose(g.is_gaussian, g_b.is_gaussian, check_dtypes=True)
+    cls.assertAllClose(
+        g.is_height_width, g_b.is_height_width, check_dtypes=True)
+    cls.assertAllClose(g.marginal, g_b.marginal, check_dtypes=True)
+    cls.assertAllClose(g.cross, g_b.cross, check_dtypes=True)
   else:
     cls.assertAllClose(g, g_b, check_dtypes=True)
 
@@ -125,18 +135,18 @@ class BatchTest(jtu.JaxTestCase):
       jtu.cases_from_list(
           {
               'testcase_name':
-                  '_train_shape={}_test_shape={}_network={}_{}'.format(
-                      train, test, network, name),
+                '_train_shape={}_test_shape={}_network={}_{}'.format(
+                    train, test, network, name),
               'train_shape':
-                  train,
+                train,
               'test_shape':
-                  test,
+                test,
               'network':
-                  network,
+                network,
               'name':
-                  name,
+                name,
               'ker_fun':
-                  ker_fun
+                ker_fun
           }
           for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
           for name, ker_fun in KERNELS.items()))
@@ -159,18 +169,18 @@ class BatchTest(jtu.JaxTestCase):
       jtu.cases_from_list(
           {
               'testcase_name':
-                  '_train_shape={}_test_shape={}_network={}_{}'.format(
-                      train, test, network, name),
+                '_train_shape={}_test_shape={}_network={}_{}'.format(
+                    train, test, network, name),
               'train_shape':
-                  train,
+                train,
               'test_shape':
-                  test,
+                test,
               'network':
-                  network,
+                network,
               'name':
-                  name,
+                name,
               'ker_fun':
-                  ker_fun
+                ker_fun
           }
           for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
           for name, ker_fun in KERNELS.items()))
@@ -193,18 +203,18 @@ class BatchTest(jtu.JaxTestCase):
       jtu.cases_from_list(
           {
               'testcase_name':
-                  '_train_shape={}_test_shape={}_network={}_{}'.format(
-                      train, test, network, name),
+                '_train_shape={}_test_shape={}_network={}_{}'.format(
+                    train, test, network, name),
               'train_shape':
-                  train,
+                train,
               'test_shape':
-                  test,
+                test,
               'network':
-                  network,
+                network,
               'name':
-                  name,
+                name,
               'ker_fun':
-                  ker_fun
+                ker_fun
           }
           for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
           for name, ker_fun in KERNELS.items()
@@ -231,18 +241,18 @@ class BatchTest(jtu.JaxTestCase):
       jtu.cases_from_list(
           {
               'testcase_name':
-                  '_train_shape={}_test_shape={}_network={}_{}'.format(
-                      train, test, network, name),
+                '_train_shape={}_test_shape={}_network={}_{}'.format(
+                    train, test, network, name),
               'train_shape':
-                  train,
+                train,
               'test_shape':
-                  test,
+                test,
               'network':
-                  network,
+                network,
               'name':
-                  name,
+                name,
               'ker_fun':
-                  ker_fun
+                ker_fun
           }
           for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
           for name, ker_fun in KERNELS.items()

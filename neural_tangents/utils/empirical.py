@@ -305,6 +305,7 @@ def get_ker_fun_empirical(f, compute_nngp=True, compute_ntk=True):
 
   def ker_fun(x1, x2, params):
     return Kernel(None, nngp_fun(x1, x2, params),
-                  None, ntk_fun(x1, x2, params), None, None)
+                  None, ntk_fun(x1, x2, params), None, None,
+                  None, None)
 
   return ker_fun
