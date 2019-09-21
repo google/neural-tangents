@@ -303,7 +303,7 @@ Coming soon.
 
 <a name="1"></a>[1] [Deep Neural Networks as Gaussian Processes.](https://arxiv.org/abs/1806.07572)
 *ICLR 2018.* \
-Jaehoon Lee,* Yasaman Bahri*, Roman Novak, Samuel S. Schoenholz, Jeffrey Pennington, Jascha Sohl-Dickstein
+Jaehoon Lee*, Yasaman Bahri*, Roman Novak, Samuel S. Schoenholz, Jeffrey Pennington, Jascha Sohl-Dickstein
 
 <a name="2"></a>[2] [Gaussian Process Behaviour in Wide Deep Neural Networks.](https://arxiv.org/abs/1804.11271)
 *ICLR 2018.* \
