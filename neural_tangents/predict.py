@@ -23,8 +23,11 @@ from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.scipy as sp
 from neural_tangents.utils import empirical
-from neural_tangents.utils.kernel import Kernel
+from neural_tangents.utils.utils import canonicalize_get
+from neural_tangents.utils.utils import named_tuple_factory
+from neural_tangents.utils.utils import get_namedtuple
 from scipy.integrate._ode import ode
+
 
 Gaussian = collections.namedtuple('Gaussian', 'mean covariance')
 
@@ -91,9 +94,6 @@ def gradient_descent_mse(g_dd, y_train, g_td=None, diag_reg=0.):
       [n_train, output_dim] and [n_test, output_dim] for train and test points
       respectively.
   """
-
-  g_dd = _canonicalize_kernel_to_ntk(g_dd)
-  g_td = _canonicalize_kernel_to_ntk(g_td)
 
   g_dd = empirical.flatten_features(g_dd)
 
@@ -215,9 +215,6 @@ def gradient_descent(g_dd, y_train, loss, g_td=None):
       [n_train, output_dim] and [n_test, output_dim] for train and test points
       respectively.
   """
-
-  g_dd = _canonicalize_kernel_to_ntk(g_dd)
-  g_td = _canonicalize_kernel_to_ntk(g_td)
 
   output_dimension = y_train.shape[-1]
 
@@ -365,9 +362,6 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
       get_fn(state): Takes a state and returns two `np.ndarray` of shape
         [n_train, output_dim] and [n_test, output_dim] respectively.
   """
-  g_dd = _canonicalize_kernel_to_ntk(g_dd)
-  g_td = _canonicalize_kernel_to_ntk(g_td)
-
   output_dimension = y_train.shape[-1]
 
   g_dd = empirical.flatten_features(g_dd)
@@ -462,12 +456,13 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
   return init_fn, predict_fn, get_fn
 
 
+@get_namedtuple('GPInference')
 def gp_inference(ker_fun,
                  x_train,
                  y_train,
                  x_test,
+                 get,
                  diag_reg=0.,
-                 mode='NNGP',
                  compute_var=False):
   """Compute the mean and variance of the `posterior` of NNGP and NTK.
 
@@ -485,34 +480,48 @@ def gp_inference(ker_fun,
     Either a Gaussian(`mean`, `variance`) namedtuple or `mean` of the GP
     posterior.
   """
-  if mode not in ['NNGP', 'NTK']:
-    raise ValueError('The `mode` must be either `NNGP` or `NTK`.')
+  out = {}
 
-  kdd, ktd = ker_fun(x_train, None), ker_fun(x_test, x_train)
-  if mode == 'NNGP':
+  for g in get:
+    if g not in ['nngp', 'ntk']:
+      raise NotImplementedError(
+          'Can only get either `NNGP` or `NTK` predictions.')
+
+  get_dependency = ()
+  if 'nngp' in get or ('ntk' in get and compute_var):
+    get_dependency = get_dependency + ('nngp',)
+  if 'ntk' in get:
+    get_dependency = get_dependency + ('ntk',)
+
+  kdd = ker_fun(x_train, None, get_dependency)
+  ktd = ker_fun(x_test, x_train, get_dependency)
+  if compute_var:
+    ktt = ker_fun(x_test, x_test, 'nngp')
+
+  if 'nngp' in get:
     op = _inv_operator(kdd.nngp, diag_reg)
     pred_mean = _mean_prediction(op, ktd.nngp, y_train)
-  else:
+    if compute_var:
+      pred_var = _nngp_var(op, ktd.nngp, ktt)
+    out['nngp'] = Gaussian(pred_mean, pred_var) if compute_var else pred_mean
+
+  if 'ntk' in get:
     op = _inv_operator(kdd.ntk, diag_reg)
     pred_mean = _mean_prediction(op, ktd.ntk, y_train)
-  if not compute_var:
-    return pred_mean
+    if compute_var:
+      pred_var = _ntk_var(op, ktd.ntk, kdd.nngp, ktd.nngp, ktt)
+    out['ntk'] = Gaussian(pred_mean, pred_var) if compute_var else pred_mean
 
-  ktt = ker_fun(x_test, None)
-  if mode == 'NNGP':
-    var = _nngp_var(op, ktd.nngp, ktt.nngp)
-  else:
-    var = _ntk_var(op, ktd.ntk, kdd.nngp, ktd.nngp, ktt.nngp)
-
-  return Gaussian(pred_mean, var)
+  return out
 
 
+#TODO(schsam): Refactor this method to make use of @getter.
 def gradient_descent_mse_gp(ker_fun,
                             x_train,
                             y_train,
                             x_test,
+                            get,
                             diag_reg=0.0,
-                            mode='NTK',
                             compute_var=False):
   """Predicts the gaussian embedding induced by gradient descent with mse loss.
 
@@ -534,53 +543,76 @@ def gradient_descent_mse_gp(ker_fun,
       prediction(t) -> Gaussian(mean, variance).
       If compute_var is False, only returns the mean.
   """
-  if mode not in ['NNGP', 'NTK']:
-    raise ValueError('The `mode` must be either `NNGP` or `NTK`.')
+  if not get:
+    return ()
 
-  kdd = ker_fun(x_train, None)
-  ktd = ker_fun(x_test, x_train)
-  ktt = ker_fun(x_test, None)
+  if isinstance(get, str):
+    # NOTE(schsam): This seems like an ugly solution that involves an extra
+    # indirection. It might be nice to clean it up.
+    return lambda t: gradient_descent_mse_gp(
+        ker_fun, x_train, y_train, x_test,
+        diag_reg=diag_reg, get=(get,), compute_var=compute_var)(t)[0]
+
+  _, get = canonicalize_get(get)
+
+  for g in get:
+    if g not in ['nngp', 'ntk']:
+      raise NotImplementedError(
+          'Can only get either `NNGP` or `NTK` predictions.')
+
+  get_dependency = ()
+  if 'nngp' in get or ('ntk' in get and compute_var):
+    get_dependency = get_dependency + ('nngp',)
+  if 'ntk' in get:
+    get_dependency = get_dependency + ('ntk',)
+
+  kdd = ker_fun(x_train, None, get_dependency)
+  ktd = ker_fun(x_test, x_train, get_dependency)
+  if compute_var:
+    ktt = ker_fun(x_test, None, 'nngp')
+
   normalization = y_train.size
   op_func = _make_inv_expm1_func(normalization)
 
-  if mode == 'NNGP':
-    k_dd_plus_reg = _add_diagonal_regularizer(kdd.nngp, diag_reg)
-    evals, evecs = _eigh(k_dd_plus_reg)
+  eigenspace = {}
+  for g in get:
+    k = kdd.nngp if g == 'nngp' else kdd.ntk
+    k_dd_plus_reg = _add_diagonal_regularizer(k, diag_reg)
+    eigenspace[g] = _eigh(k_dd_plus_reg)
 
-    def prediction(t):
-      """The Gaussian prediction at finite time for the NNGP."""
+  def prediction(t):
+    out = {}
+
+    if 'nngp' in get:
+      evals, evecs = eigenspace['nngp']
       op_evals = -op_func(evals, 2 * t)
       pred_mean = _mean_prediction_einsum(evecs, op_evals, ktd.nngp, y_train)
-      if not compute_var:
-        return pred_mean
-      # inline the variance calculation with an einsum.
-      var = ktt.nngp - np.einsum(
-          'mj,ji,i,ki,lk->ml',
-          ktd.nngp, evecs, op_evals, evecs, ktd.nngp, optimize=True)
+      if compute_var:
+        pred_var = ktt - np.einsum(
+            'mj,ji,i,ki,lk->ml',
+            ktd.nngp, evecs, op_evals, evecs, ktd.nngp, optimize=True)
 
-      return Gaussian(pred_mean, var)
+      out['nngp'] = Gaussian(pred_mean, pred_var) if compute_var else pred_mean
 
-  else:  # mode == 'NTK'
-    g_dd_plus_reg = _add_diagonal_regularizer(kdd.ntk, diag_reg)
-    evals, evecs = _eigh(g_dd_plus_reg)
-
-    def prediction(t):
-      """The Gaussian prediction at finite time for the NTK."""
-      op_evals = -op_func(evals, t)
+    if 'ntk' in get:
+      evals, evecs = eigenspace['ntk']
+      op_evals = -op_func(evals, 2 * t)
       pred_mean = _mean_prediction_einsum(evecs, op_evals, ktd.ntk, y_train)
-      if not compute_var:
-        return pred_mean
-      # inline the covariance calculation with einsum.
-      var = np.einsum(
-          'mj,ji,i,ki,lk->ml',
-          kdd.nngp, evecs, op_evals, evecs, ktd.ntk, optimize=True)
-      var -= 2. * np.transpose(ktd.nngp)
-      var = np.einsum(
-          'mj,ji,i,ki,kl->ml',
-          ktd.ntk, evecs, op_evals, evecs, var, optimize=True)
-      var = var + ktt.nngp
+      if compute_var:
+        # inline the covariance calculation with einsum.
+        pred_var = np.einsum(
+            'mj,ji,i,ki,lk->ml',
+            kdd.nngp, evecs, op_evals, evecs, ktd.ntk, optimize=True)
+        pred_var -= 2. * np.transpose(ktd.nngp)
+        pred_var = np.einsum(
+            'mj,ji,i,ki,kl->ml',
+            ktd.ntk, evecs, op_evals, evecs, pred_var, optimize=True)
+        pred_var = pred_var + ktt
 
-      return Gaussian(pred_mean, var)
+      out['ntk'] = Gaussian(pred_mean, pred_var) if compute_var else pred_mean
+
+    returntype = named_tuple_factory('GPGradientDescent', get)
+    return returntype(*tuple(out[g] for g in get))
 
   return prediction
 
@@ -626,16 +658,6 @@ def _eigenfuncs(mat, funcs):
     return _
 
   return tuple(transform(func) for func in funcs)
-
-
-def _canonicalize_kernel_to_ntk(k):
-  if k is None or isinstance(k, np.ndarray):
-    return k
-  if isinstance(k, Kernel):
-    return k.ntk
-  raise ValueError(
-      'Expected kernel to either be a `Kernel`, a `np.ndarry`, or `None`. '
-      'Found {}.'.format(type(k)))
 
 
 def _add_diagonal_regularizer(covariance, diag_reg=0.):

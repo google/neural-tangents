@@ -39,7 +39,7 @@ config.parse_flags_with_absl()
 MATRIX_SHAPES = [(3, 3), (4, 4)]
 OUTPUT_LOGITS = [1, 2, 3]
 
-MODES = ('NTK', 'NNGP')
+GETS = ('NTK', 'NNGP', ('NTK', 'NNGP'))
 
 RTOL = 0.1
 ATOL = 0.1
@@ -87,15 +87,15 @@ def _build_network(input_shape, network, out_logits):
 def _empirical_kernel(key, input_shape, network, out_logits):
   init_fn, f, _ = _build_network(input_shape, network, out_logits)
   _, params = init_fn(key, (-1,) + input_shape)
-  ker_fun = jit(empirical.get_ntk_fun_empirical(f))
-
-  return params, f, partial(ker_fun, params=params)
+  _ker_fun = empirical.get_ker_fun_empirical(f)
+  ker_fun = lambda x1, x2, get: _ker_fun(x1, x2, params, get)
+  return params, f, jit(ker_fun, static_argnums=(2,))
 
 
 def _theoretical_kernel(key, input_shape, network, out_logits):
   init_fn, f, ker_fun = _build_network(input_shape, network, out_logits)
   _, params = init_fn(key, (-1,) + input_shape)
-  return params, jit(f), jit(ker_fun)
+  return params, f, jit(ker_fun, static_argnums=(2,))
 
 
 KERNELS = {
@@ -161,14 +161,14 @@ class PredictTest(jtu.JaxTestCase):
         0.5 * np.mean((f(params, x) - data_labels) ** 2)
     grad_loss = jit(grad(loss))
 
-    g_dd = ntk(data_train, None)
-    g_td = ntk(data_test, data_train)
+    g_dd = ntk(data_train, None, 'ntk')
+    g_td = ntk(data_test, data_train, 'ntk')
 
     predictor = predict.gradient_descent_mse(g_dd, data_labels, g_td)
 
     atol = ATOL
     rtol = RTOL
-    step_size = 0.5
+    step_size = 0.1
 
     if len(train_shape) > 2:
       # Hacky way to up the tolerance just for convolutions.
@@ -245,8 +245,8 @@ class PredictTest(jtu.JaxTestCase):
     loss = lambda y, y_hat: 0.5 * np.mean((y - y_hat) ** 2)
     grad_loss = jit(grad(lambda params, x: loss(f(params, x), data_labels)))
 
-    g_dd = ntk(data_train, None)
-    g_td = ntk(data_test, data_train)
+    g_dd = ntk(data_train, None, 'ntk')
+    g_td = ntk(data_test, data_train, 'ntk')
 
     predictor = predict.gradient_descent(g_dd, data_labels, loss, g_td)
 
@@ -331,8 +331,8 @@ class PredictTest(jtu.JaxTestCase):
     loss = lambda y, y_hat: 0.5 * np.mean((y - y_hat) ** 2)
     grad_loss = jit(grad(lambda params, x: loss(f(params, x), data_labels)))
 
-    g_dd = ntk(data_train, None)
-    g_td = ntk(data_test, data_train)
+    g_dd = ntk(data_train, None, 'ntk')
+    g_td = ntk(data_test, data_train, 'ntk')
 
     atol = ATOL
     rtol = RTOL
@@ -419,7 +419,7 @@ class PredictTest(jtu.JaxTestCase):
     data_test = np.cos(random.normal(split, test_shape))
     _, _, ker_fun = _build_network(train_shape[1:], network, out_logits)
     mean_pred, var = predict.gp_inference(ker_fun, data_train, data_labels,
-                                          data_test, diag_reg=0., mode='NTK',
+                                          data_test, 'ntk', diag_reg=0.,
                                           compute_var=True)
 
     if xla_bridge.get_backend().platform == 'tpu':
@@ -433,12 +433,16 @@ class PredictTest(jtu.JaxTestCase):
     def mc_sampling(count=10):
       empirical_mean = 0.
       key = random.PRNGKey(100)
+      init_fn, f, _ = _build_network(train_shape[1:], network, out_logits)
+      _ker_fun = empirical.get_ker_fun_empirical(f)
+      ker_fun = jit(lambda x1, x2, params: _ker_fun(x1, x2, params, 'ntk'))
+
       for _ in range(count):
         key, split = random.split(key)
-        params, f, theta = _empirical_kernel(split, train_shape[1:],
-                                             network, out_logits)
-        g_dd = theta(data_train, None)
-        g_td = theta(data_test, data_train)
+        _, params = init_fn(split, train_shape)
+
+        g_dd = ker_fun(data_train, None, params)
+        g_td = ker_fun(data_test, data_train, params)
         predictor = predict.gradient_descent_mse(g_dd, data_labels, g_td)
 
         fx_initial_train = f(params, data_train)
@@ -456,8 +460,8 @@ class PredictTest(jtu.JaxTestCase):
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
-              '_train={}_test={}_network={}_logits={}_mode={}'.format(
-                  train, test, network, out_logits, mode),
+              '_train={}_test={}_network={}_logits={}'.format(
+                  train, test, network, out_logits),
           'train_shape':
               train,
           'test_shape':
@@ -466,15 +470,77 @@ class PredictTest(jtu.JaxTestCase):
               network,
           'out_logits':
               out_logits,
-          'mode':
-              mode,
       }
                           for train, test, network in zip(
                               TRAIN_SHAPES[:-1], TEST_SHAPES[:-1], NETWORK[:-1])
-                          for out_logits in OUTPUT_LOGITS for mode in MODES))
+                          for out_logits in OUTPUT_LOGITS))
 
+  def testGPInferenceGet(
+      self, train_shape, test_shape, network, out_logits):
+
+    key = random.PRNGKey(0)
+
+    key, split = random.split(key)
+    data_train = np.cos(random.normal(split, train_shape))
+
+    key, split = random.split(key)
+    data_labels = np.array(
+        random.bernoulli(split, shape=(train_shape[0], out_logits)), np.float32)
+
+    key, split = random.split(key)
+    data_test = np.cos(random.normal(split, test_shape))
+    _, _, ker_fun = _build_network(train_shape[1:], network, out_logits)
+
+    out = predict.gp_inference(ker_fun, data_train, data_labels,
+                               data_test, 'ntk', diag_reg=0.,
+                               compute_var=True)
+    assert isinstance(out, predict.Gaussian)
+
+    out = predict.gp_inference(ker_fun, data_train, data_labels,
+                               data_test, 'nngp', diag_reg=0.,
+                               compute_var=True)
+    assert isinstance(out, predict.Gaussian)
+
+    out = predict.gp_inference(ker_fun, data_train, data_labels,
+                               data_test, ('ntk',), diag_reg=0.,
+                               compute_var=True)
+    assert len(out) == 1 and isinstance(out[0], predict.Gaussian)
+
+    out = predict.gp_inference(ker_fun, data_train, data_labels,
+                               data_test, ('ntk', 'nngp'), diag_reg=0.,
+                               compute_var=True)
+    assert (len(out) == 2 and
+            isinstance(out[0], predict.Gaussian) and
+            isinstance(out[1], predict.Gaussian))
+
+    out2 = predict.gp_inference(ker_fun, data_train, data_labels,
+                               data_test, ('nngp', 'ntk'), diag_reg=0.,
+                               compute_var=True)
+    self.assertAllClose(out[0], out2[1], True)
+    self.assertAllClose(out[1], out2[0], True)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              '_train={}_test={}_network={}_logits={}_get={}'.format(
+                  train, test, network, out_logits, get),
+          'train_shape':
+              train,
+          'test_shape':
+              test,
+          'network':
+              network,
+          'out_logits':
+              out_logits,
+          'get':
+              get,
+      }
+                          for train, test, network in zip(
+                              TRAIN_SHAPES[:-1], TEST_SHAPES[:-1], NETWORK[:-1])
+                          for out_logits in OUTPUT_LOGITS
+                          for get in GETS))
   def testInfiniteTimeAgreement(
-      self, train_shape, test_shape, network, out_logits, mode):
+      self, train_shape, test_shape, network, out_logits, get):
     # TODO(alemi): Add some finite time tests.
 
     key = random.PRNGKey(0)
@@ -491,17 +557,16 @@ class PredictTest(jtu.JaxTestCase):
     _, _, ker_fun = _build_network(train_shape[1:], network, out_logits)
 
     reg = 1e-7
-    mean_pred, var = predict.gp_inference(
-        ker_fun, data_train, data_labels, data_test,
-        diag_reg=reg, mode=mode, compute_var=True)
+    inf_prediction = predict.gp_inference(
+        ker_fun, data_train, data_labels, data_test, get,
+        diag_reg=reg, compute_var=True)
     prediction = predict.gradient_descent_mse_gp(
-        ker_fun, data_train, data_labels, data_test,
-        diag_reg=reg, mode=mode, compute_var=True)
+        ker_fun, data_train, data_labels, data_test, get,
+        diag_reg=reg, compute_var=True)
 
-    inf_mean_pred, inf_var = prediction(np.inf)
+    finite_prediction = prediction(np.inf)
 
-    self.assertAllClose(mean_pred, inf_mean_pred, True)
-    self.assertAllClose(var, inf_var, True)
+    self.assertAllClose(inf_prediction, finite_prediction, True)
 
 
 if __name__ == '__main__':

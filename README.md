@@ -53,13 +53,16 @@ key1, key2 = random.split(random.PRNGKey(1))
 x1 = random.normal(key1, (10, 100))
 x2 = random.normal(key2, (20, 100))
 
-kernel = ker_fun(x1, x2)
+kernel = ker_fun(x1, x2, 'NNGP')
 ```
-Note that `kernel` contains _two_ covariance matrices: `kernel.nngp` and `kernel.ntk`. `kernel.nngp` corresponds to the _Bayesian_ infinite neural network, and is commonly referred to as "NNGP" (Neural Network Gaussian Process, [[1]](1)). `kernel.ntk` corresponds to the _(continuous) gradient descent trained_ infinite network, and is commonly referred to as "NTK" (Neural Tangent Kernel [[5]](5)). These matrices can be accessed as follows:
+Note that `ker_fun` can compute _two_ covariance matrices corresponding to the Neural Network Gaussian Process (NNGP) and Neural Tangent (NT) kernels respectively. The NNGP kernel corresponds to the _Bayesian_ infinite neural network [[1]](1). The NTK corresponds to the _(continuous) gradient descent trained_ infinite network [[5]](5). In the above example, we compute the NNGP kernel but we could compute the NTK or both as follows:
 
 ```python
-nngp = kernel.nngp  # (10, 20) np.ndarray
-ntk = kernel.ntk  # (10, 20) np.ndarray
+nngp = ker_fun(x1, x2, 'NNGP') # (10, 20) np.ndarray
+ntk = ker_fun(x1, x2, 'NTK') # (10, 20) np.ndarray
+both = ker_fun(x1, x2, ('NNGP', 'NTK'))
+both.nngp == nngp
+both.ntk == ntk
 ```
 
 Doing inference with infinite networks trained on MSE loss reduces to classical GP inference, for which we also provide convenient tools:
@@ -70,10 +73,10 @@ from neural_tangents import predict
 x_train, x_test = x1, x2
 y_train = random.uniform(key1, shape=(10, 1))  # training targets
 
-y_test_nngp = predict.gp_inference(ker_fun, x_train, y_train, x_test, mode='NNGP')
+y_test_nngp = predict.gp_inference(ker_fun, x_train, y_train, x_test, get='NNGP')
 # (20, 1) np.ndarray test predictions of an infinite Bayesian network
 
-y_test_ntk = predict.gp_inference(ker_fun, x_train, y_train, x_test, mode='NTK')
+y_test_ntk = predict.gp_inference(ker_fun, x_train, y_train, x_test, get='NTK')
 # (20, 1) np.ndarray test predictions of an infinite continuous gradient descent trained network at convergence (t = inf)
 ```
 
@@ -125,18 +128,18 @@ The `neural_tangents` package contains two modules:
   * `predict.gp_inference` - either fully Bayesian inference (`mode="NNGP"`) or inference with a network trained to full convergence (infinite time) on MSE loss using continuous gradient descent (`mode="NTK"`).
 
   * `predict.gradient_descent_mse` - inference with a network trained on MSE loss with continuous gradient descent for an arbitrary finite time.
-  
+
   * `predict.gradient_descent` - inference with a network trained on arbitrary loss with continuous gradient descent for an arbitrary finite time (using an ODE solver).
-  
+
   * `predict.momentum` - inference with a network trained on arbitrary loss with continuous momentum gradient descent for an arbitrary finite time (using an ODE solver).
 
 * `api` - various methods useful for working with infinite networks, including (but not limited to!):
     * `batch` - makes any kernel function `ker_fun` compute the kernel in batches over inputs, in parallel over available GPUs or TPU cores.
-    
+
     * `get_ker_fun_monte_carlo` - compute a Monte Carlo kernel estimate  of _any_ `(init_fun, apply_fun)`, not necessarily specified `neural_tangents.stax`, enabling the kernel computation of infinite networks without closed-form expressions.
-  
+
   * Tools to investigate training dynamics of _wide but finite_ neural networks, like `linearize`, `taylor_expand`, `get_ker_fun_empirical` and more. See [Training Dynamics of Wide but Finite Networks](wide) for details.
-    
+
 
 
 
@@ -208,9 +211,10 @@ x_test = random.normal(key2, (4, 2))
 y_train = random.uniform(key1, shape=(3, 2))
 
 ker_fun = get_ker_fun_empirical(apply_fun)
-ntk_train_train = ker_fun(x_train, x_train, params).ntk
-ntk_test_train = ker_fun(x_test, x_train, params).ntk
-mse_predictor = predict.gradient_descent_mse(ntk_train_train, y_train, ntk_test_train)
+ntk_train_train = ker_fun(x_train, x_train, params, 'NTK')
+ntk_test_train = ker_fun(x_test, x_train, params, 'NTK')
+mse_predictor = predict.gradient_descent_mse(
+    ntk_train_train, y_train, ntk_test_train)
 
 t = 5.
 y_train_0 = apply_fun(params, x_train)

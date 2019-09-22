@@ -178,17 +178,16 @@ class StaxTest(jtu.JaxTestCase):
                                             is_ntk)
 
     if is_ntk:
-      exact = ker_fun(x1, x2).ntk
+      exact = ker_fun(x1, x2, 'ntk')
       ker_fun_empirical = monte_carlo.get_ker_fun_monte_carlo(
-          init_fun, apply_fun, False, True)
-      empirical = ker_fun_empirical(x1, x2, key, N_SAMPLES).ntk
+          init_fun, apply_fun)
+      empirical = ker_fun_empirical(x1, x2, key, N_SAMPLES, 'ntk')
       empirical = np.reshape(empirical, exact.shape)
     else:
-      exact = ker_fun(x1, x2, compute_ntk=False).nngp
+      exact = ker_fun(x1, x2, 'nngp')
       ker_fun_empirical = monte_carlo.get_ker_fun_monte_carlo(
-          init_fun, apply_fun, True, False)
-      empirical = ker_fun_empirical(x1, x2, key, N_SAMPLES).nngp
-
+          init_fun, apply_fun)
+      empirical = ker_fun_empirical(x1, x2, key, N_SAMPLES, 'nngp')
     utils.assert_close_matrices(self, empirical, exact, RTOL)
 
 
@@ -229,8 +228,8 @@ class ABReluTest(jtu.JaxTestCase):
         X1_1_ab_relu = apply_ab_relu(params, X0_1)
         self.assertAllClose(X1_1_relu, X1_1_ab_relu, True)
 
-        kernels_relu = ker_fun_relu(X0_1, X0_2)
-        kernels_ab_relu = ker_fun_ab_relu(X0_1, X0_2)
+        kernels_relu = ker_fun_relu(X0_1, X0_2, ('NNGP', 'NTK'))
+        kernels_ab_relu = ker_fun_ab_relu(X0_1, X0_2, ('NNGP', 'NTK'))
         self.assertAllClose(kernels_relu, kernels_ab_relu, True)
 
   def test_ab_relu_id(self, same_inputs):
@@ -252,8 +251,9 @@ class ABReluTest(jtu.JaxTestCase):
         X1_1_ab_relu = apply_ab_relu(params, X0_1)
         self.assertAllClose(X1_1_id, X1_1_ab_relu, True)
 
-        kernels_id = ker_fun_id(X0_1 * a, None if X0_2 is None else a * X0_2)
-        kernels_ab_relu = ker_fun_ab_relu(X0_1, X0_2)
+        kernels_id = ker_fun_id(
+            X0_1 * a, None if X0_2 is None else a * X0_2, ('NNGP', 'NTK'))
+        kernels_ab_relu = ker_fun_ab_relu(X0_1, X0_2, ('NNGP', 'NTK'))
         self.assertAllClose(kernels_id, kernels_ab_relu, True)
 
   def test_leaky_relu(self, same_inputs):
@@ -275,8 +275,8 @@ class ABReluTest(jtu.JaxTestCase):
         X1_1_ab_relu = apply_ab_relu(params, X0_1)
         self.assertAllClose(X1_1_leaky_relu, X1_1_ab_relu, True)
 
-        kernels_leaky_relu = ker_fun_leaky_relu(X0_1, X0_2)
-        kernels_ab_relu = ker_fun_ab_relu(X0_1, X0_2)
+        kernels_leaky_relu = ker_fun_leaky_relu(X0_1, X0_2, ('NNGP', 'NTK'))
+        kernels_ab_relu = ker_fun_ab_relu(X0_1, X0_2, ('NNGP', 'NTK'))
         self.assertAllClose(kernels_leaky_relu, kernels_ab_relu, True)
 
   def test_abs(self, same_inputs):
@@ -295,8 +295,8 @@ class ABReluTest(jtu.JaxTestCase):
     X1_1_ab_relu = apply_ab_relu(params, X0_1)
     self.assertAllClose(X1_1_abs, X1_1_ab_relu, True)
 
-    kernels_abs = ker_fun_abs(X0_1, X0_2)
-    kernels_ab_relu = ker_fun_ab_relu(X0_1, X0_2)
+    kernels_abs = ker_fun_abs(X0_1, X0_2, ('NNGP', 'NTK'))
+    kernels_ab_relu = ker_fun_ab_relu(X0_1, X0_2, ('NNGP', 'NTK'))
     self.assertAllClose(kernels_abs, kernels_ab_relu, True)
 
 

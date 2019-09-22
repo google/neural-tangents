@@ -23,35 +23,35 @@ from __future__ import division
 from __future__ import print_function
 from jax import random
 from functools import partial
+import operator
+from collections import namedtuple
+from jax.tree_util import tree_map
+from jax.tree_util import tree_multimap
 from neural_tangents.utils import batch
 from neural_tangents.utils import empirical
-from neural_tangents.utils.kernel import Kernel
+from neural_tangents.utils.utils import get_namedtuple
 
 
+# NOTE(schsam): Before this CL, device_count=0 by default. Changing this to -1
+# seemed right (is it?) However, this causes some errors in the MC batching
+# tests with convolutions. It seems like this might be a batching rule issue.
 def _get_ker_fun_sample_once(ker_fun,
                              init_fun,
                              batch_size=0,
-                             device_count=0,
+                             device_count=-1,
                              store_on_device=True):
-
   @partial(batch.batch, batch_size=batch_size,
            device_count=device_count,
            store_on_device=store_on_device)
-  def ker_fun_sample_once(x1, x2, key):
+  def ker_fun_sample_once(x1, x2, key, get):
     _, params = init_fun(key, x1.shape)
-
-    def ker_fun_params(x1, x2):
-      return ker_fun(x1, x2, params)
-
-    return ker_fun_params(x1, x2)
-
+    return ker_fun(x1, x2, params, get)
   return ker_fun_sample_once
 
 
-def _get_ker_fun_sample_many(ker_fun_sample_once,
-                             compute_nngp=True,
-                             compute_ntk=True):
-  def get_sampled_kernel(x1, x2, key, n_samples):
+def _get_ker_fun_sample_many(ker_fun_sample_once):
+  @get_namedtuple('MonteCarloKernel')
+  def get_sampled_kernel(x1, x2, key, n_samples, get):
     if x2 is not None:
       assert x1.shape[1:] == x2.shape[1:]
 
@@ -61,26 +61,22 @@ def _get_ker_fun_sample_many(ker_fun_sample_once,
       raise ValueError('Got set `n_samples=%d` and %d RNG keys.' %
                        (n_samples, key.shape[0]))
 
-    ker_sampled = Kernel(var1=None,
-                         nngp=0. if compute_nngp else None,
-                         var2=None,
-                         ntk=0. if compute_ntk else None,
-                         is_gaussian=None,
-                         is_height_width=None,
-                         marginal=None,
-                         cross=None)
-    for subkey in key:
-      ker_sampled += ker_fun_sample_once(x1, x2, subkey)
+    for i, subkey in enumerate(key):
+      one_sample = ker_fun_sample_once(x1, x2, subkey, get)
+      if i == 0:
+        ker_sampled = one_sample
+      else:
+        ker_sampled = tree_multimap(
+            operator.add, ker_sampled, one_sample)
 
-    return ker_sampled / len(key)
+    ker_sampled = tree_map(lambda x: x / len(key), ker_sampled)
+    return ker_sampled._asdict()
 
   return get_sampled_kernel
 
 
 def get_ker_fun_monte_carlo(init_fun,
                             apply_fun,
-                            compute_nngp=True,
-                            compute_ntk=True,
                             batch_size=0,
                             device_count=-1,
                             store_on_device=True):
@@ -93,8 +89,6 @@ def get_ker_fun_monte_carlo(init_fun,
     apply_fun: a function computing the output of the neural network.
       From `jax.experimental.stax`: "takes params, inputs, and an rng key and
       applies the layer".
-    compute_nngp: a boolean, `True` to compute NNGP kernel.
-    compute_ntk: a boolean, `True` to compute NTK kernel.
     batch_size: an integer making the kernel computed in batches of `x1` and
       `x2` of this size. `0` means computing the whole kernel. Must divide
       `x1.shape[0]` and `x2.shape[0]`.
@@ -110,9 +104,7 @@ def get_ker_fun_monte_carlo(init_fun,
     A function of signature `ker_fun(x1, x2, key, n_samples)` to sample an
       empirical `Kernel`.
   """
-  ker_fun = empirical.get_ker_fun_empirical(apply_fun,
-                                            compute_nngp,
-                                            compute_ntk)
+  ker_fun = empirical.get_ker_fun_empirical(apply_fun)
 
   ker_fun_sample_once = _get_ker_fun_sample_once(ker_fun,
                                                  init_fun,
@@ -120,7 +112,5 @@ def get_ker_fun_monte_carlo(init_fun,
                                                  device_count,
                                                  store_on_device)
 
-  ker_fun_sample_many = _get_ker_fun_sample_many(ker_fun_sample_once,
-                                                 compute_nngp,
-                                                 compute_ntk)
+  ker_fun_sample_many = _get_ker_fun_sample_many(ker_fun_sample_once)
   return ker_fun_sample_many

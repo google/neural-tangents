@@ -36,7 +36,7 @@ INTERMEDIATE_CONV = 'INTERMEDIATE_CONV'
 
 # TODO(schsam): Add a pooling test when multiple inputs are supported in
 # Conv + Pooling.
-TRAIN_SHAPES = [(4, 4), (4, 8), (8, 8), (6, 4, 4, 3), (4, 4, 4, 3)]
+TRAIN_SHAPES = [(4, 4), (4, 8), (8, 8), (8, 4, 4, 3), (4, 4, 4, 3)]
 TEST_SHAPES = [(2, 4), (6, 8), (16, 8), (2, 4, 4, 3), (2, 4, 4, 3)]
 NETWORK = [STANDARD, STANDARD, STANDARD, STANDARD, INTERMEDIATE_CONV]
 OUTPUT_LOGITS = [1, 2, 3]
@@ -78,9 +78,8 @@ def _theoretical_kernel(unused_key, input_shape, network, just_theta):
 
   @jit
   def ker_fun(x1, x2=None):
-    k = _ker_fun(x1, x2)
-    if just_theta:
-      return k.ntk
+    get_all = ('ntk', 'nngp', 'var1', 'var2', 'is_gaussian', 'is_height_width')
+    k = _ker_fun(x1, x2, 'ntk') if just_theta else _ker_fun(x1, x2, get_all)
     return k
 
   return ker_fun
@@ -99,31 +98,25 @@ def _test_kernel_against_batched(cls, ker_fun, batched_ker_fun, train, test):
   g = ker_fun(train, None)
   g_b = batched_ker_fun(train, None)
 
-  if isinstance(g, stax.Kernel):
-    cls.assertAllClose(g.var1, g_b.var1, check_dtypes=True)
-    cls.assertAllClose(g.nngp, g_b.nngp, check_dtypes=True)
-    cls.assertAllClose(g.ntk, g_b.ntk, check_dtypes=True)
-    cls.assertAllClose(g.is_gaussian, g_b.is_gaussian, check_dtypes=True)
-    cls.assertAllClose(
-        g.is_height_width, g_b.is_height_width, check_dtypes=True)
-    cls.assertAllClose(g.marginal, g_b.marginal, check_dtypes=True)
-    cls.assertAllClose(g.cross, g_b.cross, check_dtypes=True)
+  if hasattr(g, '_asdict'):
+    g_dict = g._asdict()
+    g_b_dict = g_b._asdict()
+    assert set(g_dict.keys()) == set(g_b_dict.keys())
+    for k in g_dict:
+      if k != 'var2':
+        cls.assertAllClose(g_dict[k], g_b_dict[k], check_dtypes=True)
   else:
     cls.assertAllClose(g, g_b, check_dtypes=True)
 
   g = ker_fun(train, test)
   g_b = batched_ker_fun(train, test)
 
-  if isinstance(g, stax.Kernel):
-    cls.assertAllClose(g.var1, g_b.var1, check_dtypes=True)
-    cls.assertAllClose(g.var2, g_b.var2, check_dtypes=True)
-    cls.assertAllClose(g.nngp, g_b.nngp, check_dtypes=True)
-    cls.assertAllClose(g.ntk, g_b.ntk, check_dtypes=True)
-    cls.assertAllClose(g.is_gaussian, g_b.is_gaussian, check_dtypes=True)
-    cls.assertAllClose(
-        g.is_height_width, g_b.is_height_width, check_dtypes=True)
-    cls.assertAllClose(g.marginal, g_b.marginal, check_dtypes=True)
-    cls.assertAllClose(g.cross, g_b.cross, check_dtypes=True)
+  if hasattr(g, '_asdict'):
+    g_dict = g._asdict()
+    g_b_dict = g_b._asdict()
+    assert set(g_dict.keys()) == set(g_b_dict.keys())
+    for k in g_dict:
+      cls.assertAllClose(g_dict[k], g_b_dict[k], check_dtypes=True)
   else:
     cls.assertAllClose(g, g_b, check_dtypes=True)
 
@@ -255,8 +248,7 @@ class BatchTest(jtu.JaxTestCase):
                 ker_fun
           }
           for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
-          for name, ker_fun in KERNELS.items()
-          if len(train) == 2))
+          for name, ker_fun in KERNELS.items()))
   def testAutomatic(self, train_shape, test_shape, network, name, ker_fun):
     utils.stub_out_pmap(batch, 2)
 

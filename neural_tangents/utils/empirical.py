@@ -18,6 +18,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 import operator
+from collections import namedtuple
 from absl import flags
 from jax.api import eval_shape
 from jax.api import jacobian
@@ -27,8 +28,8 @@ from jax.config import config
 import jax.numpy as np
 from jax.tree_util import tree_multimap
 from jax.tree_util import tree_reduce
-from neural_tangents.utils.kernel import Kernel
 from neural_tangents.utils import flags as internal_flags
+from neural_tangents.utils.utils import get_namedtuple
 
 
 config.parse_flags_with_absl()  # NOTE(schsam): Is this safe?
@@ -292,20 +293,30 @@ def get_nngp_fun_empirical(f):
   return nngp_fun
 
 
-def get_ker_fun_empirical(f, compute_nngp=True, compute_ntk=True):
-  if compute_nngp:
-    nngp_fun = get_nngp_fun_empirical(f)
-  else:
-    nngp_fun = lambda x1, x2, params: None
+def get_ker_fun_empirical(f):
+  """Returns a function that computes single draws from NNGP and NT kernels."""
 
-  if compute_ntk:
-    ntk_fun = get_ntk_fun_empirical(f)
-  else:
-    ntk_fun = lambda x1, x2, params: None
+  ker_funs = {
+      'nngp': get_nngp_fun_empirical(f),
+      'ntk': get_ntk_fun_empirical(f)
+  }
 
-  def ker_fun(x1, x2, params):
-    return Kernel(None, nngp_fun(x1, x2, params),
-                  None, ntk_fun(x1, x2, params), None, None,
-                  None, None)
+  @get_namedtuple('EmpiricalKernel')
+  def ker_fun(x1, x2, params, get):
+    """Returns a draw from the requested empirical kernels.
+
+    Args:
+      x1: An ndarray of shape [n1,] + input_shape.
+      x2: An ndarray of shape [n2,] + input_shape.
+      params: A PyTree of parameters for the function `f`.
+      get: either a string or a tuple of strings specifying which data should
+        be returned by the kernel function. Can be `nngp` or `ntk`.
+
+    Returns:
+      If get is a string, returns the requested ndarray. If get is a tuple
+      returns an `EmpiricalKernel` namedtuple containing only the requested
+      information.
+    """
+    return {g: ker_funs[g](x1, x2, params) for g in get}
 
   return ker_fun

@@ -45,6 +45,7 @@ def _scan(f, init, xs, store_on_device):
   for x in xs:
     carry, y = f(carry, x)
     ys += [y]
+
   return carry, tree_multimap(lambda *y: stack(y), *ys)
 
 
@@ -74,39 +75,40 @@ def _flatten_batch_dimensions(k, discard_axis=None):
 
 def _flatten_kernel(k):
   """Flattens a kernel array or a `Kernel` along the batch dimension."""
-  if isinstance(k, Kernel):
-    return Kernel(
-        _flatten_batch_dimensions(k.var1, discard_axis=1),
-        _flatten_batch_dimensions(k.nngp),
-        _flatten_batch_dimensions(k.var2, discard_axis=0),
-        _flatten_batch_dimensions(k.ntk),
-        np.all(k.is_gaussian) if k.is_gaussian is not None else None,
-        np.all(k.is_height_width) if k.is_height_width is not None else None,
-        np.reshape(k.marginal, (-1,))[0] if k.marginal is not None else None,
-        np.reshape(k.cross, (-1,))[0] if k.cross is not None else None)
+  if hasattr(k, '_asdict'):
+    k_dict = k._asdict()
+    k = k._replace(**dict((key, 0.) for key in k_dict))
+    for key, value in k_dict.items():
+      if key == 'var1':
+        k_dict[key] = _flatten_batch_dimensions(value, discard_axis=1)
+      elif key == 'var2':
+        k_dict[key] = _flatten_batch_dimensions(value, discard_axis=0)
+      elif key in ('marginal', 'is_height_width', 'is_gaussian', 'cross'):
+        k_dict[key] = value[(0,) * value.ndim]
+      else:
+        k_dict[key] = _flatten_batch_dimensions(value)
+    return k._replace(**k_dict)
   elif isinstance(k, np.ndarray):
     return _flatten_batch_dimensions(k)
   else:
     raise TypeError(
-        'Expected kernel to be either a `Kernel` or a `np.ndarray`, got %s.'
+        'Expected kernel to be either a namedtuple or a `np.ndarray`, got %s.'
         % type(k)
     )
 
 
 def _move_kernel_to_cpu(kernel):
   """Moves data in a kernel from an accelerator to the CPU."""
-  if isinstance(kernel, Kernel):
-    return Kernel(
-        device_get(kernel.var1),
-        device_get(kernel.nngp),
-        device_get(kernel.var2),
-        device_get(kernel.ntk),
-        kernel.is_gaussian,
-        kernel.is_height_width,
-        kernel.marginal,
-        kernel.cross)
-  else:
+  if hasattr(kernel, '_asdict'):
+    return kernel._replace(
+        **dict([(k, device_get(v)) for k, v in kernel._asdict().items()]))
+  elif isinstance(kernel, np.ndarray):
     return device_get(kernel)
+  else:
+    raise TypeError(
+        'Expected kernel to be either a namedtuple or a `np.ndarray`, got %s.'
+        % type(k)
+    )
 
 
 def _serial(ker_fun, batch_size, store_on_device=True):

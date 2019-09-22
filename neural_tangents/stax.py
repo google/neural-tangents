@@ -35,12 +35,12 @@ Example:
   >>> from jax import random
   >>> from neural_tangents import stax
   >>> from neural_tangents import predict
-  >>> 
+  >>>
   >>> key1, key2 = random.split(random.PRNGKey(1), 2)
   >>> x_train = random.normal(key1, (20, 32, 32, 3))
   >>> y_train = random.uniform(key1, (20, 10))
   >>> x_test = random.normal(key2, (5, 32, 32, 3))
-  >>> 
+  >>>
   >>> init_fun, apply_fun, ker_fun = stax.serial(
   >>>     stax.Conv(128, (3, 3)),
   >>>     stax.Relu(),
@@ -50,13 +50,13 @@ Example:
   >>>     stax.Flatten(),
   >>>     stax.Dense(10)
   >>> )
-  >>> 
+  >>>
   >>> # (5, 10) np.ndarray NNGP test prediction
-  >>> y_test_nngp = predict.gp_inference(ker_fun, x_train, y_train, x_test, 
+  >>> y_test_nngp = predict.gp_inference(ker_fun, x_train, y_train, x_test,
   >>>                                    mode='NNGP')
-  >>> 
+  >>>
   >>> # (5, 10) np.ndarray NTK prediction
-  >>> y_test_ntk = predict.gp_inference(ker_fun, x_train, y_train, x_test, 
+  >>> y_test_ntk = predict.gp_inference(ker_fun, x_train, y_train, x_test,
   >>>                                   mode='NTK')
   ```
 """
@@ -67,6 +67,7 @@ from __future__ import print_function
 from functools import wraps
 import warnings
 import aenum
+from collections import namedtuple
 from jax import lax
 from jax import random
 from jax.experimental import stax
@@ -74,6 +75,7 @@ from jax.lib import xla_bridge
 import jax.numpy as np
 from jax.scipy.special import erf
 from neural_tangents.utils.kernel import Kernel
+from neural_tangents.utils.utils import get_namedtuple
 from neural_tangents.utils.kernel import Marginalisation
 
 
@@ -313,10 +315,7 @@ def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk):
 
 
 def _preprocess_ker_fun(ker_fun):
-  def new_ker_fun(x1_or_kernel,
-                  x2=None,
-                  compute_nngp=True,
-                  compute_ntk=True):
+  def new_ker_fun(x1_or_kernel, x2, get):
     """Returns the `Kernel` resulting from applying `ker_fun` to given inputs.
 
     Args:
@@ -324,45 +323,40 @@ def _preprocess_ker_fun(ker_fun):
         `[batch_size_1] + input_shape`, or a `Kernel`.
       x2: an optional `np.ndarray` with shape `[batch_size_2] + input_shape`.
         `None` means `x2 == x1` or `x1_or_kernel is Kernel`.
-      compute_nngp: a boolean, `True` to compute NNGP kernel.
-      compute_ntk: a boolean, `True` to compute NTK kernel.
-
+      get: either a string or a tuple of strings specifying which data should
+        be returned by the kernel function. Can be `nngp`, `ntk`, `var1`,
+        `var2`, `is_gaussian`, or `is_height_width`.
     Returns:
-      A `Kernel`.
+      If get is a string, returns the requested ndarray. If get is a tuple
+      returns an `AnalyticKernel` namedtuple containing only the requested
+      information.
     """
+
     if (isinstance(x1_or_kernel, Kernel) or
         (isinstance(x1_or_kernel, list) and
          all(isinstance(k, Kernel) for k in x1_or_kernel))):
-      kernel = x1_or_kernel
+      return ker_fun(x1_or_kernel)
+    return outer_ker_fun(x1_or_kernel, x2, get)
 
-    elif isinstance(x1_or_kernel, np.ndarray):
-      if x2 is None or isinstance(x2, np.ndarray):
-        if not compute_nngp:
-          if compute_ntk:
-            raise ValueError('NNGP has to be computed to compute NTK. Please '
-                             'set `compute_nngp=True`.')
-          else:
-            return Kernel(None, None, None, None, None, None, None, None)
-
-        covs_req = getattr(
-            ker_fun, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_ALL,
-                                        'cross': Marginalisation.OVER_ALL})
-        kernel = _inputs_to_kernel(
-            x1_or_kernel, x2, compute_ntk=compute_ntk, **covs_req)
-
-      else:
-        raise TypeError('`x2` to a kernel propagation function '
-                        'should be `None` or a `np.ndarray`, got %s.'
-                        % type(x2))
-
-    else:
+  @get_namedtuple('AnalyticKernel')
+  def outer_ker_fun(x1, x2, get):
+    if not isinstance(x1, np.ndarray):
       raise TypeError('Inputs to a kernel propagation function should be '
                       'a `Kernel`, '
                       'a `list` of `Kernel`s, '
-                      'or a (tuple of) `np.ndarray`(s), got %s.'
-                      % type(x1_or_kernel))
+                      'or a (tuple of) `np.ndarray`(s), got %s.' % type(x1))
 
-    return ker_fun(kernel)
+    if not (x2 is None or isinstance(x2, np.ndarray)):
+      raise TypeError('`x2` to a kernel propagation function '
+                      'should be `None` or a `np.ndarray`, got %s.'
+                      % type(x2))
+
+    include_ntk = 'ntk' in get
+    covs_req = getattr(ker_fun,
+                       _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_ALL,
+                                          'cross': Marginalisation.OVER_ALL})
+    kernel = _inputs_to_kernel(x1, x2, compute_ntk=include_ntk, **covs_req)
+    return ker_fun(kernel)._asdict()
 
   if hasattr(ker_fun, _COVARIANCES_REQ):
     setattr(new_ker_fun, _COVARIANCES_REQ, getattr(ker_fun, _COVARIANCES_REQ))
@@ -699,30 +693,6 @@ def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0)):
   return init_fun, apply_fun, ker_fun
 
 
-@_layer
-def serial(*layers):
-  """Combinator for composing layers in serial.
-
-  Based on `jax.experimental.stax.serial`.
-
-  Args:
-    *layers: a sequence of layers, each an (init_fun, apply_fun, ker_fun) tuple.
-
-  Returns:
-    A new layer, meaning an `(init_fun, apply_fun, ker_fun)` tuple, representing
-      the serial composition of the given sequence of layers.
-  """
-  init_funs, apply_funs, ker_funs = zip(*layers)
-  init_fun, apply_fun = stax.serial(*zip(init_funs, apply_funs))
-
-  def ker_fun(kernels):
-    for f in ker_funs:
-      kernels = f(kernels)
-    return kernels
-
-  _set_covariances_req_attr(ker_fun, ker_funs)
-  return init_fun, apply_fun, ker_fun
-
 
 @_layer
 def Identity():
@@ -837,6 +807,34 @@ def _flip_height_width(kernels):
   return Kernel(var1, nngp, var2, ntk, is_gaussian, not is_height_width,
                 marginal, cross)
 
+@_layer
+def serial(*layers):
+  """Combinator for composing layers in serial.
+
+  Based on `jax.experimental.stax.serial`.
+
+  Args:
+    *layers: a sequence of layers, each an (init_fun, apply_fun, ker_fun) tuple.
+
+  Returns:
+    A new layer, meaning an `(init_fun, apply_fun, ker_fun)` tuple, representing
+      the serial composition of the given sequence of layers.
+  """
+  init_funs, apply_funs, ker_funs = zip(*layers)
+  init_fun, apply_fun = stax.serial(*zip(init_funs, apply_funs))
+
+  def ker_fun(kernels):
+    for f in ker_funs:
+      # NOTE(schsam): Note that in combinators, the kernel functions have
+      # already been wrapped in a @_layer decorator. Since we don't want the
+      # @_layer decorated kernel functions to have default arguments we have to
+      # pass arguments here even though we know they are a no-op.
+      kernels = f(kernels, None, None)
+    return kernels
+
+  _set_covariances_req_attr(ker_fun, ker_funs)
+  return init_fun, apply_fun, ker_fun
+
 
 @_layer
 def parallel(*layers):
@@ -859,7 +857,7 @@ def parallel(*layers):
   init_fun, apply_fun = stax.parallel(*zip(init_funs, apply_funs))
 
   def ker_fun(kernels):
-    return [f(ker) for ker, f in zip(kernels, ker_funs)]
+    return [f(ker, None, None) for ker, f in zip(kernels, ker_funs)]
 
   _set_covariances_req_attr(ker_fun, ker_funs)
   return init_fun, apply_fun, ker_fun
