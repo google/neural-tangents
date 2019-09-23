@@ -5,7 +5,7 @@
 
 Neural Tangents is a high-level neural network API for specifying complex, hierarchical, neural networks of both finite and _infinite_ width. Neural Tangents allows researchers to define, train, and evaluate infinite networks as easily as finite ones.
 
-Infinite (in width or channel count) neural networks are Gaussian Processes (GPs) with a kernel function determined by their architecture (see [References](References) for details and nuances of this correspondence).
+Infinite (in width or channel count) neural networks are Gaussian Processes (GPs) with a kernel function determined by their architecture (see [References](#References) for details and nuances of this correspondence).
 
 Neural Tangents allows you to construct a neural network model with the usual building blocks like convolutions, pooling, residual connections, nonlinearities etc. and obtain not only the finite model, but also the kernel function of the respective GP.
 
@@ -13,6 +13,49 @@ The library is written in python using [JAX](https://github.com/google/jax) and 
 
 Neural Tangents is a work in progress.
 We happily welcome contributions!
+
+## Contents
+* [Installation](#Installation)
+* [5-Minute Intro](#5-Minute-Intro)
+* [Package description](#Package-description)
+* [Training Dynamics of Wide but Finite Networks](#Training-Dynamics-of-Wide-but-Finite-Networks)
+* [Papers](#Papers)
+* [Citation](#Citation)
+* [References](#References)
+
+## Installation
+
+To install Neural Tangents, first follow [JAX's](https://www.github.com/google/jax/)
+installation instructions. With JAX installed, using Neural Tangents should be
+as easy as:
+
+```
+git clone https://github.com/google/neural-tangents
+pip install -e neural-tangents
+```
+
+You can then run the examples by calling:
+
+```
+pip install tensorflow-datasets
+
+python neural-tangents/examples/weight_space.py
+python neural-tangents/examples/function_space.py
+```
+
+Finally, you can run tests by calling:
+
+```
+for f in neural-tangents/neural_tangents/tests/*.py; do python $f; done
+```
+
+If you would prefer, you can get started without installing by checking out our
+colab examples:
+
+- [Neural Tangents Cookbook](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/neural_tangents_cookbook.ipynb)
+- [Weight Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/weight_space_linearization.ipynb)
+- [Function Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/function_space_linearization.ipynb)
+
 
 ## 5-Minute Intro
 
@@ -138,12 +181,19 @@ The `neural_tangents` package contains two modules:
 
     * `get_ker_fun_monte_carlo` - compute a Monte Carlo kernel estimate  of _any_ `(init_fun, apply_fun)`, not necessarily specified `neural_tangents.stax`, enabling the kernel computation of infinite networks without closed-form expressions.
 
-  * Tools to investigate training dynamics of _wide but finite_ neural networks, like `linearize`, `taylor_expand`, `get_ker_fun_empirical` and more. See [Training Dynamics of Wide but Finite Networks](wide) for details.
+  * Tools to investigate training dynamics of _wide but finite_ neural networks, like `linearize`, `taylor_expand`, `get_ker_fun_empirical` and more. See [Training Dynamics of Wide but Finite Networks](#Training-Dynamics-of-Wide-but-Finite-Networks) for details.
 
 
+### [`neural_tangents.stax`](https://github.com/google/neural-tangents/blob/master/neural_tangents/stax.py) vs [`jax.experimental.stax`](https://github.com/google/jax/blob/master/jax/experimental/stax.py)
+We remark the following differences between our library and the JAX one. 
+
+* All `nt.stax` layers are instantiated with a function call, i.e. `nt.stax.Relu()` vs `jax.experimental.stax.Relu`.
+* All layers with trainable parameters use the _NTK parameterization_ (see [[5]](5), Remark 1).
+* `nt.stax` layers support `CIRCULAR` padding.
+* `nt.stax` and `jax.experimental.stax` may have different layers available.
 
 
-## <a name="wide"></a>Training Dynamics of Wide but Finite Networks
+## Training Dynamics of Wide but Finite Networks
 
 The kernel of an infinite network `ker_fun(x1, x2).ntk` combined with  `neural_tangents.predict.gradient_descent_mse` together allow to analytically track the outputs of an infinitely wide neural network trained on MSE loss througout training. Here we discuss the implications for _wide but finite_ neural networks and present tools to study their evolution in _weight space_ (trainable parameters of the network) and _function space_ (outputs of the network).
 
@@ -243,41 +293,7 @@ With a new model it is therefore adviseable to start with a very large model on
 a small dataset using a small learning rate.
 
 
-## Getting Started
-
-To install Neural Tangents, first follow [JAX's](https://www.github.com/google/jax/)
-installation instructions. With JAX installed, using Neural Tangents should be
-as easy as:
-
-```
-git clone https://github.com/google/neural-tangents
-pip install -e neural-tangents
-```
-
-You can then run the examples by calling:
-
-```
-pip install tensorflow-datasets
-
-python neural-tangents/examples/weight_space.py
-python neural-tangents/examples/function_space.py
-```
-
-Finally, you can run tests by calling:
-
-```
-for f in neural-tangents/neural_tangents/tests/*.py; do python $f; done
-```
-
-If you would prefer, you can get started without installing by checking out our
-colab examples:
-
-- [Neural Tangents Cookbook](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/neural_tangents_cookbook.ipynb)
-- [Weight Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/weight_space_linearization.ipynb)
-- [Function Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/function_space_linearization.ipynb)
-
-
-## <a name="Papers"></a>Papers
+## Papers
 
 Neural tangents has been used in the following papers:
 
@@ -303,7 +319,7 @@ Coming soon.
 
 
 
-## <a name="References"></a> References
+## References
 
 <a name="1"></a>[1] [Deep Neural Networks as Gaussian Processes.](https://arxiv.org/abs/1806.07572)
 *ICLR 2018.* \
