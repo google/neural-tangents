@@ -24,7 +24,6 @@ from __future__ import print_function
 from jax import random
 from functools import partial
 import operator
-from collections import namedtuple
 from jax.tree_util import tree_map
 from jax.tree_util import tree_multimap
 from neural_tangents.utils import batch
@@ -32,9 +31,6 @@ from neural_tangents.utils import empirical
 from neural_tangents.utils.utils import get_namedtuple
 
 
-# NOTE(schsam): Before this CL, device_count=0 by default. Changing this to -1
-# seemed right (is it?) However, this causes some errors in the MC batching
-# tests with convolutions. It seems like this might be a batching rule issue.
 def _get_ker_fun_sample_once(ker_fun,
                              init_fun,
                              batch_size=0,
@@ -49,34 +45,45 @@ def _get_ker_fun_sample_once(ker_fun,
   return ker_fun_sample_once
 
 
-def _get_ker_fun_sample_many(ker_fun_sample_once):
-  @get_namedtuple('MonteCarloKernel')
-  def get_sampled_kernel(x1, x2, key, n_samples, get):
+def _get_ker_fun_sample_many(ker_fun_sample_once, key, n_samples,
+                             get_generator):
+  def normalize(sample, n):
+    return tree_map(lambda sample: sample / n, sample)._asdict()
+
+  def get_samples(x1, x2, get):
     if x2 is not None:
       assert x1.shape[1:] == x2.shape[1:]
 
-    if key.shape == (2,):
-      key = random.split(key, n_samples)
-    elif n_samples is not None:
-      raise ValueError('Got set `n_samples=%d` and %d RNG keys.' %
-                       (n_samples, key.shape[0]))
-
-    for i, subkey in enumerate(key):
-      one_sample = ker_fun_sample_once(x1, x2, subkey, get)
-      if i == 0:
+    _key = key
+    for n in range(1, max(n_samples) + 1):
+      _key, split = random.split(_key)
+      one_sample = ker_fun_sample_once(x1, x2, split, get)
+      if n == 1:
         ker_sampled = one_sample
       else:
-        ker_sampled = tree_multimap(
-            operator.add, ker_sampled, one_sample)
+        ker_sampled = tree_multimap(operator.add, ker_sampled, one_sample)
+      yield n, ker_sampled
 
-    ker_sampled = tree_map(lambda x: x / len(key), ker_sampled)
-    return ker_sampled._asdict()
+  if get_generator:
+    @get_namedtuple('MonteCarloKernel')
+    def get_sampled_kernel(x1, x2, get):
+      for n, sample in get_samples(x1, x2, get):
+        if n in n_samples:
+          yield normalize(sample, n)
+  else:
+    @get_namedtuple('MonteCarloKernel')
+    def get_sampled_kernel(x1, x2, get):
+      for n, sample in get_samples(x1, x2, get):
+        pass
+      return normalize(sample, n)
 
   return get_sampled_kernel
 
 
 def get_ker_fun_monte_carlo(init_fun,
                             apply_fun,
+                            key,
+                            n_samples,
                             batch_size=0,
                             device_count=-1,
                             store_on_device=True):
@@ -89,6 +96,12 @@ def get_ker_fun_monte_carlo(init_fun,
     apply_fun: a function computing the output of the neural network.
       From `jax.experimental.stax`: "takes params, inputs, and an rng key and
       applies the layer".
+    key: RNG (`jax.random.PRNGKey`) for sampling random networks. Must have
+      shape `(2,)`.
+    n_samples: number of Monte Carlo samples. Can be either an integer or an
+      iterable of integers at which the resulting generator will yield
+      estimates. Example: use `n_samples=[2**k for k in range(10)]` for the
+      generator to yield estimates using 1, 2, 4, ..., 512 Monte Carlo samples.
     batch_size: an integer making the kernel computed in batches of `x1` and
       `x2` of this size. `0` means computing the whole kernel. Must divide
       `x1.shape[0]` and `x2.shape[0]`.
@@ -101,8 +114,47 @@ def get_ker_fun_monte_carlo(init_fun,
       kernels may fit.
 
   Returns:
-    A function of signature `ker_fun(x1, x2, key, n_samples)` to sample an
-      empirical `Kernel`.
+    If `n_samples` is an integer, returns a function of signature
+    `ker_fun(x1, x2, get)` that returns an MC estimation of the kernel using
+    `n_samples`. If `n_samples` is a collection of integers,
+    `ker_fun(x1, x2, get)` returns a generator that yields estimates using
+    `n` samples for `n in n_samples`.
+
+  Example:
+  ```python
+  >>> from jax import random
+  >>> from neural_tangents import stax
+  >>> from neural_tangents import predict
+  >>> from neural_tangents.api import get_ker_fun_monte_carlo
+  >>>
+  >>> key1, key2 = random.split(random.PRNGKey(1), 2)
+  >>> x_train = random.normal(key1, (20, 32, 32, 3))
+  >>> y_train = random.uniform(key1, (20, 10))
+  >>> x_test = random.normal(key2, (5, 32, 32, 3))
+  >>>
+  >>> init_fun, apply_fun, ker_fun = stax.serial(
+  >>>     stax.Conv(128, (3, 3)),
+  >>>     stax.Relu(),
+  >>>     stax.Conv(256, (3, 3)),
+  >>>     stax.Relu(),
+  >>>     stax.Conv(512, (3, 3)),
+  >>>     stax.Flatten(),
+  >>>     stax.Dense(10)
+  >>> )
+  >>>
+  >>> n_samples = 200
+  >>> ker_fun = get_ker_fun_monte_carlo(init_fun, apply_fun, key1, n_samples)
+  >>> kernel = ker_fun(x_train, x_test, get=('NNGP', 'NTK'))
+  >>> # `kernel` is a tuple of NNGP and NTK MC estimate using `n` samples.
+  >>>
+  >>> n_samples = [1, 10, 100, 1000]
+  >>> ker_fun_generator = get_ker_fun_monte_carlo(init_fun, apply_fun, key1,
+  >>>                                              n_samples)
+  >>> kernel_samples = ker_fun_generator(x_train, x_test, get=('NNGP', 'NTK'))
+  >>> for n, kernel in zip(n_samples, kernel_samples):
+  >>>   print(n, kernel)
+  >>>   # `kernel` is a tuple of NNGP and NTK MC estimate using `n` samples.
+  ```
   """
   ker_fun = empirical.get_ker_fun_empirical(apply_fun)
 
@@ -112,5 +164,29 @@ def get_ker_fun_monte_carlo(init_fun,
                                                  device_count,
                                                  store_on_device)
 
-  ker_fun_sample_many = _get_ker_fun_sample_many(ker_fun_sample_once)
-  return ker_fun_sample_many
+  n_samples, get_generator = _canonicalize_n_samples(n_samples)
+  ker_fun = _get_ker_fun_sample_many(ker_fun_sample_once, key, n_samples,
+                                     get_generator)
+  return ker_fun
+
+
+def _canonicalize_n_samples(n_samples):
+  get_generator = True
+  if isinstance(n_samples, int):
+    get_generator = False
+    n_samples = (n_samples,)
+
+  if hasattr(n_samples, '__iter__'):
+    n_samples = set(n_samples)
+
+    if not all(isinstance(n, int) for n in n_samples):
+      raise ValueError('`n_samples` must contain only integers, got %s.'
+                       % n_samples)
+
+    if any(n <= 0 for n in n_samples):
+      raise ValueError('`n_samples` must be positive, got %s.' % n_samples)
+
+  else:
+    raise ValueError('`n_samples` must be either an integer of a set of '
+                     'integers, got %s.' % type(n_samples))
+  return n_samples, get_generator

@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Tests for `utils/monte_carlo.py`."""
 
 from __future__ import absolute_import
@@ -20,7 +19,6 @@ from __future__ import print_function
 
 from jax import test_util as jtu
 from jax.config import config as jax_config
-from functools import partial
 import jax.numpy as np
 import jax.random as random
 from neural_tangents import stax
@@ -43,8 +41,8 @@ STORE_ON_DEVICE = [True, False]
 
 N_SAMPLES = 4
 
-
 ALL_GET = ('nngp', 'ntk', ('nngp', 'ntk'))
+
 
 def _get_inputs_and_model(width=1, n_classes=2):
   key = random.PRNGKey(1)
@@ -59,28 +57,23 @@ def _get_inputs_and_model(width=1, n_classes=2):
 
 class MonteCarloTest(jtu.JaxTestCase):
 
-  def assertAllClose(self, x, y, check_dtypes, atol=None, rtol=None):
-    if x is None and y is None:
-      return
-    super(MonteCarloTest, self).assertAllClose(x, y, check_dtypes, atol, rtol)
-
   @jtu.parameterized.named_parameters(
-    jtu.cases_from_list({
-        'testcase_name': '[batch_size={}, '
-                         'device_count={} '
-                         'store_on_device={} '
-                         'get={} '
-                         ']'.format(
-                  batch_size, device_count, store_on_device, get),
+      jtu.cases_from_list({
+          'testcase_name': '[batch_size={}, '
+                           'device_count={} '
+                           'store_on_device={} '
+                           'get={} '
+                           ']'.format(batch_size, device_count, store_on_device,
+                                      get),
           'batch_size': batch_size,
           'device_count': device_count,
           'store_on_device': store_on_device,
           'get': get,
-    } for batch_size in BATCH_SIZES for device_count in DEVICE_COUNTS
-                        for store_on_device in STORE_ON_DEVICE
-                        for get in ALL_GET))
-  def test_sample_once_batch(
-      self, batch_size, device_count, store_on_device, get):
+      } for batch_size in BATCH_SIZES for device_count in DEVICE_COUNTS
+                          for store_on_device in STORE_ON_DEVICE
+                          for get in ALL_GET))
+  def test_sample_once_batch(self, batch_size, device_count, store_on_device,
+                             get):
     utils.stub_out_pmap(batch, device_count)
 
     x1, x2, init_fun, apply_fun, _, key = _get_inputs_and_model()
@@ -95,22 +88,22 @@ class MonteCarloTest(jtu.JaxTestCase):
     self.assertAllClose(one_sample, one_sample_batch, True)
 
   @jtu.parameterized.named_parameters(
-    jtu.cases_from_list({
-        'testcase_name': '[batch_size={}, '
-                         'device_count={} '
-                         'store_on_device={} '
-                         'get={} '
-                         ']'.format(
-                  batch_size, device_count, store_on_device, get),
+      jtu.cases_from_list({
+          'testcase_name': '[batch_size={}, '
+                           'device_count={} '
+                           'store_on_device={} '
+                           'get={} '
+                           ']'.format(batch_size, device_count, store_on_device,
+                                      get),
           'batch_size': batch_size,
           'device_count': device_count,
           'store_on_device': store_on_device,
           'get': get,
-    } for batch_size in BATCH_SIZES for device_count in DEVICE_COUNTS
-                        for store_on_device in STORE_ON_DEVICE
-                        for get in ALL_GET))
-  def test_batch_sample_once(
-      self, batch_size, device_count, store_on_device, get):
+      } for batch_size in BATCH_SIZES for device_count in DEVICE_COUNTS
+                          for store_on_device in STORE_ON_DEVICE
+                          for get in ALL_GET))
+  def test_batch_sample_once(self, batch_size, device_count, store_on_device,
+                             get):
     utils.stub_out_pmap(batch, device_count)
 
     x1, x2, init_fun, apply_fun, _, key = _get_inputs_and_model()
@@ -120,58 +113,23 @@ class MonteCarloTest(jtu.JaxTestCase):
         ker_fun, init_fun, device_count=0)
     one_sample = sample_once_fun(x1, x2, key, get)
 
-    batch_sample_once_fun = batch.batch(
-        partial(sample_once_fun, get=get),
-        batch_size, device_count, store_on_device)
-    one_batch_sample = batch_sample_once_fun(x1, x2, key)
+    batch_sample_once_fun = batch.batch(sample_once_fun, batch_size,
+                                        device_count, store_on_device)
+    one_batch_sample = batch_sample_once_fun(x1, x2, key, get)
     self.assertAllClose(one_sample, one_batch_sample, True)
 
   @jtu.parameterized.named_parameters(
-    jtu.cases_from_list({
-        'testcase_name': '[batch_size={}, '
-                         'device_count={} '
-                         'store_on_device={} '
-                         'get={} '
-                         ']'.format(
-                  batch_size, device_count, store_on_device, get),
-        'batch_size': batch_size,
-        'device_count': device_count,
-        'store_on_device': store_on_device,
-        'get': get,
-    } for batch_size in BATCH_SIZES for device_count in DEVICE_COUNTS
-                        for store_on_device in STORE_ON_DEVICE
-                        for get in ALL_GET))
-  def test_sample_many_batch(
-      self, batch_size, device_count, store_on_device, get):
-    utils.stub_out_pmap(batch, device_count)
-
-    x1, x2, init_fun, apply_fun, _, key = _get_inputs_and_model()
-    ker_fun = empirical.get_ker_fun_empirical(apply_fun)
-
-    sample_once_fun = monte_carlo._get_ker_fun_sample_once(
-        ker_fun, init_fun, device_count=0)
-    sample_many_fun = monte_carlo._get_ker_fun_sample_many(sample_once_fun)
-
-    sample_once_fun_batched = batch.batch(sample_once_fun,
-        batch_size, device_count, store_on_device)
-    sample_many_batch_fun = monte_carlo._get_ker_fun_sample_many(
-        sample_once_fun_batched)
-
-    many_samples = sample_many_fun(x1, x2, key, N_SAMPLES, get)
-    many_samples_batch = sample_many_batch_fun(x1, x2, key, N_SAMPLES, get)
-    self.assertAllClose(many_samples, many_samples_batch, True)
-
-  @jtu.parameterized.named_parameters(
-    jtu.cases_from_list({
-        'testcase_name': '[batch_size={}, '
-                         'device_count={} '
-                         'store_on_device={} '
-                         ']'.format(batch_size, device_count, store_on_device),
-        'batch_size': batch_size,
-        'device_count': device_count,
-        'store_on_device': store_on_device,
-    } for batch_size in BATCH_SIZES for device_count in DEVICE_COUNTS
-                        for store_on_device in STORE_ON_DEVICE))
+      jtu.cases_from_list({
+          'testcase_name': '[batch_size={}, '
+                           'device_count={} '
+                           'store_on_device={} '
+                           ']'.format(batch_size, device_count, store_on_device
+                                     ),
+          'batch_size': batch_size,
+          'device_count': device_count,
+          'store_on_device': store_on_device,
+      } for batch_size in BATCH_SIZES for device_count in DEVICE_COUNTS
+                          for store_on_device in STORE_ON_DEVICE))
   def test_sample_vs_analytic_nngp(self, batch_size, device_count,
                                    store_on_device):
     utils.stub_out_pmap(batch, device_count)
@@ -179,25 +137,27 @@ class MonteCarloTest(jtu.JaxTestCase):
     x1, x2, init_fun, apply_fun, stax_ker_fun, key = _get_inputs_and_model(
         512, 512)
 
-    sample = monte_carlo.get_ker_fun_monte_carlo(
-        init_fun, apply_fun, batch_size, device_count, store_on_device)
+    sample = monte_carlo.get_ker_fun_monte_carlo(init_fun, apply_fun, key, 200,
+                                                 batch_size, device_count,
+                                                 store_on_device)
 
-    ker_empirical = sample(x1, x2, key, 200, 'nngp')
+    ker_empirical = sample(x1, x2, 'nngp')
     ker_analytic = stax_ker_fun(x1, x2, 'nngp')
 
     utils.assert_close_matrices(self, ker_analytic, ker_empirical, 1e-2)
 
   @jtu.parameterized.named_parameters(
-    jtu.cases_from_list({
-        'testcase_name': '[batch_size={}, '
-                         'device_count={} '
-                         'store_on_device={} '
-                         ']'.format(batch_size, device_count, store_on_device),
-        'batch_size': batch_size,
-        'device_count': device_count,
-        'store_on_device': store_on_device,
-    } for batch_size in BATCH_SIZES for device_count in DEVICE_COUNTS
-                        for store_on_device in STORE_ON_DEVICE))
+      jtu.cases_from_list({
+          'testcase_name': '[batch_size={}, '
+                           'device_count={} '
+                           'store_on_device={} '
+                           ']'.format(batch_size, device_count, store_on_device
+                                     ),
+          'batch_size': batch_size,
+          'device_count': device_count,
+          'store_on_device': store_on_device,
+      } for batch_size in BATCH_SIZES for device_count in DEVICE_COUNTS
+                          for store_on_device in STORE_ON_DEVICE))
   def test_monte_carlo_vs_analytic_ntk(self, batch_size, device_count,
                                        store_on_device):
     utils.stub_out_pmap(batch, device_count)
@@ -205,16 +165,73 @@ class MonteCarloTest(jtu.JaxTestCase):
     x1, x2, init_fun, apply_fun, stax_ker_fun, key = _get_inputs_and_model(
         512, 2)
 
-    sample = monte_carlo.get_ker_fun_monte_carlo(
-        init_fun, apply_fun, batch_size, device_count, store_on_device)
+    sample = monte_carlo.get_ker_fun_monte_carlo(init_fun, apply_fun, key, 100,
+                                                 batch_size, device_count,
+                                                 store_on_device)
 
-    ker_empirical = sample(x1, x2, key, 100, 'ntk')
+    ker_empirical = sample(x1, x2, 'ntk')
     ker_empirical = (
         np.sum(ker_empirical, axis=(-1, -2)) / ker_empirical.shape[-1])
 
     ker_analytic = stax_ker_fun(x1, x2, 'ntk')
 
     utils.assert_close_matrices(self, ker_analytic, ker_empirical, 1e-2)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name': '[batch_size={}, '
+                           'device_count={} '
+                           'store_on_device={} '
+                           'get={}'
+                           ']'.format(batch_size, device_count, store_on_device,
+                                      get),
+          'batch_size': batch_size,
+          'device_count': device_count,
+          'store_on_device': store_on_device,
+          'get': get
+      } for batch_size in BATCH_SIZES for device_count in DEVICE_COUNTS
+                          for store_on_device in STORE_ON_DEVICE
+                          for get in ALL_GET))
+  def test_monte_carlo_generator(self, batch_size, device_count,
+                                 store_on_device, get):
+    utils.stub_out_pmap(batch, device_count)
+
+    x1, x2, init_fun, apply_fun, stax_ker_fun, key = _get_inputs_and_model(8, 1)
+    x3, x4, _, _, _, _ = _get_inputs_and_model(8, 1)
+
+    log_n_max = 4
+    n_samples = [2**k for k in range(log_n_max)]
+    sample_generator = monte_carlo.get_ker_fun_monte_carlo(
+        init_fun, apply_fun, key, n_samples, batch_size, device_count,
+        store_on_device)
+
+    samples_12 = sample_generator(x1, x2, get)
+    samples_34 = sample_generator(x3, x4, get)
+
+    count = 0
+    for n, s_12, s_34 in zip(n_samples, samples_12, samples_34):
+      sample_fun = monte_carlo.get_ker_fun_monte_carlo(init_fun, apply_fun, key,
+                                                       n, batch_size,
+                                                       device_count,
+                                                       store_on_device)
+      sample_12 = sample_fun(x1, x2, get)
+      sample_34 = sample_fun(x3, x4, get)
+      self.assertAllClose(s_12, sample_12, True)
+      self.assertAllClose(s_12, s_34, True)
+      self.assertAllClose(s_12, sample_34, True)
+
+      count += 1
+
+    self.assertEqual(log_n_max, count)
+
+    ker_analytic_12 = stax_ker_fun(x1, x2, get)
+    ker_analytic_34 = stax_ker_fun(x3, x4, get)
+    if get == 'ntk':
+      s_12 = np.squeeze(s_12, (-1, -2))
+    elif 'ntk' in get:
+      s_12 = s_12._replace(ntk=np.squeeze(s_12.ntk, (-1, -2)))
+    self.assertAllClose(ker_analytic_12, s_12, True, 2., 2.)
+    self.assertAllClose(ker_analytic_12, ker_analytic_34, True)
 
 
 if __name__ == '__main__':

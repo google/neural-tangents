@@ -25,8 +25,8 @@ import jax.numpy as np
 import jax.random as random
 from neural_tangents import stax
 from neural_tangents.utils import monte_carlo
-from neural_tangents.utils import kernel
 from neural_tangents.utils import utils
+
 
 jax_config.parse_flags_with_absl()
 
@@ -40,7 +40,7 @@ INPUT_SHAPE = (2, 7, 6, 3)
 
 WIDTHS = [2**11]
 
-N_SAMPLES = 200
+N_SAMPLES = 300
 
 RTOL = 0.01
 
@@ -180,14 +180,14 @@ class StaxTest(jtu.JaxTestCase):
     if is_ntk:
       exact = ker_fun(x1, x2, 'ntk')
       ker_fun_empirical = monte_carlo.get_ker_fun_monte_carlo(
-          init_fun, apply_fun)
-      empirical = ker_fun_empirical(x1, x2, key, N_SAMPLES, 'ntk')
+          init_fun, apply_fun, key, N_SAMPLES)
+      empirical = ker_fun_empirical(x1, x2, 'ntk')
       empirical = np.reshape(empirical, exact.shape)
     else:
       exact = ker_fun(x1, x2, 'nngp')
       ker_fun_empirical = monte_carlo.get_ker_fun_monte_carlo(
-          init_fun, apply_fun)
-      empirical = ker_fun_empirical(x1, x2, key, N_SAMPLES, 'nngp')
+          init_fun, apply_fun, key, N_SAMPLES)
+      empirical = ker_fun_empirical(x1, x2, 'nngp')
     utils.assert_close_matrices(self, empirical, exact, RTOL)
 
 
@@ -200,14 +200,6 @@ class StaxTest(jtu.JaxTestCase):
     },
 ])
 class ABReluTest(jtu.JaxTestCase):
-
-  def assertAllClose(self, x, y, check_dtypes, atol=None, rtol=None):
-    if x is None and y is None:
-      pass
-    elif isinstance(x, kernel.Marginalisation) and isinstance(x, kernel.Marginalisation):
-      assert x == y
-    else:
-      super(ABReluTest, self).assertAllClose(x, y, check_dtypes, atol, rtol)
 
   def test_ab_relu_relu(self, same_inputs):
     key = random.PRNGKey(1)

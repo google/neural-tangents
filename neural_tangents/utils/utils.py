@@ -20,6 +20,7 @@ import jax.numpy as np
 from collections import namedtuple
 from functools import wraps
 import inspect
+import types
 
 
 def stub_out_pmap(batch, count):
@@ -100,10 +101,17 @@ def get_namedtuple(name):
       fun_out = fun(*canonicalized_args, **kwargs)
 
       if get_is_not_tuple:
-        return fun_out[get[0]]
+        if isinstance(fun_out, types.GeneratorType):
+          return (output[get[0]] for output in fun_out)
+        else:
+          return fun_out[get[0]]
 
       ReturnType = named_tuple_factory(name, get)
-      return ReturnType(*tuple(fun_out[g] for g in get))
+      if isinstance(fun_out, types.GeneratorType):
+        return (ReturnType(*tuple(output[g] for g in get))
+                for output in fun_out)
+      else:
+        return ReturnType(*tuple(fun_out[g] for g in get))
 
     return getter_fun
   return getter_decorator
