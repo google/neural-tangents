@@ -28,8 +28,8 @@ from jax.experimental import optimizers
 import jax.numpy as np
 import neural_tangents as nt
 from neural_tangents import stax
-import datasets
-import util
+from examples import datasets
+from examples import util
 
 
 flags.DEFINE_float('learning_rate', 1.0,

@@ -19,7 +19,7 @@ from __future__ import division
 from __future__ import print_function
 from jax import test_util as jtu
 from jax.config import config
-from neural_tangents.examples import weight_space
+from examples import weight_space
 
 
 config.parse_flags_with_absl()
