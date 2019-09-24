@@ -82,15 +82,15 @@ def named_tuple_factory(name, get):
 
 
 def get_namedtuple(name):
-  def getter_decorator(fun):
+  def getter_decorator(fn):
     try:
-      get_index = inspect.getargspec(fun).args.index('get')
+      get_index = inspect.getargspec(fn).args.index('get')
     except:
       raise ValueError(
           '"get_namedtuple" functions must have a "get" argument.')
 
-    @wraps(fun)
-    def getter_fun(*args, **kwargs):
+    @wraps(fn)
+    def getter_fn(*args, **kwargs):
       if not args:
         raise ValueError(
             'A get_namedtuple function must have a "get" argument.')
@@ -103,20 +103,20 @@ def get_namedtuple(name):
         get_is_not_tuple, get = canonicalize_get(args[get_index])
         canonicalized_args[get_index] = get
 
-      fun_out = fun(*canonicalized_args, **kwargs)
+      fn_out = fn(*canonicalized_args, **kwargs)
 
       if get_is_not_tuple:
-        if isinstance(fun_out, types.GeneratorType):
-          return (output[get[0]] for output in fun_out)
+        if isinstance(fn_out, types.GeneratorType):
+          return (output[get[0]] for output in fn_out)
         else:
-          return fun_out[get[0]]
+          return fn_out[get[0]]
 
       ReturnType = named_tuple_factory(name, get)
-      if isinstance(fun_out, types.GeneratorType):
+      if isinstance(fn_out, types.GeneratorType):
         return (ReturnType(*tuple(output[g] for g in get))
-                for output in fun_out)
+                for output in fn_out)
       else:
-        return ReturnType(*tuple(fun_out[g] for g in get))
+        return ReturnType(*tuple(fn_out[g] for g in get))
 
-    return getter_fun
+    return getter_fn
   return getter_decorator

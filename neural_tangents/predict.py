@@ -50,8 +50,8 @@ def gradient_descent_mse(g_dd, y_train, g_td=None, diag_reg=0.):
     >>> from neural_tangents import predict
     >>>
     >>> train_time = 1e-7
-    >>> ker_fun = empirical(f)
-    >>> g_td = ker_fun(x_test, x_train, params)
+    >>> kernel_fn = empirical(f)
+    >>> g_td = kernel_fn(x_test, x_train, params)
     >>>
     >>> predict_fn = predict.gradient_descent_mse(g_dd, y_train, g_td)
     >>>
@@ -72,7 +72,7 @@ def gradient_descent_mse(g_dd, y_train, g_td=None, diag_reg=0.):
     g_td: A Kernel relating training data with test data. The kernel should be
       an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim] or
       [n_test, n_train]. Note; g_td should have been created in the convention
-      ker_fun(x_train, x_test, params).
+      kernel_fn(x_train, x_test, params).
     diag_reg: A float, representing the strength of the regularization.
 
   Returns:
@@ -99,8 +99,8 @@ def gradient_descent_mse(g_dd, y_train, g_td=None, diag_reg=0.):
 
   normalization = y_train.size
   output_dimension = y_train.shape[-1]
-  expm1_func, inv_expm1_func = (_make_expm1_func(normalization),
-                                _make_inv_expm1_func(normalization))
+  expm1_fn, inv_expm1_fn = (_make_expm1_fn(normalization),
+                                _make_inv_expm1_fn(normalization))
 
   def fl(fx):
     """Flatten outputs."""
@@ -119,8 +119,8 @@ def gradient_descent_mse(g_dd, y_train, g_td=None, diag_reg=0.):
     ufl = lambda x: x
 
   g_dd_plus_reg = _add_diagonal_regularizer(g_dd, diag_reg)
-  expm1_dot_vec, inv_expm1_dot_vec = _eigenfuncs(g_dd_plus_reg,
-                                                 (expm1_func, inv_expm1_func))
+  expm1_dot_vec, inv_expm1_dot_vec = _eigen_fns(g_dd_plus_reg,
+                                                (expm1_fn, inv_expm1_fn))
 
   if g_td is None:
 
@@ -166,8 +166,8 @@ def gradient_descent(g_dd, y_train, loss, g_td=None):
     >>> from neural_tangents import predict
     >>>
     >>> train_time = 1e-7
-    >>> ker_fun = empirical(f)
-    >>> g_td = ker_fun(x_test, x_train, params)
+    >>> kernel_fn = empirical(f)
+    >>> g_td = kernel_fn(x_test, x_train, params)
     >>>
     >>> from jax.experimental import stax
     >>> cross_entropy = lambda fx, y_hat: -np.mean(stax.logsoftmax(fx) * y_hat)
@@ -194,7 +194,7 @@ def gradient_descent(g_dd, y_train, loss, g_td=None):
     g_td: A Kernel relating training data with test data. The kernel should be
       an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim] or
       [n_test, n_train]. Note: g_td should have been created in the convention
-        ker_fun(x_test, x_train, params).
+        kernel_fn(x_test, x_train, params).
 
   Returns:
     A function that predicts outputs after t = learning_rate * steps of
@@ -299,8 +299,8 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
     >>> train_time = 1e-7
     >>> learning_rate = 1e-2
     >>>
-    >>> ker_fun = empirical(f)
-    >>> g_td = ker_fun(x_test, x_train, params)
+    >>> kernel_fn = empirical(f)
+    >>> g_td = kernel_fn(x_test, x_train, params)
     >>>
     >>> from jax.experimental import stax
     >>> cross_entropy = lambda fx, y_hat: -np.mean(stax.logsoftmax(fx) * y_hat)
@@ -327,7 +327,7 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
     learning_rate:  A float specifying the learning rate.
     g_td: Kernel relating training data with test data. Should be an
       `np.ndarray` of shape [n_test * output_dim, n_train * output_dim]. Note:
-        g_td should have been created in the convention g_td = ker_fun(x_test,
+        g_td should have been created in the convention g_td = kernel_fn(x_test,
         x_train, params).
     momentum: float specifying the momentum.
 
@@ -457,7 +457,7 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
 
 
 @get_namedtuple('GPInference')
-def gp_inference(ker_fun,
+def gp_inference(kernel_fn,
                  x_train,
                  y_train,
                  x_test,
@@ -467,7 +467,7 @@ def gp_inference(ker_fun,
   """Compute the mean and variance of the `posterior` of NNGP and NTK.
 
   Args:
-    ker_fun: A kernel function that computes NNGP and NTK.
+    kernel_fn: A kernel function that computes NNGP and NTK.
     x_train: A `np.ndarray`, representing the training data.
     y_train: A `np.ndarray`, representing the labels of the training data.
     x_test: A `np.ndarray`, representing the test data.
@@ -493,10 +493,10 @@ def gp_inference(ker_fun,
   if 'ntk' in get:
     get_dependency = get_dependency + ('ntk',)
 
-  kdd = ker_fun(x_train, None, get_dependency)
-  ktd = ker_fun(x_test, x_train, get_dependency)
+  kdd = kernel_fn(x_train, None, get_dependency)
+  ktd = kernel_fn(x_test, x_train, get_dependency)
   if compute_var:
-    ktt = ker_fun(x_test, x_test, 'nngp')
+    ktt = kernel_fn(x_test, x_test, 'nngp')
 
   if 'nngp' in get:
     op = _inv_operator(kdd.nngp, diag_reg)
@@ -516,7 +516,7 @@ def gp_inference(ker_fun,
 
 
 #TODO(schsam): Refactor this method to make use of @getter.
-def gradient_descent_mse_gp(ker_fun,
+def gradient_descent_mse_gp(kernel_fn,
                             x_train,
                             y_train,
                             x_test,
@@ -529,7 +529,7 @@ def gradient_descent_mse_gp(ker_fun,
   out the initialization.
 
   Args:
-    ker_fun: A kernel function that computes NNGP and NTK.
+    kernel_fn: A kernel function that computes NNGP and NTK.
     x_train: A `np.ndarray`, representing the training data.
     y_train: A `np.ndarray`, representing the labels of the training data.
     x_test: A `np.ndarray`, representing the test data.
@@ -550,7 +550,7 @@ def gradient_descent_mse_gp(ker_fun,
     # NOTE(schsam): This seems like an ugly solution that involves an extra
     # indirection. It might be nice to clean it up.
     return lambda t: gradient_descent_mse_gp(
-        ker_fun, x_train, y_train, x_test,
+        kernel_fn, x_train, y_train, x_test,
         diag_reg=diag_reg, get=(get,), compute_var=compute_var)(t)[0]
 
   _, get = canonicalize_get(get)
@@ -566,13 +566,13 @@ def gradient_descent_mse_gp(ker_fun,
   if 'ntk' in get:
     get_dependency = get_dependency + ('ntk',)
 
-  kdd = ker_fun(x_train, None, get_dependency)
-  ktd = ker_fun(x_test, x_train, get_dependency)
+  kdd = kernel_fn(x_train, None, get_dependency)
+  ktd = kernel_fn(x_test, x_train, get_dependency)
   if compute_var:
-    ktt = ker_fun(x_test, None, 'nngp')
+    ktt = kernel_fn(x_test, None, 'nngp')
 
   normalization = y_train.size
-  op_func = _make_inv_expm1_func(normalization)
+  op_fn = _make_inv_expm1_fn(normalization)
 
   eigenspace = {}
   for g in get:
@@ -585,7 +585,7 @@ def gradient_descent_mse_gp(ker_fun,
 
     if 'nngp' in get:
       evals, evecs = eigenspace['nngp']
-      op_evals = -op_func(evals, 2 * t)
+      op_evals = -op_fn(evals, 2 * t)
       pred_mean = _mean_prediction_einsum(evecs, op_evals, ktd.nngp, y_train)
       if compute_var:
         pred_var = ktt - np.einsum(
@@ -596,7 +596,7 @@ def gradient_descent_mse_gp(ker_fun,
 
     if 'ntk' in get:
       evals, evecs = eigenspace['ntk']
-      op_evals = -op_func(evals, 2 * t)
+      op_evals = -op_fn(evals, 2 * t)
       pred_mean = _mean_prediction_einsum(evecs, op_evals, ktd.ntk, y_train)
       if compute_var:
         # inline the covariance calculation with einsum.
@@ -633,31 +633,31 @@ def _eigh(mat):
   return eigh(mat)
 
 
-def _eigenfuncs(mat, funcs):
+def _eigen_fns(mat, fns):
   """Build functions of a matrix in its eigenbasis.
 
   Args:
     mat: an n x n matrix
-    funcs: a sequence of functions that add on the eigenvalues (evals, dt) ->
+    fns: a sequence of functions that add on the eigenvalues (evals, dt) ->
       modified_evals
 
   Returns:
     A tuple of functions that act as functions of the matrix mat
       acting on vectors:
-        transform(vec, dt) = func(mat, dt) @ vec
+        transform(vec, dt) = fn(mat, dt) @ vec
   """
   evals, evecs = _eigh(mat)
 
-  def transform(func):
+  def transform(fn):
     """Generates a transform given a function on the eigenvalues."""
     def _(vec, dt):
       return np.einsum(
           'ji,i,ki,k...->j...',
-          evecs, func(evals, dt), evecs, vec, optimize=True)
+          evecs, fn(evals, dt), evecs, vec, optimize=True)
 
     return _
 
-  return tuple(transform(func) for func in funcs)
+  return tuple(transform(fn) for fn in fns)
 
 
 def _add_diagonal_regularizer(covariance, diag_reg=0.):
@@ -750,21 +750,21 @@ def _nngp_var(op, g_td, g_tt):
   return g_tt - np.dot(g_td, var)
 
 
-def _make_expm1_func(normalization):
+def _make_expm1_fn(normalization):
 
-  def expm1_func(evals, dt):
+  def expm1_fn(evals, dt):
     # Since our maxtrix really should be positive semidefinite,
     # we can threshold the eigenvalues to squash ones that are negative
     # for numerical reasons.
     return np.expm1(-np.maximum(evals, 0.) * dt / normalization)
 
-  return expm1_func
+  return expm1_fn
 
 
-def _make_inv_expm1_func(normalization):
-  expm1_func = _make_expm1_func(normalization)
+def _make_inv_expm1_fn(normalization):
+  expm1_fn = _make_expm1_fn(normalization)
 
-  def _inv_expm1_func(evals, dt):
-    return expm1_func(evals, dt) / np.abs(evals)
+  def _inv_expm1_fn(evals, dt):
+    return expm1_fn(evals, dt) / np.abs(evals)
 
-  return _inv_expm1_func
+  return _inv_expm1_fn

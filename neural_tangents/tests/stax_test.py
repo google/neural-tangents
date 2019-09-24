@@ -77,11 +77,11 @@ PROJECTIONS = [
 ]
 
 
-def _get_inputs(key, is_conv, same_inputs, input_shape, fun=np.cos):
+def _get_inputs(key, is_conv, same_inputs, input_shape, fn=np.cos):
   key, split = random.split(key)
   shape = input_shape if is_conv else (input_shape[0], np.prod(input_shape[1:]))
-  x1 = fun(random.normal(key, shape))
-  x2 = None if same_inputs else 2 * fun(random.normal(split, shape))
+  x1 = fn(random.normal(key, shape))
+  x2 = None if same_inputs else 2 * fn(random.normal(split, shape))
   return x1, x2
 
 
@@ -204,25 +204,25 @@ class StaxTest(jtu.JaxTestCase):
     key = random.PRNGKey(1)
     x1, x2 = _get_inputs(key, is_conv, same_inputs, INPUT_SHAPE)
 
-    init_fun, apply_fun, ker_fun = _get_net(W_std, b_std, filter_size,
+    init_fn, apply_fn, kernel_fn = _get_net(W_std, b_std, filter_size,
                                             is_conv, use_pooling, is_res,
                                             padding, phi, strides, width,
                                             is_ntk, proj_into_2d)
 
     def _get_empirical(n_samples, get):
-      ker_fun_empirical = monte_carlo.get_ker_fun_monte_carlo(
-          init_fun, apply_fun, key, n_samples)
-      return ker_fun_empirical(x1, x2, get)
+      kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
+          init_fn, apply_fn, key, n_samples)
+      return kernel_fn_empirical(x1, x2, get)
 
     if proj_into_2d == 'ATTN_PARAM':
       # no analytic kernel available, just test forward/backward pass
       _get_empirical(1, 'ntk' if is_ntk else 'nngp')
     else:
       if is_ntk:
-        exact = ker_fun(x1, x2, 'ntk')
+        exact = kernel_fn(x1, x2, 'ntk')
         empirical = np.reshape(_get_empirical(N_SAMPLES, 'ntk'), exact.shape)
       else:
-        exact = ker_fun(x1, x2, 'nngp')
+        exact = kernel_fn(x1, x2, 'nngp')
         empirical = _get_empirical(N_SAMPLES, 'nngp')
       utils.assert_close_matrices(self, empirical, exact, RTOL)
 
@@ -243,21 +243,21 @@ class ABReluTest(jtu.JaxTestCase):
     fc = stax.Dense(10, 1, 0)
 
     # Test that ABRelu(0, 1) == ReLU
-    init_fun, apply_relu, ker_fun_relu = stax.serial(fc, stax.Relu())
-    params = init_fun(key, input_shape=(-1, 7))
+    init_fn, apply_relu, kernel_fn_relu = stax.serial(fc, stax.Relu())
+    params = init_fn(key, input_shape=(-1, 7))
 
     X0_2 = None if same_inputs else random.normal(key, (9, 7))
 
     for a, b in [(0, 1), (0, -1), (-1, 0), (1, 0)]:
       with self.subTest(a=a, b=b):
-        _, apply_ab_relu, ker_fun_ab_relu = stax.serial(fc, stax.ABRelu(a, b))
+        _, apply_ab_relu, kernel_fn_ab_relu = stax.serial(fc, stax.ABRelu(a, b))
 
         X1_1_relu = (b - a) * apply_relu(params, X0_1 * (-1 if a != 0 else 1))
         X1_1_ab_relu = apply_ab_relu(params, X0_1)
         self.assertAllClose(X1_1_relu, X1_1_ab_relu, True)
 
-        kernels_relu = ker_fun_relu(X0_1, X0_2, ('NNGP', 'NTK'))
-        kernels_ab_relu = ker_fun_ab_relu(X0_1, X0_2, ('NNGP', 'NTK'))
+        kernels_relu = kernel_fn_relu(X0_1, X0_2, ('NNGP', 'NTK'))
+        kernels_ab_relu = kernel_fn_ab_relu(X0_1, X0_2, ('NNGP', 'NTK'))
         self.assertAllClose(kernels_relu, kernels_ab_relu, True)
 
   def test_ab_relu_id(self, same_inputs):
@@ -268,20 +268,20 @@ class ABReluTest(jtu.JaxTestCase):
     X0_2 = None if same_inputs else random.normal(key, (9, 7))
 
     # Test that ABRelu(a, a) == a * Identity
-    init_fun, apply_id, ker_fun_id = stax.serial(fc, stax.Identity())
-    params = init_fun(key, input_shape=(-1, 7))
+    init_fn, apply_id, kernel_fn_id = stax.serial(fc, stax.Identity())
+    params = init_fn(key, input_shape=(-1, 7))
 
     for a in [-5, -1, -0.5, 0, 0.5, 1, 5]:
       with self.subTest(a=a):
-        _, apply_ab_relu, ker_fun_ab_relu = stax.serial(fc, stax.ABRelu(a, a))
+        _, apply_ab_relu, kernel_fn_ab_relu = stax.serial(fc, stax.ABRelu(a, a))
 
         X1_1_id = a * apply_id(params, X0_1)
         X1_1_ab_relu = apply_ab_relu(params, X0_1)
         self.assertAllClose(X1_1_id, X1_1_ab_relu, True)
 
-        kernels_id = ker_fun_id(
+        kernels_id = kernel_fn_id(
             X0_1 * a, None if X0_2 is None else a * X0_2, ('NNGP', 'NTK'))
-        kernels_ab_relu = ker_fun_ab_relu(X0_1, X0_2, ('NNGP', 'NTK'))
+        kernels_ab_relu = kernel_fn_ab_relu(X0_1, X0_2, ('NNGP', 'NTK'))
         self.assertAllClose(kernels_id, kernels_ab_relu, True)
 
   def test_leaky_relu(self, same_inputs):
@@ -294,17 +294,17 @@ class ABReluTest(jtu.JaxTestCase):
     # Test that ABRelu(alpha, 1) == LeakyRelu(alpha)
     for a in [-2, -1, 0, 1, 2]:
       with self.subTest(alpha=a):
-        init_fun, apply_leaky_relu, ker_fun_leaky_relu = stax.serial(
+        init_fn, apply_leaky_relu, kernel_fn_leaky_relu = stax.serial(
             fc, stax.LeakyRelu(a))
-        _, apply_ab_relu, ker_fun_ab_relu = stax.serial(fc, stax.ABRelu(a, 1))
+        _, apply_ab_relu, kernel_fn_ab_relu = stax.serial(fc, stax.ABRelu(a, 1))
 
-        params = init_fun(key, input_shape=(-1, 7))
+        params = init_fn(key, input_shape=(-1, 7))
         X1_1_leaky_relu = apply_leaky_relu(params, X0_1)
         X1_1_ab_relu = apply_ab_relu(params, X0_1)
         self.assertAllClose(X1_1_leaky_relu, X1_1_ab_relu, True)
 
-        kernels_leaky_relu = ker_fun_leaky_relu(X0_1, X0_2, ('NNGP', 'NTK'))
-        kernels_ab_relu = ker_fun_ab_relu(X0_1, X0_2, ('NNGP', 'NTK'))
+        kernels_leaky_relu = kernel_fn_leaky_relu(X0_1, X0_2, ('NNGP', 'NTK'))
+        kernels_ab_relu = kernel_fn_ab_relu(X0_1, X0_2, ('NNGP', 'NTK'))
         self.assertAllClose(kernels_leaky_relu, kernels_ab_relu, True)
 
   def test_abs(self, same_inputs):
@@ -315,16 +315,16 @@ class ABReluTest(jtu.JaxTestCase):
     X0_2 = None if same_inputs else random.normal(key, (9, 7))
 
     # Test that Abs == ABRelu(-1, 1)
-    init_fun, apply_leaky_relu, ker_fun_abs = stax.serial(fc, stax.Abs())
-    _, apply_ab_relu, ker_fun_ab_relu = stax.serial(fc, stax.ABRelu(-1, 1))
+    init_fn, apply_leaky_relu, kernel_fn_abs = stax.serial(fc, stax.Abs())
+    _, apply_ab_relu, kernel_fn_ab_relu = stax.serial(fc, stax.ABRelu(-1, 1))
 
-    params = init_fun(key, input_shape=(-1, 7))
+    params = init_fn(key, input_shape=(-1, 7))
     X1_1_abs = apply_leaky_relu(params, X0_1)
     X1_1_ab_relu = apply_ab_relu(params, X0_1)
     self.assertAllClose(X1_1_abs, X1_1_ab_relu, True)
 
-    kernels_abs = ker_fun_abs(X0_1, X0_2, ('NNGP', 'NTK'))
-    kernels_ab_relu = ker_fun_ab_relu(X0_1, X0_2, ('NNGP', 'NTK'))
+    kernels_abs = kernel_fn_abs(X0_1, X0_2, ('NNGP', 'NTK'))
+    kernels_ab_relu = kernel_fn_ab_relu(X0_1, X0_2, ('NNGP', 'NTK'))
     self.assertAllClose(kernels_abs, kernels_ab_relu, True)
 
 

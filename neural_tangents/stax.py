@@ -17,12 +17,12 @@
 This library contains layer constructors mimicking those in
 `jax.experimental.stax` with similar API apart apart from:
 
-1) Instead of `(init_fun, apply_fun)` tuple, layer constructors return a triple
-  `(init_fun, apply_fun, ker_fun)`, where the added `ker_fun` maps an
+1) Instead of `(init_fn, apply_fn)` tuple, layer constructors return a triple
+  `(init_fn, apply_fn, kernel_fn)`, where the added `kernel_fn` maps an
   `Kernel` to a new `Kernel`, and represents the change in the
   analytic NTK and NNGP kernels (fields of `Kernel`). These functions
   are chained / stacked together within the `serial` or `parallel` combinators,
-  similarly to `init_fun` and `apply_fun`.
+  similarly to `init_fn` and `apply_fn`.
 
 2) In layers with random weights, NTK parameterization is used
   (https://arxiv.org/abs/1806.07572, page 3).
@@ -41,7 +41,7 @@ Example:
   >>> y_train = random.uniform(key1, (20, 10))
   >>> x_test = random.normal(key2, (5, 32, 32, 3))
   >>>
-  >>> init_fun, apply_fun, ker_fun = stax.serial(
+  >>> init_fn, apply_fn, kernel_fn = stax.serial(
   >>>     stax.Conv(128, (3, 3)),
   >>>     stax.Relu(),
   >>>     stax.Conv(256, (3, 3)),
@@ -52,11 +52,11 @@ Example:
   >>> )
   >>>
   >>> # (5, 10) np.ndarray NNGP test prediction
-  >>> y_test_nngp = nt.predict.gp_inference(ker_fun, x_train, y_train, x_test,
+  >>> y_test_nngp = nt.predict.gp_inference(kernel_fn, x_train, y_train, x_test,
   >>>                                       mode='NNGP')
   >>>
   >>> # (5, 10) np.ndarray NTK prediction
-  >>> y_test_ntk = nt.predict.gp_inference(ker_fun, x_train, y_train, x_test,
+  >>> y_test_ntk = nt.predict.gp_inference(kernel_fn, x_train, y_train, x_test,
   >>>                                      mode='NTK')
   ```
 """
@@ -93,11 +93,11 @@ def _is_array(x):
   return isinstance(x, np.ndarray) and hasattr(x, 'shape') and x.shape
 
 
-def _set_covariances_req_attr(combinator_ker_fun, ker_funs):
+def _set_covariances_req_attr(combinator_kernel_fn, kernel_fns):
   """Labels which covariances are required by the individual layers
-  combinded in `combinator_ker_fun` based on `ker_funs`.
+  combinded in `combinator_kernel_fn` based on `kernel_fns`.
 
-  Specifically, sets `combinator_ker_fun`'s attribute `covariances_req`
+  Specifically, sets `combinator_kernel_fn`'s attribute `covariances_req`
   to a dictionary with keys `marginal` and `cross` which respectively correspond
   to the types of covariances tracked in `var1`/`var2` and `nngp`/`ntk`.
   The current combinations for `marginal` and `cross` are:
@@ -111,17 +111,17 @@ def _set_covariances_req_attr(combinator_ker_fun, ker_funs):
   #TODO(jirihron): make `NO` marginalisation the default
 
   Args:
-    combinator_ker_fun: a 'ker_fun` of a `serial` or `parallel` combinator.
-    ker_funs: list of 'ker_fun`s fed to the `ker_funs` (e.g. a list of
+    combinator_kernel_fn: a 'kernel_fn` of a `serial` or `parallel` combinator.
+    kernel_fns: list of 'kernel_fn`s fed to the `kernel_fns` (e.g. a list of
       convolutional layers and nonlinearities to be chained together with the
       `serial` combinator).
 
   Returns:
-    `ker_funs` with the `_COVARIANCES_REQ` attribute set accordingly to
+    `kernel_fns` with the `_COVARIANCES_REQ` attribute set accordingly to
       the needs of their corresponding layer
   """
   def _get_maximal_element(covs_req, comparison_op):
-    for f in ker_funs:
+    for f in kernel_fns:
       if hasattr(f, _COVARIANCES_REQ):
         marginal = getattr(f, _COVARIANCES_REQ)['marginal']
         cross = getattr(f, _COVARIANCES_REQ)['cross']
@@ -138,8 +138,8 @@ def _set_covariances_req_attr(combinator_ker_fun, ker_funs):
       {'marginal': Marginalisation.OVER_ALL,'cross': Marginalisation.OVER_ALL},
       lambda x, y: x > y)
 
-  setattr(combinator_ker_fun, _COVARIANCES_REQ, covs_req)
-  return combinator_ker_fun
+  setattr(combinator_kernel_fn, _COVARIANCES_REQ, covs_req)
+  return combinator_kernel_fn
 
 
 def _randn(stddev=1e-2):
@@ -313,9 +313,9 @@ def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk):
                 marginal, cross)
 
 
-def _preprocess_ker_fun(ker_fun):
-  def new_ker_fun(x1_or_kernel, x2, get):
-    """Returns the `Kernel` resulting from applying `ker_fun` to given inputs.
+def _preprocess_kernel_fn(kernel_fn):
+  def new_kernel_fn(x1_or_kernel, x2, get):
+    """Returns the `Kernel` resulting from applying `kernel_fn` to given inputs.
 
     Args:
       x1_or_kernel: either a `np.ndarray` with shape
@@ -334,11 +334,11 @@ def _preprocess_ker_fun(ker_fun):
     if (isinstance(x1_or_kernel, Kernel) or
         (isinstance(x1_or_kernel, list) and
          all(isinstance(k, Kernel) for k in x1_or_kernel))):
-      return ker_fun(x1_or_kernel)
-    return outer_ker_fun(x1_or_kernel, x2, get)
+      return kernel_fn(x1_or_kernel)
+    return outer_kernel_fn(x1_or_kernel, x2, get)
 
   @get_namedtuple('AnalyticKernel')
-  def outer_ker_fun(x1, x2, get):
+  def outer_kernel_fn(x1, x2, get):
     if not isinstance(x1, np.ndarray):
       raise TypeError('Inputs to a kernel propagation function should be '
                       'a `Kernel`, '
@@ -351,48 +351,48 @@ def _preprocess_ker_fun(ker_fun):
                       % type(x2))
 
     include_ntk = 'ntk' in get
-    covs_req = getattr(ker_fun,
+    covs_req = getattr(kernel_fn,
                        _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_ALL,
                                           'cross': Marginalisation.OVER_ALL})
     kernel = _inputs_to_kernel(x1, x2, compute_ntk=include_ntk, **covs_req)
-    return ker_fun(kernel)._asdict()
+    return kernel_fn(kernel)._asdict()
 
-  if hasattr(ker_fun, _COVARIANCES_REQ):
-    setattr(new_ker_fun, _COVARIANCES_REQ, getattr(ker_fun, _COVARIANCES_REQ))
+  if hasattr(kernel_fn, _COVARIANCES_REQ):
+    setattr(new_kernel_fn, _COVARIANCES_REQ, getattr(kernel_fn, _COVARIANCES_REQ))
 
-  return new_ker_fun
+  return new_kernel_fn
 
 
 def _layer(layer):
   """A convenience decorator to be added to all public layers like `Relu` etc.
 
-  Makes the `ker_fun` of the layer work with both input `np.ndarray`s (when the
+  Makes the `kernel_fn` of the layer work with both input `np.ndarray`s (when the
     layer is the first one applied to inputs), and with `Kernel` for
-    intermediary layers. Also adds optional arguments to make the `ker_fun` call
+    intermediary layers. Also adds optional arguments to make the `kernel_fn` call
     the empirical Monte Carlo kernel estimation instead of computing it
     analytically (by default), as well as specifying the batching strategy.
 
   Args:
-    layer: A layer function returning a triple `(init_fun, apply_fun, ker_fun)`.
+    layer: A layer function returning a triple `(init_fn, apply_fn, kernel_fn)`.
 
   Returns:
-    A function with the same signature as `layer` with `ker_fun` now accepting
+    A function with the same signature as `layer` with `kernel_fn` now accepting
       `np.ndarray`s as inputs if needed, and optional `n_samples=0`, `key=None`,
       `compute_ntk=True` arguments to let the user indicate that they want the
       kernel to be computed by Monte Carlo sampling.
   """
   @wraps(layer)
-  def layer_fun(*args, **kwargs):
-    init_fun, apply_fun, ker_fun = layer(*args, **kwargs)
-    ker_fun = _preprocess_ker_fun(ker_fun)
-    return init_fun, apply_fun, ker_fun
-  return layer_fun
+  def layer_fn(*args, **kwargs):
+    init_fn, apply_fn, kernel_fn = layer(*args, **kwargs)
+    kernel_fn = _preprocess_kernel_fn(kernel_fn)
+    return init_fn, apply_fn, kernel_fn
+  return layer_fn
 
 
-def _elementwise(fun, **fun_kwargs):
-  init_fun, apply_fun = stax.elementwise(fun, **fun_kwargs)
-  ker_fun = lambda kernels: _transform_kernels(kernels, fun, **fun_kwargs)
-  return init_fun, apply_fun, ker_fun
+def _elementwise(fn, **fn_kwargs):
+  init_fn, apply_fn = stax.elementwise(fn, **fn_kwargs)
+  kernel_fn = lambda kernels: _transform_kernels(kernels, fn, **fn_kwargs)
+  return init_fn, apply_fn, kernel_fn
 
 
 def _ab_relu(x, a, b, **kwargs):
@@ -614,12 +614,12 @@ def _transform_kernels_erf(kernels, do_backprop):
   return Kernel(var1, nngp, var2, ntk, False, is_height_width, marginal, cross)
 
 
-def _transform_kernels(kernels, fun, **fun_kwargs):
+def _transform_kernels(kernels, fn, **fn_kwargs):
   """Apply transformation to kernels.
 
   Args:
     kernels: a `Kernel` object.
-    fun: nonlinearity function, can only be Relu, Erf or Identity.
+    fn: nonlinearity function, can only be Relu, Erf or Identity.
   Returns:
     The transformed kernel.
   """
@@ -627,13 +627,13 @@ def _transform_kernels(kernels, fun, **fun_kwargs):
   if not is_gaussian:
     raise ValueError('An affine layer (i.e. dense or convolution) '
                      'has to be applied before a nonlinearity layer.')
-  if fun is _ab_relu:
-    return _transform_kernels_ab_relu(kernels, **fun_kwargs)
-  if fun is _erf:
-    return _transform_kernels_erf(kernels, **fun_kwargs)
+  if fn is _ab_relu:
+    return _transform_kernels_ab_relu(kernels, **fn_kwargs)
+  if fn is _erf:
+    return _transform_kernels_erf(kernels, **fn_kwargs)
   # TODO(xlc): Monte Carlo approximation to the integral (suggested by schsam.)
   raise NotImplementedError('Analaytic kernel for activiation {} is not '
-                            'implmented'.format(fun))
+                            'implmented'.format(fn))
 
 
 def _affine(nngp, W_std, b_std):
@@ -666,14 +666,14 @@ def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0)):
 
   Based on `jax.experimental.stax.Dense`. Has a similar API.
   """
-  init_fun, _ = stax.Dense(out_dim, W_init, b_init)
+  init_fn, _ = stax.Dense(out_dim, W_init, b_init)
 
-  def apply_fun(params, inputs, **kwargs):
+  def apply_fn(params, inputs, **kwargs):
     W, b = params
     norm = W_std / np.sqrt(inputs.shape[-1])
     return norm * np.dot(inputs, W) + b_std * b
 
-  def ker_fun(kernels):
+  def kernel_fn(kernels):
     """Compute the transformed kernels after a dense layer."""
     var1, nngp, var2, ntk, _, _, marginal, cross = kernels
 
@@ -686,10 +686,10 @@ def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0)):
 
     return Kernel(var1, nngp, var2, ntk, True, True, marginal, cross)
 
-  setattr(ker_fun, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_ALL,
+  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_ALL,
                                       'cross': Marginalisation.OVER_ALL})
 
-  return init_fun, apply_fun, ker_fun
+  return init_fn, apply_fn, kernel_fn
 
 
 
@@ -699,9 +699,9 @@ def Identity():
 
   Based on `jax.experimental.stax.Identity`.
   """
-  init_fun, apply_fun = stax.Identity
-  ker_fun = lambda kernels: kernels
-  return init_fun, apply_fun, ker_fun
+  init_fn, apply_fn = stax.Identity
+  kernel_fn = lambda kernels: kernels
+  return init_fn, apply_fn, kernel_fn
 
 
 @_layer
@@ -710,9 +710,9 @@ def FanOut(num):
 
   Based on `jax.experimental.stax.FanOut`.
   """
-  init_fun, apply_fun = stax.FanOut(num)
-  ker_fun = lambda kernels: [kernels] * num
-  return init_fun, apply_fun, ker_fun
+  init_fn, apply_fn = stax.FanOut(num)
+  kernel_fn = lambda kernels: [kernels] * num
+  return init_fn, apply_fn, kernel_fn
 
 
 @_layer
@@ -721,8 +721,8 @@ def FanInSum():
 
   Based on `jax.experimental.stax.FanInSum`.
   """
-  init_fun, apply_fun = stax.FanInSum
-  def ker_fun(kernels):
+  init_fn, apply_fn = stax.FanInSum
+  def kernel_fn(kernels):
     is_gaussian = all(ker.is_gaussian for ker in kernels)
     if not is_gaussian:
       raise NotImplementedError('`FanInSum` layer is only implemented for the '
@@ -763,7 +763,7 @@ def FanInSum():
                  sum(ker[i] for ker in kernels) for i in range(4))
     return Kernel(*(kers + (is_gaussian, is_height_width, marginal, cross)))
 
-  return init_fun, apply_fun, ker_fun
+  return init_fn, apply_fn, kernel_fn
 
 
 def _flip_height_width(kernels):
@@ -813,17 +813,17 @@ def serial(*layers):
   Based on `jax.experimental.stax.serial`.
 
   Args:
-    *layers: a sequence of layers, each an (init_fun, apply_fun, ker_fun) tuple.
+    *layers: a sequence of layers, each an (init_fn, apply_fn, kernel_fn) tuple.
 
   Returns:
-    A new layer, meaning an `(init_fun, apply_fun, ker_fun)` tuple, representing
+    A new layer, meaning an `(init_fn, apply_fn, kernel_fn)` tuple, representing
       the serial composition of the given sequence of layers.
   """
-  init_funs, apply_funs, ker_funs = zip(*layers)
-  init_fun, apply_fun = stax.serial(*zip(init_funs, apply_funs))
+  init_fns, apply_fns, kernel_fns = zip(*layers)
+  init_fn, apply_fn = stax.serial(*zip(init_fns, apply_fns))
 
-  def ker_fun(kernels):
-    for f in ker_funs:
+  def kernel_fn(kernels):
+    for f in kernel_fns:
       # NOTE(schsam): Note that in combinators, the kernel functions have
       # already been wrapped in a @_layer decorator. Since we don't want the
       # @_layer decorated kernel functions to have default arguments we have to
@@ -831,8 +831,8 @@ def serial(*layers):
       kernels = f(kernels, None, None)
     return kernels
 
-  _set_covariances_req_attr(ker_fun, ker_funs)
-  return init_fun, apply_fun, ker_fun
+  _set_covariances_req_attr(kernel_fn, kernel_fns)
+  return init_fn, apply_fn, kernel_fn
 
 
 @_layer
@@ -843,23 +843,23 @@ def parallel(*layers):
     `FanInSum` layers. Based on `jax.experimental.stax.parallel`.
 
   Args:
-    *layers: a sequence of layers, each an `(init_fun, apply_fun, ker_fun)`
+    *layers: a sequence of layers, each an `(init_fn, apply_fn, kernel_fn)`
       triple.
 
   Returns:
-    A new layer, meaning an `(init_fun, apply_fun, ker_fun)` triples,
+    A new layer, meaning an `(init_fn, apply_fn, kernel_fn)` triples,
       representing the parallel composition of the given sequence of layers. In
       particular, the returned layer takes a sequence of inputs and returns a
       sequence of outputs with the same length as the argument `layers`.
   """
-  init_funs, apply_funs, ker_funs = zip(*layers)
-  init_fun, apply_fun = stax.parallel(*zip(init_funs, apply_funs))
+  init_fns, apply_fns, kernel_fns = zip(*layers)
+  init_fn, apply_fn = stax.parallel(*zip(init_fns, apply_fns))
 
-  def ker_fun(kernels):
-    return [f(ker, None, None) for ker, f in zip(kernels, ker_funs)]
+  def kernel_fn(kernels):
+    return [f(ker, None, None) for ker, f in zip(kernels, kernel_fns)]
 
-  _set_covariances_req_attr(ker_fun, ker_funs)
-  return init_fun, apply_fun, ker_fun
+  _set_covariances_req_attr(kernel_fn, kernel_fns)
+  return init_fn, apply_fn, kernel_fn
 
 
 def _same_pad_for_filter_shape(x, filter_shape, strides, axes, mode):
@@ -1084,10 +1084,10 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape,
   if padding == Padding.CIRCULAR:
     init_padding = Padding.SAME
 
-  init_fun, _ = stax.GeneralConv(dimension_numbers, out_chan, filter_shape,
+  init_fn, _ = stax.GeneralConv(dimension_numbers, out_chan, filter_shape,
                                  strides, init_padding.name, W_init, b_init)
 
-  def apply_fun(params, inputs, **kwargs):
+  def apply_fn(params, inputs, **kwargs):
     W, b = params
 
     norm = inputs.shape[lhs_spec.index('C')]
@@ -1104,7 +1104,7 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape,
         inputs, W, strides, apply_padding.name,
         dimension_numbers=dimension_numbers) + b_std * b
 
-  def ker_fun(kernels):
+  def kernel_fn(kernels):
     """Compute the transformed kernels after a conv layer."""
     var1, nngp, var2, ntk, _, is_height_width, marginal, cross = kernels
     marginal, cross = _ids_to_marginalisation_types(marginal, cross)
@@ -1160,10 +1160,10 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape,
 
     return Kernel(var1, nngp, var2, ntk, True, is_height_width, marginal, cross)
 
-  setattr(ker_fun, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_PIXELS,
+  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_PIXELS,
                                       'cross': Marginalisation.OVER_PIXELS})
 
-  return init_fun, apply_fun, ker_fun
+  return init_fn, apply_fn, kernel_fn
 
 
 def Conv(out_chan, filter_shape,
@@ -1242,18 +1242,18 @@ def AvgPool(window_shape, strides=None, padding=Padding.VALID.name):
   padding = Padding(padding)
 
   if padding == Padding.CIRCULAR:
-    init_fun, _ = stax.AvgPool(window_shape, strides, Padding.SAME.name)
-    _, apply_fun_0 = stax.AvgPool(window_shape, strides, Padding.VALID.name)
+    init_fn, _ = stax.AvgPool(window_shape, strides, Padding.SAME.name)
+    _, apply_fn_0 = stax.AvgPool(window_shape, strides, Padding.VALID.name)
 
-    def apply_fun(params, inputs, **kwargs):
+    def apply_fn(params, inputs, **kwargs):
       inputs = _same_pad_for_filter_shape(inputs, window_shape, strides, (1, 2),
                                           'wrap')
-      res = apply_fun_0(params, inputs, **kwargs)
+      res = apply_fn_0(params, inputs, **kwargs)
       return res
   else:
-    init_fun, apply_fun = stax.AvgPool(window_shape, strides, padding.name)
+    init_fn, apply_fn = stax.AvgPool(window_shape, strides, padding.name)
 
-  def ker_fun(kernels):
+  def kernel_fn(kernels):
     """Kernel transformation."""
     var1, nngp, var2, ntk, is_gaussian, is_height_width, marginal, cross = kernels
     marginal, cross = _ids_to_marginalisation_types(marginal, cross)
@@ -1278,9 +1278,9 @@ def AvgPool(window_shape, strides=None, padding=Padding.VALID.name):
     return Kernel(var1, nngp, var2, ntk, is_gaussian, is_height_width,
                   marginal, cross)
 
-  setattr(ker_fun, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_POINTS,
+  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_POINTS,
                                       'cross': Marginalisation.NO})
-  return init_fun, apply_fun, ker_fun
+  return init_fn, apply_fn, kernel_fn
 
 
 @_layer
@@ -1297,15 +1297,15 @@ def GlobalAvgPool():
                 " (optionally preceded by a nonlinearity),"
                 " otherwise the kernels will not be correct!")
 
-  def init_fun(rng, input_shape):
+  def init_fn(rng, input_shape):
     output_shape = input_shape[0], input_shape[-1]
     return output_shape, ()
 
-  def apply_fun(params, inputs, **kwargs):
+  def apply_fn(params, inputs, **kwargs):
     pixel_axes = tuple(range(1, inputs.ndim - 1))
     return np.mean(inputs, axis=pixel_axes)
 
-  def ker_fun(kernels):
+  def kernel_fn(kernels):
     var1, nngp, var2, ntk, is_gaussian, _, marginal, cross = kernels
     marginal, cross = _ids_to_marginalisation_types(marginal, cross)
 
@@ -1322,9 +1322,9 @@ def GlobalAvgPool():
     return Kernel(var1, nngp, var2, ntk, is_gaussian, True,
                   Marginalisation.OVER_ALL, Marginalisation.OVER_ALL)
 
-  setattr(ker_fun, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_POINTS,
+  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_POINTS,
                                        'cross': Marginalisation.NO})
-  return init_fun, apply_fun, ker_fun
+  return init_fn, apply_fn, kernel_fn
 
 
 @_layer
@@ -1340,9 +1340,9 @@ def Flatten():
                 " (optionally preceded by a nonlinearity),"
                 " otherwise the kernels will not be correct!")
 
-  init_fun, apply_fun = stax.Flatten
+  init_fn, apply_fn = stax.Flatten
 
-  def ker_fun(kernels):
+  def kernel_fn(kernels):
     """Compute kernels."""
     var1, nngp, var2, ntk, is_gaussian, _, marginal, cross = kernels
     marginal, cross = _ids_to_marginalisation_types(marginal, cross)
@@ -1386,7 +1386,7 @@ def Flatten():
     return Kernel(var1, nngp, var2, ntk, is_gaussian, True,
                   Marginalisation.OVER_ALL, Marginalisation.OVER_ALL)
 
-  return init_fun, apply_fun, ker_fun
+  return init_fn, apply_fn, kernel_fn
 
 @_layer
 def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
@@ -1403,7 +1403,7 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
   1) Parametric: this is the standard scaled dot-product attention, i.e.,
    the dot product between keys and queries is scaled by the squared root
    of their dimension. The expression for `nngp`/`ntk` involves an integral
-   with no known closed form and thus call to `ker_fun` results in an error.
+   with no known closed form and thus call to `kernel_fn` results in an error.
 
   2) Fixed: same as Parametric except for scaling the dot products
    between keys and queries by their dimension instead of the square root
@@ -1421,7 +1421,7 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
    ```f(x) = concat[f_1(x) , ... , f_<n_heads> (x)] W_out + b```
   where the shape of of `b` is (n_chan_out,), i.e., single bias per channel
 
-  The `ker_fun` computes the limiting kernel of the outputs of this layer
+  The `kernel_fn` computes the limiting kernel of the outputs of this layer
   as the number of heads and the number of feature dimensions of keys/queries
   goes to infinity.
 
@@ -1456,7 +1456,7 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
     Currently only works with image data.
 
   Raises:
-    NotImplementedError: If `fixed` is `False`, call to `ker_fun` will result in
+    NotImplementedError: If `fixed` is `False`, call to `kernel_fn` will result in
     an error as there is no known analytic expression for the kernel.
   """
   if dimension_spec is None:
@@ -1469,7 +1469,7 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
   QK_gain = W_query_std * W_key_std
   QK_prod_scaling = float(n_chan_key if fixed else n_chan_key**0.5)
 
-  def init_fun(rng, input_shape):
+  def init_fn(rng, input_shape):
     _, height, width, n_chan_in = input_shape
     output_shape = input_shape[:-1] + (n_chan_out,)
 
@@ -1489,7 +1489,7 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
 
     return output_shape, (query_matrices, key_matrices, val_matrices, W_out, b)
 
-  def apply_fun(params, inputs, **kwargs):
+  def apply_fn(params, inputs, **kwargs):
     query_matrices, key_matrices, val_matrices, W_out, b = params
     n_chan_in = inputs.shape[dimension_spec.index('C')]
     height = inputs.shape[dimension_spec.index('H')]
@@ -1518,7 +1518,7 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
     ret = np.matmul(heads, W_out_std * W_out / np.sqrt(n_chan_val * n_heads))
     return np.reshape(ret, (-1, height, width, n_chan_out)) + b_std * b
 
-  def ker_fun(kernels):
+  def kernel_fn(kernels):
     var1, nngp, var2, ntk, _, is_height_width, marginal, cross = kernels
     marginal, cross = _ids_to_marginalisation_types(marginal, cross)
 
@@ -1554,7 +1554,7 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
 
     return Kernel(var1, nngp, var2, ntk, True, is_height_width, marginal, cross)
 
-  setattr(ker_fun, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_POINTS,
+  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_POINTS,
                                       'cross': Marginalisation.NO})
 
-  return init_fun, apply_fun, ker_fun
+  return init_fn, apply_fn, kernel_fn

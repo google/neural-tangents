@@ -14,7 +14,7 @@
 
 """Methods to compute Monte Carlo NNGP and NTK estimates.
 
-The library has a public method `get_ker_fun_monte_carlo` that allow to compute
+The library has a public method `monte_carlo_kernel_fn` that allow to compute
   Monte Carlo estimates of NNGP and NTK kernels of arbitrary functions.
 """
 
@@ -31,22 +31,22 @@ from neural_tangents.utils import empirical
 from neural_tangents.utils.utils import get_namedtuple
 
 
-def _get_ker_fun_sample_once(ker_fun,
-                             init_fun,
-                             batch_size=0,
-                             device_count=-1,
-                             store_on_device=True):
+def _sample_once_kernel_fn(kernel_fn,
+                           init_fn,
+                           batch_size=0,
+                           device_count=-1,
+                           store_on_device=True):
   @partial(batch.batch, batch_size=batch_size,
            device_count=device_count,
            store_on_device=store_on_device)
-  def ker_fun_sample_once(x1, x2, key, get):
-    _, params = init_fun(key, x1.shape)
-    return ker_fun(x1, x2, params, get)
-  return ker_fun_sample_once
+  def kernel_fn_sample_once(x1, x2, key, get):
+    _, params = init_fn(key, x1.shape)
+    return kernel_fn(x1, x2, params, get)
+  return kernel_fn_sample_once
 
 
-def _get_ker_fun_sample_many(ker_fun_sample_once, key, n_samples,
-                             get_generator):
+def _sample_many_kernel_fn(kernel_fn_sample_once, key, n_samples,
+                           get_generator):
   def normalize(sample, n):
     return tree_map(lambda sample: sample / n, sample)._asdict()
 
@@ -57,7 +57,7 @@ def _get_ker_fun_sample_many(ker_fun_sample_once, key, n_samples,
     _key = key
     for n in range(1, max(n_samples) + 1):
       _key, split = random.split(_key)
-      one_sample = ker_fun_sample_once(x1, x2, split, get)
+      one_sample = kernel_fn_sample_once(x1, x2, split, get)
       if n == 1:
         ker_sampled = one_sample
       else:
@@ -80,20 +80,20 @@ def _get_ker_fun_sample_many(ker_fun_sample_once, key, n_samples,
   return get_sampled_kernel
 
 
-def get_ker_fun_monte_carlo(init_fun,
-                            apply_fun,
-                            key,
-                            n_samples,
-                            batch_size=0,
-                            device_count=-1,
-                            store_on_device=True):
+def monte_carlo_kernel_fn(init_fn,
+                          apply_fn,
+                          key,
+                          n_samples,
+                          batch_size=0,
+                          device_count=-1,
+                          store_on_device=True):
   """Return a Monte Carlo sampler of NTK and NNGP kernels of a given function.
 
   Args:
-    init_fun: a function initializing parameters of the neural network. From
+    init_fn: a function initializing parameters of the neural network. From
       `jax.experimental.stax`: "takes an rng key and an input shape and returns
       an `(output_shape, params)` pair".
-    apply_fun: a function computing the output of the neural network.
+    apply_fn: a function computing the output of the neural network.
       From `jax.experimental.stax`: "takes params, inputs, and an rng key and
       applies the layer".
     key: RNG (`jax.random.PRNGKey`) for sampling random networks. Must have
@@ -115,9 +115,9 @@ def get_ker_fun_monte_carlo(init_fun,
 
   Returns:
     If `n_samples` is an integer, returns a function of signature
-    `ker_fun(x1, x2, get)` that returns an MC estimation of the kernel using
+    `kernel_fn(x1, x2, get)` that returns an MC estimation of the kernel using
     `n_samples`. If `n_samples` is a collection of integers,
-    `ker_fun(x1, x2, get)` returns a generator that yields estimates using
+    `kernel_fn(x1, x2, get)` returns a generator that yields estimates using
     `n` samples for `n in n_samples`.
 
   Example:
@@ -131,7 +131,7 @@ def get_ker_fun_monte_carlo(init_fun,
   >>> y_train = random.uniform(key1, (20, 10))
   >>> x_test = random.normal(key2, (5, 32, 32, 3))
   >>>
-  >>> init_fun, apply_fun, ker_fun = stax.serial(
+  >>> init_fn, apply_fn, kernel_fn = stax.serial(
   >>>     stax.Conv(128, (3, 3)),
   >>>     stax.Relu(),
   >>>     stax.Conv(256, (3, 3)),
@@ -142,31 +142,31 @@ def get_ker_fun_monte_carlo(init_fun,
   >>> )
   >>>
   >>> n_samples = 200
-  >>> ker_fun = nt.get_ker_fun_monte_carlo(init_fun, apply_fun, key1, n_samples)
-  >>> kernel = ker_fun(x_train, x_test, get=('NNGP', 'NTK'))
+  >>> kernel_fn = nt.monte_carlo_kernel_fn(init_fn, apply_fn, key1, n_samples)
+  >>> kernel = kernel_fn(x_train, x_test, get=('NNGP', 'NTK'))
   >>> # `kernel` is a tuple of NNGP and NTK MC estimate using `n` samples.
   >>>
   >>> n_samples = [1, 10, 100, 1000]
-  >>> ker_fun_generator = nt.get_ker_fun_monte_carlo(init_fun, apply_fun, key1,
+  >>> kernel_fn_generator = nt.monte_carlo_kernel_fn(init_fn, apply_fn, key1,
   >>>                                                n_samples)
-  >>> kernel_samples = ker_fun_generator(x_train, x_test, get=('NNGP', 'NTK'))
+  >>> kernel_samples = kernel_fn_generator(x_train, x_test, get=('NNGP', 'NTK'))
   >>> for n, kernel in zip(n_samples, kernel_samples):
   >>>   print(n, kernel)
   >>>   # `kernel` is a tuple of NNGP and NTK MC estimate using `n` samples.
   ```
   """
-  ker_fun = empirical.get_ker_fun_empirical(apply_fun)
+  kernel_fn = empirical.empirical_kernel_fn(apply_fn)
 
-  ker_fun_sample_once = _get_ker_fun_sample_once(ker_fun,
-                                                 init_fun,
+  kernel_fn_sample_once = _sample_once_kernel_fn(kernel_fn,
+                                                 init_fn,
                                                  batch_size,
                                                  device_count,
                                                  store_on_device)
 
   n_samples, get_generator = _canonicalize_n_samples(n_samples)
-  ker_fun = _get_ker_fun_sample_many(ker_fun_sample_once, key, n_samples,
+  kernel_fn = _sample_many_kernel_fn(kernel_fn_sample_once, key, n_samples,
                                      get_generator)
-  return ker_fun
+  return kernel_fn
 
 
 def _canonicalize_n_samples(n_samples):

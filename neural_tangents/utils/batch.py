@@ -111,7 +111,7 @@ def _move_kernel_to_cpu(kernel):
     )
 
 
-def _serial(ker_fun, batch_size, store_on_device=True):
+def _serial(kernel_fn, batch_size, store_on_device=True):
   """Returns a function that computes a kernel in batches serially.
 
   This function computes the kernel over data in batches where each batch is
@@ -125,8 +125,8 @@ def _serial(ker_fun, batch_size, store_on_device=True):
   divide batch_size.
 
   Args:
-    ker_fun: A function that computes a kernel between two datasets,
-        ker_fun(x1, x2). Here x1 and x2 are `np.ndarray`s of floats of shape
+    kernel_fn: A function that computes a kernel between two datasets,
+        kernel_fn(x1, x2). Here x1 and x2 are `np.ndarray`s of floats of shape
         [n1] + input_shape and [n2] + input_shape. The kernel function
         should return a PyTree.
     batch_size: Integer specifying the size of batches in which to split the
@@ -136,18 +136,18 @@ def _serial(ker_fun, batch_size, store_on_device=True):
         True.
 
   Returns:
-    A new function with the same signature as ker_fun that computes the kernel
+    A new function with the same signature as kernel_fn that computes the kernel
     by batching over the dataset serially with the specified batch_size.
   """
 
-  is_parallel = hasattr(ker_fun, 'is_parallel')
+  is_parallel = hasattr(kernel_fn, 'is_parallel')
   if is_parallel:
-    device_count = ker_fun.device_count
+    device_count = kernel_fn.device_count
 
   if not store_on_device:
-    _ker_fun = ker_fun
-    def ker_fun(x1, x2, *args, **kwargs):
-      return _move_kernel_to_cpu(_ker_fun(x1, x2, *args, **kwargs))
+    _kernel_fn = kernel_fn
+    def kernel_fn(x1, x2, *args, **kwargs):
+      return _move_kernel_to_cpu(_kernel_fn(x1, x2, *args, **kwargs))
 
   flatten = (_flatten_kernel if store_on_device else
              jit(_flatten_kernel, backend='cpu'))
@@ -186,7 +186,7 @@ def _serial(ker_fun, batch_size, store_on_device=True):
       return _, _scan(col_fn, x1, x2s, store_on_device)[1]
 
     def col_fn(x1, x2):
-      return x1, ker_fun(x1, x2, *args, **kwargs)
+      return x1, kernel_fn(x1, x2, *args, **kwargs)
 
     _, kernel = _scan(row_fn, 0, x1s, store_on_device)
 
@@ -194,7 +194,7 @@ def _serial(ker_fun, batch_size, store_on_device=True):
   return serial_fn
 
 
-def _parallel(ker_fun, device_count=-1):
+def _parallel(kernel_fn, device_count=-1):
   """Returns a function that computes a kernel in batches in parallel.
 
   When batching in parallel, the data is split over a set number of devices.
@@ -206,8 +206,8 @@ def _parallel(ker_fun, device_count=-1):
   [|x1| / device_count, |x2|].
 
   Args:
-    ker_fun: A function that computes a kernel between two datasets,
-        ker_fun(x1, x2). Here x1 and x2 are `np.ndarray`s of floats of shape
+    kernel_fn: A function that computes a kernel between two datasets,
+        kernel_fn(x1, x2). Here x1 and x2 are `np.ndarray`s of floats of shape
         [n1,] + input_shape and [n2,] + input_shape. The kernel function
         should return a PyTree.
     device_count: Integer specifying the number of devices over which to split
@@ -215,10 +215,10 @@ def _parallel(ker_fun, device_count=-1):
         available devices.
 
   Returns:
-    A new function with the same signature as ker_fun that computes the kernel
+    A new function with the same signature as kernel_fn that computes the kernel
     by batching over the dataset in parallel over a specified number of cores.
   """
-  ker_fun = _jit_or_pmap_broadcast(ker_fun, device_count)
+  kernel_fn = _jit_or_pmap_broadcast(kernel_fn, device_count)
   if device_count == -1:
     device_count = xla_bridge.device_count()
 
@@ -244,7 +244,7 @@ def _parallel(ker_fun, device_count=-1):
       n1_per_device = 1
 
     x1 = np.reshape(x1, (_device_count, n1_per_device,) + input_shape)
-    kernel = ker_fun(x1, x2, *args, **kwargs)
+    kernel = kernel_fn(x1, x2, *args, **kwargs)
     return _flatten_kernel(kernel)
 
   # Set function attributes so that `serial` can detect whether or not it is
@@ -255,12 +255,12 @@ def _parallel(ker_fun, device_count=-1):
   return parallel_fn
 
 
-def batch(ker_fun, batch_size=0, device_count=-1, store_on_device=True):
+def batch(kernel_fn, batch_size=0, device_count=-1, store_on_device=True):
   """Returns a function that computes a kernel in batches over all devices.
 
   Args:
-    ker_fun: A function that computes a kernel between two datasets,
-        ker_fun(x1, x2). Here x1 and x2 are `np.ndarray`s of floats of shape
+    kernel_fn: A function that computes a kernel between two datasets,
+        kernel_fn(x1, x2). Here x1 and x2 are `np.ndarray`s of floats of shape
         [n1,] + input_shape and [n2,] + input_shape. The kernel function
         should return a PyTree.
     batch_size: Integer specifying the size of each batch that gets processed
@@ -275,18 +275,18 @@ def batch(ker_fun, batch_size=0, device_count=-1, store_on_device=True):
         True.
 
   Returns:
-    A new function with the same signature as ker_fun that computes the kernel
+    A new function with the same signature as kernel_fn that computes the kernel
     by batching over the dataset in parallel with the specified batch_size.
   """
   if (device_count == -1 and xla_bridge.device_count() > 1) or device_count > 0:
-    ker_fun = _parallel(ker_fun, device_count)
+    kernel_fn = _parallel(kernel_fn, device_count)
   else:
-    ker_fun = _jit_or_pmap_broadcast(ker_fun, device_count=0)
+    kernel_fn = _jit_or_pmap_broadcast(kernel_fn, device_count=0)
 
   if not batch_size:
-    return ker_fun
+    return kernel_fn
 
-  return _serial(ker_fun, batch_size, store_on_device)
+  return _serial(kernel_fn, batch_size, store_on_device)
 
 
 def _is_np_ndarray(x):

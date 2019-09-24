@@ -61,13 +61,13 @@ colab examples:
 
 <b>See this [Colab](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/neural_tangents_cookbook.ipynb) for a detailed tutorial. Below is a very quick introduction.</b>
 
-Our library closely follows JAX's API for specifying neural networks,  [`stax`](https://github.com/google/jax/blob/master/jax/experimental/stax.py). In `stax` a network is defined by a pair of functions `(init_fun, apply_fun)` initializing the trainable parameters and computing the outputs of the network respectively. Below is an example of defining a 3-layer network and computing it's outputs `y` given inputs `x`.
+Our library closely follows JAX's API for specifying neural networks,  [`stax`](https://github.com/google/jax/blob/master/jax/experimental/stax.py). In `stax` a network is defined by a pair of functions `(init_fn, apply_fn)` initializing the trainable parameters and computing the outputs of the network respectively. Below is an example of defining a 3-layer network and computing it's outputs `y` given inputs `x`.
 
 ```python
 from jax import random
 from jax.experimental import stax
 
-init_fun, apply_fun = stax.serial(
+init_fn, apply_fn = stax.serial(
     stax.Dense(512), stax.Relu,
     stax.Dense(512), stax.Relu,
     stax.Dense(1)
@@ -75,18 +75,18 @@ init_fun, apply_fun = stax.serial(
 
 key = random.PRNGKey(1)
 x = random.normal(key, (10, 100))
-_, params = init_fun(key, input_shape=x.shape)
+_, params = init_fn(key, input_shape=x.shape)
 
-y = apply_fun(params, x)  # (10, 1) np.ndarray outputs of the neural network
+y = apply_fn(params, x)  # (10, 1) np.ndarray outputs of the neural network
 ```
 
-Neural Tangents is designed to serve as a drop-in replacement for `stax`, extending the `(init_fun, apply_fun)` tuple to a triple `(init_fun, apply_fun, ker_fun)`, where `ker_fun` is the kernel function of the infinite network (GP) of the given architecture. Below is an example of computing the covariances of the GP between two batches of inputs `x1` and `x2`.
+Neural Tangents is designed to serve as a drop-in replacement for `stax`, extending the `(init_fn, apply_fn)` tuple to a triple `(init_fn, apply_fn, kernel_fn)`, where `kernel_fn` is the kernel function of the infinite network (GP) of the given architecture. Below is an example of computing the covariances of the GP between two batches of inputs `x1` and `x2`.
 
 ```python
 from jax import random
 from neural_tangents import stax
 
-init_fun, apply_fun, ker_fun = stax.serial(
+init_fn, apply_fn, kernel_fn = stax.serial(
     stax.Dense(512), stax.Relu(),
     stax.Dense(512), stax.Relu(),
     stax.Dense(1)
@@ -96,22 +96,22 @@ key1, key2 = random.split(random.PRNGKey(1))
 x1 = random.normal(key1, (10, 100))
 x2 = random.normal(key2, (20, 100))
 
-kernel = ker_fun(x1, x2, 'NNGP')
+kernel = kernel_fn(x1, x2, 'NNGP')
 ```
-Note that `ker_fun` can compute _two_ covariance matrices corresponding to the Neural Network Gaussian Process (NNGP) and Neural Tangent (NT) kernels respectively. The NNGP kernel corresponds to the _Bayesian_ infinite neural network [[1]](1). The NTK corresponds to the _(continuous) gradient descent trained_ infinite network [[5]](5). In the above example, we compute the NNGP kernel but we could compute the NTK or both as follows:
+Note that `kernel_fn` can compute _two_ covariance matrices corresponding to the Neural Network Gaussian Process (NNGP) and Neural Tangent (NT) kernels respectively. The NNGP kernel corresponds to the _Bayesian_ infinite neural network [[1]](1). The NTK corresponds to the _(continuous) gradient descent trained_ infinite network [[5]](5). In the above example, we compute the NNGP kernel but we could compute the NTK or both as follows:
 
 ```python
 # Get kernel of a single type
-nngp = ker_fun(x1, x2, 'NNGP') # (10, 20) np.ndarray
-ntk = ker_fun(x1, x2, 'NTK') # (10, 20) np.ndarray
+nngp = kernel_fn(x1, x2, 'NNGP') # (10, 20) np.ndarray
+ntk = kernel_fn(x1, x2, 'NTK') # (10, 20) np.ndarray
 
 # Get kernels as a namedtuple
-both = ker_fun(x1, x2, ('NNGP', 'NTK'))
+both = kernel_fn(x1, x2, ('NNGP', 'NTK'))
 both.nngp == nngp  # True
 both.ntk == ntk  # True
 
 # Unpack the kernels namedtuple
-nngp, ntk = ker_fun(x1, x2, ('NNGP', 'NTK'))
+nngp, ntk = kernel_fn(x1, x2, ('NNGP', 'NTK'))
 ```
 
 Doing inference with infinite networks trained on MSE loss reduces to classical GP inference, for which we also provide convenient tools:
@@ -122,10 +122,10 @@ import neural_tangents as nt
 x_train, x_test = x1, x2
 y_train = random.uniform(key1, shape=(10, 1))  # training targets
 
-y_test_nngp = nt.predict.gp_inference(ker_fun, x_train, y_train, x_test, get='NNGP')
+y_test_nngp = nt.predict.gp_inference(kernel_fn, x_train, y_train, x_test, get='NNGP')
 # (20, 1) np.ndarray test predictions of an infinite Bayesian network
 
-y_test_ntk = nt.predict.gp_inference(ker_fun, x_train, y_train, x_test, get='NTK')
+y_test_ntk = nt.predict.gp_inference(kernel_fn, x_train, y_train, x_test, get='NTK')
 # (20, 1) np.ndarray test predictions of an infinite continuous gradient descent trained network at convergence (t = inf)
 ```
 
@@ -162,7 +162,7 @@ def WideResnet(block_size, k, num_classes):
       stax.Flatten(),
       stax.Dense(num_classes, 1., 0.))
 
-init_fun, apply_fun, ker_fun = WideResnet(block_size=4, k=1, num_classes=10)
+init_fn, apply_fn, kernel_fn = WideResnet(block_size=4, k=1, num_classes=10)
 ```
 
 
@@ -182,9 +182,9 @@ The `neural_tangents` (`nt`) package contains the following modules and methods:
 
   * `predict.momentum` - inference with a network trained on arbitrary loss with continuous momentum gradient descent for an arbitrary finite time (using an ODE solver).
 
-* `get_ker_fun_monte_carlo` - compute a Monte Carlo kernel estimate  of _any_ `(init_fun, apply_fun)`, not necessarily specified `nt.stax`, enabling the kernel computation of infinite networks without closed-form expressions.
+* `monte_carlo_kernel_fn` - compute a Monte Carlo kernel estimate  of _any_ `(init_fn, apply_fn)`, not necessarily specified `nt.stax`, enabling the kernel computation of infinite networks without closed-form expressions.
 
-* Tools to investigate training dynamics of _wide but finite_ neural networks, like `linearize`, `taylor_expand`, `get_ker_fun_empirical` and more. See [Training Dynamics of Wide but Finite Networks](#Training-Dynamics-of-Wide-but-Finite-Networks) for details.
+* Tools to investigate training dynamics of _wide but finite_ neural networks, like `linearize`, `taylor_expand`, `empirical_kernel_fn` and more. See [Training Dynamics of Wide but Finite Networks](#Training-Dynamics-of-Wide-but-Finite-Networks) for details.
 
 
 ### [`nt.stax`](https://github.com/google/neural-tangents/blob/master/neural_tangents/stax.py) vs [`jax.experimental.stax`](https://github.com/google/jax/blob/master/jax/experimental/stax.py)
@@ -198,7 +198,7 @@ We remark the following differences between our library and the JAX one.
 
 ## Training Dynamics of Wide but Finite Networks
 
-The kernel of an infinite network `ker_fun(x1, x2).ntk` combined with  `nt.predict.gradient_descent_mse` together allow to analytically track the outputs of an infinitely wide neural network trained on MSE loss througout training. Here we discuss the implications for _wide but finite_ neural networks and present tools to study their evolution in _weight space_ (trainable parameters of the network) and _function space_ (outputs of the network).
+The kernel of an infinite network `kernel_fn(x1, x2).ntk` combined with  `nt.predict.gradient_descent_mse` together allow to analytically track the outputs of an infinitely wide neural network trained on MSE loss througout training. Here we discuss the implications for _wide but finite_ neural networks and present tools to study their evolution in _weight space_ (trainable parameters of the network) and _function space_ (outputs of the network).
 
 ### Weight Space
 
@@ -209,9 +209,9 @@ For this, we provide two convenient methods:
 * `nt.linearize`, and
 * `nt.taylor_expand`,
 
-which allow to linearize or get an arbitrary-order Taylor expansion of any function `apply_fun(params, x)` around some initial parameters `params_0` as `apply_fun_lin = nt.linearize(apply_fun, params_0)`.
+which allow to linearize or get an arbitrary-order Taylor expansion of any function `apply_fn(params, x)` around some initial parameters `params_0` as `apply_fn_lin = nt.linearize(apply_fn, params_0)`.
 
-One can use `apply_fun_lin(params, x)` exactly as you would any other function
+One can use `apply_fn_lin(params, x)` exactly as you would any other function
 (including as an input to JAX optimizers). This makes it easy to compare the
 training trajectory of neural networks with that of its linearization.
 Previous theory and experiments have examined the linearization of neural 
@@ -224,24 +224,24 @@ post-activations which are substantially more nonlinear.
 import jax.numpy as np
 import neural_tangents as nt
 
-def apply_fun(params, x):
+def apply_fn(params, x):
   W, b = params
   return np.dot(x, W) + b
 
 W_0 = np.array([[1., 0.], [0., 1.]])
 b_0 = np.zeros((2,))
 
-apply_fun_lin = nt.linearize(apply_fun, (W_0, b_0))
+apply_fn_lin = nt.linearize(apply_fn, (W_0, b_0))
 W = np.array([[1.5, 0.2], [0.1, 0.9]])
 b = b_0 + 0.2
 
 x = np.array([[0.3, 0.2], [0.4, 0.5], [1.2, 0.2]])
-logits = apply_fun_lin((W, b), x)  # (3, 2) np.ndarray
+logits = apply_fn_lin((W, b), x)  # (3, 2) np.ndarray
 ```
 
 ### Function Space:
 
-Outputs of a linearized model evolve identically to those of an infinite one [[6]](6) but with a different kernel - specifically, the Neural Tangent Kernel [[5]](5) evaluated on the specific `apply_fun` of the finite network given specific `params_0` that the network is initialized with. For this we provide the `nt.get_ker_fun_empirical` function that accepts any `apply_fun` and returns a `ker_fun(x1, x2, params)` that allows to compute the empirical NTK and NNGP kernels on specific `params`.
+Outputs of a linearized model evolve identically to those of an infinite one [[6]](6) but with a different kernel - specifically, the Neural Tangent Kernel [[5]](5) evaluated on the specific `apply_fn` of the finite network given specific `params_0` that the network is initialized with. For this we provide the `nt.empirical_kernel_fn` function that accepts any `apply_fn` and returns a `kernel_fn(x1, x2, params)` that allows to compute the empirical NTK and NNGP kernels on specific `params`.
 
 #### Example:
 
@@ -250,7 +250,7 @@ import jax.random as random
 import jax.numpy as np
 import neural_tangents as nt
 
-def apply_fun(params, x):
+def apply_fn(params, x):
   W, b = params
   return np.dot(x, W) + b
 
@@ -263,15 +263,15 @@ x_train = random.normal(key1, (3, 2))
 x_test = random.normal(key2, (4, 2))
 y_train = random.uniform(key1, shape=(3, 2))
 
-ker_fun = nt.get_ker_fun_empirical(apply_fun)
-ntk_train_train = ker_fun(x_train, x_train, params, 'NTK')
-ntk_test_train = ker_fun(x_test, x_train, params, 'NTK')
+kernel_fn = nt.empirical_kernel_fn(apply_fn)
+ntk_train_train = kernel_fn(x_train, x_train, params, 'NTK')
+ntk_test_train = kernel_fn(x_test, x_train, params, 'NTK')
 mse_predictor = nt.predict.gradient_descent_mse(
     ntk_train_train, y_train, ntk_test_train)
 
 t = 5.
-y_train_0 = apply_fun(params, x_train)
-y_test_0 = apply_fun(params, x_test)
+y_train_0 = apply_fn(params, x_train)
+y_test_0 = apply_fn(params, x_test)
 y_train_t, y_test_t = mse_predictor(t, y_train_0, y_test_0)
 # (3, 2) and (4, 2) np.ndarray train and test outputs after `t` units of time training with continuous gradient descent
 ```

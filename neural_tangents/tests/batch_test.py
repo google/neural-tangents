@@ -68,21 +68,21 @@ def _build_network(input_shape, network, out_logits):
 def _empirical_kernel(key, input_shape, network, out_logits):
   init_fn, f, _ = _build_network(input_shape, network, out_logits)
   _, params = init_fn(key, (-1,) + input_shape)
-  ker_fun = jit(empirical.get_ntk_fun_empirical(f))
+  kernel_fn = jit(empirical.empirical_ntk_fn(f))
 
-  return partial(ker_fun, params=params)
+  return partial(kernel_fn, params=params)
 
 
 def _theoretical_kernel(unused_key, input_shape, network, just_theta):
-  _, _, _ker_fun = _build_network(input_shape, network, 1)
+  _, _, _kernel_fn = _build_network(input_shape, network, 1)
 
   @jit
-  def ker_fun(x1, x2=None):
+  def kernel_fn(x1, x2=None):
     get_all = ('ntk', 'nngp', 'var1', 'var2', 'is_gaussian', 'is_height_width')
-    k = _ker_fun(x1, x2, 'ntk') if just_theta else _ker_fun(x1, x2, get_all)
+    k = _kernel_fn(x1, x2, 'ntk') if just_theta else _kernel_fn(x1, x2, get_all)
     return k
 
-  return ker_fun
+  return kernel_fn
 
 
 KERNELS = {}
@@ -93,10 +93,10 @@ KERNELS['theoretical'] = partial(_theoretical_kernel, just_theta=True)
 KERNELS['theoretical_pytree'] = partial(_theoretical_kernel, just_theta=False)
 
 
-def _test_kernel_against_batched(cls, ker_fun, batched_ker_fun, train, test):
+def _test_kernel_against_batched(cls, kernel_fn, batched_kernel_fn, train, test):
 
-  g = ker_fun(train, None)
-  g_b = batched_ker_fun(train, None)
+  g = kernel_fn(train, None)
+  g_b = batched_kernel_fn(train, None)
 
   if hasattr(g, '_asdict'):
     g_dict = g._asdict()
@@ -108,8 +108,8 @@ def _test_kernel_against_batched(cls, ker_fun, batched_ker_fun, train, test):
   else:
     cls.assertAllClose(g, g_b, check_dtypes=True)
 
-  g = ker_fun(train, test)
-  g_b = batched_ker_fun(train, test)
+  g = kernel_fn(train, test)
+  g_b = batched_kernel_fn(train, test)
 
   if hasattr(g, '_asdict'):
     g_dict = g._asdict()
@@ -138,21 +138,21 @@ class BatchTest(jtu.JaxTestCase):
                 network,
               'name':
                 name,
-              'ker_fun':
-                ker_fun
+              'kernel_fn':
+                kernel_fn
           }
           for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
-          for name, ker_fun in KERNELS.items()))
-  def testSerial(self, train_shape, test_shape, network, name, ker_fun):
+          for name, kernel_fn in KERNELS.items()))
+  def testSerial(self, train_shape, test_shape, network, name, kernel_fn):
     key = random.PRNGKey(0)
     key, self_split, other_split = random.split(key, 3)
     data_self = random.normal(self_split, train_shape)
     data_other = random.normal(other_split, test_shape)
 
-    ker_fun = ker_fun(key, train_shape[1:], network)
-    kernel_batched = batch._serial(ker_fun, batch_size=2)
+    kernel_fn = kernel_fn(key, train_shape[1:], network)
+    kernel_batched = batch._serial(kernel_fn, batch_size=2)
 
-    _test_kernel_against_batched(self, ker_fun, kernel_batched, data_self,
+    _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
                                  data_other)
 
   # NOTE(schsam): Here and below we exclude tests involving convolutions and
@@ -172,13 +172,13 @@ class BatchTest(jtu.JaxTestCase):
                 network,
               'name':
                 name,
-              'ker_fun':
-                ker_fun
+              'kernel_fn':
+                kernel_fn
           }
           for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
-          for name, ker_fun in KERNELS.items()))
+          for name, kernel_fn in KERNELS.items()))
   # if (len(train) == 2 or name[:5] == 'theor')))
-  def testParallel(self, train_shape, test_shape, network, name, ker_fun):
+  def testParallel(self, train_shape, test_shape, network, name, kernel_fn):
     utils.stub_out_pmap(batch, 2)
 
     key = random.PRNGKey(0)
@@ -186,10 +186,10 @@ class BatchTest(jtu.JaxTestCase):
     data_self = random.normal(self_split, train_shape)
     data_other = random.normal(other_split, test_shape)
 
-    ker_fun = ker_fun(key, train_shape[1:], network)
-    kernel_batched = batch._parallel(ker_fun)
+    kernel_fn = kernel_fn(key, train_shape[1:], network)
+    kernel_batched = batch._parallel(kernel_fn)
 
-    _test_kernel_against_batched(self, ker_fun, kernel_batched, data_self,
+    _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
                                  data_other)
 
   @jtu.parameterized.named_parameters(
@@ -206,13 +206,13 @@ class BatchTest(jtu.JaxTestCase):
                 network,
               'name':
                 name,
-              'ker_fun':
-                ker_fun
+              'kernel_fn':
+                kernel_fn
           }
           for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
-          for name, ker_fun in KERNELS.items()
+          for name, kernel_fn in KERNELS.items()
           if len(train) == 2))
-  def testComposition(self, train_shape, test_shape, network, name, ker_fun):
+  def testComposition(self, train_shape, test_shape, network, name, kernel_fn):
     utils.stub_out_pmap(batch, 2)
 
     key = random.PRNGKey(0)
@@ -220,14 +220,14 @@ class BatchTest(jtu.JaxTestCase):
     data_self = random.normal(self_split, train_shape)
     data_other = random.normal(other_split, test_shape)
 
-    ker_fun = ker_fun(key, train_shape[1:], network)
+    kernel_fn = kernel_fn(key, train_shape[1:], network)
 
-    kernel_batched = batch._parallel(batch._serial(ker_fun, batch_size=2))
-    _test_kernel_against_batched(self, ker_fun, kernel_batched, data_self,
+    kernel_batched = batch._parallel(batch._serial(kernel_fn, batch_size=2))
+    _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
                                  data_other)
 
-    kernel_batched = batch._serial(batch._parallel(ker_fun), batch_size=2)
-    _test_kernel_against_batched(self, ker_fun, kernel_batched, data_self,
+    kernel_batched = batch._serial(batch._parallel(kernel_fn), batch_size=2)
+    _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
                                  data_other)
 
   @jtu.parameterized.named_parameters(
@@ -244,12 +244,12 @@ class BatchTest(jtu.JaxTestCase):
                 network,
               'name':
                 name,
-              'ker_fun':
-                ker_fun
+              'kernel_fn':
+                kernel_fn
           }
           for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
-          for name, ker_fun in KERNELS.items()))
-  def testAutomatic(self, train_shape, test_shape, network, name, ker_fun):
+          for name, kernel_fn in KERNELS.items()))
+  def testAutomatic(self, train_shape, test_shape, network, name, kernel_fn):
     utils.stub_out_pmap(batch, 2)
 
     key = random.PRNGKey(0)
@@ -257,18 +257,18 @@ class BatchTest(jtu.JaxTestCase):
     data_self = random.normal(self_split, train_shape)
     data_other = random.normal(other_split, test_shape)
 
-    ker_fun = ker_fun(key, train_shape[1:], network)
+    kernel_fn = kernel_fn(key, train_shape[1:], network)
 
-    kernel_batched = batch.batch(ker_fun, batch_size=2)
-    _test_kernel_against_batched(self, ker_fun, kernel_batched, data_self,
+    kernel_batched = batch.batch(kernel_fn, batch_size=2)
+    _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
                                  data_other)
 
-    kernel_batched = batch.batch(ker_fun, batch_size=2, store_on_device=False)
-    _test_kernel_against_batched(self, ker_fun, kernel_batched, data_self,
+    kernel_batched = batch.batch(kernel_fn, batch_size=2, store_on_device=False)
+    _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
                                  data_other)
 
   def test_jit_or_pmap_broadcast(self):
-    def ker_fun(x1, x2, do_flip, keys, do_square, params, _unused=None, p=0.65):
+    def kernel_fn(x1, x2, do_flip, keys, do_square, params, _unused=None, p=0.65):
       res = np.abs(np.matmul(x1, x2))
       if do_square:
         res *= res
@@ -282,33 +282,33 @@ class BatchTest(jtu.JaxTestCase):
     x2 = np.arange(0, 10).reshape((10,))
     keys = random.PRNGKey(1)
 
-    ker_fun_pmapped = batch._jit_or_pmap_broadcast(ker_fun, device_count=0)
+    kernel_fn_pmapped = batch._jit_or_pmap_broadcast(kernel_fn, device_count=0)
     x1 = np.arange(0, 10).reshape((1, 10))
     for do_flip in [True, False]:
       for do_square in [True, False]:
         with self.subTest(do_flip=do_flip, do_square=do_square, device_count=0):
-          res_1 = ker_fun(
+          res_1 = kernel_fn(
               x1, x2, do_flip, keys, do_square, params, _unused=True, p=0.65)
-          res_2 = ker_fun_pmapped(
+          res_2 = kernel_fn_pmapped(
               x1, x2, do_flip, keys, do_square, params, _unused=True)
           self.assertAllClose(res_1, res_2, True)
 
     utils.stub_out_pmap(batch, 1)
     x1 = np.arange(0, 10).reshape((1, 10))
-    ker_fun_pmapped = batch._jit_or_pmap_broadcast(ker_fun, device_count=1)
+    kernel_fn_pmapped = batch._jit_or_pmap_broadcast(kernel_fn, device_count=1)
     for do_flip in [True, False]:
       for do_square in [True, False]:
         with self.subTest(do_flip=do_flip, do_square=do_square, device_count=1):
-          res_1 = ker_fun(
+          res_1 = kernel_fn(
               x1, x2, do_flip, keys, do_square, params, _unused=False, p=0.65)
-          res_2 = ker_fun_pmapped(
+          res_2 = kernel_fn_pmapped(
               x1, x2, do_flip, keys, do_square, params, _unused=None)
           self.assertAllClose(res_1[0], res_2[0], True)
           self.assertAllClose(
               tree_map(partial(np.expand_dims, axis=0), res_1[1]), res_2[1],
               True)
 
-    ker_fun_pmapped = batch._jit_or_pmap_broadcast(ker_fun, device_count=2)
+    kernel_fn_pmapped = batch._jit_or_pmap_broadcast(kernel_fn, device_count=2)
     x1 = np.arange(0, 20).reshape((2, 10))
     utils.stub_out_pmap(batch, 2)
 
@@ -318,8 +318,8 @@ class BatchTest(jtu.JaxTestCase):
     for do_flip in [True, False]:
       for do_square in [True, False]:
         with self.subTest(do_flip=do_flip, do_square=do_square, device_count=2):
-          res_1 = ker_fun(x1, x2, do_flip, keys, do_square, params, p=0.2)
-          res_2 = ker_fun_pmapped(
+          res_1 = kernel_fn(x1, x2, do_flip, keys, do_square, params, p=0.2)
+          res_2 = kernel_fn_pmapped(
               x1, x2, do_flip, keys, do_square, params, _unused=None, p=0.2)
           self.assertAllClose(res_1[0][0], res_2[0][0], True)
           self.assertAllClose(res_1[0][1], res_2[0][1], True)

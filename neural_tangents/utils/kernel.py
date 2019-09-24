@@ -14,8 +14,8 @@
 
 """The `Kernel` class containing NTK and NNGP `np.ndarray`s as fields."""
 
-import aenum
 import collections
+import aenum
 
 
 class Marginalisation(aenum.OrderedEnum):
@@ -83,7 +83,7 @@ class Kernel(
     ntk: the neural tangent kernel (NTK). `np.ndarray` of same shape as
       `nngp`.
     is_gaussian: a boolean, specifying whether the output features or channels
-      of the layer / NN function (returning this `Kernel` as the `ker_fun`)
+      of the layer / NN function (returning this `Kernel` as the `kernel_fn`)
       are i.i.d. Gaussian with covariance `nngp`, conditioned on fixed inputs
       to the layer and i.i.d. Gaussian weights and biases of the layer. For
       example, passing an input through a CNN layer with i.i.d. Gaussian
@@ -137,7 +137,7 @@ class Kernel(
       ntk: the neural tangent kernel (NTK). `np.ndarray` of same shape as
         `nngp`.
       is_gaussian: a boolean, specifying whether the output features or channels
-        of the layer / NN function (returning this `Kernel` as the `ker_fun`)
+        of the layer / NN function (returning this `Kernel` as the `kernel_fn`)
         are i.i.d. Gaussian with covariance `nngp`, conditioned on fixed inputs
         to the layer and i.i.d. Gaussian weights and biases of the layer. For
         example, passing an input through a CNN layer with i.i.d. Gaussian

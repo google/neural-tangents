@@ -123,7 +123,7 @@ def flatten_features(kernel):
   return np.reshape(kernel, (feature_size *  n1, feature_size * n2))
 
 
-def get_ntk_fun_empirical_implicit(f):
+def empirical_implicit_ntk_fn(f):
   """Computes the ntk without batching for inputs x1 and x2.
 
   The Neural Tangent Kernel is defined as J(X_1)^T J(X_2) where J is the
@@ -146,10 +146,10 @@ def get_ntk_fun_empirical_implicit(f):
        [|inputs|, output_dim].
 
   Returns:
-    A function ntk_fun that computes the empirical ntk.
+    A function ntk_fn that computes the empirical ntk.
   """
 
-  def ntk_fun(x1, x2, params):
+  def ntk_fn(x1, x2, params):
     """Computes the empirical ntk.
 
     Args:
@@ -179,10 +179,10 @@ def get_ntk_fun_empirical_implicit(f):
         tuple(x + ndim for x in range(1, ndim))
     return np.transpose(ntk, ordering)
 
-  return ntk_fun
+  return ntk_fn
 
 
-def get_ntk_fun_empirical_direct(f):
+def empirical_direct_ntk_fn(f):
   """Computes the ntk without batching for inputs x1 and x2.
 
   The Neural Tangent Kernel is defined as J(X_1)^T J(X_2) where J is the
@@ -194,7 +194,7 @@ def get_ntk_fun_empirical_direct(f):
        [|inputs|, output_dim].
 
   Returns:
-    A function `ntk_fun` that computes the empirical ntk.
+    A function `ntk_fn` that computes the empirical ntk.
   """
   jac_fn = jacobian(f)
 
@@ -207,7 +207,7 @@ def get_ntk_fun_empirical_direct(f):
 
     return tree_reduce(operator.add, tree_multimap(contract, j1, j2))
 
-  def ntk_fun(x1, x2, params):
+  def ntk_fn(x1, x2, params):
     """Computes the empirical ntk.
 
     Args:
@@ -232,15 +232,15 @@ def get_ntk_fun_empirical_direct(f):
     # shape [n, output_dim].
     return np.transpose(ntk, (0, 2, 1, 3))
 
-  return ntk_fun
+  return ntk_fn
 
 
-get_ntk_fun_empirical = (get_ntk_fun_empirical_implicit
-                         if FLAGS.tangents_optimized else
-                         get_ntk_fun_empirical_direct)
+empirical_ntk_fn = (empirical_implicit_ntk_fn
+                     if FLAGS.tangents_optimized else
+                     empirical_direct_ntk_fn)
 
 
-def get_nngp_fun_empirical(f):
+def empirical_nngp_fn(f):
   """Returns a function to draw a single sample the NNGP of a given network `f`.
 
   This method assumes that slices of the random network outputs along the last
@@ -260,7 +260,7 @@ def get_nngp_fun_empirical(f):
   Returns:
      A function to draw a single sample the NNGP of a given network `f`.
   """
-  def nngp_fun(x1, x2, params):
+  def nngp_fn(x1, x2, params):
     """Sample a single NNGP of a given network `f` on given inputs and `params`.
 
     This method assumes that slices of the random network outputs along the last
@@ -290,19 +290,19 @@ def get_nngp_fun_empirical(f):
     nngp_12 = np.dot(out1, out2) / out1.shape[-1]
     return np.squeeze(nngp_12, -1)
 
-  return nngp_fun
+  return nngp_fn
 
 
-def get_ker_fun_empirical(f):
+def empirical_kernel_fn(f):
   """Returns a function that computes single draws from NNGP and NT kernels."""
 
-  ker_funs = {
-      'nngp': get_nngp_fun_empirical(f),
-      'ntk': get_ntk_fun_empirical(f)
+  kernel_fns = {
+      'nngp': empirical_nngp_fn(f),
+      'ntk': empirical_ntk_fn(f)
   }
 
   @get_namedtuple('EmpiricalKernel')
-  def ker_fun(x1, x2, params, get):
+  def kernel_fn(x1, x2, params, get):
     """Returns a draw from the requested empirical kernels.
 
     Args:
@@ -317,6 +317,6 @@ def get_ker_fun_empirical(f):
       returns an `EmpiricalKernel` namedtuple containing only the requested
       information.
     """
-    return {g: ker_funs[g](x1, x2, params) for g in get}
+    return {g: kernel_fns[g](x1, x2, params) for g in get}
 
-  return ker_fun
+  return kernel_fn

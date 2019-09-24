@@ -52,7 +52,7 @@ def main(unused_argv):
       datasets.mnist(FLAGS.train_size, FLAGS.test_size)
 
   # Build the network
-  init_fn, f, _ = stax.serial(
+  init_fn, apply_fn, _ = stax.serial(
       stax.Dense(2048, 1., 0.05),
       stax.Erf(),
       stax.Dense(10, 1., 0.05))
@@ -66,17 +66,17 @@ def main(unused_argv):
 
   # Create an mse loss function and a gradient function.
   loss = lambda fx, y_hat: 0.5 * np.mean((fx - y_hat) ** 2)
-  grad_loss = jit(grad(lambda params, x, y: loss(f(params, x), y)))
+  grad_loss = jit(grad(lambda params, x, y: loss(apply_fn(params, x), y)))
 
   # Create an MSE predictor to solve the NTK equation in function space.
-  ntk = nt.batch(nt.get_ntk_fun_empirical(f), batch_size=4, device_count=0)
+  ntk = nt.batch(nt.empirical_ntk_fn(apply_fn), batch_size=4, device_count=0)
   g_dd = ntk(x_train, None, params)
   g_td = ntk(x_test, x_train, params)
   predictor = nt.predict.gradient_descent_mse(g_dd, y_train, g_td)
 
   # Get initial values of the network in function space.
-  fx_train = f(params, x_train)
-  fx_test = f(params, x_test)
+  fx_train = apply_fn(params, x_train)
+  fx_test = apply_fn(params, x_test)
 
   # Train the network.
   train_steps = int(FLAGS.train_time // FLAGS.learning_rate)
@@ -91,8 +91,8 @@ def main(unused_argv):
   fx_train, fx_test = predictor(FLAGS.train_time, fx_train, fx_test)
 
   # Print out summary data comparing the linear / nonlinear model.
-  util.print_summary('train', y_train, f(params, x_train), fx_train, loss)
-  util.print_summary('test', y_test, f(params, x_test), fx_test, loss)
+  util.print_summary('train', y_train, apply_fn(params, x_train), fx_train, loss)
+  util.print_summary('test', y_test, apply_fn(params, x_test), fx_test, loss)
 
 if __name__ == '__main__':
   app.run(main)

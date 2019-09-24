@@ -62,19 +62,19 @@ def _build_network(input_shape, network, out_logits):
     raise ValueError('Expected flat or image test input.')
 
 
-def _ker_funs(key, input_shape, network, out_logits):
+def _kernel_fns(key, input_shape, network, out_logits):
   init_fn, f, _ = _build_network(input_shape, network, out_logits)
   _, params = init_fn(key, (-1,) + input_shape)
-  implicit_ker_fun = jit(empirical.get_ntk_fun_empirical_implicit(f))
-  direct_ker_fun = jit(empirical.get_ntk_fun_empirical_direct(f))
+  implicit_kernel_fn = jit(empirical.empirical_implicit_ntk_fn(f))
+  direct_kernel_fn = jit(empirical.empirical_direct_ntk_fn(f))
 
-  return (partial(implicit_ker_fun, params=params),
-          partial(direct_ker_fun, params=params))
+  return (partial(implicit_kernel_fn, params=params),
+          partial(direct_kernel_fn, params=params))
 
 
 KERNELS = {}
 for o in OUTPUT_LOGITS:
-  KERNELS['empirical_logits_{}'.format(o)] = partial(_ker_funs, out_logits=o)
+  KERNELS['empirical_logits_{}'.format(o)] = partial(_kernel_fns, out_logits=o)
 
 
 class EmpiricalTest(jtu.JaxTestCase):
@@ -165,17 +165,17 @@ class EmpiricalTest(jtu.JaxTestCase):
           'test_shape': test,
           'network': network,
           'name': name,
-          'ker_fun': ker_fun
+          'kernel_fn': kernel_fn
       } for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
-                          for name, ker_fun in KERNELS.items()))
+                          for name, kernel_fn in KERNELS.items()))
   def testNTKAgainstDirect(
-      self, train_shape, test_shape, network, name, ker_fun):
+      self, train_shape, test_shape, network, name, kernel_fn):
     key = random.PRNGKey(0)
     key, self_split, other_split = random.split(key, 3)
     data_self = random.normal(self_split, train_shape)
     data_other = random.normal(other_split, test_shape)
 
-    implicit, direct = ker_fun(key, train_shape[1:], network)
+    implicit, direct = kernel_fn(key, train_shape[1:], network)
 
     g = implicit(data_self, None)
     g_direct = direct(data_self, None)

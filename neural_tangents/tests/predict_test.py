@@ -18,8 +18,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from functools import partial
-
 from jax import test_util as jtu
 from jax.api import grad
 from jax.api import jit
@@ -28,9 +26,9 @@ from jax.experimental import optimizers
 from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.random as random
+from neural_tangents import predict
 from neural_tangents import stax
 from neural_tangents.utils import empirical
-from neural_tangents import predict
 
 
 config.parse_flags_with_absl()
@@ -87,15 +85,15 @@ def _build_network(input_shape, network, out_logits):
 def _empirical_kernel(key, input_shape, network, out_logits):
   init_fn, f, _ = _build_network(input_shape, network, out_logits)
   _, params = init_fn(key, (-1,) + input_shape)
-  _ker_fun = empirical.get_ker_fun_empirical(f)
-  ker_fun = lambda x1, x2, get: _ker_fun(x1, x2, params, get)
-  return params, f, jit(ker_fun, static_argnums=(2,))
+  _kernel_fn = empirical.empirical_kernel_fn(f)
+  kernel_fn = lambda x1, x2, get: _kernel_fn(x1, x2, params, get)
+  return params, f, jit(kernel_fn, static_argnums=(2,))
 
 
 def _theoretical_kernel(key, input_shape, network, out_logits):
-  init_fn, f, ker_fun = _build_network(input_shape, network, out_logits)
+  init_fn, f, kernel_fn = _build_network(input_shape, network, out_logits)
   _, params = init_fn(key, (-1,) + input_shape)
-  return params, f, jit(ker_fun, static_argnums=(2,))
+  return params, f, jit(kernel_fn, static_argnums=(2,))
 
 
 KERNELS = {
@@ -111,10 +109,10 @@ def momentum(learning_rate, momentum=0.9):
   Different from `jax.experimental.optimizers.momentum` (Nesterov).
   """
   learning_rate = optimizers.make_schedule(learning_rate)
-  def init_fun(x0):
+  def init_fn(x0):
     v0 = np.zeros_like(x0)
     return x0, v0
-  def update_fun(i, g, state):
+  def update_fn(i, g, state):
     x, velocity = state
     velocity = momentum * velocity + g
     x = x - learning_rate(i) * velocity
@@ -122,7 +120,7 @@ def momentum(learning_rate, momentum=0.9):
   def get_params(state):
     x, _ = state
     return x
-  return init_fun, update_fun, get_params
+  return init_fn, update_fn, get_params
 
 
 class PredictTest(jtu.JaxTestCase):
@@ -417,8 +415,8 @@ class PredictTest(jtu.JaxTestCase):
 
     key, split = random.split(key)
     data_test = np.cos(random.normal(split, test_shape))
-    _, _, ker_fun = _build_network(train_shape[1:], network, out_logits)
-    mean_pred, var = predict.gp_inference(ker_fun, data_train, data_labels,
+    _, _, kernel_fn = _build_network(train_shape[1:], network, out_logits)
+    mean_pred, var = predict.gp_inference(kernel_fn, data_train, data_labels,
                                           data_test, 'ntk', diag_reg=0.,
                                           compute_var=True)
 
@@ -434,15 +432,15 @@ class PredictTest(jtu.JaxTestCase):
       empirical_mean = 0.
       key = random.PRNGKey(100)
       init_fn, f, _ = _build_network(train_shape[1:], network, out_logits)
-      _ker_fun = empirical.get_ker_fun_empirical(f)
-      ker_fun = jit(lambda x1, x2, params: _ker_fun(x1, x2, params, 'ntk'))
+      _kernel_fn = empirical.empirical_kernel_fn(f)
+      kernel_fn = jit(lambda x1, x2, params: _kernel_fn(x1, x2, params, 'ntk'))
 
       for _ in range(count):
         key, split = random.split(key)
         _, params = init_fn(split, train_shape)
 
-        g_dd = ker_fun(data_train, None, params)
-        g_td = ker_fun(data_test, data_train, params)
+        g_dd = kernel_fn(data_train, None, params)
+        g_td = kernel_fn(data_test, data_train, params)
         predictor = predict.gradient_descent_mse(g_dd, data_labels, g_td)
 
         fx_initial_train = f(params, data_train)
@@ -489,31 +487,31 @@ class PredictTest(jtu.JaxTestCase):
 
     key, split = random.split(key)
     data_test = np.cos(random.normal(split, test_shape))
-    _, _, ker_fun = _build_network(train_shape[1:], network, out_logits)
+    _, _, kernel_fn = _build_network(train_shape[1:], network, out_logits)
 
-    out = predict.gp_inference(ker_fun, data_train, data_labels,
+    out = predict.gp_inference(kernel_fn, data_train, data_labels,
                                data_test, 'ntk', diag_reg=0.,
                                compute_var=True)
     assert isinstance(out, predict.Gaussian)
 
-    out = predict.gp_inference(ker_fun, data_train, data_labels,
+    out = predict.gp_inference(kernel_fn, data_train, data_labels,
                                data_test, 'nngp', diag_reg=0.,
                                compute_var=True)
     assert isinstance(out, predict.Gaussian)
 
-    out = predict.gp_inference(ker_fun, data_train, data_labels,
+    out = predict.gp_inference(kernel_fn, data_train, data_labels,
                                data_test, ('ntk',), diag_reg=0.,
                                compute_var=True)
     assert len(out) == 1 and isinstance(out[0], predict.Gaussian)
 
-    out = predict.gp_inference(ker_fun, data_train, data_labels,
+    out = predict.gp_inference(kernel_fn, data_train, data_labels,
                                data_test, ('ntk', 'nngp'), diag_reg=0.,
                                compute_var=True)
     assert (len(out) == 2 and
             isinstance(out[0], predict.Gaussian) and
             isinstance(out[1], predict.Gaussian))
 
-    out2 = predict.gp_inference(ker_fun, data_train, data_labels,
+    out2 = predict.gp_inference(kernel_fn, data_train, data_labels,
                                data_test, ('nngp', 'ntk'), diag_reg=0.,
                                compute_var=True)
     self.assertAllClose(out[0], out2[1], True)
@@ -554,14 +552,14 @@ class PredictTest(jtu.JaxTestCase):
 
     key, split = random.split(key)
     data_test = np.cos(random.normal(split, test_shape))
-    _, _, ker_fun = _build_network(train_shape[1:], network, out_logits)
+    _, _, kernel_fn = _build_network(train_shape[1:], network, out_logits)
 
     reg = 1e-7
     inf_prediction = predict.gp_inference(
-        ker_fun, data_train, data_labels, data_test, get,
+        kernel_fn, data_train, data_labels, data_test, get,
         diag_reg=reg, compute_var=True)
     prediction = predict.gradient_descent_mse_gp(
-        ker_fun, data_train, data_labels, data_test, get,
+        kernel_fn, data_train, data_labels, data_test, get,
         diag_reg=reg, compute_var=True)
 
     finite_prediction = prediction(np.inf)
