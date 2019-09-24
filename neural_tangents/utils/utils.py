@@ -37,9 +37,6 @@ def stub_out_pmap(batch, count):
 
     platform = xla_bridge.get_backend().platform
     if platform == 'gpu' or platform == 'cpu':
-      # TODO(romann): investigate why vmap is extremely slow in
-      # `utils/monte_carlo_test.py`, `test_monte_carlo_vs_analytic`.
-      # Example: http://sponge/e081c176-e77f-428c-846d-bafbfd86a46c
       batch.pmap = _jit_vmap
       batch.xla_bridge = xla_bridge_stub()
 
