@@ -575,7 +575,7 @@ def gradient_descent_mse_gp(kernel_fn,
 
     if 'ntk' in get:
       evals, evecs = eigenspace['ntk']
-      op_evals = -op_fn(evals, 2 * t)
+      op_evals = -op_fn(evals, t)
       pred_mean = _mean_prediction_einsum(evecs, op_evals, ktd.ntk, y_train)
       if compute_var:
         # inline the covariance calculation with einsum.
