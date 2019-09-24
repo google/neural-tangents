@@ -26,10 +26,8 @@ from jax.api import grad
 from jax.api import jit
 from jax.experimental import optimizers
 import jax.numpy as np
-from neural_tangents import predict
+import neural_tangents as nt
 from neural_tangents import stax
-from neural_tangents.api import batch
-from neural_tangents.api import get_ntk_fun_empirical
 import datasets
 import util
 
@@ -71,10 +69,10 @@ def main(unused_argv):
   grad_loss = jit(grad(lambda params, x, y: loss(f(params, x), y)))
 
   # Create an MSE predictor to solve the NTK equation in function space.
-  ntk = batch(get_ntk_fun_empirical(f), batch_size=4, device_count=0)
+  ntk = nt.batch(nt.get_ntk_fun_empirical(f), batch_size=4, device_count=0)
   g_dd = ntk(x_train, None, params)
   g_td = ntk(x_test, x_train, params)
-  predictor = predict.gradient_descent_mse(g_dd, y_train, g_td)
+  predictor = nt.predict.gradient_descent_mse(g_dd, y_train, g_td)
 
   # Get initial values of the network in function space.
   fx_train = f(params, x_train)

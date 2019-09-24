@@ -32,8 +32,8 @@ from jax.api import jit
 from jax.experimental import optimizers
 from jax.experimental.stax import logsoftmax
 import jax.numpy as np
+import neural_tangents as nt
 from neural_tangents import stax
-from neural_tangents.api import linearize
 import datasets
 import util
 
@@ -64,7 +64,7 @@ def main(unused_argv):
   _, params = init_fn(key, (-1, 784))
 
   # Linearize the network about its initial parameters.
-  f_lin = linearize(f, params)
+  f_lin = nt.linearize(f, params)
 
   # Create and initialize an optimizer for both f and f_lin.
   opt_init, opt_apply, get_params = optimizers.momentum(FLAGS.learning_rate,

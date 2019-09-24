@@ -33,8 +33,8 @@ This library contains layer constructors mimicking those in
 Example:
   ```python
   >>> from jax import random
+  >>> import neural_tangents as nt
   >>> from neural_tangents import stax
-  >>> from neural_tangents import predict
   >>>
   >>> key1, key2 = random.split(random.PRNGKey(1), 2)
   >>> x_train = random.normal(key1, (20, 32, 32, 3))
@@ -52,12 +52,12 @@ Example:
   >>> )
   >>>
   >>> # (5, 10) np.ndarray NNGP test prediction
-  >>> y_test_nngp = predict.gp_inference(ker_fun, x_train, y_train, x_test,
-  >>>                                    mode='NNGP')
+  >>> y_test_nngp = nt.predict.gp_inference(ker_fun, x_train, y_train, x_test,
+  >>>                                       mode='NNGP')
   >>>
   >>> # (5, 10) np.ndarray NTK prediction
-  >>> y_test_ntk = predict.gp_inference(ker_fun, x_train, y_train, x_test,
-  >>>                                   mode='NTK')
+  >>> y_test_ntk = nt.predict.gp_inference(ker_fun, x_train, y_train, x_test,
+  >>>                                      mode='NTK')
   ```
 """
 

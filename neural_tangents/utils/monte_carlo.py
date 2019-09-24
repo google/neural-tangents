@@ -123,9 +123,8 @@ def get_ker_fun_monte_carlo(init_fun,
   Example:
   ```python
   >>> from jax import random
+  >>> import neural_tangents as nt
   >>> from neural_tangents import stax
-  >>> from neural_tangents import predict
-  >>> from neural_tangents.api import get_ker_fun_monte_carlo
   >>>
   >>> key1, key2 = random.split(random.PRNGKey(1), 2)
   >>> x_train = random.normal(key1, (20, 32, 32, 3))
@@ -143,13 +142,13 @@ def get_ker_fun_monte_carlo(init_fun,
   >>> )
   >>>
   >>> n_samples = 200
-  >>> ker_fun = get_ker_fun_monte_carlo(init_fun, apply_fun, key1, n_samples)
+  >>> ker_fun = nt.get_ker_fun_monte_carlo(init_fun, apply_fun, key1, n_samples)
   >>> kernel = ker_fun(x_train, x_test, get=('NNGP', 'NTK'))
   >>> # `kernel` is a tuple of NNGP and NTK MC estimate using `n` samples.
   >>>
   >>> n_samples = [1, 10, 100, 1000]
-  >>> ker_fun_generator = get_ker_fun_monte_carlo(init_fun, apply_fun, key1,
-  >>>                                              n_samples)
+  >>> ker_fun_generator = nt.get_ker_fun_monte_carlo(init_fun, apply_fun, key1,
+  >>>                                                n_samples)
   >>> kernel_samples = ker_fun_generator(x_train, x_test, get=('NNGP', 'NTK'))
   >>> for n, kernel in zip(n_samples, kernel_samples):
   >>>   print(n, kernel)
