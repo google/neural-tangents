@@ -96,22 +96,25 @@ key1, key2 = random.split(random.PRNGKey(1))
 x1 = random.normal(key1, (10, 100))
 x2 = random.normal(key2, (20, 100))
 
-kernel = kernel_fn(x1, x2, 'NNGP')
+kernel = kernel_fn(x1, x2, 'nngp')
 ```
 Note that `kernel_fn` can compute _two_ covariance matrices corresponding to the Neural Network Gaussian Process (NNGP) and Neural Tangent (NT) kernels respectively. The NNGP kernel corresponds to the _Bayesian_ infinite neural network [[1]](1). The NTK corresponds to the _(continuous) gradient descent trained_ infinite network [[5]](5). In the above example, we compute the NNGP kernel but we could compute the NTK or both as follows:
 
 ```python
 # Get kernel of a single type
-nngp = kernel_fn(x1, x2, 'NNGP') # (10, 20) np.ndarray
-ntk = kernel_fn(x1, x2, 'NTK') # (10, 20) np.ndarray
+nngp = kernel_fn(x1, x2, 'nngp') # (10, 20) np.ndarray
+ntk = kernel_fn(x1, x2, 'ntk') # (10, 20) np.ndarray
 
 # Get kernels as a namedtuple
-both = kernel_fn(x1, x2, ('NNGP', 'NTK'))
+both = kernel_fn(x1, x2, ('nngp', 'ntk'))
 both.nngp == nngp  # True
 both.ntk == ntk  # True
 
 # Unpack the kernels namedtuple
-nngp, ntk = kernel_fn(x1, x2, ('NNGP', 'NTK'))
+nngp, ntk = kernel_fn(x1, x2, ('nngp', 'ntk'))
+
+# Default is to return ('nngp', 'ntk')
+nngp, ntk = kernel_fn(x1, x2)
 ```
 
 Doing inference with infinite networks trained on MSE loss reduces to classical GP inference, for which we also provide convenient tools:
@@ -122,11 +125,14 @@ import neural_tangents as nt
 x_train, x_test = x1, x2
 y_train = random.uniform(key1, shape=(10, 1))  # training targets
 
-y_test_nngp = nt.predict.gp_inference(kernel_fn, x_train, y_train, x_test, get='NNGP')
+y_test_nngp = nt.predict.gp_inference(kernel_fn, x_train, y_train, x_test, 
+                                      get='nngp')
 # (20, 1) np.ndarray test predictions of an infinite Bayesian network
 
-y_test_ntk = nt.predict.gp_inference(kernel_fn, x_train, y_train, x_test, get='NTK')
-# (20, 1) np.ndarray test predictions of an infinite continuous gradient descent trained network at convergence (t = inf)
+y_test_ntk = nt.predict.gp_inference(kernel_fn, x_train, y_train, x_test, 
+                                     get='ntk')
+# (20, 1) np.ndarray test predictions of an infinite continuous 
+# gradient descent trained network at convergence (t = inf)
 ```
 
 
@@ -143,7 +149,9 @@ def WideResnetBlock(channels, strides=(1, 1), channel_mismatch=False):
       stax.Relu(), stax.Conv(channels, (3, 3), padding='SAME'))
   Shortcut = stax.Identity() if not channel_mismatch else stax.Conv(
       channels, (3, 3), strides, padding='SAME')
-  return stax.serial(stax.FanOut(2), stax.parallel(Main, Shortcut), stax.FanInSum())
+  return stax.serial(stax.FanOut(2), 
+                     stax.parallel(Main, Shortcut), 
+                     stax.FanInSum())
 
 def WideResnetGroup(n, channels, strides=(1, 1)):
   blocks = []
@@ -174,7 +182,7 @@ The `neural_tangents` (`nt`) package contains the following modules and methods:
 
 * `predict` - predictions with infinite networks:
 
-  * `predict.gp_inference` - either fully Bayesian inference (`mode="NNGP"`) or inference with a network trained to full convergence (infinite time) on MSE loss using continuous gradient descent (`mode="NTK"`).
+  * `predict.gp_inference` - either fully Bayesian inference (`get='nngp'`) or inference with a network trained to full convergence (infinite time) on MSE loss using continuous gradient descent (`get='ntk'`).
 
   * `predict.gradient_descent_mse` - inference with a network trained on MSE loss with continuous gradient descent for an arbitrary finite time.
 
@@ -264,8 +272,8 @@ x_test = random.normal(key2, (4, 2))
 y_train = random.uniform(key1, shape=(3, 2))
 
 kernel_fn = nt.empirical_kernel_fn(apply_fn)
-ntk_train_train = kernel_fn(x_train, x_train, params, 'NTK')
-ntk_test_train = kernel_fn(x_test, x_train, params, 'NTK')
+ntk_train_train = kernel_fn(x_train, x_train, params, 'ntk')
+ntk_test_train = kernel_fn(x_test, x_train, params, 'ntk')
 mse_predictor = nt.predict.gradient_descent_mse(
     ntk_train_train, y_train, ntk_test_train)
 

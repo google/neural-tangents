@@ -37,7 +37,7 @@ config.parse_flags_with_absl()
 MATRIX_SHAPES = [(3, 3), (4, 4)]
 OUTPUT_LOGITS = [1, 2, 3]
 
-GETS = ('NTK', 'NNGP', ('NTK', 'NNGP'))
+GETS = ('ntk', 'nngp', ('ntk', 'nngp'))
 
 RTOL = 0.1
 ATOL = 0.1

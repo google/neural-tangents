@@ -53,11 +53,11 @@ Example:
   >>>
   >>> # (5, 10) np.ndarray NNGP test prediction
   >>> y_test_nngp = nt.predict.gp_inference(kernel_fn, x_train, y_train, x_test,
-  >>>                                       mode='NNGP')
+  >>>                                       get='nngp')
   >>>
   >>> # (5, 10) np.ndarray NTK prediction
   >>> y_test_ntk = nt.predict.gp_inference(kernel_fn, x_train, y_train, x_test,
-  >>>                                      mode='NTK')
+  >>>                                      get='ntk')
   ```
 """
 
@@ -314,8 +314,8 @@ def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk):
 
 
 def _preprocess_kernel_fn(kernel_fn):
-  def new_kernel_fn(x1_or_kernel, x2, get):
-    """Returns the `Kernel` resulting from applying `kernel_fn` to given inputs.
+  def new_kernel_fn(x1_or_kernel, x2, get=('nngp', 'ntk')):
+    """Returns the `Kernel` resulting from applying `ker_fun` to given inputs.
 
     Args:
       x1_or_kernel: either a `np.ndarray` with shape
@@ -323,12 +323,12 @@ def _preprocess_kernel_fn(kernel_fn):
       x2: an optional `np.ndarray` with shape `[batch_size_2] + input_shape`.
         `None` means `x2 == x1` or `x1_or_kernel is Kernel`.
       get: either a string or a tuple of strings specifying which data should
-        be returned by the kernel function. Can be `nngp`, `ntk`, `var1`,
-        `var2`, `is_gaussian`, or `is_height_width`.
+        be returned by the kernel function. Can be "nngp", "ntk", "var1",
+        "var2", "is_gaussian", "is_height_width", "marginal", "cross".
     Returns:
-      If get is a string, returns the requested ndarray. If get is a tuple
-      returns an `AnalyticKernel` namedtuple containing only the requested
-      information.
+      If `get` is a string, returns the requested `np.ndarray`. If `get` is a
+      tuple, returns an `AnalyticKernel` namedtuple containing only the
+      requested information.
     """
 
     if (isinstance(x1_or_kernel, Kernel) or
@@ -358,7 +358,8 @@ def _preprocess_kernel_fn(kernel_fn):
     return kernel_fn(kernel)._asdict()
 
   if hasattr(kernel_fn, _COVARIANCES_REQ):
-    setattr(new_kernel_fn, _COVARIANCES_REQ, getattr(kernel_fn, _COVARIANCES_REQ))
+    setattr(new_kernel_fn, _COVARIANCES_REQ, getattr(kernel_fn,
+                                                     _COVARIANCES_REQ))
 
   return new_kernel_fn
 
@@ -366,10 +367,10 @@ def _preprocess_kernel_fn(kernel_fn):
 def _layer(layer):
   """A convenience decorator to be added to all public layers like `Relu` etc.
 
-  Makes the `kernel_fn` of the layer work with both input `np.ndarray`s (when the
-    layer is the first one applied to inputs), and with `Kernel` for
-    intermediary layers. Also adds optional arguments to make the `kernel_fn` call
-    the empirical Monte Carlo kernel estimation instead of computing it
+  Makes the `kernel_fn` of the layer work with both input `np.ndarray`s (when
+    the layer is the first one applied to inputs), and with `Kernel` for
+    intermediary layers. Also adds optional arguments to make the `kernel_fn`
+    call the empirical Monte Carlo kernel estimation instead of computing it
     analytically (by default), as well as specifying the batching strategy.
 
   Args:
@@ -925,7 +926,7 @@ def _pad_one_side(x, pads, axes, mode):
 
 
 def _conv_nngp_5or6d_double_conv(mat, filter_shape, strides, padding):
-  """Compute covariances of the CNN outputs given inputs with covariances `nngp`.
+  """Compute covariance of the CNN outputs given inputs with covariance `nngp`.
 
   Uses 2D convolution and works on any hardware platform.
 
@@ -986,7 +987,7 @@ def _conv_nngp_5or6d_double_conv(mat, filter_shape, strides, padding):
 
 
 def _conv_nngp_4d(nngp, filter_shape, strides, padding):
-  """Compute covariances of the CNN outputs given inputs with covariances `nngp`.
+  """Compute covariance of the CNN outputs given inputs with covariance `nngp`.
 
   Uses 2D convolution and works on any platform, but only works with
     sample-sample-(same pixel) covariances.
@@ -1255,7 +1256,8 @@ def AvgPool(window_shape, strides=None, padding=Padding.VALID.name):
 
   def kernel_fn(kernels):
     """Kernel transformation."""
-    var1, nngp, var2, ntk, is_gaussian, is_height_width, marginal, cross = kernels
+    (var1, nngp, var2, ntk, is_gaussian, is_height_width, marginal,
+     cross) = kernels
     marginal, cross = _ids_to_marginalisation_types(marginal, cross)
 
     if is_height_width:
@@ -1456,8 +1458,8 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
     Currently only works with image data.
 
   Raises:
-    NotImplementedError: If `fixed` is `False`, call to `kernel_fn` will result in
-    an error as there is no known analytic expression for the kernel.
+    NotImplementedError: If `fixed` is `False`, call to `kernel_fn` will result
+    in an error as there is no known analytic expression for the kernel.
   """
   if dimension_spec is None:
     dimension_spec = _CONV_DIMENSION_NUMBERS[0]

@@ -66,13 +66,13 @@ def _sample_many_kernel_fn(kernel_fn_sample_once, key, n_samples,
 
   if get_generator:
     @get_namedtuple('MonteCarloKernel')
-    def get_sampled_kernel(x1, x2, get):
+    def get_sampled_kernel(x1, x2, get=('nngp', 'ntk')):
       for n, sample in get_samples(x1, x2, get):
         if n in n_samples:
           yield normalize(sample, n)
   else:
     @get_namedtuple('MonteCarloKernel')
-    def get_sampled_kernel(x1, x2, get):
+    def get_sampled_kernel(x1, x2, get=('nngp', 'ntk')):
       for n, sample in get_samples(x1, x2, get):
         pass
       return normalize(sample, n)
@@ -143,13 +143,13 @@ def monte_carlo_kernel_fn(init_fn,
   >>>
   >>> n_samples = 200
   >>> kernel_fn = nt.monte_carlo_kernel_fn(init_fn, apply_fn, key1, n_samples)
-  >>> kernel = kernel_fn(x_train, x_test, get=('NNGP', 'NTK'))
-  >>> # `kernel` is a tuple of NNGP and NTK MC estimate using `n` samples.
+  >>> kernel = kernel_fn(x_train, x_test, get=('nngp', 'ntk'))
+  >>> # `kernel` is a tuple of NNGP and NTK MC estimate using `n_samples`.
   >>>
   >>> n_samples = [1, 10, 100, 1000]
   >>> kernel_fn_generator = nt.monte_carlo_kernel_fn(init_fn, apply_fn, key1,
   >>>                                                n_samples)
-  >>> kernel_samples = kernel_fn_generator(x_train, x_test, get=('NNGP', 'NTK'))
+  >>> kernel_samples = kernel_fn_generator(x_train, x_test, get=('nngp', 'ntk'))
   >>> for n, kernel in zip(n_samples, kernel_samples):
   >>>   print(n, kernel)
   >>>   # `kernel` is a tuple of NNGP and NTK MC estimate using `n` samples.

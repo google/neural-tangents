@@ -256,8 +256,8 @@ class ABReluTest(jtu.JaxTestCase):
         X1_1_ab_relu = apply_ab_relu(params, X0_1)
         self.assertAllClose(X1_1_relu, X1_1_ab_relu, True)
 
-        kernels_relu = kernel_fn_relu(X0_1, X0_2, ('NNGP', 'NTK'))
-        kernels_ab_relu = kernel_fn_ab_relu(X0_1, X0_2, ('NNGP', 'NTK'))
+        kernels_relu = kernel_fn_relu(X0_1, X0_2, ('nngp', 'ntk'))
+        kernels_ab_relu = kernel_fn_ab_relu(X0_1, X0_2)
         self.assertAllClose(kernels_relu, kernels_ab_relu, True)
 
   def test_ab_relu_id(self, same_inputs):
@@ -280,8 +280,8 @@ class ABReluTest(jtu.JaxTestCase):
         self.assertAllClose(X1_1_id, X1_1_ab_relu, True)
 
         kernels_id = kernel_fn_id(
-            X0_1 * a, None if X0_2 is None else a * X0_2, ('NNGP', 'NTK'))
-        kernels_ab_relu = kernel_fn_ab_relu(X0_1, X0_2, ('NNGP', 'NTK'))
+            X0_1 * a, None if X0_2 is None else a * X0_2)
+        kernels_ab_relu = kernel_fn_ab_relu(X0_1, X0_2, ('nngp', 'ntk'))
         self.assertAllClose(kernels_id, kernels_ab_relu, True)
 
   def test_leaky_relu(self, same_inputs):
@@ -303,8 +303,8 @@ class ABReluTest(jtu.JaxTestCase):
         X1_1_ab_relu = apply_ab_relu(params, X0_1)
         self.assertAllClose(X1_1_leaky_relu, X1_1_ab_relu, True)
 
-        kernels_leaky_relu = kernel_fn_leaky_relu(X0_1, X0_2, ('NNGP', 'NTK'))
-        kernels_ab_relu = kernel_fn_ab_relu(X0_1, X0_2, ('NNGP', 'NTK'))
+        kernels_leaky_relu = kernel_fn_leaky_relu(X0_1, X0_2)
+        kernels_ab_relu = kernel_fn_ab_relu(X0_1, X0_2)
         self.assertAllClose(kernels_leaky_relu, kernels_ab_relu, True)
 
   def test_abs(self, same_inputs):
@@ -323,8 +323,8 @@ class ABReluTest(jtu.JaxTestCase):
     X1_1_ab_relu = apply_ab_relu(params, X0_1)
     self.assertAllClose(X1_1_abs, X1_1_ab_relu, True)
 
-    kernels_abs = kernel_fn_abs(X0_1, X0_2, ('NNGP', 'NTK'))
-    kernels_ab_relu = kernel_fn_ab_relu(X0_1, X0_2, ('NNGP', 'NTK'))
+    kernels_abs = kernel_fn_abs(X0_1, X0_2, ('nngp', 'ntk'))
+    kernels_ab_relu = kernel_fn_ab_relu(X0_1, X0_2, ('nngp', 'ntk'))
     self.assertAllClose(kernels_abs, kernels_ab_relu, True)
 
 
