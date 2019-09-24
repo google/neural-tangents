@@ -281,7 +281,8 @@ t = 5.
 y_train_0 = apply_fn(params, x_train)
 y_test_0 = apply_fn(params, x_test)
 y_train_t, y_test_t = mse_predictor(t, y_train_0, y_test_0)
-# (3, 2) and (4, 2) np.ndarray train and test outputs after `t` units of time training with continuous gradient descent
+# (3, 2) and (4, 2) np.ndarray train and test outputs after `t` units of time 
+# training with continuous gradient descent
 ```
 
 ### What to Expect
