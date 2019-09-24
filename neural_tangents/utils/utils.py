@@ -14,6 +14,7 @@
 
 """General-purpose internal utilities."""
 
+from jax.api import jit
 from jax.api import vmap
 from jax.lib import xla_bridge
 import jax.numpy as np
@@ -23,9 +24,13 @@ import inspect
 import types
 
 
+def _jit_vmap(f):
+  return jit(vmap(f))
+
+
 def stub_out_pmap(batch, count):
   # If we are using GPU or CPU stub out pmap with vmap to simulate multi-core.
-  if count > 1:
+  if count > 0:
     class xla_bridge_stub(object):
       def device_count(self):
         return count
@@ -35,7 +40,7 @@ def stub_out_pmap(batch, count):
       # TODO(romann): investigate why vmap is extremely slow in
       # `utils/monte_carlo_test.py`, `test_monte_carlo_vs_analytic`.
       # Example: http://sponge/e081c176-e77f-428c-846d-bafbfd86a46c
-      batch.pmap = vmap
+      batch.pmap = _jit_vmap
       batch.xla_bridge = xla_bridge_stub()
 
 

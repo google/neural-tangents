@@ -19,6 +19,7 @@ from __future__ import print_function
 
 from jax import test_util as jtu
 from jax.config import config as jax_config
+from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.random as random
 from neural_tangents import stax
@@ -44,13 +45,20 @@ N_SAMPLES = 4
 ALL_GET = ('nngp', 'ntk', ('nngp', 'ntk'))
 
 
-def _get_inputs_and_model(width=1, n_classes=2):
+def _get_inputs_and_model(width=1, n_classes=2, use_conv=True):
   key = random.PRNGKey(1)
   key, split = random.split(key)
   x1 = random.normal(key, (8, 4, 3, 2))
   x2 = random.normal(split, (4, 4, 3, 2))
+
+  if not use_conv:
+    x1 = np.reshape(x1, (x1.shape[0], -1))
+    x2 = np.reshape(x2, (x2.shape[0], -1))
+
   init_fun, apply_fun, ker_fun = stax.serial(
-      stax.Conv(width, (3, 3)), stax.Relu(), stax.Flatten(),
+      stax.Conv(width, (3, 3)) if use_conv else stax.Dense(width),
+      stax.Relu(),
+      stax.Flatten(),
       stax.Dense(n_classes, 2., 0.5))
   return x1, x2, init_fun, apply_fun, ker_fun, key
 
@@ -135,7 +143,7 @@ class MonteCarloTest(jtu.JaxTestCase):
     utils.stub_out_pmap(batch, device_count)
 
     x1, x2, init_fun, apply_fun, stax_ker_fun, key = _get_inputs_and_model(
-        512, 512)
+        1024, 256, xla_bridge.get_backend().platform == 'tpu')
 
     sample = monte_carlo.get_ker_fun_monte_carlo(init_fun, apply_fun, key, 200,
                                                  batch_size, device_count,
@@ -144,7 +152,7 @@ class MonteCarloTest(jtu.JaxTestCase):
     ker_empirical = sample(x1, x2, 'nngp')
     ker_analytic = stax_ker_fun(x1, x2, 'nngp')
 
-    utils.assert_close_matrices(self, ker_analytic, ker_empirical, 1e-2)
+    utils.assert_close_matrices(self, ker_analytic, ker_empirical, 2e-2)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -163,7 +171,7 @@ class MonteCarloTest(jtu.JaxTestCase):
     utils.stub_out_pmap(batch, device_count)
 
     x1, x2, init_fun, apply_fun, stax_ker_fun, key = _get_inputs_and_model(
-        512, 2)
+        256, 2, xla_bridge.get_backend().platform == 'tpu')
 
     sample = monte_carlo.get_ker_fun_monte_carlo(init_fun, apply_fun, key, 100,
                                                  batch_size, device_count,
@@ -175,7 +183,7 @@ class MonteCarloTest(jtu.JaxTestCase):
 
     ker_analytic = stax_ker_fun(x1, x2, 'ntk')
 
-    utils.assert_close_matrices(self, ker_analytic, ker_empirical, 1e-2)
+    utils.assert_close_matrices(self, ker_analytic, ker_empirical, 2e-2)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
