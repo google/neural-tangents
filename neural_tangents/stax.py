@@ -1197,10 +1197,9 @@ def _average_pool_nngp_5or6d(mat, window_shape, strides, padding):
   Returns:
     a 5D or 6D `np.ndarray` containing sample-(sample-)pixel-pixel covariances
     of the average pooling outputs. Has shape
-    `[batch_size_a, (batch_size_b,) new_height, new_height,
+    `[batch_size_1, (batch_size_2,) new_height, new_height,
       new_width, new_width]`.
   """
-  #TODO(jirihron): shape [n1, (n2,) h, h, w, w] or [n1, (n2,) w, w, h, h]
   if not _is_array(mat):
     return mat
 
@@ -1290,7 +1289,14 @@ def GlobalAvgPool():
 
   Pools over and removes (`keepdims=False`) all inner dimensions (from 1 to -2),
     e.g. appropriate for `NHWC`, `NWHC`, `CHWN`, `CWHN` inputs.
+
+  Warnings: assumes the next layer will be Dense (optionally preceded by
+   a nonlinearity), otherwise the kernels will not be correct
   """
+  warnings.warn("GlobalAvgPool assumes the next layer will be Dense"
+                " (optionally preceded by a nonlinearity),"
+                " otherwise the kernels will not be correct!")
+
   def init_fun(rng, input_shape):
     output_shape = input_shape[0], input_shape[-1]
     return output_shape, ()
@@ -1314,7 +1320,7 @@ def GlobalAvgPool():
       var2 = _average_pool(var2)
 
     return Kernel(var1, nngp, var2, ntk, is_gaussian, True,
-                  Marginalisation.OVER_PIXELS, Marginalisation.OVER_PIXELS)
+                  Marginalisation.OVER_ALL, Marginalisation.OVER_ALL)
 
   setattr(ker_fun, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_POINTS,
                                        'cross': Marginalisation.NO})
@@ -1378,6 +1384,177 @@ def Flatten():
           " supplied {}".format(cross))
 
     return Kernel(var1, nngp, var2, ntk, is_gaussian, True,
-                  Marginalisation.OVER_PIXELS, Marginalisation.OVER_PIXELS)
+                  Marginalisation.OVER_ALL, Marginalisation.OVER_ALL)
+
+  return init_fun, apply_fun, ker_fun
+
+@_layer
+def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
+    fixed=True, W_key_std=1.0, W_value_std=1.0, W_query_std=1.0,
+    W_out_std=1.0, b_std=0.0, W_key_init=_randn(1.0), W_value_init=_randn(1.0),
+    W_query_init=_randn(1.0), W_out_init=_randn(1.0), b_init=_randn(1.0),
+    dimension_spec=_CONV_DIMENSION_NUMBERS[0]):
+  """Layer construction function for (global) scaled dot-product self-attention
+  with multiple attention heads.
+
+  Two versions of attention are available (the version to be used is
+  determined by the argument `fixed`):
+
+  1) Parametric: this is the standard scaled dot-product attention, i.e.,
+   the dot product between keys and queries is scaled by the squared root
+   of their dimension. The expression for `nngp`/`ntk` involves an integral
+   with no known closed form and thus call to `ker_fun` results in an error.
+
+  2) Fixed: same as Parametric except for scaling the dot products
+   between keys and queries by their dimension instead of the square root
+   of the same quantity, and tying the key and query weight matrices.
+   This makes the `nngp`/`ntk` analytically tractable but for the price
+   that, unlike in the parametric case, the dot products of keys and queries
+   converge to a constant. Because this constant would be zero
+   if the key and query weights are independent, the variant where these
+   two weight matrices are tied was implemented resulting in non-constant
+   attention weights.
+
+  The final computation for single head is then
+   ```f_h (x) + softmax(<scaling> Q(x) K(x)^T) V(x)```
+  and the output of this layer is computed as
+   ```f(x) = concat[f_1(x) , ... , f_<n_heads> (x)] W_out + b```
+  where the shape of of `b` is (n_chan_out,), i.e., single bias per channel
+
+  The `ker_fun` computes the limiting kernel of the outputs of this layer
+  as the number of heads and the number of feature dimensions of keys/queries
+  goes to infinity.
+
+  Args:
+    n_chan_out: number of feature dimensions of outputs
+    n_chan_key: number of feature dimensions of keys/queries
+    n_chan_val: number of feature dimensions of values
+    n_heads: number of attention heads
+    fixed: if `True`, the dot products between keys and queries are
+      scaled by `1 / n_chan_key` and the key and query weight matrices are tied;
+      if `False`, the dot products are scaled by `1 / sqrt(n_chan_key)` and
+      the key and query matrices are independent
+    W_out_std: init standard deviation of the output weights values
+    b_std: init standard deviation of the bias values
+    W_value_std: init standard deviation of the key weights values
+    W_key_std: init standard deviation of the key weights values
+    W_query_std: init standard deviation of the query weights values; if `fixed`
+      is `True` (and thus key and query weights are tied---see above) then keys
+      are computed with `WK = WK_std * W / sqrt(n_chan_in)` and the queries are
+      computed with `WQ = W_query_std * W / sqrt(n_chan_in)` weight matrices
+    W_out_init: function used to sample the initial (unscaled) output weights
+    b_init:  function used to sample the initial (unscaled) biases
+    W_value_init: function used to sample the initial (unscaled) value weights
+    W_key_init: function used to sample the initial (unscaled) key weights
+    W_query_init: function used to sample the initial (unscaled) query weights
+      unless `fixed` is `True` in which case the argument is ignored (see above)
+    dimension_spec: a string specifying ordering of the input dimensions, e.g.,
+      `'NHWC'` for `[batch_size, height, width, channels] or `'NCHW'` for
+      `[batch_size, channels, height, width]`
+
+  Warnings:
+    Currently only works with image data.
+
+  Raises:
+    NotImplementedError: If `fixed` is `False`, call to `ker_fun` will result in
+    an error as there is no known analytic expression for the kernel.
+  """
+  if dimension_spec is None:
+    dimension_spec = _CONV_DIMENSION_NUMBERS[0]
+  if dimension_spec != _CONV_DIMENSION_NUMBERS[0]:
+    raise NotImplementedError(
+        'Dimension specification %s not implemented.' % str(dimension_spec))
+
+  OV_gain = W_out_std * W_value_std
+  QK_gain = W_query_std * W_key_std
+  QK_prod_scaling = float(n_chan_key if fixed else n_chan_key**0.5)
+
+  def init_fun(rng, input_shape):
+    _, height, width, n_chan_in = input_shape
+    output_shape = input_shape[:-1] + (n_chan_out,)
+
+    rng_Q, rng_K, rng_V, rng_O, rng_b = random.split(rng, 5)
+    key_matrices = W_key_init(rng_K, shape=(n_heads, n_chan_in, n_chan_key))
+    val_matrices = W_value_init(rng_V, shape=(n_heads, n_chan_in, n_chan_val))
+    W_out = W_out_init(rng_O, shape=(n_chan_val * n_heads, n_chan_out))
+    b = b_init(rng_b, shape=(n_chan_out,))
+
+    if fixed:
+      query_matrices = None
+      warnings.warn("Fixed attention used -> `W_query_init` ignored, tying"
+                    " the weights (see docstring for more details).")
+    else:
+      query_matrices = W_query_init(rng_Q,
+                                    shape=(n_heads, n_chan_in, n_chan_key))
+
+    return output_shape, (query_matrices, key_matrices, val_matrices, W_out, b)
+
+  def apply_fun(params, inputs, **kwargs):
+    query_matrices, key_matrices, val_matrices, W_out, b = params
+    n_chan_in = inputs.shape[dimension_spec.index('C')]
+    height = inputs.shape[dimension_spec.index('H')]
+    width = inputs.shape[dimension_spec.index('W')]
+
+    inputs = inputs.reshape((len(inputs), -1, n_chan_in))
+    def _inputs_dot(matrices, std):
+      ret = np.dot(inputs, std * matrices / np.sqrt(n_chan_in))
+      return np.moveaxis(ret, 2, 0)
+
+    keys = _inputs_dot(key_matrices, W_key_std)
+    values = _inputs_dot(val_matrices, W_value_std)
+    if fixed:
+      queries = keys * W_query_std / W_key_std
+    else:
+      queries = _inputs_dot(query_matrices, W_query_std)
+
+    G_mat  = np.matmul(queries, np.moveaxis(keys, -1, -2))
+    G_mat /= QK_prod_scaling
+    G_mat = stax.softmax(G_mat, axis=-1)
+
+    heads = np.matmul(G_mat, values)
+    heads = np.moveaxis(heads, 0, -1)
+    heads = np.reshape(heads, heads.shape[:-2] + (-1,))
+
+    ret = np.matmul(heads, W_out_std * W_out / np.sqrt(n_chan_val * n_heads))
+    return np.reshape(ret, (-1, height, width, n_chan_out)) + b_std * b
+
+  def ker_fun(kernels):
+    var1, nngp, var2, ntk, _, is_height_width, marginal, cross = kernels
+    marginal, cross = _ids_to_marginalisation_types(marginal, cross)
+
+    if not fixed:
+      # TODO(jirihron): implement the approximation and raise a warning
+      raise NotImplementedError("No known closed form expression.")
+
+    def _get_G_softmax(mat):
+      if marginal == Marginalisation.NO:
+        mat = np.moveaxis(np.diagonal(mat, axis1=0, axis2=1), -1, 0)
+      axes = range(mat.ndim)
+      return stax.softmax(QK_gain * mat, axis=(axes[-3], axes[-1]))
+
+    def _transform_kernel(mat, G1, G2=None):
+      if not _is_array(mat):
+        return mat
+
+      G2 = G1 if G2 is None else G2
+      if mat.ndim == 5:
+        pattern = 'xacbd,xcedf,xgehf->xagbh'
+      else:
+        pattern = 'xacbd,xycedf,ygehf->xyagbh'
+      return _affine(np.einsum(pattern, G1, mat, G2), OV_gain, b_std)
+
+    G1 = _get_G_softmax(var1)
+    G2 = _get_G_softmax(var2) if var2 is not None else G1
+
+    var1 = _transform_kernel(var1, G1)
+    var2 = _transform_kernel(var2, G2) if var2 is not None else var2
+    nngp = _transform_kernel(nngp, G1, G2)
+    if _is_array(ntk):
+      ntk = _transform_kernel(ntk, G1, G2) + 2 * (nngp - b_std**2)
+
+    return Kernel(var1, nngp, var2, ntk, True, is_height_width, marginal, cross)
+
+  setattr(ker_fun, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_POINTS,
+                                      'cross': Marginalisation.NO})
 
   return init_fun, apply_fun, ker_fun

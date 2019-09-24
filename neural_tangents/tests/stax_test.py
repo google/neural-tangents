@@ -66,8 +66,15 @@ ACTIVATIONS = {
     # TODO(romann): investigate poor erf convergence.
     stax.Erf(): 'erf',
     stax.Relu(): 'Relu',
-    stax.ABRelu(-3, 2): 'ABRelu(-3, 2)'
+    stax.ABRelu(-0.5, 0.7): 'ABRelu(-0.5, 0.7)'
 }
+
+PROJECTIONS = [
+    'FLAT',
+    'POOL',
+    'ATTN_FIXED',
+    'ATTN_PARAM'
+]
 
 
 def _get_inputs(key, is_conv, same_inputs, input_shape, fun=np.cos):
@@ -79,7 +86,7 @@ def _get_inputs(key, is_conv, same_inputs, input_shape, fun=np.cos):
 
 
 def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res,
-             padding, phi, strides, width, is_ntk):
+             padding, phi, strides, width, is_ntk, proj_into_2d):
   fc = partial(stax.Dense, W_std=W_std, b_std=b_std)
   conv = partial(
       stax.Conv,
@@ -101,11 +108,25 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res,
   else:
     block = stax.serial(affine, res_unit)
 
-  readout = stax.serial(stax.GlobalAvgPool() if use_pooling else stax.Flatten(),
-                        fc(1 if is_ntk else width))
+  if proj_into_2d == 'FLAT':
+    proj_layer = stax.Flatten()
+  elif proj_into_2d == 'POOL':
+    proj_layer = stax.GlobalAvgPool()
+  elif proj_into_2d.startswith('ATTN'):
+    n_heads = int(np.sqrt(width))
+    n_chan_val = int(np.round(float(width) / n_heads))
+    fixed = proj_into_2d == 'ATTN_FIXED'
+    proj_layer = stax.serial(
+        stax.GlobalSelfAttention(
+            width, n_chan_key=width, n_chan_val=n_chan_val, n_heads=n_heads,
+            fixed=fixed, W_key_std=W_std, W_value_std=W_std, W_query_std=W_std,
+            W_out_std=1.0, b_std=b_std),
+        stax.Flatten())
+  else:
+    raise ValueError(proj_into_2d)
+  readout = stax.serial(proj_layer, fc(1 if is_ntk else width))
 
-  net = stax.serial(block, readout)
-  return net
+  return stax.serial(block, readout)
 
 
 class StaxTest(jtu.JaxTestCase):
@@ -114,12 +135,13 @@ class StaxTest(jtu.JaxTestCase):
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
-              '_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}'.format(
+              '_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}'.format(
                   model, phi_name, width, 'same_inputs'
                   if same_inputs else 'different_inputs', 'filter_size=%s' %
                   str(filter_size), 'padding=%s' % padding, 'strides=%s' %
                   str(strides), 'pool' if use_pooling else 'flatten', 'NTK'
-                  if is_ntk else 'NNGP', 'RESNET' if is_res else 'serial'),
+                  if is_ntk else 'NNGP', 'RESNET' if is_res else 'serial',
+                  proj_into_2d),
           'model':
               model,
           'width':
@@ -140,6 +162,8 @@ class StaxTest(jtu.JaxTestCase):
               is_ntk,
           'is_res':
               is_res,
+          'proj_into_2d':
+            proj_into_2d
       } for model in MODELS for width in WIDTHS
                           for phi, phi_name in ACTIVATIONS.items()
                           for same_inputs in [False, True]
@@ -148,9 +172,10 @@ class StaxTest(jtu.JaxTestCase):
                           for filter_size in FILTER_SIZES
                           for use_pooling in [False, True]
                           for is_ntk in [False, True]
-                          for is_res in [False, True]))
+                          for is_res in [False, True]
+                          for proj_into_2d in PROJECTIONS))
   def test_exact(self, model, width, strides, padding, phi, same_inputs,
-                 filter_size, use_pooling, is_ntk, is_res):
+                 filter_size, use_pooling, is_ntk, is_res, proj_into_2d):
     is_conv = 'conv' in model
 
     # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
@@ -164,8 +189,15 @@ class StaxTest(jtu.JaxTestCase):
         raise jtu.SkipTest('Different paths in a residual models need to return'
                            ' outputs of the same shape.')
     elif (filter_size != FILTER_SIZES[0] or padding != PADDINGS[0] or
-          strides != STRIDES[0] or use_pooling):
+          strides != STRIDES[0] or proj_into_2d != PROJECTIONS[0] or
+          use_pooling):
       raise jtu.SkipTest('FC models do not have these parameters.')
+
+    if (proj_into_2d.startswith('ATTN') and strides == (2, 1) and
+        padding == 'VALID' and xla_bridge.get_backend().platform == 'tpu'):
+      #TODO(jirihron): speed up the vmap alternative impl or fix the current one
+      raise jtu.SkipTest('ATTN forward pass on TPU is broken if one of'
+                         ' the spatial dimensions is singleton.')
 
     W_std, b_std = 2.**0.5, 0.5**0.5
 
@@ -175,20 +207,24 @@ class StaxTest(jtu.JaxTestCase):
     init_fun, apply_fun, ker_fun = _get_net(W_std, b_std, filter_size,
                                             is_conv, use_pooling, is_res,
                                             padding, phi, strides, width,
-                                            is_ntk)
+                                            is_ntk, proj_into_2d)
 
-    if is_ntk:
-      exact = ker_fun(x1, x2, 'ntk')
+    def _get_empirical(n_samples, get):
       ker_fun_empirical = monte_carlo.get_ker_fun_monte_carlo(
-          init_fun, apply_fun, key, N_SAMPLES)
-      empirical = ker_fun_empirical(x1, x2, 'ntk')
-      empirical = np.reshape(empirical, exact.shape)
+          init_fun, apply_fun, key, n_samples)
+      return ker_fun_empirical(x1, x2, get)
+
+    if proj_into_2d == 'ATTN_PARAM':
+      # no analytic kernel available, just test forward/backward pass
+      _get_empirical(1, 'ntk' if is_ntk else 'nngp')
     else:
-      exact = ker_fun(x1, x2, 'nngp')
-      ker_fun_empirical = monte_carlo.get_ker_fun_monte_carlo(
-          init_fun, apply_fun, key, N_SAMPLES)
-      empirical = ker_fun_empirical(x1, x2, 'nngp')
-    utils.assert_close_matrices(self, empirical, exact, RTOL)
+      if is_ntk:
+        exact = ker_fun(x1, x2, 'ntk')
+        empirical = np.reshape(_get_empirical(N_SAMPLES, 'ntk'), exact.shape)
+      else:
+        exact = ker_fun(x1, x2, 'nngp')
+        empirical = _get_empirical(N_SAMPLES, 'nngp')
+      utils.assert_close_matrices(self, empirical, exact, RTOL)
 
 
 @jtu.parameterized.parameters([
