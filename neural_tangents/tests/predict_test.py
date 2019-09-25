@@ -539,7 +539,6 @@ class PredictTest(jtu.JaxTestCase):
                           for get in GETS))
   def testInfiniteTimeAgreement(
       self, train_shape, test_shape, network, out_logits, get):
-    # TODO(alemi): Add some finite time tests.
 
     key = random.PRNGKey(0)
 
@@ -565,6 +564,54 @@ class PredictTest(jtu.JaxTestCase):
     finite_prediction = prediction(np.inf)
 
     self.assertAllClose(inf_prediction, finite_prediction, True)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              '_train={}_test={}_network={}_logits={}'.format(
+                  train, test, network, out_logits),
+          'train_shape':
+              train,
+          'test_shape':
+              test,
+          'network':
+              network,
+          'out_logits':
+              out_logits,
+      }
+                          for train, test, network in zip(
+                              TRAIN_SHAPES[:-1], TEST_SHAPES[:-1], NETWORK[:-1])
+                          for out_logits in OUTPUT_LOGITS))
+
+  def testZeroTimeAgreement(
+      self, train_shape, test_shape, network, out_logits):
+    """Test that the NTK and NNGP agree at t=0."""
+
+    key = random.PRNGKey(0)
+
+    key, split = random.split(key)
+    data_train = np.cos(random.normal(split, train_shape))
+
+    key, split = random.split(key)
+    data_labels = np.array(
+        random.bernoulli(split, shape=(train_shape[0], out_logits)), np.float32)
+
+    key, split = random.split(key)
+    data_test = np.cos(random.normal(split, test_shape))
+    _, _, ker_fun = _build_network(train_shape[1:], network, out_logits)
+
+    reg = 1e-7
+    prediction = predict.gradient_descent_mse_gp(
+        ker_fun, data_train, data_labels, data_test,
+        diag_reg=reg, get=('NTK', 'NNGP'), compute_var=True)
+
+    zero_prediction = prediction(0.0)
+
+    self.assertAllClose(zero_prediction.ntk, zero_prediction.nngp, True)
+    reference = (np.zeros((test_shape[0], out_logits)),
+                 ker_fun(data_test, data_test, get='nngp'))
+    self.assertAllClose((reference,) * 2, zero_prediction, True)
+
 
 
 if __name__ == '__main__':
