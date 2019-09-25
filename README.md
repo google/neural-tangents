@@ -1,5 +1,5 @@
 # Neural Tangents
- Easy and Fast Infinite Neural Networks in Python
+ Fast and Easy Infinite Neural Networks in Python
 
 ## Overview
 
@@ -34,10 +34,10 @@ git clone https://github.com/google/neural-tangents
 pip install -e neural-tangents
 ```
 
-You can then run the examples by calling:
+You can then run the examples (using [`tensorflow_datasets`](https://github.com/tensorflow/datasets)) by calling:
 
 ```
-pip install tensorflow-datasets
+pip install tensorflow tensorflow-datasets
 
 python neural-tangents/examples/weight_space.py
 python neural-tangents/examples/function_space.py
