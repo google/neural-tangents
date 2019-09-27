@@ -102,21 +102,6 @@ class Kernel(
       of covariances between spatial dimensions tracked in `nngp`/`ntk`.
   """
 
-  @staticmethod
-  def _cov_match_check(first, second):
-    if isinstance(second, Kernel):
-      marginal1 = Marginalisation(first.marginal)
-      marginal2 = Marginalisation(second.marginal)
-      cross1 = Marginalisation(first.cross)
-      cross2 = Marginalisation(second.cross)
-
-      if not (marginal1 == marginal2 and cross1 == cross2):
-        raise ValueError('The types covariances stored do not match. '
-                         'nngp/ntk covariance type stored: {} vs. {} '
-                         'var1/var2 covariance type stored: {} vs {} '.format(
-            marginal1, marginal2, cross1, cross2))
-
-
   def __new__(cls, var1, nngp, var2, ntk, is_gaussian, is_height_width,
               marginal, cross):
     """Returns a `Kernel`.
