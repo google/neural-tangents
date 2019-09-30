@@ -75,7 +75,7 @@ import jax.numpy as np
 from jax.scipy.special import erf
 from neural_tangents.utils.kernel import Kernel
 from neural_tangents.utils import utils
-from neural_tangents.utils.kernel import Marginalisation
+from neural_tangents.utils.kernel import Marginalisation as M
 
 
 _CONV_DIMENSION_NUMBERS = ('NHWC', 'HWIO', 'NHWC')
@@ -135,7 +135,7 @@ def _set_covariances_req_attr(combinator_kernel_fn, kernel_fns):
 
   # `_get_maximal_element` sets up the code for `NO` marginalisation by default
   covs_req = _get_maximal_element(
-      {'marginal': Marginalisation.OVER_ALL,'cross': Marginalisation.OVER_ALL},
+      {'marginal': M.OVER_ALL, 'cross': M.OVER_ALL},
       lambda x, y: x > y)
 
   setattr(combinator_kernel_fn, _COVARIANCES_REQ, covs_req)
@@ -162,11 +162,11 @@ def _point_marg(x):
 
 
 def _get_variance(x, marginal_type):
-  if marginal_type in (Marginalisation.OVER_ALL, Marginalisation.OVER_PIXELS):
+  if marginal_type in (M.OVER_ALL, M.OVER_PIXELS):
     ret = np.sum(x**2, axis=-1, keepdims=False)
-  elif marginal_type == Marginalisation.OVER_POINTS:
+  elif marginal_type == M.OVER_POINTS:
     ret = _point_marg(x)
-  elif marginal_type == Marginalisation.NO:
+  elif marginal_type == M.NO:
     ret = np.squeeze(np.dot(x, x[..., None]), -1)
     ret = np.transpose(ret, (0, 3, 1, 4, 2, 5))
   else:
@@ -197,10 +197,10 @@ def _get_covariance(x1, x2, marginal_type):
   """
   x2 = x1 if x2 is None else x2
 
-  if marginal_type in (Marginalisation.OVER_ALL, Marginalisation.OVER_PIXELS):
+  if marginal_type in (M.OVER_ALL, M.OVER_PIXELS):
     ret = np.matmul(np.moveaxis(x1, 0, -2), np.moveaxis(x2, 0, -1))
     ret = np.moveaxis(ret, (-2, -1), (0, 1))
-  elif marginal_type in (Marginalisation.OVER_POINTS, Marginalisation.NO):
+  elif marginal_type in (M.OVER_POINTS, M.NO):
     # OVER_POINTS and NO coincide for the cross term
     ret = np.squeeze(np.dot(x1, x2[..., None]), -1)
     ret = np.transpose(ret, (0, 3, 1, 4, 2, 5))
@@ -245,22 +245,22 @@ def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk):
       ```python
           >>> x = np.ones((10, 32, 16, 3))
           >>> o = _inputs_to_kernel(x, None,
-          >>>                       marginal=Marginalisation.OVER_POINTS,
-          >>>                       cross=Marginalisation.NO,
+          >>>                       marginal=M.OVER_POINTS,
+          >>>                       cross=M.NO,
           >>>                       compute_ntk=True)
           >>> o.var1.shape, o.ntk.shape
           (10, 32, 32, 16, 16), (10, 10, 32, 32, 16, 16)
           >>> o = _inputs_to_kernel(x, None,
-          >>>                       marginal=Marginalisation.OVER_PIXELS,
-          >>>                       cross=Marginalisation.OVER_PIXELS,
+          >>>                       marginal=M.OVER_PIXELS,
+          >>>                       cross=M.OVER_PIXELS,
           >>>                       compute_ntk=True)
           >>> o.var1.shape, o.ntk.shape
           (10, 32, 16), (10, 10, 32, 16)
           >>> x1 = np.ones((10, 128))
           >>> x2 = np.ones((20, 128))
           >>> o = _inputs_to_kernel(x1, x2,
-          >>>                       marginal=Marginalisation.OVER_ALL,
-          >>>                       cross=Marginalisation.OVER_ALL,
+          >>>                       marginal=M.OVER_ALL,
+          >>>                       cross=M.OVER_ALL,
           >>>                       compute_ntk=False)
           >>> o.var1.shape, o.nngp.shape
           (10,), (10, 20)
@@ -277,16 +277,16 @@ def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk):
                      '`[batch_size, height, width, channels]`, '
                      'got %s.' % str(x1.shape))
 
-  if x1.ndim == 2 and not (marginal == cross == Marginalisation.OVER_ALL):
+  if x1.ndim == 2 and not (marginal == cross == M.OVER_ALL):
     raise ValueError("`OVER_ALL` marginalisation should be used for 2D inputs; "
                      "was: `marginal`={}, `cross`={}".format(marginal, cross))
 
-  if cross == marginal == Marginalisation.OVER_ALL:
+  if cross == marginal == M.OVER_ALL:
     x1 = np.reshape(x1, (x1.shape[0], -1))
     if x2 is not None:
       x2 = np.reshape(x2, (x2.shape[0], -1))
 
-  if cross == Marginalisation.OVER_POINTS:
+  if cross == M.OVER_POINTS:
     raise ValueError("Required `OVER_POINTS` to be computed for `nngp`/`ntk`. "
                      "`OVER_POINTS` is only meant for `var1`/`var2`. "
                      "Use `NO` instead to compute all covariances.")
@@ -355,8 +355,8 @@ def _preprocess_kernel_fn(kernel_fn):
 
     include_ntk = 'ntk' in get
     covs_req = getattr(kernel_fn,
-                       _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_ALL,
-                                          'cross': Marginalisation.OVER_ALL})
+                       _COVARIANCES_REQ, {'marginal': M.OVER_ALL,
+                                          'cross': M.OVER_ALL})
     kernel = _inputs_to_kernel(x1, x2, compute_ntk=include_ntk, **covs_req)
     return kernel_fn(kernel)._asdict()
 
@@ -466,9 +466,9 @@ def _get_dimensionwise_marg_var(var, marginal):
   """Extracts `OVER_ALL`/`OVER_PIXELS` marginal covariance from `var1`/`var2` of
   either of the `OVER_POINTS` or `NO` types.
   """
-  if marginal in (Marginalisation.OVER_ALL, Marginalisation.OVER_PIXELS):
+  if marginal in (M.OVER_ALL, M.OVER_PIXELS):
     return var
-  elif marginal == Marginalisation.NO:
+  elif marginal == M.NO:
     var = np.moveaxis(np.diagonal(var, axis1=0, axis2=1), -1, 0)
 
   var = np.swapaxes(var, -3, -2)  # [..., X, X, Y, Y] -> [..., X, Y, X, Y]
@@ -492,9 +492,9 @@ def _get_var_prod(var1, var2, marginal):
       raise ValueError(var1.shape, var2.shape)
 
   prod11, prod22 = None, None
-  if marginal in (Marginalisation.OVER_ALL, Marginalisation.OVER_PIXELS):
+  if marginal in (M.OVER_ALL, M.OVER_PIXELS):
     prod12 = np.expand_dims(var1, 1) * np.expand_dims(var2, 0)
-  elif marginal in [Marginalisation.OVER_POINTS, Marginalisation.NO]:
+  elif marginal in [M.OVER_POINTS, M.NO]:
     def outer_prod_full(sqnorms1, sqnorms2):
       sqnorms1 = sqnorms1[:, None, :, None, :, None]
       sqnorms2 = sqnorms2[None, :, None, :, None, :]
@@ -505,7 +505,7 @@ def _get_var_prod(var1, var2, marginal):
                                                                        marginal)
     prod12 = outer_prod_full(sqnorms1, sqnorms2)
 
-    if marginal == Marginalisation.OVER_POINTS:
+    if marginal == M.OVER_POINTS:
       def outer_prod_pixel(sqnorms1, sqnorms2):
         sqnorms1 = sqnorms1[:, :, None, :, None]
         sqnorms2 = sqnorms2[:, None, :, None, :]
@@ -559,11 +559,11 @@ def _transform_kernels_ab_relu(kernels, a, b, do_backprop, do_stabilize):
   if do_stabilize:
     nngp *= factor
 
-  if marginal in (Marginalisation.OVER_ALL, Marginalisation.OVER_PIXELS):
+  if marginal in (M.OVER_ALL, M.OVER_PIXELS):
     var1 *= (a**2 + b**2) / 2
     if var2 is not None:
       var2 *= (a**2 + b**2) / 2
-  elif marginal in (Marginalisation.OVER_POINTS, Marginalisation.NO):
+  elif marginal in (M.OVER_POINTS, M.NO):
     var1, _ = _get_ab_relu_kernel(var1, prod11, a, b, do_backprop)
     if var2 is not None:
       var2, _ = _get_ab_relu_kernel(var2, prod22, a, b, do_backprop)
@@ -600,11 +600,11 @@ def _transform_kernels_erf(kernels, do_backprop):
   prod11, prod12, prod22 = _get_var_prod(_var1_denom, _var2_denom, marginal)
   nngp, ntk = _get_erf_kernel(nngp, prod12, do_backprop, ntk=ntk)
 
-  if marginal in (Marginalisation.OVER_ALL, Marginalisation.OVER_PIXELS):
+  if marginal in (M.OVER_ALL, M.OVER_PIXELS):
     var1 = np.arcsin(2 * var1 / _var1_denom) * 2 / np.pi
     if var2 is not None:
       var2 = np.arcsin(2 * var2 / _var2_denom) * 2 / np.pi
-  elif marginal in [Marginalisation.OVER_POINTS, Marginalisation.NO]:
+  elif marginal in [M.OVER_POINTS, M.NO]:
     var1, _ = _get_erf_kernel(var1, prod11, do_backprop)
     if var2 is not None:
       var2, _ = _get_erf_kernel(var2, prod22, do_backprop)
@@ -688,8 +688,8 @@ def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0)):
 
     return Kernel(var1, nngp, var2, ntk, True, True, marginal, cross)
 
-  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_ALL,
-                                      'cross': Marginalisation.OVER_ALL})
+  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_ALL,
+                                        'cross': M.OVER_ALL})
 
   return init_fn, apply_fn, kernel_fn
 
@@ -733,8 +733,8 @@ def FanInSum():
                                 'set to `True`.')
 
     marginal, cross = kernels[0].marginal, kernels[0].cross
-    if not all(Marginalisation(k.marginal) == marginal and
-               Marginalisation(k.cross) == cross
+    if not all(k.marginal == marginal and
+               k.cross == cross
                for k in kernels):
       raise NotImplementedError('`FanInSum` layer is only implemented for the '
                                 'case if all input layers output the same type'
@@ -785,10 +785,10 @@ def _flip_height_width(kernels):
   def flip_5or6d(mat):
     return np.moveaxis(mat, (-2, -1), (-4, -3))
 
-  if marginal == Marginalisation.OVER_PIXELS:
+  if marginal == M.OVER_PIXELS:
     var1 = np.transpose(var1, (0, 2, 1))
     var2 = np.transpose(var2, (0, 2, 1)) if var2 is not None else var2
-  elif marginal in [Marginalisation.OVER_POINTS, Marginalisation.NO]:
+  elif marginal in [M.OVER_POINTS, M.NO]:
     var1 = flip_5or6d(var1)
     var2 = flip_5or6d(var2) if var2 is not None else var2
   else:
@@ -796,10 +796,10 @@ def _flip_height_width(kernels):
         "Only implemented for `OVER_PIXELS`, `OVER_POINTS` and `NO`;"
         " supplied {}".format(marginal))
 
-  if cross == Marginalisation.OVER_PIXELS:
+  if cross == M.OVER_PIXELS:
     nngp = np.moveaxis(nngp, -1, -2)
     ntk = np.moveaxis(ntk, -1, -2) if _is_array(ntk) else ntk
-  elif cross in [Marginalisation.OVER_POINTS, Marginalisation.NO]:
+  elif cross in [M.OVER_POINTS, M.NO]:
     nngp = flip_5or6d(nngp)
     ntk = flip_5or6d(ntk) if _is_array(ntk) else ntk
 
@@ -1108,20 +1108,20 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape,
     """Compute the transformed kernels after a conv layer."""
     var1, nngp, var2, ntk, _, is_height_width, marginal, cross = kernels
 
-    if cross > Marginalisation.OVER_PIXELS and not is_height_width:
+    if cross > M.OVER_PIXELS and not is_height_width:
       filter_shape_nngp = filter_shape[::-1]
       strides_nngp = strides[::-1]
     else:
       filter_shape_nngp = filter_shape
       strides_nngp = strides
 
-    if cross == Marginalisation.OVER_PIXELS:
+    if cross == M.OVER_PIXELS:
       def conv_nngp(x):
         if _is_array(x):
           x = _conv_nngp_4d(x, filter_shape_nngp, strides_nngp, padding)
         x = _affine(x, W_std, b_std)
         return x
-    elif cross in [Marginalisation.OVER_POINTS, Marginalisation.NO]:
+    elif cross in [M.OVER_POINTS, M.NO]:
       def conv_nngp(x):
         if _is_array(x):
           x = _conv_nngp_5or6d_double_conv(x, filter_shape_nngp,
@@ -1135,12 +1135,12 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape,
           "Only implemented for `OVER_PIXELS`, `OVER_POINTS` and `NO`;"
           " supplied {}".format(cross))
 
-    if marginal == Marginalisation.OVER_PIXELS:
+    if marginal == M.OVER_PIXELS:
       def conv_var(x):
         x = _conv_var_3d(x, filter_shape_nngp, strides_nngp, padding)
         x = _affine(x, W_std, b_std)
         return x
-    elif marginal in [Marginalisation.OVER_POINTS, Marginalisation.NO]:
+    elif marginal in [M.OVER_POINTS, M.NO]:
       def conv_var(x):
         if _is_array(x):
           x = _conv_nngp_5or6d_double_conv(x, filter_shape_nngp,
@@ -1159,8 +1159,8 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape,
 
     return Kernel(var1, nngp, var2, ntk, True, is_height_width, marginal, cross)
 
-  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_PIXELS,
-                                      'cross': Marginalisation.OVER_PIXELS})
+  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_PIXELS,
+                                        'cross': M.OVER_PIXELS})
 
   return init_fn, apply_fn, kernel_fn
 
@@ -1277,8 +1277,8 @@ def AvgPool(window_shape, strides=None, padding=Padding.VALID.name):
     return Kernel(var1, nngp, var2, ntk, is_gaussian, is_height_width,
                   marginal, cross)
 
-  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_POINTS,
-                                      'cross': Marginalisation.NO})
+  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_POINTS,
+                                        'cross': M.NO})
   return init_fn, apply_fn, kernel_fn
 
 
@@ -1318,10 +1318,10 @@ def GlobalAvgPool():
       var2 = _average_pool(var2)
 
     return Kernel(var1, nngp, var2, ntk, is_gaussian, True,
-                  Marginalisation.OVER_ALL, Marginalisation.OVER_ALL)
+                  M.OVER_ALL, M.OVER_ALL)
 
-  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_POINTS,
-                                       'cross': Marginalisation.NO})
+  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_POINTS,
+                                        'cross': M.NO})
   return init_fn, apply_fn, kernel_fn
 
 
@@ -1353,35 +1353,35 @@ def Flatten():
       z = np.trace(y, axis1=-2, axis2=-1)
       return z / count
 
-    if marginal == Marginalisation.OVER_PIXELS:
+    if marginal == M.OVER_PIXELS:
       var1 = np.mean(var1, axis=(1, 2))
       var2 = var2 if var2 is None else np.mean(var2, axis=(1, 2))
-    elif marginal in [Marginalisation.OVER_POINTS, Marginalisation.NO]:
-      if marginal == Marginalisation.NO:
+    elif marginal in [M.OVER_POINTS, M.NO]:
+      if marginal == M.NO:
         var1 = np.moveaxis(np.diagonal(var1, axis1=0, axis2=1), -1, 0)
         if var2 is not None:
           var2 = np.moveaxis(np.diagonal(var2, axis1=0, axis2=1), -1, 0)
 
       var1 = trace(var1)
       var2 = var2 if var2 is None else trace(var2)
-    elif marginal != Marginalisation.OVER_ALL:
+    elif marginal != M.OVER_ALL:
       raise NotImplementedError(
           "Only implemented for , `OVER_ALL`, `OVER_PIXELS`, `OVER_POINTS` and "
           " `NO`;  supplied {}".format(marginal))
 
-    if cross == Marginalisation.OVER_PIXELS:
+    if cross == M.OVER_PIXELS:
       nngp = np.mean(nngp, axis=(2, 3))
       ntk =  np.mean(ntk, axis=(2, 3)) if _is_array(ntk) else ntk
-    elif cross in [Marginalisation.OVER_POINTS, Marginalisation.NO]:
+    elif cross in [M.OVER_POINTS, M.NO]:
       nngp = trace(nngp)
       ntk = trace(ntk) if _is_array(ntk) else ntk
-    elif cross != Marginalisation.OVER_ALL:
+    elif cross != M.OVER_ALL:
       raise NotImplementedError(
           "Only implemented for , `OVER_ALL`, `OVER_PIXELS`, `OVER_POINTS` and "
           "`NO`; supplied {}".format(cross))
 
     return Kernel(var1, nngp, var2, ntk, is_gaussian, True,
-                  Marginalisation.OVER_ALL, Marginalisation.OVER_ALL)
+                  M.OVER_ALL, M.OVER_ALL)
 
   return init_fn, apply_fn, kernel_fn
 
@@ -1523,7 +1523,7 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
       raise NotImplementedError("No known closed form expression.")
 
     def _get_G_softmax(mat):
-      if marginal == Marginalisation.NO:
+      if marginal == M.NO:
         mat = np.moveaxis(np.diagonal(mat, axis1=0, axis2=1), -1, 0)
       axes = range(mat.ndim)
       return stax.softmax(QK_gain * mat, axis=(axes[-3], axes[-1]))
@@ -1550,7 +1550,7 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
 
     return Kernel(var1, nngp, var2, ntk, True, is_height_width, marginal, cross)
 
-  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': Marginalisation.OVER_POINTS,
-                                      'cross': Marginalisation.NO})
+  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_POINTS,
+                                        'cross': M.NO})
 
   return init_fn, apply_fn, kernel_fn
