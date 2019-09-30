@@ -127,9 +127,9 @@ def _set_covariances_req_attr(combinator_kernel_fn, kernel_fns):
         cross = getattr(f, _COVARIANCES_REQ)['cross']
 
         if comparison_op(marginal, covs_req['marginal']):
-          covs_req['marginal'] = getattr(f, _COVARIANCES_REQ)['marginal']
+          covs_req['marginal'] = marginal
         if comparison_op(cross, covs_req['cross']):
-          covs_req['cross'] = getattr(f, _COVARIANCES_REQ)['cross']
+          covs_req['cross'] = cross
 
     return covs_req
 
@@ -280,9 +280,16 @@ def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk):
                      '`[batch_size, n_features]` or '
                      '`[batch_size, height, width, channels]`, '
                      'got %s.' % str(x1.shape))
+
   if x1.ndim == 2 and not (marginal == cross == Marginalisation.OVER_ALL):
     raise ValueError("`OVER_ALL` marginalisation should be used for 2D inputs; "
                      "was: `marginal`={}, `cross`={}".format(marginal, cross))
+
+  if cross == marginal == Marginalisation.OVER_ALL:
+    x1 = np.reshape(x1, (x1.shape[0], -1))
+    if x2 is not None:
+      x2 = np.reshape(x2, (x2.shape[0], -1))
+
   if cross == Marginalisation.OVER_POINTS:
     raise ValueError("Required `OVER_POINTS` to be computed for `nngp`/`ntk`. "
                      "`OVER_POINTS` is only meant for `var1`/`var2`. "
@@ -1369,10 +1376,10 @@ def Flatten():
 
       var1 = trace(var1)
       var2 = var2 if var2 is None else trace(var2)
-    else:
+    elif marginal != Marginalisation.OVER_ALL:
       raise NotImplementedError(
-          "Only implemented for `OVER_PIXELS`, `OVER_POINTS` and `NO`;"
-          " supplied {}".format(marginal))
+          "Only implemented for , `OVER_ALL`, `OVER_PIXELS`, `OVER_POINTS` and "
+          " `NO`;  supplied {}".format(marginal))
 
     if cross == Marginalisation.OVER_PIXELS:
       nngp = np.mean(nngp, axis=(2, 3))
@@ -1380,10 +1387,10 @@ def Flatten():
     elif cross in [Marginalisation.OVER_POINTS, Marginalisation.NO]:
       nngp = trace(nngp)
       ntk = trace(ntk) if _is_array(ntk) else ntk
-    else:
+    elif cross != Marginalisation.OVER_ALL:
       raise NotImplementedError(
-          "Only implemented for `OVER_PIXELS`, `OVER_POINTS` and `NO`;"
-          " supplied {}".format(cross))
+          "Only implemented for , `OVER_ALL`, `OVER_PIXELS`, `OVER_POINTS` and "
+          "`NO`; supplied {}".format(cross))
 
     return Kernel(var1, nngp, var2, ntk, is_gaussian, True,
                   Marginalisation.OVER_ALL, Marginalisation.OVER_ALL)
@@ -1551,8 +1558,8 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
     var1 = _transform_kernel(var1, G1)
     var2 = _transform_kernel(var2, G2) if var2 is not None else var2
     nngp = _transform_kernel(nngp, G1, G2)
-    if _is_array(ntk):
-      ntk = _transform_kernel(ntk, G1, G2) + 2 * (nngp - b_std**2)
+    ntk = (_transform_kernel(ntk, G1, G2) + 2 * (nngp - b_std**2)
+           if ntk is not None else ntk)
 
     return Kernel(var1, nngp, var2, ntk, True, is_height_width, marginal, cross)
 

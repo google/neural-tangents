@@ -328,5 +328,34 @@ class ABReluTest(jtu.JaxTestCase):
     self.assertAllClose(kernels_abs, kernels_ab_relu, True)
 
 
+@jtu.parameterized.parameters([
+    {
+        'same_inputs': True
+    },
+    {
+        'same_inputs': False
+    },
+])
+class FlattenTest(jtu.JaxTestCase):
+
+  def test_flatten_first(self, same_inputs):
+    key = random.PRNGKey(1)
+    X0_1 = random.normal(key, (5, 4, 3, 2))
+    X0_2 = None if same_inputs else random.normal(key, (3, 4, 3, 2))
+
+    X0_1_flat = np.reshape(X0_1, (X0_1.shape[0], -1))
+    X0_2_flat = None if same_inputs else np.reshape(X0_2, (X0_2.shape[0], -1))
+
+    _, _, fc_flat = stax.serial(stax.Dense(10, 2., 0.5),
+                                stax.Erf())
+    _, _, fc = stax.serial(stax.Flatten(),
+                           stax.Dense(10, 2., 0.5),
+                           stax.Erf())
+
+    K_flat = fc_flat(X0_1_flat, X0_2_flat)
+    K = fc(X0_1, X0_2)
+    self.assertAllClose(K_flat, K, True)
+
+
 if __name__ == '__main__':
   jtu.absltest.main()
