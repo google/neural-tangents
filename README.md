@@ -16,12 +16,13 @@ We happily welcome contributions!
 
 ## Contents
 * [Installation](#Installation)
-* [5-Minute Intro](#5-Minute-Intro)
-* [Package description](#Package-description)
-* [Training Dynamics of Wide but Finite Networks](#Training-Dynamics-of-Wide-but-Finite-Networks)
-* [Papers](#Papers)
-* [Citation](#Citation)
-* [References](#References)
+* [5-Minute intro](#5-minute-intro)
+* [Package description](#package-description)
+* [Technical gotchas](#technical-gotchas)
+* [Training dynamics of wide but finite networks](#training-dynamics-of-wide-but-finite-networks)
+* [Papers](#papers)
+* [Citation](#citation)
+* [References](#references)
 
 ## Installation
 
@@ -57,7 +58,7 @@ colab examples:
 - [Function Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/function_space_linearization.ipynb)
 
 
-## 5-Minute Intro
+## 5-Minute intro
 
 <b>See this [Colab](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/neural_tangents_cookbook.ipynb) for a detailed tutorial. Below is a very quick introduction.</b>
 
@@ -192,7 +193,19 @@ The `neural_tangents` (`nt`) package contains the following modules and methods:
 
 * `monte_carlo_kernel_fn` - compute a Monte Carlo kernel estimate  of _any_ `(init_fn, apply_fn)`, not necessarily specified `nt.stax`, enabling the kernel computation of infinite networks without closed-form expressions.
 
-* Tools to investigate training dynamics of _wide but finite_ neural networks, like `linearize`, `taylor_expand`, `empirical_kernel_fn` and more. See [Training Dynamics of Wide but Finite Networks](#Training-Dynamics-of-Wide-but-Finite-Networks) for details.
+* Tools to investigate training dynamics of _wide but finite_ neural networks, like `linearize`, `taylor_expand`, `empirical_kernel_fn` and more. See [Training dynamics of wide but finite networks](#training-dynamics-of-wide-but-finite-networks) for details.
+
+
+## Technical gotchas
+
+
+### 64-bit precision
+To enable 64-bit precision, set the respective JAX flag _before_ importing `neural_tangents` (see the JAX [guide](https://colab.research.google.com/github/google/jax/blob/master/notebooks/Common_Gotchas_in_JAX.ipynb#scrollTo=YTktlwTTMgFl)), for example:
+```python
+from jax.config import config
+config.update("jax_enable_x64", True)
+import neural_tangents as nt  # 64-bit precision enabled
+```
 
 
 ### [`nt.stax`](https://github.com/google/neural-tangents/blob/master/neural_tangents/stax.py) vs [`jax.experimental.stax`](https://github.com/google/jax/blob/master/jax/experimental/stax.py)
@@ -200,15 +213,14 @@ We remark the following differences between our library and the JAX one.
 
 * All `nt.stax` layers are instantiated with a function call, i.e. `nt.stax.Relu()` vs `jax.experimental.stax.Relu`.
 * All layers with trainable parameters use the _NTK parameterization_ (see [[5]](5), Remark 1).
-* `nt.stax` layers support `CIRCULAR` padding.
-* `nt.stax` and `jax.experimental.stax` may have different layers available.
+* `nt.stax` and `jax.experimental.stax` may have different layers and options available (for example `nt.stax` layers support `CIRCULAR` padding, but only `NHWC` data format).
 
 
-## Training Dynamics of Wide but Finite Networks
+## Training dynamics of wide but finite networks
 
 The kernel of an infinite network `kernel_fn(x1, x2).ntk` combined with  `nt.predict.gradient_descent_mse` together allow to analytically track the outputs of an infinitely wide neural network trained on MSE loss througout training. Here we discuss the implications for _wide but finite_ neural networks and present tools to study their evolution in _weight space_ (trainable parameters of the network) and _function space_ (outputs of the network).
 
-### Weight Space
+### Weight space
 
 Continuous gradient descent in an infinite network has been shown in [[6]](6) to correspond to training a _linear_ (in trainable parameters) model, which makes linearized neural networks an important subject of study for understanding the behavior of parameters in wide models.
 
@@ -247,7 +259,7 @@ x = np.array([[0.3, 0.2], [0.4, 0.5], [1.2, 0.2]])
 logits = apply_fn_lin((W, b), x)  # (3, 2) np.ndarray
 ```
 
-### Function Space:
+### Function space:
 
 Outputs of a linearized model evolve identically to those of an infinite one [[6]](6) but with a different kernel - specifically, the Neural Tangent Kernel [[5]](5) evaluated on the specific `apply_fn` of the finite network given specific `params_0` that the network is initialized with. For this we provide the `nt.empirical_kernel_fn` function that accepts any `apply_fn` and returns a `kernel_fn(x1, x2, params)` that allows to compute the empirical NTK and NNGP kernels on specific `params`.
 
