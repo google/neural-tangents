@@ -25,7 +25,6 @@ import jax.numpy as np
 from jax.tree_util import tree_all
 from jax.tree_util import tree_map
 from jax.tree_util import tree_multimap
-from neural_tangents.utils.kernel import Kernel
 
 
 def _scan(f, init, xs, store_on_device):

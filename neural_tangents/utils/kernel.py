@@ -11,14 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """The `Kernel` class containing NTK and NNGP `np.ndarray`s as fields."""
 
 import collections
-import aenum
+import enum
 
 
-class Marginalisation(aenum.OrderedEnum):
+class Marginalisation(enum.IntEnum):
   """Types of marginal distributions for which covariances can be computed.
 
   Let k_{ij}(x, y) represent a covariance between the spatial dimensions i and j
@@ -49,11 +48,10 @@ class Marginalisation(aenum.OrderedEnum):
   amount of information being tracked compared to the other options, i.e.,
   the information tracked by `OVER_PIXELS` is a strict subset of that tracked
   by `OVER_POINTS`, which itself tracks a strict subset of information
-  compared to the `NO` option. Note that this is an `OrderedEnum`
+  compared to the `NO` option. Note that this is an `IntEnum`
   meaning that comparison operators `<`, `==` work as set inclusion and equality
   (and `>`, `<=`, `>=` as would be expected given this definition).
   """
-  NONE = None
   OVER_ALL = 0
   OVER_PIXELS = 1
   OVER_POINTS = 2
@@ -61,45 +59,42 @@ class Marginalisation(aenum.OrderedEnum):
 
 
 class Kernel(
-    collections.namedtuple(
-        'Kernel',
-        ['var1', 'nngp', 'var2', 'ntk', 'is_gaussian', 'is_height_width',
-         'marginal', 'cross'])):
+    collections.namedtuple('Kernel', [
+        'var1', 'nngp', 'var2', 'ntk', 'is_gaussian', 'is_height_width',
+        'marginal', 'cross'
+    ])):
   """A tuple containing information about the analytic NTK and NNGP of a model.
 
   Attributes:
     var1: variances of the first batch of inputs. A `np.ndarray` with shape
       `[batch_size_1]` for fully-connected networks, or matching the one
-      specified by the `marginal` argument for CNNs with `batch_size_1` for
-      data dimension(s).
+      specified by the `marginal` argument for CNNs with `batch_size_1` for data
+      dimension(s).
     nngp: covariance between the first and second input (NNGP). A `np.ndarray`
       of shape `[batch_size_1, batch_size_2]` for fully-connected networks, or
       matching the one specifed by the `cross` argument for CNNs with
       `[batch_size_1, batch_size_2]` for data dimensions.
-    var2: optional variances of the second batch of inputs. A `np.ndarray`
-      with shape `[batch_size_2]` for fully-connected networks or matching
-      the one  specified by the `marginal` argument for CNNs with
-      `batch_size_2` for data dimension(s).
-    ntk: the neural tangent kernel (NTK). `np.ndarray` of same shape as
-      `nngp`.
+    var2: optional variances of the second batch of inputs. A `np.ndarray` with
+      shape `[batch_size_2]` for fully-connected networks or matching the one
+      specified by the `marginal` argument for CNNs with `batch_size_2` for data
+      dimension(s).
+    ntk: the neural tangent kernel (NTK). `np.ndarray` of same shape as `nngp`.
     is_gaussian: a boolean, specifying whether the output features or channels
       of the layer / NN function (returning this `Kernel` as the `kernel_fn`)
-      are i.i.d. Gaussian with covariance `nngp`, conditioned on fixed inputs
-      to the layer and i.i.d. Gaussian weights and biases of the layer. For
-      example, passing an input through a CNN layer with i.i.d. Gaussian
-      weights and biases produces i.i.d. Gaussian random variables along the
-      channel dimension, while passing an input through a nonlinearity does
-      not.
+      are i.i.d. Gaussian with covariance `nngp`, conditioned on fixed inputs to
+      the layer and i.i.d. Gaussian weights and biases of the layer. For
+      example, passing an input through a CNN layer with i.i.d. Gaussian weights
+      and biases produces i.i.d. Gaussian random variables along the channel
+      dimension, while passing an input through a nonlinearity does not.
     is_height_width: a boolean specifying whether the covariance matrices
       `nngp`, `var1`, `var2`, and `ntk` have `height` dimensions preceding
       `width` or the other way around. Is always set to `True` if `nngp` and
       `ntk` are less than 6-dimensional and alternates between consecutive CNN
       layers otherwise to avoid self-cancelling transpositions.
-    marginal: an instance of `Marginalisation` enum or its ID, specifying
-      types of covariances between spatial dimensions tracked in
-      `var1`/`var2`.
-    cross: an instance of `Marginalisation` enum or its ID, specifying types
-      of covariances between spatial dimensions tracked in `nngp`/`ntk`.
+    marginal: an instance of `Marginalisation` enum or its ID, specifying types
+      of covariances between spatial dimensions tracked in `var1`/`var2`.
+    cross: an instance of `Marginalisation` enum or its ID, specifying types of
+      covariances between spatial dimensions tracked in `nngp`/`ntk`.
   """
 
   def __new__(cls, var1, nngp, var2, ntk, is_gaussian, is_height_width,
@@ -116,9 +111,9 @@ class Kernel(
         matching the one specifed by the `cross` argument for CNNs with
         `[batch_size_1, batch_size_2]` for data dimensions.
       var2: optional variances of the second batch of inputs. A `np.ndarray`
-        with shape `[batch_size_2]` for fully-connected networks or matching
-        the one  specified by the `marginal` argument for CNNs with
-        `batch_size_2` for data dimension(s).
+        with shape `[batch_size_2]` for fully-connected networks or matching the
+        one  specified by the `marginal` argument for CNNs with `batch_size_2`
+        for data dimension(s).
       ntk: the neural tangent kernel (NTK). `np.ndarray` of same shape as
         `nngp`.
       is_gaussian: a boolean, specifying whether the output features or channels
@@ -143,14 +138,8 @@ class Kernel(
     Returns:
       A `Kernel`.
     """
-    def _convert(marg):
-      if marg is None or isinstance(marg, (int, Marginalisation)):
-        return Marginalisation(marg).value
-      else:
-        return marg
-      #TODO(jirihron): parallel + tree_map pass `object` for `marginal`, `cross`
-      # and other arguments which does not go well with Marginalisation(marg)
+    # TODO(jirihron): parallel+tree_map pass `object` for `marginal`, `cross`
+    # and other arguments which does not go well with Marginalisation(marg)
 
-    return super(Kernel, cls).__new__(
-        cls, var1, nngp, var2, ntk, is_gaussian, is_height_width,
-        _convert(marginal), _convert(cross))
+    return super(Kernel, cls).__new__(cls, var1, nngp, var2, ntk, is_gaussian,
+                                      is_height_width, marginal, cross)

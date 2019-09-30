@@ -66,7 +66,7 @@ from __future__ import division
 from __future__ import print_function
 from functools import wraps
 import warnings
-import aenum
+import enum
 from jax import lax
 from jax import random
 from jax.experimental import stax
@@ -74,7 +74,7 @@ from jax.lib import xla_bridge
 import jax.numpy as np
 from jax.scipy.special import erf
 from neural_tangents.utils.kernel import Kernel
-from neural_tangents.utils.utils import get_namedtuple
+from neural_tangents.utils import utils
 from neural_tangents.utils.kernel import Marginalisation
 
 
@@ -83,7 +83,7 @@ _CONV_QAB_DIMENSION_NUMBERS = ('NCHW', 'HWIO', 'NCHW')
 _COVARIANCES_REQ = 'covariances_req'
 
 
-class Padding(aenum.Enum):
+class Padding(enum.Enum):
   CIRCULAR = 'CIRCULAR'
   SAME = 'SAME'
   VALID = 'VALID'
@@ -151,10 +151,6 @@ def _randn(stddev=1e-2):
 
 def _double_tuple(x):
   return tuple(v for v in x for _ in range(2))
-
-
-def _ids_to_marginalisation_types(marginal, cross):
-  return Marginalisation(marginal), Marginalisation(cross)
 
 
 def _point_marg(x):
@@ -344,7 +340,7 @@ def _preprocess_kernel_fn(kernel_fn):
       return kernel_fn(x1_or_kernel)
     return outer_kernel_fn(x1_or_kernel, x2, get)
 
-  @get_namedtuple('AnalyticKernel')
+  @utils.get_namedtuple('AnalyticKernel')
   def outer_kernel_fn(x1, x2, get):
     if not isinstance(x1, np.ndarray):
       raise TypeError('Inputs to a kernel propagation function should be '
@@ -550,7 +546,6 @@ def _transform_kernels_ab_relu(kernels, a, b, do_backprop, do_stabilize):
   See https://arxiv.org/pdf/1711.09090.pdf for the leaky ReLU derivation.
   """
   var1, nngp, var2, ntk, _, is_height_width, marginal, cross = kernels
-  marginal, cross = _ids_to_marginalisation_types(marginal, cross)
 
   if do_stabilize:
     factor = np.max([np.max(np.abs(nngp)), 1e-12])
@@ -598,7 +593,6 @@ def _get_erf_kernel(ker_mat, prod, do_backprop, ntk=None):
 def _transform_kernels_erf(kernels, do_backprop):
   """Compute new kernels after an `Erf` layer."""
   var1, nngp, var2, ntk, _, is_height_width, marginal, cross = kernels
-  marginal, cross = _ids_to_marginalisation_types(marginal, cross)
 
   _var1_denom = 1 + 2 * var1
   _var2_denom = None if var2 is None else 1 + 2 * var2
@@ -739,7 +733,6 @@ def FanInSum():
                                 'set to `True`.')
 
     marginal, cross = kernels[0].marginal, kernels[0].cross
-    marginal, cross = _ids_to_marginalisation_types(marginal, cross)
     if not all(Marginalisation(k.marginal) == marginal and
                Marginalisation(k.cross) == cross
                for k in kernels):
@@ -788,7 +781,6 @@ def _flip_height_width(kernels):
     `[batch_size_1, batch_size_2, width, width, height, height]`.
   """
   var1, nngp, var2, ntk, is_gaussian, is_height_width, marginal, cross = kernels
-  marginal, cross = _ids_to_marginalisation_types(marginal, cross)
 
   def flip_5or6d(mat):
     return np.moveaxis(mat, (-2, -1), (-4, -3))
@@ -1115,7 +1107,6 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape,
   def kernel_fn(kernels):
     """Compute the transformed kernels after a conv layer."""
     var1, nngp, var2, ntk, _, is_height_width, marginal, cross = kernels
-    marginal, cross = _ids_to_marginalisation_types(marginal, cross)
 
     if cross > Marginalisation.OVER_PIXELS and not is_height_width:
       filter_shape_nngp = filter_shape[::-1]
@@ -1265,7 +1256,6 @@ def AvgPool(window_shape, strides=None, padding=Padding.VALID.name):
     """Kernel transformation."""
     (var1, nngp, var2, ntk, is_gaussian, is_height_width, marginal,
      cross) = kernels
-    marginal, cross = _ids_to_marginalisation_types(marginal, cross)
 
     if is_height_width:
       window_shape_nngp = window_shape
@@ -1316,7 +1306,6 @@ def GlobalAvgPool():
 
   def kernel_fn(kernels):
     var1, nngp, var2, ntk, is_gaussian, _, marginal, cross = kernels
-    marginal, cross = _ids_to_marginalisation_types(marginal, cross)
 
     def _average_pool(ker_mat):
       pixel_axes = tuple(range(ker_mat.ndim)[-4:])
@@ -1354,7 +1343,6 @@ def Flatten():
   def kernel_fn(kernels):
     """Compute kernels."""
     var1, nngp, var2, ntk, is_gaussian, _, marginal, cross = kernels
-    marginal, cross = _ids_to_marginalisation_types(marginal, cross)
 
     if nngp.ndim == 2:
       return kernels
@@ -1529,7 +1517,6 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
 
   def kernel_fn(kernels):
     var1, nngp, var2, ntk, _, is_height_width, marginal, cross = kernels
-    marginal, cross = _ids_to_marginalisation_types(marginal, cross)
 
     if not fixed:
       # TODO(jirihron): implement the approximation and raise a warning
