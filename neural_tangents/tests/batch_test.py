@@ -78,7 +78,8 @@ def _theoretical_kernel(unused_key, input_shape, network, just_theta):
 
   @jit
   def kernel_fn(x1, x2=None):
-    get_all = ('ntk', 'nngp', 'var1', 'var2', 'is_gaussian', 'is_height_width')
+    get_all = ('ntk', 'nngp', 'var1', 'var2', 'is_gaussian', 'is_height_width',
+               'marginal', 'cross')
     k = _kernel_fn(x1, x2, 'ntk') if just_theta else _kernel_fn(x1, x2, get_all)
     return k
 
@@ -268,7 +269,8 @@ class BatchTest(jtu.JaxTestCase):
                                  data_other)
 
   def test_jit_or_pmap_broadcast(self):
-    def kernel_fn(x1, x2, do_flip, keys, do_square, params, _unused=None, p=0.65):
+    def kernel_fn(x1, x2, do_flip, keys, do_square, params, _unused=None,
+                  p=0.65):
       res = np.abs(np.matmul(x1, x2))
       if do_square:
         res *= res

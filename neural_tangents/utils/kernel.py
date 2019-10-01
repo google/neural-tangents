@@ -138,8 +138,5 @@ class Kernel(
     Returns:
       A `Kernel`.
     """
-    # TODO(jirihron): parallel+tree_map pass `object` for `marginal`, `cross`
-    # and other arguments which does not go well with Marginalisation(marg)
-
     return super(Kernel, cls).__new__(cls, var1, nngp, var2, ntk, is_gaussian,
-                                      is_height_width, marginal, cross)
+        is_height_width, int(marginal), int(cross))

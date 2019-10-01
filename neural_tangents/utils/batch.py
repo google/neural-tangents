@@ -96,13 +96,13 @@ def _flatten_kernel(k):
     )
 
 
-def _move_kernel_to_cpu(kernel):
+def _move_kernel_to_cpu(k):
   """Moves data in a kernel from an accelerator to the CPU."""
-  if hasattr(kernel, '_asdict'):
-    return kernel._replace(
-        **dict([(k, device_get(v)) for k, v in kernel._asdict().items()]))
-  elif isinstance(kernel, np.ndarray):
-    return device_get(kernel)
+  if hasattr(k, '_asdict'):
+    return k._replace(
+        **dict([(k, device_get(v)) for k, v in k._asdict().items()]))
+  elif isinstance(k, np.ndarray):
+    return device_get(k)
   else:
     raise TypeError(
         'Expected kernel to be either a namedtuple or a `np.ndarray`, got %s.'
