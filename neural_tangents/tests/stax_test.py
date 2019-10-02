@@ -76,6 +76,12 @@ PROJECTIONS = [
     'ATTN_PARAM'
 ]
 
+LAYER_NORM = [
+    (-1,),
+    (1, 3),
+    (1, 2, 3)
+]
+
 
 def _get_inputs(key, is_conv, same_inputs, input_shape, fn=np.cos):
   key, split = random.split(key)
@@ -86,7 +92,7 @@ def _get_inputs(key, is_conv, same_inputs, input_shape, fn=np.cos):
 
 
 def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res,
-             padding, phi, strides, width, is_ntk, proj_into_2d):
+             padding, phi, strides, width, is_ntk, proj_into_2d, layer_norm):
   fc = partial(stax.Dense, W_std=W_std, b_std=b_std)
   conv = partial(
       stax.Conv,
@@ -102,11 +108,16 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res,
                           if use_pooling else stax.Identity()), phi, affine)
 
   if is_res:
-    block = stax.serial(affine, stax.FanOut(2),
-                        stax.parallel(stax.Identity(), res_unit),
-                        stax.FanInSum())
+    block = stax.serial(
+        affine, stax.FanOut(2),stax.parallel(stax.Identity(), res_unit),
+        stax.FanInSum(),
+        stax.Identity() if layer_norm is None
+        else stax.LayerNorm(axis=layer_norm))
   else:
-    block = stax.serial(affine, res_unit)
+    block = stax.serial(
+        affine, res_unit,
+        stax.Identity() if layer_norm is None
+        else stax.LayerNorm(axis=layer_norm))
 
   if proj_into_2d == 'FLAT':
     proj_layer = stax.Flatten()
@@ -200,14 +211,71 @@ class StaxTest(jtu.JaxTestCase):
                          ' the spatial dimensions is singleton.')
 
     W_std, b_std = 2.**0.5, 0.5**0.5
+    layer_norm = None
 
+    self._check_agreement_with_empirical(W_std, b_std, filter_size, is_conv,
+                                         is_ntk, is_res, layer_norm, padding,
+                                         phi, proj_into_2d, same_inputs,
+                                         strides, use_pooling, width)
+
+  # pylint: disable=g-complex-comprehension
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+            '_{}_{}_{}_{}_{}_{}'.format(
+                model, width,
+                'same_inputs' if same_inputs else 'different_inputs',
+                'NTK' if is_ntk else 'NNGP', proj_into_2d,
+                'layer_norm=%s' % str(layer_norm)),
+          'model':
+            model,
+          'width':
+            width,
+          'same_inputs':
+            same_inputs,
+          'is_ntk':
+            is_ntk,
+          'proj_into_2d':
+            proj_into_2d,
+          'layer_norm':
+            layer_norm
+      } for model in MODELS for width in WIDTHS
+      for same_inputs in [False, True]
+      for is_ntk in [False, True]
+      for proj_into_2d in PROJECTIONS[:2]
+      for layer_norm in LAYER_NORM))
+  def test_layernorm(self, model, width, same_inputs, is_ntk,
+      proj_into_2d, layer_norm):
+    is_conv = 'conv' in model
+
+    # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
+    if is_conv:
+      if xla_bridge.get_backend().platform == 'cpu':
+        raise jtu.SkipTest('Not running CNN models on CPU to save time.')
+    elif proj_into_2d != PROJECTIONS[0] or layer_norm != LAYER_NORM[0]:
+      raise jtu.SkipTest('FC models do not have these parameters.')
+
+    W_std, b_std = 2.**0.5, 0.5**0.5
+    filter_size = FILTER_SIZES[0]
+    padding = PADDINGS[0]
+    strides = STRIDES[0]
+    phi = stax.Relu()
+    use_pooling, is_res = False, False
+
+    self._check_agreement_with_empirical(W_std, b_std, filter_size, is_conv,
+                                         is_ntk, is_res, layer_norm, padding,
+                                         phi, proj_into_2d, same_inputs,
+                                         strides, use_pooling, width)
+
+  def _check_agreement_with_empirical(self, W_std, b_std, filter_size, is_conv,
+      is_ntk, is_res, layer_norm, padding, phi, proj_into_2d, same_inputs,
+      strides, use_pooling, width):
     key = random.PRNGKey(1)
     x1, x2 = _get_inputs(key, is_conv, same_inputs, INPUT_SHAPE)
-
     init_fn, apply_fn, kernel_fn = _get_net(W_std, b_std, filter_size,
                                             is_conv, use_pooling, is_res,
                                             padding, phi, strides, width,
-                                            is_ntk, proj_into_2d)
+                                            is_ntk, proj_into_2d, layer_norm)
 
     def _get_empirical(n_samples, get):
       kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(

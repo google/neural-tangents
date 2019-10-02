@@ -106,8 +106,7 @@ def _set_covariances_req_attr(combinator_kernel_fn, kernel_fns):
     (`Marginalisation.OVER_PIXELS`, `Marginalisation.OVER_PIXELS`) if CNN but no
       average pooling is used
     (`Marginalisation.OVER_POINTS`, `Marginalisation.NO`) if CNN and average
-      pooling is used
-  #TODO(jirihron): after adding attention layers, 2nd option also for attention
+      pooling or attention are used
   #TODO(jirihron): make `NO` marginalisation the default
 
   Args:
@@ -480,10 +479,19 @@ def _get_dimensionwise_marg_var(var, marginal):
   return sqnorms
 
 
-def _get_var_prod(var1, var2, marginal):
-  """Returns a 6D tensor where an entry (x1, x2, a, b, c, d) equals
-  k_{ab}(x1, x1) * k_{cd} (x2, x2).
+def _get_normalising_prod(var1, var2, marginal, axis=()):
+  """Returns three tensors, `prod11`, `prod12` and `prod22` which contain
+  products of marginal variances of `var1`, `nngp` and `var2` respectively.
+
+  `prod12` is a 6D tensor where an entry [x1, x2, a, b, c, d] equals
+  k_{ab}(x1, x1) * k_{cd}(x2, x2), if `marginal` is `OVER_POINTS` or `NO`,
+  or a 4D tensor k_{aa}(x1, x1) k_{cc}(x2, x2) if `marginal` is `OVER_PIXELS`,
+  or a 2D tensor k(x1, x1) k(x2, x2) if `marginal` is `OVER_ALL`. In the last
+  two cases, both `prod11` and `prod22` will be None. Otherwise they will be
+  5D tensors k_{ab}(x1, x1) k_{cd}(x1, x1) in the `marginal == OVER_POINTS`
+  case, or 6D tensors akin to the one for `prod12` if `marginal == NO`.
   """
+  axis = (axis,) if isinstance(axis, int) else tuple(axis)
   same_input = var2 is None
   if same_input:
     var2 = var1
@@ -491,33 +499,47 @@ def _get_var_prod(var1, var2, marginal):
     if var1.shape[1:] != var2.shape[1:]:
       raise ValueError(var1.shape, var2.shape)
 
-  prod11, prod22 = None, None
   if marginal in (M.OVER_ALL, M.OVER_PIXELS):
-    prod12 = np.expand_dims(var1, 1) * np.expand_dims(var2, 0)
-  elif marginal in [M.OVER_POINTS, M.NO]:
+    if marginal == M.OVER_ALL and len(axis) > 0:
+      raise ValueError("Required normalisation over axis={} is impossible when"
+                       " {}. Maybe axis=()?".format(axis, marginal))
+    sqnorms1, sqnorms2 = var1, var2
+    sqnorms1 = np.mean(sqnorms1, axis=axis, keepdims=True)
+    if same_input:
+      sqnorms2 = sqnorms1
+    else:
+      sqnorms2 = np.mean(sqnorms2, axis=axis, keepdims=True)
+
+    prod12 = np.expand_dims(sqnorms1, 1) * np.expand_dims(sqnorms2, 0)
+    prod11 = sqnorms1**2.0
+    prod22 = sqnorms2**2.0 if not same_input else prod11
+  elif marginal in (M.OVER_POINTS, M.NO):
     def outer_prod_full(sqnorms1, sqnorms2):
       sqnorms1 = sqnorms1[:, None, :, None, :, None]
       sqnorms2 = sqnorms2[None, :, None, :, None, :]
       return sqnorms1 * sqnorms2
 
     sqnorms1 = _get_dimensionwise_marg_var(var1, marginal)
-    sqnorms2 = sqnorms1 if same_input else _get_dimensionwise_marg_var(var2,
-                                                                       marginal)
+    sqnorms1 = np.mean(sqnorms1, axis=axis, keepdims=True)
+    if same_input:
+      sqnorms2 = sqnorms1
+    else:
+      sqnorms2 = _get_dimensionwise_marg_var(var2, marginal)
+      sqnorms2 = np.mean(sqnorms2, axis=axis, keepdims=True)
+
     prod12 = outer_prod_full(sqnorms1, sqnorms2)
 
     if marginal == M.OVER_POINTS:
-      def outer_prod_pixel(sqnorms1, sqnorms2):
+      def outer_prod_pix(sqnorms1, sqnorms2):
         sqnorms1 = sqnorms1[:, :, None, :, None]
         sqnorms2 = sqnorms2[:, None, :, None, :]
         return sqnorms1 * sqnorms2
 
-      prod11 = outer_prod_pixel(sqnorms1, sqnorms1)
-      if not same_input:
-        prod22 = outer_prod_pixel(sqnorms2, sqnorms2)
+      prod11 = outer_prod_pix(sqnorms1, sqnorms1)
+      prod22 = outer_prod_pix(sqnorms2, sqnorms2) if not same_input else prod11
     else:
       prod11 = outer_prod_full(sqnorms1, sqnorms1)
-      if not same_input:
-        prod22 = outer_prod_full(sqnorms2, sqnorms2)
+      prod22 = outer_prod_full(sqnorms2, sqnorms2) if not same_input else prod11
   else:
     raise NotImplementedError(
         "Only implemented for `OVER_ALL`, `OVER_PIXELS`, `OVER_POINTS` "
@@ -554,7 +576,7 @@ def _transform_kernels_ab_relu(kernels, a, b, do_backprop, do_stabilize):
     if var2 is not None:
       var2 /= factor
 
-  prod11, prod12, prod22 = _get_var_prod(var1, var2, marginal)
+  prod11, prod12, prod22 = _get_normalising_prod(var1, var2, marginal)
   nngp, ntk = _get_ab_relu_kernel(nngp, prod12, a, b, do_backprop, ntk=ntk)
   if do_stabilize:
     nngp *= factor
@@ -597,7 +619,8 @@ def _transform_kernels_erf(kernels, do_backprop):
   _var1_denom = 1 + 2 * var1
   _var2_denom = None if var2 is None else 1 + 2 * var2
 
-  prod11, prod12, prod22 = _get_var_prod(_var1_denom, _var2_denom, marginal)
+  prod11, prod12, prod22 = _get_normalising_prod(
+      _var1_denom, _var2_denom, marginal)
   nngp, ntk = _get_erf_kernel(nngp, prod12, do_backprop, ntk=ntk)
 
   if marginal in (M.OVER_ALL, M.OVER_PIXELS):
@@ -1552,5 +1575,75 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
 
   setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_POINTS,
                                         'cross': M.NO})
+
+  return init_fn, apply_fn, kernel_fn
+
+
+@_layer
+def LayerNorm(axis=-1, eps=1e-12):
+  """Layer normalisation.
+
+  Args:
+    axis: int or a tuple, specifies dimensions over which to normalise
+    eps: float, specifies (small) positive constant to be added to the variance
+      estimates in order to prevent division by zero
+
+  Warnings:
+    For image data, `kernel_fn` assumes they have been fed in in the NHWC format
+  """
+  warnings.warn("For image data, `kernel_fn` assumes they have been fed in "
+                "in the NHWC format.")
+  axis = (axis,) if isinstance(axis, int) else tuple(axis)
+
+  def init_fn(rng, input_shape):
+    return input_shape, ()
+
+  def apply_fn(params, inputs, **kwargs):
+    mean = np.mean(inputs, axis=axis, keepdims=True)
+    var = np.var(inputs, axis=axis, keepdims=True)
+
+    return (inputs - mean) / np.sqrt(eps + var)
+
+  def kernel_fn(kernels):
+    var1, nngp, var2, ntk, _, is_height_width, marginal, cross = kernels
+    _axis = axis
+
+    if marginal != M.OVER_ALL or cross != M.OVER_ALL:
+      if not all(a in [-3, -2, -1, 1, 2, 3] for a in _axis):
+        raise ValueError(_axis)
+      _axis = list(set(np.arange(4)[list(_axis)]))
+      if 3 not in _axis:
+        raise ValueError("Normalisation over channels necessary for convergence"
+                         " to an asymptotic kernel; axis={}".format(_axis))
+      _axis.remove(3)
+
+      kernel_axis = []
+      if 1 in _axis:
+        kernel_axis += [1] if is_height_width else [2]
+      if 2 in _axis:
+        kernel_axis += [2] if is_height_width else [1]
+    else:
+      if len(_axis) > 1 or _axis[0] not in [-1, 1]:
+        raise ValueError("Normalisation over features necessary for convergence"
+                         " to an asymptotic kernel; axis={}".format(_axis))
+      kernel_axis = []
+
+    prod11, prod12, prod22 = _get_normalising_prod(
+        eps + var1, var2 if var2 is None else eps + var2,
+        marginal, axis=kernel_axis)
+    nngp /= np.sqrt(prod12)
+    if _is_array(ntk):
+      ntk /= np.sqrt(prod12)
+
+    var1 /= np.sqrt(prod11)
+    if var2 is not None:
+      var2 /= np.sqrt(prod22)
+
+    return Kernel(var1, nngp, var2, ntk, kernels.is_gaussian, is_height_width,
+                  marginal, cross)
+
+  if len(axis) > 1:
+    setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_PIXELS,
+                                          'cross': M.OVER_PIXELS})
 
   return init_fn, apply_fn, kernel_fn
