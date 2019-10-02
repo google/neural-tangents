@@ -19,7 +19,6 @@ INSTALL_REQUIRES = [
     'absl-py',
     'numpy',
     'jax',
-    'aenum',
 ]
 
 setuptools.setup(
