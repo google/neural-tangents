@@ -82,7 +82,6 @@ _CONV_DIMENSION_NUMBERS = ('NHWC', 'HWIO', 'NHWC')
 _CONV_QAB_DIMENSION_NUMBERS = ('NCHW', 'HWIO', 'NCHW')
 _COVARIANCES_REQ = 'covariances_req'
 
-
 class Padding(enum.Enum):
   CIRCULAR = 'CIRCULAR'
   SAME = 'SAME'
@@ -360,8 +359,9 @@ def _preprocess_kernel_fn(kernel_fn):
     return kernel_fn(kernel)._asdict()
 
   if hasattr(kernel_fn, _COVARIANCES_REQ):
-    setattr(new_kernel_fn, _COVARIANCES_REQ, getattr(kernel_fn,
-                                                     _COVARIANCES_REQ))
+    setattr(new_kernel_fn,
+            _COVARIANCES_REQ,
+            getattr(kernel_fn, _COVARIANCES_REQ))
 
   return new_kernel_fn
 
@@ -567,7 +567,8 @@ def _transform_kernels_ab_relu(kernels, a, b, do_backprop, do_stabilize):
 
   See https://arxiv.org/pdf/1711.09090.pdf for the leaky ReLU derivation.
   """
-  var1, nngp, var2, ntk, _, is_height_width, marginal, cross = kernels
+  var1, nngp, var2, ntk, marginal = \
+      kernels.var1, kernels.nngp, kernels.var2, kernels.ntk, kernels.marginal
 
   if do_stabilize:
     factor = np.max([np.max(np.abs(nngp)), 1e-12])
@@ -599,7 +600,9 @@ def _transform_kernels_ab_relu(kernels, a, b, do_backprop, do_stabilize):
     if var2 is not None:
       var2 *= factor
 
-  return Kernel(var1, nngp, var2, ntk, a == b, is_height_width, marginal, cross)
+  return kernels._replace(
+      var1=var1, nngp=nngp, var2=var2, ntk=ntk,
+      is_gaussian=(a == b), marginal=marginal)
 
 
 def _get_erf_kernel(ker_mat, prod, do_backprop, ntk=None):
@@ -614,7 +617,8 @@ def _get_erf_kernel(ker_mat, prod, do_backprop, ntk=None):
 
 def _transform_kernels_erf(kernels, do_backprop):
   """Compute new kernels after an `Erf` layer."""
-  var1, nngp, var2, ntk, _, is_height_width, marginal, cross = kernels
+  var1, nngp, var2, ntk, marginal = \
+      kernels.var1, kernels.nngp, kernels.var2, kernels.ntk, kernels.marginal
 
   _var1_denom = 1 + 2 * var1
   _var2_denom = None if var2 is None else 1 + 2 * var2
@@ -636,7 +640,9 @@ def _transform_kernels_erf(kernels, do_backprop):
         "Only implemented for `OVER_ALL`, `OVER_PIXELS`, `OVER_POINTS` "
         "and `NO`; supplied {}".format(marginal))
 
-  return Kernel(var1, nngp, var2, ntk, False, is_height_width, marginal, cross)
+  return kernels._replace(
+      var1=var1, nngp=nngp, var2=var2, ntk=ntk,
+      is_gaussian=False, marginal=marginal)
 
 
 def _transform_kernels(kernels, fn, **fn_kwargs):
@@ -700,7 +706,8 @@ def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0)):
 
   def kernel_fn(kernels):
     """Compute the transformed kernels after a dense layer."""
-    var1, nngp, var2, ntk, _, _, marginal, cross = kernels
+    var1, nngp, var2, ntk = \
+        kernels.var1, kernels.nngp, kernels.var2, kernels.ntk
 
     def fc(x):
       return _affine(x, W_std, b_std)
@@ -709,11 +716,11 @@ def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0)):
     if ntk is not None:
       ntk += nngp - b_std**2
 
-    return Kernel(var1, nngp, var2, ntk, True, True, marginal, cross)
+    return kernels._replace(
+        var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=True)
 
   setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_ALL,
                                         'cross': M.OVER_ALL})
-
   return init_fn, apply_fn, kernel_fn
 
 
@@ -1129,7 +1136,9 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape,
 
   def kernel_fn(kernels):
     """Compute the transformed kernels after a conv layer."""
-    var1, nngp, var2, ntk, _, is_height_width, marginal, cross = kernels
+    var1, nngp, var2, ntk, is_height_width, marginal, cross = (
+        kernels.var1, kernels.nngp, kernels.var2, kernels.ntk,
+        kernels.is_height_width, kernels.marginal, kernels.cross)
 
     if cross > M.OVER_PIXELS and not is_height_width:
       filter_shape_nngp = filter_shape[::-1]
@@ -1180,11 +1189,12 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape,
     nngp = conv_nngp(nngp)
     ntk = conv_nngp(ntk) + nngp - b_std**2 if ntk is not None else ntk
 
-    return Kernel(var1, nngp, var2, ntk, True, is_height_width, marginal, cross)
+    return kernels._replace(
+        var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=True,
+        is_height_width=is_height_width, marginal=marginal, cross=cross)
 
   setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_PIXELS,
                                         'cross': M.OVER_PIXELS})
-
   return init_fn, apply_fn, kernel_fn
 
 
@@ -1277,8 +1287,10 @@ def AvgPool(window_shape, strides=None, padding=Padding.VALID.name):
 
   def kernel_fn(kernels):
     """Kernel transformation."""
-    (var1, nngp, var2, ntk, is_gaussian, is_height_width, marginal,
-     cross) = kernels
+    var1, nngp, var2, ntk, is_gaussian, is_height_width, marginal, cross = (
+        kernels.var1, kernels.nngp, kernels.var2, kernels.ntk,
+        kernels.is_gaussian, kernels.is_height_width, kernels.marginal,
+        kernels.cross)
 
     if is_height_width:
       window_shape_nngp = window_shape
@@ -1297,8 +1309,9 @@ def AvgPool(window_shape, strides=None, padding=Padding.VALID.name):
       var2 = _average_pool_nngp_5or6d(var2, window_shape_nngp,
                                       strides_nngp, padding)
 
-    return Kernel(var1, nngp, var2, ntk, is_gaussian, is_height_width,
-                  marginal, cross)
+    return kernels._replace(
+        var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=is_gaussian,
+        is_height_width=is_height_width, marginal=marginal, cross=cross)
 
   setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_POINTS,
                                         'cross': M.NO})
@@ -1328,7 +1341,9 @@ def GlobalAvgPool():
     return np.mean(inputs, axis=pixel_axes)
 
   def kernel_fn(kernels):
-    var1, nngp, var2, ntk, is_gaussian, _, marginal, cross = kernels
+    var1, nngp, var2, ntk, is_gaussian, marginal, cross = (
+        kernels.var1, kernels.nngp, kernels.var2, kernels.ntk,
+        kernels.is_gaussian, kernels.marginal, kernels.cross)
 
     def _average_pool(ker_mat):
       pixel_axes = tuple(range(ker_mat.ndim)[-4:])
@@ -1340,8 +1355,9 @@ def GlobalAvgPool():
     if var2 is not None:
       var2 = _average_pool(var2)
 
-    return Kernel(var1, nngp, var2, ntk, is_gaussian, True,
-                  M.OVER_ALL, M.OVER_ALL)
+    return kernels._replace(
+        var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=is_gaussian,
+        is_height_width=True, marginal=M.OVER_ALL, cross=M.OVER_ALL)
 
   setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_POINTS,
                                         'cross': M.NO})
@@ -1365,7 +1381,9 @@ def Flatten():
 
   def kernel_fn(kernels):
     """Compute kernels."""
-    var1, nngp, var2, ntk, is_gaussian, _, marginal, cross = kernels
+    var1, nngp, var2, ntk, is_gaussian, marginal, cross = (
+        kernels.var1, kernels.nngp, kernels.var2, kernels.ntk,
+        kernels.is_gaussian, kernels.marginal, kernels.cross)
 
     if nngp.ndim == 2:
       return kernels
@@ -1403,8 +1421,9 @@ def Flatten():
           "Only implemented for , `OVER_ALL`, `OVER_PIXELS`, `OVER_POINTS` and "
           "`NO`; supplied {}".format(cross))
 
-    return Kernel(var1, nngp, var2, ntk, is_gaussian, True,
-                  M.OVER_ALL, M.OVER_ALL)
+    return kernels._replace(
+        var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=is_gaussian,
+        is_height_width=True, marginal=M.OVER_ALL, cross=M.OVER_ALL)
 
   return init_fn, apply_fn, kernel_fn
 
@@ -1539,7 +1558,9 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
     return np.reshape(ret, (-1, height, width, n_chan_out)) + b_std * b
 
   def kernel_fn(kernels):
-    var1, nngp, var2, ntk, _, is_height_width, marginal, cross = kernels
+    var1, nngp, var2, ntk, is_height_width, marginal, cross = (
+        kernels.var1, kernels.nngp, kernels.var2, kernels.ntk,
+        kernels.is_height_width, kernels.marginal, kernels.cross)
 
     if not fixed:
       # TODO(jirihron): implement the approximation and raise a warning
@@ -1571,8 +1592,9 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
     ntk = (_transform_kernel(ntk, G1, G2) + 2 * (nngp - b_std**2)
            if ntk is not None else ntk)
 
-    return Kernel(var1, nngp, var2, ntk, True, is_height_width, marginal, cross)
-
+    return kernels._replace(
+        var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=True,
+        is_height_width=is_height_width, marginal=marginal, cross=cross)
   setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_POINTS,
                                         'cross': M.NO})
 
@@ -1605,7 +1627,9 @@ def LayerNorm(axis=-1, eps=1e-12):
     return (inputs - mean) / np.sqrt(eps + var)
 
   def kernel_fn(kernels):
-    var1, nngp, var2, ntk, _, is_height_width, marginal, cross = kernels
+    var1, nngp, var2, ntk, is_height_width, marginal, cross = (
+        kernels.var1, kernels.nngp, kernels.var2, kernels.ntk,
+        kernels.is_height_width, kernels.marginal, kernels.cross)
     _axis = axis
 
     if marginal != M.OVER_ALL or cross != M.OVER_ALL:
@@ -1639,11 +1663,11 @@ def LayerNorm(axis=-1, eps=1e-12):
     if var2 is not None:
       var2 /= np.sqrt(prod22)
 
-    return Kernel(var1, nngp, var2, ntk, kernels.is_gaussian, is_height_width,
-                  marginal, cross)
+    return kernels._replace(
+        var1=var1, nngp=nngp, var2=var2, ntk=ntk,
+        is_height_width=is_height_width, marginal=marginal, cross=cross)
 
   if len(axis) > 1:
     setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_PIXELS,
                                           'cross': M.OVER_PIXELS})
-
   return init_fn, apply_fn, kernel_fn
