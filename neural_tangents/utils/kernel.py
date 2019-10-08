@@ -140,3 +140,10 @@ class Kernel(
     """
     return super(Kernel, cls).__new__(cls, var1, nngp, var2, ntk, is_gaussian,
         is_height_width, int(marginal), int(cross))
+
+  def _replace(self, **kwargs):
+    """`namedtuple._replace` with casting `Marginalisation` to `int`s."""
+    for k in kwargs:
+      if isinstance(kwargs[k], Marginalisation):
+        kwargs[k] = int(kwargs[k])
+    return super(Kernel, self)._replace(**kwargs)
