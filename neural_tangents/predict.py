@@ -25,6 +25,8 @@ from jax.api import jit
 from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.scipy as sp
+import scipy as osp
+
 from jax.tree_util import tree_all
 from jax.tree_util import tree_map
 from neural_tangents.utils import empirical
@@ -681,7 +683,7 @@ def _eigh(mat):
     eigh = np.onp.linalg.eigh
   else:
     eigh = np.linalg.eigh
-
+    eigh = jit(eigh, backend='cpu') if _is_on_cpu(mat) else jit(eigh)
   return eigh(mat)
 
 
@@ -844,3 +846,43 @@ def _jit_cpu(x):
       return jit(f, backend='cpu')
     return jit(f)
   return jit_cpu
+
+
+def max_learning_rate(kdd, num_outputs=-1, eps=1e-12):
+  """Computing the maximal feasible learning rate for infinite width NNs.
+  The network is assumed to be trained using SGD or full-batch GD with mean
+  squared loss. The loss is assumed to have the form
+  `1/(2 * batch_size * num_outputs) \|f(train_x) - train_y\|^2`. The maximal
+  feasible learning rate is the largest `\eta` such that the operator
+  `(I - \eta / (batch_size * num_outputs) * NTK)` is a contraction, which is
+  '2 * batch_size * num_outputs * lambda_max(NTK)'.
+
+  Args:
+    kdd: The analytic or empirical NTK of (train_x, train_x).
+    num_outputs: The number of outputs of the neural network. If `kdd` is the
+      analytic ntk, `num_outputs` must be provided. Otherwise `num_outputs=-1`
+      and `num_outputs` is computed via the size of `kdd`.
+    eps: A float to avoid zero divisor.
+  Returns:
+    The maximal feasible learning rate for infinite width NNs.
+  """
+
+  if kdd.ndim not in [2, 4]:
+    raise ValueError('`kdd` must be a 2d or 4d tensor.')
+  if kdd.ndim == 2 and num_outputs == -1:
+    raise ValueError('`num_outputs` must be provided for theoretical kernel.')
+  if kdd.ndim == 2:
+    factor = kdd.shape[0] * num_outputs
+  else:
+    kdd = empirical.flatten_features(kdd)
+    factor = kdd.shape[0]
+  if kdd.shape[0] != kdd.shape[1]:
+    raise ValueError('`kdd` must be a square matrix.')
+  if _is_on_cpu(kdd):
+    max_eva = osp.linalg.eigh(kdd, eigvals_only=True,
+                              eigvals=(kdd.shape[0] - 1, kdd.shape[0] - 1))[-1]
+  else:
+    max_eva = _eigh(kdd)[0][-1]
+  lr = 2 * factor / (max_eva + eps)
+  return lr
+

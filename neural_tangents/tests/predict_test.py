@@ -24,6 +24,7 @@ from jax.api import jit
 from jax.config import config
 from jax.experimental import optimizers
 from jax.lib import xla_bridge
+import math
 import jax.numpy as np
 import jax.random as random
 from neural_tangents import predict
@@ -125,6 +126,75 @@ def momentum(learning_rate, momentum=0.9):
 
 
 class PredictTest(jtu.JaxTestCase):
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              '_train={}_network={}_logits={}_{}'.format(
+                  train, network, out_logits, name),
+          'train_shape':
+              train,
+          'network':
+              network,
+          'out_logits':
+              out_logits,
+          'fn_and_kernel':
+              fn,
+          'name': name,
+      } for train, network in zip(TRAIN_SHAPES, NETWORK)
+                          for out_logits in OUTPUT_LOGITS
+                          for name, fn in KERNELS.items()))
+  def testMaxLearningRate(self, train_shape, network, out_logits,
+                           fn_and_kernel, name):
+
+    key = random.PRNGKey(0)
+
+    key, split = random.split(key)
+    if len(train_shape) == 2:
+      train_shape = (train_shape[0] * 5, train_shape[1] * 10)
+    else:
+      train_shape = (16, 8, 8, 3)
+    x_train = random.normal(split, train_shape)
+
+    key, split = random.split(key)
+    y_train = np.array(
+        random.bernoulli(split, shape=(train_shape[0], out_logits)), np.float32)
+
+    for lr_factor in [0.5, 3.]:
+      params, f, ntk = fn_and_kernel(key, train_shape[1:], network, out_logits)
+
+      # Regress to an MSE loss.
+      loss = lambda params, x: \
+          0.5 * np.mean((f(params, x) - y_train) ** 2)
+      grad_loss = jit(grad(loss))
+
+      g_dd = ntk(x_train, None, 'ntk')
+
+      steps = 20
+      if name == 'theoretical':
+        step_size = predict.max_learning_rate(
+            g_dd, num_outputs= out_logits) * lr_factor
+      else:
+        step_size = predict.max_learning_rate(g_dd, num_outputs=-1) * lr_factor
+      opt_init, opt_update, get_params = optimizers.sgd(step_size)
+      opt_state = opt_init(params)
+
+      def get_loss(opt_state):
+        return loss(get_params(opt_state), x_train)
+
+      init_loss = get_loss(opt_state)
+
+      for i in range(steps):
+        params = get_params(opt_state)
+        opt_state = opt_update(i, grad_loss(params, x_train), opt_state)
+
+      trained_loss = get_loss(opt_state)
+      loss_ratio = trained_loss / (init_loss + 1e-12)
+      if lr_factor == 3.:
+        if not math.isnan(loss_ratio):
+          self.assertGreater(loss_ratio, 10.)
+      else:
+        self.assertLess(loss_ratio, 0.1)
+
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
