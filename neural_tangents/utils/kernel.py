@@ -61,7 +61,7 @@ class Marginalisation(enum.IntEnum):
 class Kernel(
     collections.namedtuple('Kernel', [
         'var1', 'nngp', 'var2', 'ntk', 'is_gaussian', 'is_height_width',
-        'marginal', 'cross'
+        'marginal', 'cross', 'shape1', 'shape2',
     ])):
   """A tuple containing information about the analytic NTK and NNGP of a model.
 
@@ -95,10 +95,16 @@ class Kernel(
       of covariances between spatial dimensions tracked in `var1`/`var2`.
     cross: an instance of `Marginalisation` enum or its ID, specifying types of
       covariances between spatial dimensions tracked in `nngp`/`ntk`.
+    shape1: a tuple specifying the shape of the random variable in the first
+      batch of inputs. These have variance `var1` and covariance with the second
+      batch of inputs given by `nngp`.
+    shape2: a tuple specifying the shape of the random variable in the second
+      batch of inputs. These have variance `var2` and covariance with the first
+      batch of inputs given by `nngp`.
   """
 
   def __new__(cls, var1, nngp, var2, ntk, is_gaussian, is_height_width,
-              marginal, cross):
+              marginal, cross, shape1, shape2):
     """Returns a `Kernel`.
 
     Args:
@@ -134,12 +140,18 @@ class Kernel(
         `var1`/`var2`.
       cross: an instance of `Marginalisation` enum or its ID, specifying types
         of covariances between spatial dimensions tracked in `nngp`/`ntk`.
-
+      shape1: a tuple specifying the shape of the random variable in the first
+        batch of inputs. These have variance `var1` and covariance with the second
+        batch of inputs given by `nngp`.
+      shape2: a tuple specifying the shape of the random variable in the second
+        batch of inputs. These have variance `var2` and covariance with the first
+        batch of inputs given by `nngp`.
     Returns:
       A `Kernel`.
     """
-    return super(Kernel, cls).__new__(cls, var1, nngp, var2, ntk, is_gaussian,
-        is_height_width, int(marginal), int(cross))
+    return super(Kernel, cls).__new__(
+        cls, var1, nngp, var2, ntk, is_gaussian,
+        is_height_width, int(marginal), int(cross), shape1, shape2)
 
   def _replace(self, **kwargs):
     """`namedtuple._replace` with casting `Marginalisation` to `int`s."""

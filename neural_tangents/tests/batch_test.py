@@ -79,7 +79,7 @@ def _theoretical_kernel(unused_key, input_shape, network, just_theta):
   @jit
   def kernel_fn(x1, x2=None):
     get_all = ('ntk', 'nngp', 'var1', 'var2', 'is_gaussian', 'is_height_width',
-               'marginal', 'cross')
+               'marginal', 'cross', 'shape1', 'shape2')
     k = _kernel_fn(x1, x2, 'ntk') if just_theta else _kernel_fn(x1, x2, get_all)
     return k
 
@@ -104,7 +104,7 @@ def _test_kernel_against_batched(cls, kernel_fn, batched_kernel_fn, train, test)
     g_b_dict = g_b._asdict()
     assert set(g_dict.keys()) == set(g_b_dict.keys())
     for k in g_dict:
-      if k != 'var2':
+      if k != 'var2' and k != 'shape2':
         cls.assertAllClose(g_dict[k], g_b_dict[k], check_dtypes=True)
   else:
     cls.assertAllClose(g, g_b, check_dtypes=True)

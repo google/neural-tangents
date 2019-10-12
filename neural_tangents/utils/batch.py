@@ -84,6 +84,22 @@ def _flatten_kernel(k):
         k_dict[key] = _flatten_batch_dimensions(value, discard_axis=0)
       elif key in ('marginal', 'is_height_width', 'is_gaussian', 'cross'):
         k_dict[key] = value[(0,) * value.ndim]
+      elif key == 'shape1':
+        if any([x.ndim > 2 for x in value]):
+          raise ValueError((
+              'After batching, shape arrays expected to be either'
+              ' one- or two-dimensional.'))
+        k_dict[key] = tuple(x[(0,) * x.ndim] if i > 0 else
+                            np.sum(x[:, 0]) if x.ndim == 2 else
+                            np.sum(x) for i, x in enumerate(value))
+      elif key == 'shape2':
+        if any([x.ndim > 2 for x in value]):
+          raise ValueError((
+              'After batching, shape arrays expected to be either'
+              ' one- or two-dimensional.'))
+        k_dict[key] = tuple(x[(0,) * x.ndim] if i > 0 else
+                            np.sum(x[0]) if x.ndim == 2 else
+                            x[0] for i, x in enumerate(value))
       else:
         k_dict[key] = _flatten_batch_dimensions(value)
     return k._replace(**k_dict)
@@ -100,7 +116,8 @@ def _move_kernel_to_cpu(k):
   """Moves data in a kernel from an accelerator to the CPU."""
   if hasattr(k, '_asdict'):
     return k._replace(
-        **dict([(k, device_get(v)) for k, v in k._asdict().items()]))
+        **dict([(k, v) if isinstance(v, tuple) else
+                (k, device_get(v)) for k, v in k._asdict().items()]))
   elif isinstance(k, np.ndarray):
     return device_get(k)
   else:

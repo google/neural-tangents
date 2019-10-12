@@ -277,6 +277,13 @@ class StaxTest(jtu.JaxTestCase):
                                             padding, phi, strides, width,
                                             is_ntk, proj_into_2d, layer_norm)
 
+    x1_out_shape, params = init_fn(key, x1.shape)
+    if x2 is None:
+      x2_out_shape = x1_out_shape
+    else:
+      x2_out_shape, params = init_fn(key, x2.shape)
+    del(params)
+
     def _get_empirical(n_samples, get):
       kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
           init_fn, apply_fn, key, n_samples)
@@ -287,13 +294,14 @@ class StaxTest(jtu.JaxTestCase):
       _get_empirical(1, 'ntk' if is_ntk else 'nngp')
     else:
       if is_ntk:
-        exact = kernel_fn(x1, x2, 'ntk')
+        exact, shape1, shape2 = kernel_fn(x1, x2, ('ntk', 'shape1', 'shape2'))
         empirical = np.reshape(_get_empirical(N_SAMPLES, 'ntk'), exact.shape)
       else:
-        exact = kernel_fn(x1, x2, 'nngp')
+        exact, shape1, shape2 = kernel_fn(x1, x2, ('nngp', 'shape1', 'shape2'))
         empirical = _get_empirical(N_SAMPLES, 'nngp')
       utils.assert_close_matrices(self, empirical, exact, RTOL)
-
+      self.assertEqual(shape1, x1_out_shape)
+      self.assertEqual(shape2, x2_out_shape)
 
 @jtu.parameterized.parameters([
     {

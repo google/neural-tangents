@@ -67,8 +67,14 @@ from __future__ import print_function
 from functools import wraps
 import warnings
 import enum
+from functools import partial
 from jax import lax
 from jax import random
+from jax import linear_util as lu
+import jax.interpreters.partial_eval as pe
+from jax.abstract_arrays import ShapedArray
+from jax.api_util import flatten_fun
+from jax.tree_util import tree_map, tree_flatten, tree_unflatten
 from jax.experimental import stax
 from jax.lib import xla_bridge
 import jax.numpy as np
@@ -276,8 +282,8 @@ def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk):
                      'got %s.' % str(x1.shape))
 
   if x1.ndim == 2 and not (marginal == cross == M.OVER_ALL):
-    raise ValueError("`OVER_ALL` marginalisation should be used for 2D inputs; "
-                     "was: `marginal`={}, `cross`={}".format(marginal, cross))
+    raise ValueError('`OVER_ALL` marginalisation should be used for 2D inputs; '
+                     'was: `marginal`={}, `cross`={}'.format(marginal, cross))
 
   if cross == marginal == M.OVER_ALL:
     x1 = np.reshape(x1, (x1.shape[0], -1))
@@ -285,9 +291,9 @@ def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk):
       x2 = np.reshape(x2, (x2.shape[0], -1))
 
   if cross == M.OVER_POINTS:
-    raise ValueError("Required `OVER_POINTS` to be computed for `nngp`/`ntk`. "
-                     "`OVER_POINTS` is only meant for `var1`/`var2`. "
-                     "Use `NO` instead to compute all covariances.")
+    raise ValueError('Required `OVER_POINTS` to be computed for `nngp`/`ntk`. '
+                     '`OVER_POINTS` is only meant for `var1`/`var2`. '
+                     'Use `NO` instead to compute all covariances.')
 
   x1 = x1.astype(xla_bridge.canonicalize_dtype(np.float64))
   var1 = _get_variance(x1, marginal_type=marginal)
@@ -311,10 +317,47 @@ def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk):
   is_height_width = True
 
   return Kernel(var1, nngp, var2, ntk, is_gaussian, is_height_width,
-                marginal, cross)
+                marginal, cross, x1.shape, x2.shape)
 
 
-def _preprocess_kernel_fn(kernel_fn):
+def _propagate_shape(init_fn, shape):
+  """Statically, abstractly, evaluate the init_fn to get shape information."""
+  akey = ShapedArray((2,), np.uint32)
+  closed_init_fn = partial(init_fn, input_shape=shape)
+  args_flat, in_tree = tree_flatten(((akey,), {}))
+  fun, out_tree = flatten_fun(lu.wrap_init(closed_init_fn), in_tree)
+  out = pe.abstract_eval_fun(fun.call_wrapped, akey)
+  out_shape = tree_unflatten(out_tree(), out)[0]
+  out_shape = tree_map(lambda x: int(x.val), out_shape)
+  return out_shape
+
+
+def _apply_kernel(init_fn, kernel_fn, in_kernel):
+  """Apply a kernel_fn to a Kernel propagating side information."""
+  out_kernel = kernel_fn(in_kernel)
+  if isinstance(in_kernel, Kernel):
+    shape1 = _propagate_shape(init_fn, in_kernel.shape1)
+    shape2 = _propagate_shape(init_fn, in_kernel.shape2)
+  elif isinstance(in_kernel, list):
+    shape1 = _propagate_shape(init_fn, [k.shape1 for k in in_kernel])
+    shape2 = _propagate_shape(init_fn, [k.shape2 for k in in_kernel])
+  else:
+    raise TypeError((
+        'Expected input kernel to be a Kernel or a list of kernels.'
+        ' Found {}.'.format(type(out_kernel))))
+
+  if isinstance(out_kernel, Kernel):
+    return out_kernel._replace(shape1=shape1, shape2=shape2)
+  elif isinstance(out_kernel, list):
+    return [k._replace(shape1=s1, shape2=s2) for
+            k, s1, s2 in zip(out_kernel, shape1, shape2)]
+  else:
+    raise TypeError((
+        'Expected output kernel to be a Kernel or a list of kernels.'
+        ' Found {}.'.format(type(out_kernel))))
+
+
+def _preprocess_kernel_fn(init_fn, kernel_fn):
   def new_kernel_fn(x1_or_kernel, x2, get=('nngp', 'ntk')):
     """Returns the `Kernel` resulting from applying `ker_fun` to given inputs.
 
@@ -335,7 +378,7 @@ def _preprocess_kernel_fn(kernel_fn):
     if (isinstance(x1_or_kernel, Kernel) or
         (isinstance(x1_or_kernel, list) and
          all(isinstance(k, Kernel) for k in x1_or_kernel))):
-      return kernel_fn(x1_or_kernel)
+      return _apply_kernel(init_fn, kernel_fn, x1_or_kernel)
     return outer_kernel_fn(x1_or_kernel, x2, get)
 
   @utils.get_namedtuple('AnalyticKernel')
@@ -356,7 +399,7 @@ def _preprocess_kernel_fn(kernel_fn):
                        _COVARIANCES_REQ, {'marginal': M.OVER_ALL,
                                           'cross': M.OVER_ALL})
     kernel = _inputs_to_kernel(x1, x2, compute_ntk=include_ntk, **covs_req)
-    return kernel_fn(kernel)._asdict()
+    return _apply_kernel(init_fn, kernel_fn, kernel)._asdict()
 
   if hasattr(kernel_fn, _COVARIANCES_REQ):
     setattr(new_kernel_fn,
@@ -387,7 +430,7 @@ def _layer(layer):
   @wraps(layer)
   def layer_fn(*args, **kwargs):
     init_fn, apply_fn, kernel_fn = layer(*args, **kwargs)
-    kernel_fn = _preprocess_kernel_fn(kernel_fn)
+    kernel_fn = _preprocess_kernel_fn(init_fn, kernel_fn)
     return init_fn, apply_fn, kernel_fn
   return layer_fn
 
@@ -763,6 +806,7 @@ def FanInSum():
                                 'set to `True`.')
 
     marginal, cross = kernels[0].marginal, kernels[0].cross
+    shape1, shape2 = kernels[0].shape1, kernels[0].shape2
     if not all(k.marginal == marginal and
                k.cross == cross
                for k in kernels):
@@ -790,9 +834,13 @@ def FanInSum():
         if kernels[i].is_height_width:
           kernels[i] = _flip_height_width(kernels[i])
 
+    if not all([k.shape1 == shape1 and k.shape2 == shape2 for k in kernels]):
+      raise ValueError('All shapes should be equal in FanInSum.')
+
     kers = tuple(None if all(ker[i] is None for ker in kernels) else
                  sum(ker[i] for ker in kernels) for i in range(4))
-    return Kernel(*(kers + (is_gaussian, is_height_width, marginal, cross)))
+    return Kernel(*(
+        kers + (is_gaussian, is_height_width, marginal, cross, None, None)))
 
   return init_fn, apply_fn, kernel_fn
 
@@ -810,7 +858,9 @@ def _flip_height_width(kernels):
     `_flip_height_width(kernels).nngp` has shape
     `[batch_size_1, batch_size_2, width, width, height, height]`.
   """
-  var1, nngp, var2, ntk, is_gaussian, is_height_width, marginal, cross = kernels
+  var1, nngp, var2, ntk, is_height_width, marginal, cross = (
+      kernels.var1, kernels.nngp, kernels.var2, kernels.ntk,
+      kernels.is_height_width, kernels.marginal, kernels.cross)
 
   def flip_5or6d(mat):
     return np.moveaxis(mat, (-2, -1), (-4, -3))
@@ -833,8 +883,8 @@ def _flip_height_width(kernels):
     nngp = flip_5or6d(nngp)
     ntk = flip_5or6d(ntk) if _is_array(ntk) else ntk
 
-  return Kernel(var1, nngp, var2, ntk, is_gaussian, not is_height_width,
-                marginal, cross)
+  return kernels._replace(var1=var1, nngp=nngp, var2=var2, ntk=ntk,
+                          is_height_width=not is_height_width)
 
 @_layer
 def serial(*layers):
@@ -883,8 +933,9 @@ def parallel(*layers):
       sequence of outputs with the same length as the argument `layers`.
   """
   init_fns, apply_fns, kernel_fns = zip(*layers)
-  init_fn, apply_fn = stax.parallel(*zip(init_fns, apply_fns))
-
+  init_fn_stax, apply_fn = stax.parallel(*zip(init_fns, apply_fns))
+  def init_fn(rng, input_shape):
+    return list(init_fn_stax(rng, input_shape))
   def kernel_fn(kernels):
     return [f(ker, None, None) for ker, f in zip(kernels, kernel_fns)]
 
