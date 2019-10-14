@@ -50,29 +50,27 @@ def _scan(f, init, xs, store_on_device):
 
 def _flatten_batch_dimensions(k, discard_axis=None):
   """Takes a kernel that has been evaluated in batches and flattens."""
-  if k is None:
-    return None
-
   if discard_axis is not None:
     if k.ndim % 2:
       k = np.take(k, 0, axis=discard_axis)
       return np.reshape(k, (-1,) + k.shape[2:])
-    else:
-      if discard_axis == 1:
-        return np.reshape(k, (k.shape[0] * k.shape[1],) + k.shape[2:])
-      else:
-        return k[0]
+
+    if discard_axis == 1:
+      return np.reshape(k, (k.shape[0] * k.shape[1],) + k.shape[2:])
+
+    return k[0]
+
   else:
     if k.ndim % 2:
       return np.reshape(k, (k.shape[0] * k.shape[1],) + k.shape[2:])
-    else:
-      k = np.transpose(k, (0, 2, 1, 3) + tuple(range(4, k.ndim)))
-      return np.reshape(
-          k, (k.shape[0] * k.shape[1],
-              k.shape[2] * k.shape[3]) + k.shape[4:])
+
+    k = np.transpose(k, (0, 2, 1, 3) + tuple(range(4, k.ndim)))
+    return np.reshape(k,
+                      (k.shape[0] * k.shape[1],
+                       k.shape[2] * k.shape[3]) + k.shape[4:])
 
 
-def _flatten_kernel(k):
+def _flatten_kernel(k, x2_is_none):
   """Flattens a kernel array or a `Kernel` along the batch dimension."""
   if hasattr(k, '_asdict'):
     k_dict = k._asdict()
@@ -81,7 +79,10 @@ def _flatten_kernel(k):
       if key == 'var1':
         k_dict[key] = _flatten_batch_dimensions(value, discard_axis=1)
       elif key == 'var2':
-        k_dict[key] = _flatten_batch_dimensions(value, discard_axis=0)
+        if x2_is_none:
+          k_dict[key] = None
+        else:
+          k_dict[key] = _flatten_batch_dimensions(value, discard_axis=0)
       elif key in ('marginal', 'is_height_width', 'is_gaussian', 'cross'):
         k_dict[key] = value[(0,) * value.ndim]
       elif key == 'shape1':
@@ -103,13 +104,13 @@ def _flatten_kernel(k):
       else:
         k_dict[key] = _flatten_batch_dimensions(value)
     return k._replace(**k_dict)
-  elif isinstance(k, np.ndarray):
+
+  if isinstance(k, np.ndarray):
     return _flatten_batch_dimensions(k)
-  else:
-    raise TypeError(
-        'Expected kernel to be either a namedtuple or a `np.ndarray`, got %s.'
-        % type(k)
-    )
+
+  raise TypeError(
+      'Expected kernel to be either a namedtuple or a `np.ndarray`, got %s.'
+      % type(k))
 
 
 def _move_kernel_to_cpu(k):
@@ -166,10 +167,11 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
       return _move_kernel_to_cpu(_kernel_fn(x1, x2, *args, **kwargs))
 
   flatten = (_flatten_kernel if store_on_device else
-             jit(_flatten_kernel, backend='cpu'))
+             jit(_flatten_kernel, static_argnums=(1,), backend='cpu'))
 
   def serial_fn(x1, x2=None, *args, **kwargs):
-    if x2 is None:
+    x2_is_none = x2 is None
+    if x2_is_none:
       # TODO(schsam): Only compute the upper triangular part of the kernel.
       x2 = x1
 
@@ -184,8 +186,8 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
       msg = ('Number of examples in x1 must divide batch size. Found |x1| = {} '
              'and batch size = {}.').format(n1, n1_batch_size)
       if is_parallel:
-        msg += (' Note that device parallelism was detected and so the batch size'
-                ' was expanded by a factor of {}.'.format(device_count))
+        msg += (' Note that device parallelism was detected and so the batch '
+                'size was expanded by a factor of {}.'.format(device_count))
       raise ValueError(msg)
 
     n2_batches, ragged = divmod(n2, batch_size)
@@ -206,7 +208,7 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
 
     _, kernel = _scan(row_fn, 0, x1s, store_on_device)
 
-    return flatten(kernel)
+    return flatten(kernel, x2_is_none)
   return serial_fn
 
 
@@ -239,7 +241,8 @@ def _parallel(kernel_fn, device_count=-1):
     device_count = xla_bridge.device_count()
 
   def parallel_fn(x1, x2=None, *args, **kwargs):
-    if x2 is None:
+    x2_is_none = x2 is None
+    if x2_is_none:
       # TODO(schsam): Only compute the upper triangular part of the kernel.
       x2 = x1
 
@@ -261,7 +264,7 @@ def _parallel(kernel_fn, device_count=-1):
 
     x1 = np.reshape(x1, (_device_count, n1_per_device,) + input_shape)
     kernel = kernel_fn(x1, x2, *args, **kwargs)
-    return _flatten_kernel(kernel)
+    return _flatten_kernel(kernel, x2_is_none)
 
   # Set function attributes so that `serial` can detect whether or not it is
   # acting on a parallel function.

@@ -94,32 +94,15 @@ KERNELS['theoretical'] = partial(_theoretical_kernel, just_theta=True)
 KERNELS['theoretical_pytree'] = partial(_theoretical_kernel, just_theta=False)
 
 
-def _test_kernel_against_batched(cls, kernel_fn, batched_kernel_fn, train, test):
-
+def _test_kernel_against_batched(cls, kernel_fn, batched_kernel_fn, train,
+                                 test):
   g = kernel_fn(train, None)
   g_b = batched_kernel_fn(train, None)
-
-  if hasattr(g, '_asdict'):
-    g_dict = g._asdict()
-    g_b_dict = g_b._asdict()
-    assert set(g_dict.keys()) == set(g_b_dict.keys())
-    for k in g_dict:
-      if k != 'var2' and k != 'shape2':
-        cls.assertAllClose(g_dict[k], g_b_dict[k], check_dtypes=True)
-  else:
-    cls.assertAllClose(g, g_b, check_dtypes=True)
+  cls.assertAllClose(g, g_b, check_dtypes=True)
 
   g = kernel_fn(train, test)
   g_b = batched_kernel_fn(train, test)
-
-  if hasattr(g, '_asdict'):
-    g_dict = g._asdict()
-    g_b_dict = g_b._asdict()
-    assert set(g_dict.keys()) == set(g_b_dict.keys())
-    for k in g_dict:
-      cls.assertAllClose(g_dict[k], g_b_dict[k], check_dtypes=True)
-  else:
-    cls.assertAllClose(g, g_b, check_dtypes=True)
+  cls.assertAllClose(g, g_b, check_dtypes=True)
 
 
 class BatchTest(jtu.JaxTestCase):
@@ -156,9 +139,6 @@ class BatchTest(jtu.JaxTestCase):
     _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
                                  data_other)
 
-  # NOTE(schsam): Here and below we exclude tests involving convolutions and
-  # empirical kernels since we need to add a batching rule to JAX to proceed.
-  # I'll do that in a followup PR and then enable the tests.
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list(
           {
@@ -178,7 +158,6 @@ class BatchTest(jtu.JaxTestCase):
           }
           for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
           for name, kernel_fn in KERNELS.items()))
-  # if (len(train) == 2 or name[:5] == 'theor')))
   def testParallel(self, train_shape, test_shape, network, name, kernel_fn):
     utils.stub_out_pmap(batch, 2)
 
@@ -211,8 +190,7 @@ class BatchTest(jtu.JaxTestCase):
                 kernel_fn
           }
           for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
-          for name, kernel_fn in KERNELS.items()
-          if len(train) == 2))
+          for name, kernel_fn in KERNELS.items()))
   def testComposition(self, train_shape, test_shape, network, name, kernel_fn):
     utils.stub_out_pmap(batch, 2)
 
