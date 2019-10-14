@@ -1,5 +1,7 @@
 # Neural Tangents
  Fast and Easy Infinite Neural Networks in Python
+ 
+**News:** we'll be at the [NeurIPS 2019](https://nips.cc/) [Bayesian Deep Learning](http://bayesiandeeplearning.org/) and [Science meets Engineering of Deep Learning](https://sites.google.com/corp/view/sedl-neurips-2019/) workshops, come tell us about your experience with the library!
 
 ## Overview
 
@@ -13,6 +15,9 @@ The library is written in python using [JAX](https://github.com/google/jax) and 
 
 Neural Tangents is a work in progress.
 We happily welcome contributions!
+
+
+
 
 ## Contents
 * [Installation](#installation)
@@ -198,7 +203,6 @@ The `neural_tangents` (`nt`) package contains the following modules and methods:
 
 ## Technical gotchas
 
-
 ### 64-bit precision
 To enable 64-bit precision, set the respective JAX flag _before_ importing `neural_tangents` (see the JAX [guide](https://colab.research.google.com/github/google/jax/blob/master/notebooks/Common_Gotchas_in_JAX.ipynb#scrollTo=YTktlwTTMgFl)), for example:
 
@@ -215,6 +219,9 @@ We remark the following differences between our library and the JAX one.
 * All `nt.stax` layers are instantiated with a function call, i.e. `nt.stax.Relu()` vs `jax.experimental.stax.Relu`.
 * All layers with trainable parameters use the _NTK parameterization_ (see [[5]](#5-neural-tangent-kernel-convergence-and-generalization-in-neural-networks-neurips-2018-arthur-jacot-franck-gabriel-clément-hongler), Remark 1).
 * `nt.stax` and `jax.experimental.stax` may have different layers and options available (for example `nt.stax` layers support `CIRCULAR` padding, but only `NHWC` data format).
+
+### Python 2
+We will be dropping python 2 support before 2020.
 
 
 ## Training dynamics of wide but finite networks
