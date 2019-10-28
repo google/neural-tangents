@@ -16,6 +16,7 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+import math
 
 from jax import test_util as jtu
 from jax.api import device_get
@@ -24,7 +25,6 @@ from jax.api import jit
 from jax.config import config
 from jax.experimental import optimizers
 from jax.lib import xla_bridge
-import math
 import jax.numpy as np
 import jax.random as random
 from neural_tangents import predict
@@ -126,6 +126,7 @@ def momentum(learning_rate, momentum=0.9):
 
 
 class PredictTest(jtu.JaxTestCase):
+
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
@@ -139,12 +140,13 @@ class PredictTest(jtu.JaxTestCase):
               out_logits,
           'fn_and_kernel':
               fn,
-          'name': name,
+          'name':
+              name,
       } for train, network in zip(TRAIN_SHAPES, NETWORK)
                           for out_logits in OUTPUT_LOGITS
                           for name, fn in KERNELS.items()))
-  def testMaxLearningRate(self, train_shape, network, out_logits,
-                           fn_and_kernel, name):
+  def testMaxLearningRate(self, train_shape, network, out_logits, fn_and_kernel,
+                          name):
 
     key = random.PRNGKey(0)
 
@@ -172,7 +174,7 @@ class PredictTest(jtu.JaxTestCase):
       steps = 20
       if name == 'theoretical':
         step_size = predict.max_learning_rate(
-            g_dd, num_outputs= out_logits) * lr_factor
+            g_dd, num_outputs=out_logits) * lr_factor
       else:
         step_size = predict.max_learning_rate(g_dd, num_outputs=-1) * lr_factor
       opt_init, opt_update, get_params = optimizers.sgd(step_size)
@@ -194,7 +196,6 @@ class PredictTest(jtu.JaxTestCase):
           self.assertGreater(loss_ratio, 10.)
       else:
         self.assertLess(loss_ratio, 0.1)
-
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -732,6 +733,111 @@ class PredictTest(jtu.JaxTestCase):
         (test_shape[0], out_logits)), ker_fun(x_test, x_test, get='nngp'))
     self.assertAllClose((reference,) * 2, zero_prediction, True)
 
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              '_train={}_test={}_network={}_logits={}'.format(
+                  train, test, network, out_logits),
+          'train_shape':
+              train,
+          'test_shape':
+              test,
+          'network':
+              network,
+          'out_logits':
+              out_logits,
+      }
+                          for train, test, network in zip(
+                              TRAIN_SHAPES[:-1], TEST_SHAPES[:-1], NETWORK[:-1])
+                          for out_logits in OUTPUT_LOGITS))
+  def testNTK_NTKNNGPAgreement(self, train_shape, test_shape, network,
+                               out_logits):
+    key = random.PRNGKey(0)
+
+    key, split = random.split(key)
+    x_train = np.cos(random.normal(split, train_shape))
+
+    key, split = random.split(key)
+    y_train = np.array(
+        random.bernoulli(split, shape=(train_shape[0], out_logits)), np.float32)
+
+    key, split = random.split(key)
+    x_test = np.cos(random.normal(split, test_shape))
+    _, _, ker_fun = _build_network(train_shape[1:], network, out_logits)
+
+    reg = 1e-7
+    prediction = predict.gradient_descent_mse_gp(
+        ker_fun,
+        x_train,
+        y_train,
+        x_test,
+        diag_reg=reg,
+        get='NTK',
+        compute_var=True)
+
+    ts = np.logspace(-2, 8, 10)
+    ntk_predictions = [prediction(t).mean for t in ts]
+
+    # Create a hacked kernel function that always returns the ntk kernel
+    def always_ntk(x1, x2, get=('nngp', 'ntk')):
+      out = ker_fun(x1, x2, get=('nngp', 'ntk'))
+      if get == 'nngp' or get == 'ntk':
+        return out.ntk
+      else:
+        return out._replace(nngp=out.ntk)
+
+    ntk_nngp_prediction = predict.gradient_descent_mse_gp(
+        always_ntk,
+        x_train,
+        y_train,
+        x_test,
+        diag_reg=reg,
+        get='NNGP',
+        compute_var=True)
+
+    ntk_nngp_predictions = [ntk_nngp_prediction(t).mean for t in ts]
+
+    # Test if you use the nngp equations with the ntk, you get the same mean
+    self.assertAllClose(ntk_predictions, ntk_nngp_predictions, True)
+
+    # Next test that if you go through the NTK code path, but with only
+    # the NNGP kernel, we recreate the NNGP dynamics.
+    reg = 1e-7
+    nngp_prediction = predict.gradient_descent_mse_gp(
+        ker_fun,
+        x_train,
+        y_train,
+        x_test,
+        diag_reg=reg,
+        get='NNGP',
+        compute_var=True)
+
+    nngp_predictions = [nngp_prediction(t).mean for t in ts]
+
+    # Create a hacked kernel function that always returns the nngp kernel
+    def always_nngp(x1, x2, get=('nngp', 'ntk')):
+      out = ker_fun(x1, x2, get=('nngp', 'ntk'))
+      if get == 'nngp' or get == 'ntk':
+        return out.nngp
+      else:
+        return out._replace(ntk=out.nngp)
+
+    nngp_ntk_prediction = predict.gradient_descent_mse_gp(
+        always_nngp,
+        x_train,
+        y_train,
+        x_test,
+        diag_reg=reg,
+        get='NTK',
+        compute_var=True)
+
+    nngp_cov_predictions = [nngp_prediction(t).covariance for t in ts]
+    nngp_ntk_cov_predictions = [nngp_ntk_prediction(t).covariance for t in ts]
+
+    # Test if you use the ntk equations with the nngp, you get the same cov
+    # Although, due to accumulation of numerical errors, only roughly.
+    self.assertAllClose(nngp_cov_predictions, nngp_ntk_cov_predictions, True)
+
   def testPredictOnCPU(self):
     x_train = random.normal(random.PRNGKey(1), (10, 4, 5, 3))
     x_test = random.normal(random.PRNGKey(1), (8, 4, 5, 3))
@@ -762,6 +868,7 @@ class PredictTest(jtu.JaxTestCase):
   def testIsOnCPU(self):
     for dtype in [np.float32, np.float64]:
       with self.subTest(dtype=dtype):
+
         def x():
           return random.normal(random.PRNGKey(1), (2, 3), dtype)
 
@@ -782,6 +889,7 @@ class PredictTest(jtu.JaxTestCase):
         else:
           self.assertFalse(predict._is_on_cpu(x()))
           self.assertFalse(predict._is_on_cpu(x_jit()))
+
 
 if __name__ == '__main__':
   jtu.absltest.main()

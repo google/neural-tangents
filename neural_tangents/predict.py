@@ -25,7 +25,6 @@ from jax.api import jit
 from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.scipy as sp
-import scipy as osp
 
 from jax.tree_util import tree_all
 from jax.tree_util import tree_map
@@ -33,6 +32,7 @@ from neural_tangents.utils import empirical
 from neural_tangents.utils.utils import canonicalize_get
 from neural_tangents.utils.utils import get_namedtuple
 from neural_tangents.utils.utils import named_tuple_factory
+import scipy as osp
 from scipy.integrate._ode import ode
 
 
@@ -562,7 +562,7 @@ def _get_matrices(kernel_fn, x_train, x_test, get, compute_var):
   return kdd, ktd, ktt
 
 
-#TODO(schsam): Refactor this method to make use of @getter.
+# TODO(schsam): Refactor this method to make use of @getter.
 def gradient_descent_mse_gp(kernel_fn,
                             x_train,
                             y_train,
@@ -625,12 +625,13 @@ def gradient_descent_mse_gp(kernel_fn,
 
     if 'nngp' in get:
       evals, evecs = eigenspace['nngp']
-      op_evals = -op_fn(evals, 2 * t)
+      op_evals = -op_fn(evals, t)
       pred_mean = _mean_prediction_einsum(evecs, op_evals, ktd.nngp, y_train)
       if compute_var:
+        op_evals_x2 = -op_fn(evals, 2 * t)
         pred_var = ktt - np.einsum(
             'mj,ji,i,ki,lk->ml',
-            ktd.nngp, evecs, op_evals, evecs, ktd.nngp, optimize=True)
+            ktd.nngp, evecs, op_evals_x2, evecs, ktd.nngp, optimize=True)
 
       out['nngp'] = Gaussian(pred_mean, pred_var) if compute_var else pred_mean
 
