@@ -78,8 +78,7 @@ def _theoretical_kernel(unused_key, input_shape, network, just_theta):
 
   @jit
   def kernel_fn(x1, x2=None):
-    get_all = ('ntk', 'nngp', 'var1', 'var2', 'is_gaussian', 'is_height_width',
-               'marginal', 'cross', 'shape1', 'shape2')
+    get_all = None
     k = _kernel_fn(x1, x2, 'ntk') if just_theta else _kernel_fn(x1, x2, get_all)
     return k
 
@@ -245,6 +244,57 @@ class BatchTest(jtu.JaxTestCase):
     kernel_batched = batch.batch(kernel_fn, batch_size=2, store_on_device=False)
     _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
                                  data_other)
+
+  def _test_analytic_kernel_composition(self, batching_fn):
+    rng = random.PRNGKey(0)
+    rng_self, rng_other = random.split(rng)
+    x_self = random.normal(rng_self, (8, 10))
+    x_other = random.normal(rng_other, (20, 10))
+    Block = stax.serial(stax.Dense(256), stax.Relu())
+
+    _, _, ker_fn = Block
+    ker_fn = batching_fn(ker_fn)
+
+    _, _, composed_ker_fn = stax.serial(Block, Block)
+
+    ker_out = ker_fn(ker_fn(x_self))
+    composed_ker_out = composed_ker_fn(x_self)
+    self.assertAllClose(ker_out, composed_ker_out, True)
+
+    ker_out = ker_fn(ker_fn(x_self, x_other))
+    composed_ker_out = composed_ker_fn(x_self, x_other)
+    self.assertAllClose(ker_out, composed_ker_out, True)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list(
+          {
+              'testcase_name':
+                '_on_device={}'.format(store_on_device),
+              'store_on_device':
+                store_on_device,
+          }
+          for store_on_device in [True, False]))
+  def testAnalyticKernelComposeSerial(self, store_on_device):
+    self._test_analytic_kernel_composition(
+        partial(batch._serial, batch_size=2, store_on_device=store_on_device))
+
+  def testAnalyticKernelComposeParallel(self):
+    utils.stub_out_pmap(batch, 2)
+    self._test_analytic_kernel_composition(batch._parallel)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list(
+          {
+              'testcase_name':
+                '_on_device={}'.format(store_on_device),
+              'store_on_device':
+                store_on_device,
+          }
+          for store_on_device in [True, False]))
+  def testAnalyticKernelComposeAutomatic(self, store_on_device):
+    utils.stub_out_pmap(batch, 2)
+    self._test_analytic_kernel_composition(
+        partial(batch.batch, batch_size=2, store_on_device=store_on_device))
 
   def test_jit_or_pmap_broadcast(self):
     def kernel_fn(x1, x2, do_flip, keys, do_square, params, _unused=None,

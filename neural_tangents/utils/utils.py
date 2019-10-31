@@ -55,6 +55,9 @@ def assert_close_matrices(self, expected, actual, rtol):
 
 
 def canonicalize_get(get):
+  if get is None:
+    return True, get
+
   if not get:
     # NOTE(schsam): It seems slightly nicer to not support the empty-tuple
     # case. Happy to add support later, if there's a use-case.
@@ -82,8 +85,20 @@ def named_tuple_factory(name, get):
     return named_tuple_factory(name, get)
 
 
-def get_namedtuple(name):
+def _output_to_dict(output):
+  if isinstance(output, dict):
+    return output
 
+  if hasattr(output, '_asdict'):
+    return output._asdict()
+
+  if isinstance(output, types.GeneratorType):
+    return (_output_to_dict(out) for out in output)
+
+  raise ValueError(type(output))
+
+
+def get_namedtuple(name):
   def getter_decorator(fn):
     try:
       argspec = _argspec(fn)
@@ -111,6 +126,14 @@ def get_namedtuple(name):
                                                           len(args)])
 
       fn_out = fn(*canonicalized_args, **kwargs)
+
+      if get is None:
+        if isinstance(fn_out, dict):
+          ReturnType = named_tuple_factory(name, tuple(fn_out.keys()))
+          fn_out = ReturnType(*fn_out.values())
+        return fn_out
+
+      fn_out = _output_to_dict(fn_out)
 
       if get_is_not_tuple:
         if isinstance(fn_out, types.GeneratorType):

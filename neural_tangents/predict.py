@@ -487,7 +487,8 @@ def gp_inference(kernel_fn,
     y_train: A `np.ndarray`, representing the labels of the training data.
     x_test: A `np.ndarray`, representing the test data.
     get: string, the mode of the Gaussian process, either "nngp" or "ntk", or a
-      tuple.
+      tuple, or None. If `None` then both `nngp` and `ntk` predictions are
+      returned.
     diag_reg: A float, representing the strength of the regularization.
     compute_var: A boolean. If `True` computing both `mean` and `variance` and
       only `mean` otherwise.
@@ -496,6 +497,8 @@ def gp_inference(kernel_fn,
     Either a Gaussian(`mean`, `variance`) namedtuple or `mean` of the GP
     posterior.
   """
+  if get is None:
+    get = ('nngp', 'ntk')
   kdd, ktd, ktt = _get_matrices(kernel_fn, x_train, x_test, get, compute_var)
   gp_inference_mat = (_gp_inference_mat_jit_cpu if _is_on_cpu(kdd) else
                       _gp_inference_mat_jit)
@@ -517,7 +520,8 @@ def _gp_inference_mat(kdd,
     ktt: A test-test `Kernel` namedtuple.
     y_train: A `np.ndarray`, representing the train targets.
     get: string, the mode of the Gaussian process, either "nngp" or "ntk", or a
-      tuple.
+      tuple, or `None`. If `None` then both `nngp` and `ntk` predictions are
+      returned.
     diag_reg: A float, representing the strength of the regularization.
 
   Returns:
@@ -525,7 +529,8 @@ def _gp_inference_mat(kdd,
     posterior.
   """
   out = {}
-
+  if get is None:
+    get = ('nngp', 'ntk')
   if 'nngp' in get:
     op = _inv_operator(kdd.nngp, diag_reg)
     pred_mean = _mean_prediction(op, ktd.nngp, y_train)
@@ -567,7 +572,7 @@ def gradient_descent_mse_gp(kernel_fn,
                             x_train,
                             y_train,
                             x_test,
-                            get=('nngp', 'ntk'),
+                            get,
                             diag_reg=0.0,
                             compute_var=False):
   """Predicts the gaussian embedding induced by gradient descent with mse loss.
@@ -591,6 +596,8 @@ def gradient_descent_mse_gp(kernel_fn,
       predict(t) -> Gaussian(mean, variance).
       If compute_var is False, only returns the mean.
   """
+  if get is None:
+    get = ('nngp', 'ntk')
   if isinstance(get, str):
     # NOTE(schsam): This seems like an ugly solution that involves an extra
     # indirection. It might be nice to clean it up.

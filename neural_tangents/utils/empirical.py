@@ -302,21 +302,24 @@ def empirical_kernel_fn(f):
   }
 
   @get_namedtuple('EmpiricalKernel')
-  def kernel_fn(x1, x2, params, get=('nngp', 'ntk')):
+  def kernel_fn(x1, x2, params, get=None):
     """Returns a draw from the requested empirical kernels.
 
     Args:
       x1: An ndarray of shape [n1,] + input_shape.
       x2: An ndarray of shape [n2,] + input_shape.
       params: A PyTree of parameters for the function `f`.
-      get: either a string or a tuple of strings specifying which data should
-        be returned by the kernel function. Can be "nngp" or "ntk".
+      get: either None, a string, a tuple of strings specifying which data
+        should be returned by the kernel function. Can be "nngp" or "ntk". If
+        `None` then both "nngp" and "ntk" are returned.
 
     Returns:
       If `get` is a string, returns the requested `np.ndarray`. If `get` is a
       tuple, returns an `EmpiricalKernel` namedtuple containing only the
       requested information.
     """
+    if get is None:
+      get = ('nngp', 'ntk')
     return {g: kernel_fns[g](x1, x2, params) for g in get}
 
   return kernel_fn

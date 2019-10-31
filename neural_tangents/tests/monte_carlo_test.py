@@ -91,14 +91,6 @@ class MonteCarloTest(jtu.JaxTestCase):
     sample_once_batch_fn = monte_carlo._sample_once_kernel_fn(
         kernel_fn, init_fn, batch_size, device_count, store_on_device)
 
-    if get is None:
-      if get is None:
-        raise jtu.SkipTest('No default `get` values for this method.')
-    else:
-      one_sample = sample_once_fn(x1, x2, key, get)
-      one_sample_batch = sample_once_batch_fn(x1, x2, key, get)
-      self.assertAllClose(one_sample, one_sample_batch, True)
-
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '[batch_size={}, '
@@ -124,12 +116,9 @@ class MonteCarloTest(jtu.JaxTestCase):
         kernel_fn, init_fn, device_count=0)
     batch_sample_once_fn = batch.batch(sample_once_fn, batch_size,
                                        device_count, store_on_device)
-    if get is None:
-      raise jtu.SkipTest('No default `get` values for this method.')
-    else:
-      one_sample = sample_once_fn(x1, x2, key, get)
-      one_batch_sample = batch_sample_once_fn(x1, x2, key, get)
-      self.assertAllClose(one_sample, one_batch_sample, True)
+    one_sample = sample_once_fn(x1, x2, key, get)
+    one_batch_sample = batch_sample_once_fn(x1, x2, key, get)
+    self.assertAllClose(one_sample, one_batch_sample, True)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -237,8 +226,8 @@ class MonteCarloTest(jtu.JaxTestCase):
 
       self.assertEqual(log_n_max, count)
 
-      ker_analytic_12 = stax_kernel_fn(x1, x2)
-      ker_analytic_34 = stax_kernel_fn(x3, x4)
+      ker_analytic_12 = stax_kernel_fn(x1, x2, ('nngp', 'ntk'))
+      ker_analytic_34 = stax_kernel_fn(x3, x4, ('nngp', 'ntk'))
 
     else:
       samples_12 = sample_generator(x1, x2, get)
@@ -246,10 +235,9 @@ class MonteCarloTest(jtu.JaxTestCase):
 
       count = 0
       for n, s_12, s_34 in zip(n_samples, samples_12, samples_34):
-        sample_fn = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn, key,
-                                                     n, batch_size,
-                                                     device_count,
-                                                     store_on_device)
+        sample_fn = monte_carlo.monte_carlo_kernel_fn(
+            init_fn, apply_fn, key, n, batch_size,
+            device_count, store_on_device)
         sample_12 = sample_fn(x1, x2, get)
         sample_34 = sample_fn(x3, x4, get)
         self.assertAllClose(s_12, sample_12, True)

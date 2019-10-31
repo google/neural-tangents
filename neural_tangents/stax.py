@@ -358,7 +358,7 @@ def _apply_kernel(init_fn, kernel_fn, in_kernel):
 
 
 def _preprocess_kernel_fn(init_fn, kernel_fn):
-  def new_kernel_fn(x1_or_kernel, x2, get=('nngp', 'ntk')):
+  def new_kernel_fn(x1_or_kernel, x2=None, get=None):
     """Returns the `Kernel` resulting from applying `ker_fun` to given inputs.
 
     Args:
@@ -366,13 +366,14 @@ def _preprocess_kernel_fn(init_fn, kernel_fn):
         `[batch_size_1] + input_shape`, or a `Kernel`.
       x2: an optional `np.ndarray` with shape `[batch_size_2] + input_shape`.
         `None` means `x2 == x1` or `x1_or_kernel is Kernel`.
-      get: either a string or a tuple of strings specifying which data should
-        be returned by the kernel function. Can be "nngp", "ntk", "var1",
+      get: either `None`, a string, or a tuple of strings specifying which data
+        should be returned by the kernel function. Can be "nngp", "ntk", "var1",
         "var2", "is_gaussian", "is_height_width", "marginal", "cross".
     Returns:
       If `get` is a string, returns the requested `np.ndarray`. If `get` is a
       tuple, returns an `AnalyticKernel` namedtuple containing only the
-      requested information.
+      requested information.  If `get` is None then a Kernel object is returned
+      containing all the data.
     """
 
     if (isinstance(x1_or_kernel, Kernel) or
@@ -394,12 +395,12 @@ def _preprocess_kernel_fn(init_fn, kernel_fn):
                       'should be `None` or a `np.ndarray`, got %s.'
                       % type(x2))
 
-    include_ntk = 'ntk' in get
+    include_ntk = (get is None) or ('ntk' in get)
     covs_req = getattr(kernel_fn,
                        _COVARIANCES_REQ, {'marginal': M.OVER_ALL,
                                           'cross': M.OVER_ALL})
     kernel = _inputs_to_kernel(x1, x2, compute_ntk=include_ntk, **covs_req)
-    return _apply_kernel(init_fn, kernel_fn, kernel)._asdict()
+    return _apply_kernel(init_fn, kernel_fn, kernel)
 
   if hasattr(kernel_fn, _COVARIANCES_REQ):
     setattr(new_kernel_fn,
@@ -904,11 +905,7 @@ def serial(*layers):
 
   def kernel_fn(kernels):
     for f in kernel_fns:
-      # NOTE(schsam): Note that in combinators, the kernel functions have
-      # already been wrapped in a @_layer decorator. Since we don't want the
-      # @_layer decorated kernel functions to have default arguments we have to
-      # pass arguments here even though we know they are a no-op.
-      kernels = f(kernels, None, None)
+      kernels = f(kernels)
     return kernels
 
   _set_covariances_req_attr(kernel_fn, kernel_fns)
@@ -937,7 +934,7 @@ def parallel(*layers):
   def init_fn(rng, input_shape):
     return list(init_fn_stax(rng, input_shape))
   def kernel_fn(kernels):
-    return [f(ker, None, None) for ker, f in zip(kernels, kernel_fns)]
+    return [f(ker) for ker, f in zip(kernels, kernel_fns)]
 
   _set_covariances_req_attr(kernel_fn, kernel_fns)
   return init_fn, apply_fn, kernel_fn

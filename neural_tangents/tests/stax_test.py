@@ -303,6 +303,20 @@ class StaxTest(jtu.JaxTestCase):
       self.assertEqual(shape1, x1_out_shape)
       self.assertEqual(shape2, x2_out_shape)
 
+  def test_composition(self):
+    rng = random.PRNGKey(0)
+    xs = random.normal(rng, (10, 10))
+    Block = stax.serial(stax.Dense(256), stax.Relu())
+
+    _, _, ker_fn = Block
+    _, _, composed_ker_fn = stax.serial(Block, Block)
+
+    ker_out = ker_fn(ker_fn(xs))
+    composed_ker_out = composed_ker_fn(xs)
+
+    self.assertAllClose(ker_out, composed_ker_out, True)
+
+
 @jtu.parameterized.parameters([
     {
         'same_inputs': True
@@ -332,7 +346,7 @@ class ABReluTest(jtu.JaxTestCase):
         X1_1_ab_relu = apply_ab_relu(params, X0_1)
         self.assertAllClose(X1_1_relu, X1_1_ab_relu, True)
 
-        kernels_relu = kernel_fn_relu(X0_1, X0_2, ('nngp', 'ntk'))
+        kernels_relu = kernel_fn_relu(X0_1, X0_2)
         kernels_ab_relu = kernel_fn_ab_relu(X0_1, X0_2)
         self.assertAllClose(kernels_relu, kernels_ab_relu, True)
 
@@ -357,7 +371,7 @@ class ABReluTest(jtu.JaxTestCase):
 
         kernels_id = kernel_fn_id(
             X0_1 * a, None if X0_2 is None else a * X0_2)
-        kernels_ab_relu = kernel_fn_ab_relu(X0_1, X0_2, ('nngp', 'ntk'))
+        kernels_ab_relu = kernel_fn_ab_relu(X0_1, X0_2)
         self.assertAllClose(kernels_id, kernels_ab_relu, True)
 
   def test_leaky_relu(self, same_inputs):

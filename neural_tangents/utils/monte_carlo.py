@@ -48,7 +48,7 @@ def _sample_once_kernel_fn(kernel_fn,
 def _sample_many_kernel_fn(kernel_fn_sample_once, key, n_samples,
                            get_generator):
   def normalize(sample, n):
-    return tree_map(lambda sample: sample / n, sample)._asdict()
+    return tree_map(lambda sample: sample / n, sample)
 
   def get_samples(x1, x2, get):
     if x2 is not None:
@@ -66,13 +66,13 @@ def _sample_many_kernel_fn(kernel_fn_sample_once, key, n_samples,
 
   if get_generator:
     @get_namedtuple('MonteCarloKernel')
-    def get_sampled_kernel(x1, x2, get=('nngp', 'ntk')):
+    def get_sampled_kernel(x1, x2, get=None):
       for n, sample in get_samples(x1, x2, get):
         if n in n_samples:
           yield normalize(sample, n)
   else:
     @get_namedtuple('MonteCarloKernel')
-    def get_sampled_kernel(x1, x2, get=('nngp', 'ntk')):
+    def get_sampled_kernel(x1, x2, get=None):
       for n, sample in get_samples(x1, x2, get):
         pass
       return normalize(sample, n)

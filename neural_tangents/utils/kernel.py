@@ -16,7 +16,6 @@
 import collections
 import enum
 
-
 class Marginalisation(enum.IntEnum):
   """Types of marginal distributions for which covariances can be computed.
 
@@ -149,9 +148,13 @@ class Kernel(
     Returns:
       A `Kernel`.
     """
+    if isinstance(marginal, Marginalisation):
+      marginal = int(marginal)
+    if isinstance(cross, Marginalisation):
+      cross = int(cross)
     return super(Kernel, cls).__new__(
         cls, var1, nngp, var2, ntk, is_gaussian,
-        is_height_width, int(marginal), int(cross), shape1, shape2)
+        is_height_width, marginal, cross, shape1, shape2)
 
   def _replace(self, **kwargs):
     """`namedtuple._replace` with casting `Marginalisation` to `int`s."""
