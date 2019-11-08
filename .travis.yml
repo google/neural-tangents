@@ -1,0 +1,10 @@
+language: python
+python:
+  - "2.7"
+  - "3.6"
+install:
+  - pip install tensorflow tensorflow-datasets
+  - git clone https://github.com/google/neural-tangents
+  - pip install -e neural-tangents
+script:
+  - for f in neural-tangents/neural_tangents/tests/*.py; do python $f; done

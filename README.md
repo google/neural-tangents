@@ -1,6 +1,8 @@
 # Neural Tangents
  Fast and Easy Infinite Neural Networks in Python
  
+[![Build Status](https://travis-ci.org/google/neural-tangents.svg?branch=master)](https://travis-ci.org/google/neural-tangents)
+ 
 **News:** we'll be at the [NeurIPS 2019](https://nips.cc/) [Bayesian Deep Learning](http://bayesiandeeplearning.org/) and [Science meets Engineering of Deep Learning](https://sites.google.com/corp/view/sedl-neurips-2019/) workshops, come tell us about your experience with the library!
 
 ## Overview
