@@ -75,7 +75,7 @@ import jax.interpreters.partial_eval as pe
 from jax.abstract_arrays import ShapedArray
 from jax.api_util import flatten_fun
 from jax.tree_util import tree_map, tree_flatten, tree_unflatten
-from jax.experimental import stax
+from jax.experimental import stax as ostax
 from jax.lib import xla_bridge
 import jax.numpy as np
 from jax.scipy.special import erf
@@ -147,7 +147,7 @@ def _set_covariances_req_attr(combinator_kernel_fn, kernel_fns):
 
 
 def _randn(stddev=1e-2):
-  """`stax.randn` for implicitly-typed results."""
+  """`jax.experimental.stax.randn` for implicitly-typed results."""
   def init(rng, shape):
     return stddev * random.normal(rng, shape)
   return init
@@ -437,7 +437,7 @@ def _layer(layer):
 
 
 def _elementwise(fn, **fn_kwargs):
-  init_fn, apply_fn = stax.elementwise(fn, **fn_kwargs)
+  init_fn, apply_fn = ostax.elementwise(fn, **fn_kwargs)
   kernel_fn = lambda kernels: _transform_kernels(kernels, fn, **fn_kwargs)
   return init_fn, apply_fn, kernel_fn
 
@@ -741,7 +741,7 @@ def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0)):
 
   Based on `jax.experimental.stax.Dense`. Has a similar API.
   """
-  init_fn, _ = stax.Dense(out_dim, W_init, b_init)
+  init_fn, _ = ostax.Dense(out_dim, W_init, b_init)
 
   def apply_fn(params, inputs, **kwargs):
     W, b = params
@@ -775,7 +775,7 @@ def Identity():
 
   Based on `jax.experimental.stax.Identity`.
   """
-  init_fn, apply_fn = stax.Identity
+  init_fn, apply_fn = ostax.Identity
   kernel_fn = lambda kernels: kernels
   return init_fn, apply_fn, kernel_fn
 
@@ -786,7 +786,7 @@ def FanOut(num):
 
   Based on `jax.experimental.stax.FanOut`.
   """
-  init_fn, apply_fn = stax.FanOut(num)
+  init_fn, apply_fn = ostax.FanOut(num)
   kernel_fn = lambda kernels: [kernels] * num
   return init_fn, apply_fn, kernel_fn
 
@@ -797,7 +797,7 @@ def FanInSum():
 
   Based on `jax.experimental.stax.FanInSum`.
   """
-  init_fn, apply_fn = stax.FanInSum
+  init_fn, apply_fn = ostax.FanInSum
   def kernel_fn(kernels):
     is_gaussian = all(ker.is_gaussian for ker in kernels)
     if not is_gaussian:
@@ -901,7 +901,7 @@ def serial(*layers):
       the serial composition of the given sequence of layers.
   """
   init_fns, apply_fns, kernel_fns = zip(*layers)
-  init_fn, apply_fn = stax.serial(*zip(init_fns, apply_fns))
+  init_fn, apply_fn = ostax.serial(*zip(init_fns, apply_fns))
 
   def kernel_fn(kernels):
     for f in kernel_fns:
@@ -930,9 +930,11 @@ def parallel(*layers):
       sequence of outputs with the same length as the argument `layers`.
   """
   init_fns, apply_fns, kernel_fns = zip(*layers)
-  init_fn_stax, apply_fn = stax.parallel(*zip(init_fns, apply_fns))
+  init_fn_stax, apply_fn = ostax.parallel(*zip(init_fns, apply_fns))
+
   def init_fn(rng, input_shape):
     return list(init_fn_stax(rng, input_shape))
+
   def kernel_fn(kernels):
     return [f(ker) for ker, f in zip(kernels, kernel_fns)]
 
@@ -1162,7 +1164,7 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape,
   if padding == Padding.CIRCULAR:
     init_padding = Padding.SAME
 
-  init_fn, _ = stax.GeneralConv(dimension_numbers, out_chan, filter_shape,
+  init_fn, _ = ostax.GeneralConv(dimension_numbers, out_chan, filter_shape,
                                  strides, init_padding.name, W_init, b_init)
 
   def apply_fn(params, inputs, **kwargs):
@@ -1322,8 +1324,8 @@ def AvgPool(window_shape, strides=None, padding=Padding.VALID.name):
   padding = Padding(padding)
 
   if padding == Padding.CIRCULAR:
-    init_fn, _ = stax.AvgPool(window_shape, strides, Padding.SAME.name)
-    _, apply_fn_0 = stax.AvgPool(window_shape, strides, Padding.VALID.name)
+    init_fn, _ = ostax.AvgPool(window_shape, strides, Padding.SAME.name)
+    _, apply_fn_0 = ostax.AvgPool(window_shape, strides, Padding.VALID.name)
 
     def apply_fn(params, inputs, **kwargs):
       inputs = _same_pad_for_filter_shape(inputs, window_shape, strides, (1, 2),
@@ -1331,7 +1333,7 @@ def AvgPool(window_shape, strides=None, padding=Padding.VALID.name):
       res = apply_fn_0(params, inputs, **kwargs)
       return res
   else:
-    init_fn, apply_fn = stax.AvgPool(window_shape, strides, padding.name)
+    init_fn, apply_fn = ostax.AvgPool(window_shape, strides, padding.name)
 
   def kernel_fn(kernels):
     """Kernel transformation."""
@@ -1425,7 +1427,7 @@ def Flatten():
                 " (optionally preceded by a nonlinearity),"
                 " otherwise the kernels will not be correct!")
 
-  init_fn, apply_fn = stax.Flatten
+  init_fn, apply_fn = ostax.Flatten
 
   def kernel_fn(kernels):
     """Compute kernels."""
@@ -1596,7 +1598,7 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
 
     G_mat  = np.matmul(queries, np.moveaxis(keys, -1, -2))
     G_mat /= QK_prod_scaling
-    G_mat = stax.softmax(G_mat, axis=-1)
+    G_mat = ostax.softmax(G_mat, axis=-1)
 
     heads = np.matmul(G_mat, values)
     heads = np.moveaxis(heads, 0, -1)
@@ -1618,7 +1620,7 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
       if marginal == M.NO:
         mat = np.moveaxis(np.diagonal(mat, axis1=0, axis2=1), -1, 0)
       axes = range(mat.ndim)
-      return stax.softmax(QK_gain * mat, axis=(axes[-3], axes[-1]))
+      return ostax.softmax(QK_gain * mat, axis=(axes[-3], axes[-1]))
 
     def _transform_kernel(mat, G1, G2=None):
       if not _is_array(mat):
