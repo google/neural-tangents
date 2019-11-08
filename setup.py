@@ -16,14 +16,13 @@ import setuptools
 
 
 INSTALL_REQUIRES = [
-    'absl-py',
-    'numpy',
+    'jaxlib',
     'jax',
 ]
 
 setuptools.setup(
     name='neural-tangents',
-    version='0.0.0',
+    version='1.0.0',
     license='Apache 2.0',
     author='Google',
     author_email='neural-tangents-dev@google.com',

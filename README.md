@@ -31,16 +31,15 @@ We happily welcome contributions!
 
 ## Installation
 
-To install Neural Tangents, first follow [JAX's](https://www.github.com/google/jax/)
-installation instructions. With JAX installed, using Neural Tangents should be
-as easy as:
+To use GPU, first follow [JAX's](https://www.github.com/google/jax/)
+ GPU installation instructions (not necessary for CPU-only usage). Then run
 
 ```
 git clone https://github.com/google/neural-tangents
 pip install -e neural-tangents
 ```
 
-You can then run the examples (using [`tensorflow_datasets`](https://github.com/tensorflow/datasets)) by calling:
+You can now run the examples (using [`tensorflow_datasets`](https://github.com/tensorflow/datasets)) by calling:
 
 ```
 pip install tensorflow tensorflow-datasets
@@ -52,6 +51,9 @@ python neural-tangents/examples/function_space.py
 Finally, you can run tests by calling:
 
 ```
+# NOTE: a few tests will fail without
+# pip install tensorflow tensorflow-datasets
+
 for f in neural-tangents/neural_tangents/tests/*.py; do python $f; done
 ```
 
@@ -210,6 +212,11 @@ The `neural_tangents` (`nt`) package contains the following modules and methods:
 
 
 ## Technical gotchas
+
+### GPU
+
+You must follow [JAX's](https://www.github.com/google/jax/) GPU installation instructions to enable GPU support.
+
 
 ### 64-bit precision
 To enable 64-bit precision, set the respective JAX flag _before_ importing `neural_tangents` (see the JAX [guide](https://colab.research.google.com/github/google/jax/blob/master/notebooks/Common_Gotchas_in_JAX.ipynb#scrollTo=YTktlwTTMgFl)), for example:
