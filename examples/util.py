@@ -30,10 +30,11 @@ def print_summary(name, labels, net_p, lin_p, loss):
   """Print summary information comparing a network with its linearization."""
   print('\nEvaluating Network on {} data.'.format(name))
   print('---------------------------------------')
-  print('RMSE of predictions: {}'.format(
-      np.sqrt(np.mean((net_p - lin_p) ** 2))))
   print('Network Accuracy = {}'.format(_accuracy(net_p, labels)))
-  print('Linearization Accuracy = {}'.format(_accuracy(lin_p, labels)))
   print('Network Loss = {}'.format(loss(net_p, labels)))
-  print('Linearization Loss = {}'.format(loss(lin_p, labels)))
+  if lin_p is not None:
+    print('Linearization Accuracy = {}'.format(_accuracy(lin_p, labels)))
+    print('Linearization Loss = {}'.format(loss(lin_p, labels)))
+    print('RMSE of predictions: {}'.format(
+        np.sqrt(np.mean((net_p - lin_p) ** 2))))
   print('---------------------------------------')

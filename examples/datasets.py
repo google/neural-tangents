@@ -33,11 +33,11 @@ def _one_hot(x, k, dtype=np.float32):
   return np.array(x[:, None] == np.arange(k), dtype)
 
 
-def mnist(n_train=None, n_test=None, permute_train=False):
+def get_dataset(name, n_train=None, n_test=None, permute_train=False):
   """Download, parse and process MNIST data to unit scale and one-hot labels."""
   ds_train, ds_test = tfds.as_numpy(
       tfds.load(
-          "mnist",
+          name,
           split=["train", "test"],
           batch_size=-1,
           as_dataset_kwargs={"shuffle_files": False}))

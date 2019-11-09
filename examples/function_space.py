@@ -49,7 +49,7 @@ def main(unused_argv):
   # Build data pipelines.
   print('Loading data.')
   x_train, y_train, x_test, y_test = \
-      datasets.mnist(FLAGS.train_size, FLAGS.test_size)
+      datasets.get_dataset('mnist', FLAGS.train_size, FLAGS.test_size)
 
   # Build the network
   init_fn, apply_fn, _ = stax.serial(

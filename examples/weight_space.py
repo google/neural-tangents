@@ -52,7 +52,8 @@ FLAGS = flags.FLAGS
 def main(unused_argv):
   # Build data and .
   print('Loading data.')
-  x_train, y_train, x_test, y_test = datasets.mnist(permute_train=True)
+  x_train, y_train, x_test, y_test = datasets.get_dataset('mnist',
+                                                          permute_train=True)
 
   # Build the network
   init_fn, f, _ = stax.serial(
