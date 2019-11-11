@@ -91,6 +91,10 @@ class MonteCarloTest(jtu.JaxTestCase):
     sample_once_batch_fn = monte_carlo._sample_once_kernel_fn(
         kernel_fn, init_fn, batch_size, device_count, store_on_device)
 
+    one_sample = sample_once_fn(x1, x2, key, get)
+    one_sample_batch = sample_once_batch_fn(x1, x2, key, get)
+    self.assertAllClose(one_sample, one_sample_batch, True)
+
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '[batch_size={}, '
