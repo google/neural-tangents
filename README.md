@@ -1,9 +1,10 @@
 # Neural Tangents
  Fast and Easy Infinite Neural Networks in Python
  
-[![Build Status](https://travis-ci.org/google/neural-tangents.svg?branch=master)](https://travis-ci.org/google/neural-tangents)
+[![Build Status](https://travis-ci.org/google/neural-tangents.svg?branch=master)](https://travis-ci.org/google/neural-tangents) ![PyPI](https://img.shields.io/pypi/v/neural-tangents) ![PyPI - License](https://img.shields.io/pypi/l/neural_tangents)
  
-**News:** we'll be at the [NeurIPS 2019](https://nips.cc/) [Bayesian Deep Learning](http://bayesiandeeplearning.org/) and [Science meets Engineering of Deep Learning](https://sites.google.com/corp/view/sedl-neurips-2019/) workshops, come tell us about your experience with the library!
+**News:** we'll be at the [NeurIPS 2019](https://nips.cc/) [Bayesian Deep Learning](http://bayesiandeeplearning.org/) and [Science meets Engineering of Deep Learning](https://sites.google.com/corp/view/sedl-neurips-2019/) workshops, and the [Symposium on
+Advances in Approximate Bayesian Inference](http://approximateinference.org/). Come tell us about your experience with the library!
 
 ## Overview
 
@@ -34,8 +35,13 @@ We happily welcome contributions!
 ## Installation
 
 To use GPU, first follow [JAX's](https://www.github.com/google/jax/)
- GPU installation instructions (not necessary for CPU-only usage). Then run
-
+ GPU installation instructions (not necessary for CPU-only usage). 
+ 
+ Then either run
+```
+pip install neural-tangents
+```
+or, to build the bleeding-edge version from source,
 ```
 git clone https://github.com/google/neural-tangents
 pip install -e neural-tangents
