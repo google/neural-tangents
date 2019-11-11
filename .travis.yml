@@ -1,8 +1,11 @@
 language: python
 python:
   - "2.7"
+  - "3.5"
   - "3.6"
+  - "3.7"
 install:
+  - pip install --upgrade pip
   - pip install tensorflow tensorflow-datasets
   - git clone https://github.com/google/neural-tangents
   - pip install -e neural-tangents
