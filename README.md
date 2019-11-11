@@ -1,7 +1,7 @@
 # Neural Tangents
  Fast and Easy Infinite Neural Networks in Python
  
-[![Build Status](https://travis-ci.org/google/neural-tangents.svg?branch=master)](https://travis-ci.org/google/neural-tangents) ![PyPI](https://img.shields.io/pypi/v/neural-tangents) ![PyPI - License](https://img.shields.io/pypi/l/neural_tangents)
+[![Build Status](https://travis-ci.org/google/neural-tangents.svg?branch=master)](https://travis-ci.org/google/neural-tangents) [![PyPI](https://img.shields.io/pypi/v/neural-tangents)](https://pypi.org/project/neural-tangents/) [![PyPI - License](https://img.shields.io/pypi/l/neural_tangents)](https://github.com/google/neural-tangents/blob/master/LICENSE)
  
 **News:** we'll be at the [NeurIPS 2019](https://nips.cc/) [Bayesian Deep Learning](http://bayesiandeeplearning.org/) and [Science meets Engineering of Deep Learning](https://sites.google.com/corp/view/sedl-neurips-2019/) workshops, and the [Symposium on
 Advances in Approximate Bayesian Inference](http://approximateinference.org/). Come tell us about your experience with the library!
