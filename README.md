@@ -52,6 +52,7 @@ You can now run the examples (using [`tensorflow_datasets`](https://github.com/t
 ```
 pip install tensorflow tensorflow-datasets
 
+python neural-tangents/examples/infinite_fcn.py
 python neural-tangents/examples/weight_space.py
 python neural-tangents/examples/function_space.py
 ```
