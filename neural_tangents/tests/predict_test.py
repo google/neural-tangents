@@ -22,6 +22,7 @@ from jax import test_util as jtu
 from jax.api import device_get
 from jax.api import grad
 from jax.api import jit
+from jax.api import vmap
 from jax.config import config
 from jax.experimental import optimizers
 from jax.lib import xla_bridge
@@ -489,7 +490,8 @@ class PredictTest(jtu.JaxTestCase):
                           for train, test, network in zip(
                               TRAIN_SHAPES[:-1], TEST_SHAPES[:-1], NETWORK[:-1])
                           for out_logits in OUTPUT_LOGITS))
-  def testNTKMeanPrediction(self, train_shape, test_shape, network, out_logits):
+  def testNTKMeanCovPrediction(self, train_shape, test_shape, network,
+                               out_logits):
 
     key = random.PRNGKey(0)
 
@@ -503,31 +505,30 @@ class PredictTest(jtu.JaxTestCase):
     key, split = random.split(key)
     x_test = np.cos(random.normal(split, test_shape))
     _, _, kernel_fn = _build_network(train_shape[1:], network, out_logits)
-    mean_pred, var = predict.gp_inference(
+    mean_pred, cov_pred = predict.gp_inference(
         kernel_fn,
         x_train,
         y_train,
         x_test,
         'ntk',
         diag_reg=0.,
-        compute_var=True)
+        compute_cov=True)
 
     if xla_bridge.get_backend().platform == 'tpu':
       eigh = np.onp.linalg.eigh
     else:
       eigh = np.linalg.eigh
 
-    self.assertEqual(var.shape[0], x_test.shape[0])
-    min_eigh = np.min(eigh(var)[0])
+    self.assertEqual(cov_pred.shape[0], x_test.shape[0])
+    min_eigh = np.min(eigh(cov_pred)[0])
     self.assertGreater(min_eigh + 1e-10, 0.)
 
     def mc_sampling(count=10):
-      empirical_mean = 0.
       key = random.PRNGKey(100)
       init_fn, f, _ = _build_network(train_shape[1:], network, out_logits)
       _kernel_fn = empirical.empirical_kernel_fn(f)
       kernel_fn = jit(lambda x1, x2, params: _kernel_fn(x1, x2, params, 'ntk'))
-
+      collect_test_predict = []
       for _ in range(count):
         key, split = random.split(key)
         _, params = init_fn(split, train_shape)
@@ -540,14 +541,21 @@ class PredictTest(jtu.JaxTestCase):
         fx_initial_test = f(params, x_test)
 
         _, fx_pred_test = predictor(1.0e8, fx_initial_train, fx_initial_test)
-        empirical_mean += fx_pred_test
-      return empirical_mean / count
+        collect_test_predict.append(fx_pred_test)
+      collect_test_predict = np.array(collect_test_predict)
+      mean_emp = np.mean(collect_test_predict, axis=0)
+      mean_subtracted = collect_test_predict - mean_emp
+      cov_emp = np.einsum(
+          'ijk,ilk->jl', mean_subtracted, mean_subtracted, optimize=True) / (
+              mean_subtracted.shape[0] * mean_subtracted.shape[-1])
+      return mean_emp, cov_emp
 
     atol = ATOL
     rtol = RTOL
-    mean_emp = mc_sampling(100)
+    mean_emp, cov_emp = mc_sampling(100)
 
     self.assertAllClose(mean_pred, mean_emp, True, rtol, atol)
+    self.assertAllClose(cov_pred, cov_emp, True, rtol, atol)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -588,7 +596,7 @@ class PredictTest(jtu.JaxTestCase):
         x_test,
         'ntk',
         diag_reg=0.,
-        compute_var=True)
+        compute_cov=True)
     assert isinstance(out, predict.Gaussian)
 
     out = predict.gp_inference(
@@ -598,7 +606,7 @@ class PredictTest(jtu.JaxTestCase):
         x_test,
         'nngp',
         diag_reg=0.,
-        compute_var=True)
+        compute_cov=True)
     assert isinstance(out, predict.Gaussian)
 
     out = predict.gp_inference(
@@ -607,7 +615,7 @@ class PredictTest(jtu.JaxTestCase):
         y_train,
         x_test, ('ntk',),
         diag_reg=0.,
-        compute_var=True)
+        compute_cov=True)
     assert len(out) == 1 and isinstance(out[0], predict.Gaussian)
 
     out = predict.gp_inference(
@@ -616,7 +624,7 @@ class PredictTest(jtu.JaxTestCase):
         y_train,
         x_test, ('ntk', 'nngp'),
         diag_reg=0.,
-        compute_var=True)
+        compute_cov=True)
     assert (len(out) == 2 and isinstance(out[0], predict.Gaussian) and
             isinstance(out[1], predict.Gaussian))
 
@@ -626,7 +634,7 @@ class PredictTest(jtu.JaxTestCase):
         y_train,
         x_test, ('nngp', 'ntk'),
         diag_reg=0.,
-        compute_var=True)
+        compute_cov=True)
     self.assertAllClose(out[0], out2[1], True)
     self.assertAllClose(out[1], out2[0], True)
 
@@ -673,7 +681,7 @@ class PredictTest(jtu.JaxTestCase):
         x_test,
         get,
         diag_reg=reg,
-        compute_var=True)
+        compute_cov=True)
 
     finite_prediction = prediction(np.inf)
     finite_prediction_none = prediction(None)
@@ -724,7 +732,7 @@ class PredictTest(jtu.JaxTestCase):
         x_test,
         diag_reg=reg,
         get=('NTK', 'NNGP'),
-        compute_var=True)
+        compute_cov=True)
 
     zero_prediction = prediction(0.0)
 
@@ -773,7 +781,7 @@ class PredictTest(jtu.JaxTestCase):
         x_test,
         diag_reg=reg,
         get='NTK',
-        compute_var=True)
+        compute_cov=True)
 
     ts = np.logspace(-2, 8, 10)
     ntk_predictions = [prediction(t).mean for t in ts]
@@ -793,7 +801,7 @@ class PredictTest(jtu.JaxTestCase):
         x_test,
         diag_reg=reg,
         get='NNGP',
-        compute_var=True)
+        compute_cov=True)
 
     ntk_nngp_predictions = [ntk_nngp_prediction(t).mean for t in ts]
 
@@ -810,9 +818,7 @@ class PredictTest(jtu.JaxTestCase):
         x_test,
         diag_reg=reg,
         get='NNGP',
-        compute_var=True)
-
-    nngp_predictions = [nngp_prediction(t).mean for t in ts]
+        compute_cov=True)
 
     # Create a hacked kernel function that always returns the nngp kernel
     def always_nngp(x1, x2, get=('nngp', 'ntk')):
@@ -829,7 +835,7 @@ class PredictTest(jtu.JaxTestCase):
         x_test,
         diag_reg=reg,
         get='NTK',
-        compute_var=True)
+        compute_cov=True)
 
     nngp_cov_predictions = [nngp_prediction(t).covariance for t in ts]
     nngp_ntk_cov_predictions = [nngp_ntk_prediction(t).covariance for t in ts]
@@ -837,6 +843,143 @@ class PredictTest(jtu.JaxTestCase):
     # Test if you use the ntk equations with the nngp, you get the same cov
     # Although, due to accumulation of numerical errors, only roughly.
     self.assertAllClose(nngp_cov_predictions, nngp_ntk_cov_predictions, True)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              '_train={}_test={}_network={}_logits={}'.format(
+                  train, test, network, out_logits),
+          'train_shape':
+              train,
+          'test_shape':
+              test,
+          'network':
+              network,
+          'out_logits':
+              out_logits,
+      }
+                          for train, test, network in zip(
+                              TRAIN_SHAPES[:-1], TEST_SHAPES[:-1], NETWORK[:-1])
+                          for out_logits in OUTPUT_LOGITS))
+  def testNTKPredCovPosDef(self, train_shape, test_shape, network, out_logits):
+    key = random.PRNGKey(0)
+
+    key, split = random.split(key)
+    x_train = np.cos(random.normal(split, train_shape))
+
+    key, split = random.split(key)
+    y_train = np.array(
+        random.bernoulli(split, shape=(train_shape[0], out_logits)), np.float32)
+
+    key, split = random.split(key)
+    x_test = np.cos(random.normal(split, test_shape))
+    _, _, ker_fun = _build_network(train_shape[1:], network, out_logits)
+
+    reg = 1e-7
+    ntk_predictions = predict.gradient_descent_mse_gp(
+        ker_fun,
+        x_train,
+        y_train,
+        x_test,
+        diag_reg=reg,
+        get='ntk',
+        compute_cov=True)
+
+    ts = np.logspace(-2, 8, 10)
+
+    ntk_cov_predictions = [ntk_predictions(t).covariance for t in ts]
+
+    if xla_bridge.get_backend().platform == 'tpu':
+      eigh = np.onp.linalg.eigh
+    else:
+      eigh = np.linalg.eigh
+
+    check_symmetric = np.array(
+        [np.max(np.abs(cov - cov.T)) for cov in ntk_cov_predictions])
+    check_pos_evals = np.min(
+        np.array([eigh(cov)[0] + 1e-10 for cov in ntk_cov_predictions]))
+
+    self.assertAllClose(check_symmetric, np.zeros_like(check_symmetric), True)
+    self.assertGreater(check_pos_evals, 0., True)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              '_train={}_test={}_network={}_logits={}'.format(
+                  train, test, network, out_logits),
+          'train_shape':
+              train,
+          'test_shape':
+              test,
+          'network':
+              network,
+          'out_logits':
+              out_logits,
+      }
+                          for train, test, network in zip(
+                              TRAIN_SHAPES[:-1], TEST_SHAPES[:-1], NETWORK[:-1])
+                          for out_logits in OUTPUT_LOGITS))
+  def testTrainedEnsemblePredCov(self, train_shape, test_shape, network,
+                                 out_logits):
+    if xla_bridge.get_backend().platform == 'gpu' and config.read(
+        'jax_enable_x64'):
+      raise jtu.SkipTest('Not running GPU x64 to save time.')
+    training_steps = 5000
+    learning_rate = 1.0
+    ensemble_size = 50
+
+    init_fn, apply_fn, ker_fn = stax.serial(
+        stax.Dense(1024, W_std=1.2, b_std=0.05), stax.Erf(),
+        stax.Dense(out_logits, W_std=1.2, b_std=0.05))
+
+    opt_init, opt_update, get_params = optimizers.sgd(learning_rate)
+    opt_update = jit(opt_update)
+
+    key = random.PRNGKey(0)
+    key, = random.split(key, 1)
+
+    key, split = random.split(key)
+    x_train = np.cos(random.normal(split, train_shape))
+
+    key, split = random.split(key)
+    y_train = np.array(
+        random.bernoulli(split, shape=(train_shape[0], out_logits)), np.float32)
+    train = (x_train, y_train)
+    key, split = random.split(key)
+    x_test = np.cos(random.normal(split, test_shape))
+
+    ensemble_key = random.split(key, ensemble_size)
+
+    loss = jit(lambda params, x, y: 0.5 * np.mean((apply_fn(params, x) - y)**2))
+    grad_loss = jit(lambda state, x, y: grad(loss)(get_params(state), x, y))
+
+    def train_network(key):
+      _, params = init_fn(key, (-1,) + train_shape[1:])
+      opt_state = opt_init(params)
+      for i in range(training_steps):
+        opt_state = opt_update(i, grad_loss(opt_state, *train), opt_state)
+
+      return get_params(opt_state)
+
+    params = vmap(train_network)(ensemble_key)
+
+    ensemble_fx = vmap(apply_fn, (0, None))(params, x_test)
+    ensemble_loss = vmap(loss, (0, None, None))(params, x_train, y_train)
+    ensemble_loss = np.mean(ensemble_loss)
+    self.assertLess(ensemble_loss, 1e-5, True)
+
+    mean_emp = np.mean(ensemble_fx, axis=0)
+    mean_subtracted = ensemble_fx - mean_emp
+    cov_emp = np.einsum(
+        'ijk,ilk->jl', mean_subtracted, mean_subtracted, optimize=True) / (
+            mean_subtracted.shape[0] * mean_subtracted.shape[-1])
+
+    reg = 1e-7
+    ntk_predictions = predict.gp_inference(
+        ker_fn, x_train, y_train, x_test, 'ntk', reg, compute_cov=True)
+
+    self.assertAllClose(mean_emp, ntk_predictions.mean, True, RTOL, ATOL)
+    self.assertAllClose(cov_emp, ntk_predictions.covariance, True, RTOL, ATOL)
 
   def testPredictOnCPU(self):
     x_train = random.normal(random.PRNGKey(1), (10, 4, 5, 3))
