@@ -134,7 +134,7 @@ def gradient_descent_mse(g_dd, y_train, g_td=None, diag_reg=0.):
     def train_predict(dt, fx=0.0):
       gx_train = fl(fx - y_train)
       dgx = expm1_dot_vec(gx_train, dt)
-      return ufl(dgx) + y_train
+      return ufl(dgx) + fx
 
     return train_predict
 

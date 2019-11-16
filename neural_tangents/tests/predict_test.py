@@ -242,6 +242,7 @@ class PredictTest(jtu.JaxTestCase):
     g_td = ntk(x_test, x_train, 'ntk')
 
     predictor = predict.gradient_descent_mse(g_dd, y_train, g_td)
+    predictor_train = predict.gradient_descent_mse(g_dd, y_train)
 
     atol = ATOL
     rtol = RTOL
@@ -264,8 +265,10 @@ class PredictTest(jtu.JaxTestCase):
 
     fx_pred_train, fx_pred_test = predictor(0.0, fx_initial_train,
                                             fx_initial_test)
+    fx_pred_train_only = predictor_train(0.0, fx_initial_train)
 
     self.assertAllClose(fx_initial_train, fx_pred_train, True)
+    self.assertAllClose(fx_initial_train, fx_pred_train_only, True)
     self.assertAllClose(fx_initial_test, fx_pred_test, True)
 
     for i in range(steps):
@@ -278,15 +281,19 @@ class PredictTest(jtu.JaxTestCase):
 
     fx_pred_train, fx_pred_test = predictor(train_time, fx_initial_train,
                                             fx_initial_test)
+    fx_pred_train_only = predictor_train(train_time, fx_initial_train)
 
     fx_disp_train = np.sqrt(np.mean((fx_train - fx_initial_train)**2))
     fx_disp_test = np.sqrt(np.mean((fx_test - fx_initial_test)**2))
 
     fx_error_train = (fx_train - fx_pred_train) / fx_disp_train
+    fx_error_train_only = (fx_pred_train_only - fx_pred_train) / fx_disp_train
     fx_error_test = (fx_test - fx_pred_test) / fx_disp_test
 
     self.assertAllClose(fx_error_train, np.zeros_like(fx_error_train), True,
                         rtol, atol)
+    self.assertAllClose(fx_error_train_only, np.zeros_like(fx_error_train_only),
+                        True, rtol, atol)
     self.assertAllClose(fx_error_test, np.zeros_like(fx_error_test), True, rtol,
                         atol)
 
