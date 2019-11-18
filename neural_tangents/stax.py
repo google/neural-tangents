@@ -76,7 +76,6 @@ from jax.abstract_arrays import ShapedArray
 from jax.api_util import flatten_fun
 from jax.tree_util import tree_map, tree_flatten, tree_unflatten
 from jax.experimental import stax as ostax
-from jax import dtypes
 import jax.numpy as np
 from jax.scipy.special import erf
 from neural_tangents.utils.kernel import Kernel
@@ -295,7 +294,9 @@ def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk):
                      '`OVER_POINTS` is only meant for `var1`/`var2`. '
                      'Use `NO` instead to compute all covariances.')
 
-  x1 = x1.astype(dtypes.canonicalize_dtype(np.float64))
+  # TODO(schsam, romann): Think more about dtype automatic vs manual dtype
+  # promotion.
+  x1 = x1.astype(np.float64)
   var1 = _get_variance(x1, marginal_type=marginal)
 
   if x2 is None:
@@ -308,7 +309,7 @@ def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk):
                        ' got %s and %s.' %
                        (str(x1.shape), str(x2.shape)))
 
-    x2 = x2.astype(dtypes.canonicalize_dtype(np.float64))
+    x2 = x2.astype(np.float64)
     var2 = _get_variance(x2, marginal_type=marginal)
 
   nngp = _get_covariance(x1, x2, marginal_type=cross)
