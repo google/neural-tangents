@@ -27,14 +27,14 @@ with io.open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
 
 
 INSTALL_REQUIRES = [
-    'jaxlib>=0.1.32',
-    'jax>=0.1.50',
+    'jaxlib>=0.1.33',
+    'jax>=0.1.51',
 ]
 
 
 setuptools.setup(
     name='neural-tangents',
-    version='0.1.1',
+    version='0.1.2',
     license='Apache 2.0',
     author='Google',
     author_email='neural-tangents-dev@google.com',

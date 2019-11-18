@@ -57,7 +57,7 @@ def main(unused_argv):
 
   # Build the network
   init_fn, f, _ = stax.serial(
-      stax.Dense(2048, 1., 0.05),
+      stax.Dense(512, 1., 0.05),
       stax.Erf(),
       stax.Dense(10, 1., 0.05))
 
