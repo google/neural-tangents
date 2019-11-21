@@ -42,6 +42,12 @@ OUTPUT_LOGITS = [1, 2, 3]
 
 CONVOLUTION_CHANNELS = 256
 
+jtu.default_tolerance[np.onp.dtype(np.onp.float32)] = 5e-3
+jtu.default_tolerance[np.onp.dtype(np.onp.float64)] = 1e-5
+
+jtu.tpu_default_tolerance[np.onp.dtype(np.onp.float32)] = 1e-2
+jtu.tpu_default_tolerance[np.onp.dtype(np.onp.complex64)] = 1e-3
+
 
 def _build_network(input_shape, network, out_logits):
   if len(input_shape) == 1:
@@ -79,6 +85,7 @@ for o in OUTPUT_LOGITS:
 
 class EmpiricalTest(jtu.JaxTestCase):
 
+  # pylint: disable=g-complex-comprehension
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_{}'.format(shape),
@@ -114,7 +121,6 @@ class EmpiricalTest(jtu.JaxTestCase):
       x = random.normal(split, (shape[-1],))
       self.assertAllClose(f_lin_exact(x0, x, params), f_lin(x, params), True)
 
-  # pylint: disable=g-complex-comprehension
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_{}'.format(shape),

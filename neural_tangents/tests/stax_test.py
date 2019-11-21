@@ -18,6 +18,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from functools import partial
+
 from jax import test_util as jtu
 from jax.config import config as jax_config
 from jax.lib import xla_bridge
@@ -81,6 +82,12 @@ LAYER_NORM = [
     (1, 3),
     (1, 2, 3)
 ]
+
+jtu.default_tolerance[np.onp.dtype(np.onp.float32)] = 5e-3
+jtu.default_tolerance[np.onp.dtype(np.onp.float64)] = 1e-5
+
+jtu.tpu_default_tolerance[np.onp.dtype(np.onp.float32)] = 3e-2
+jtu.tpu_default_tolerance[np.onp.dtype(np.onp.complex64)] = 1e-3
 
 
 def _get_inputs(key, is_conv, same_inputs, input_shape, fn=np.cos):
