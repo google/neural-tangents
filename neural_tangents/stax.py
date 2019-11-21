@@ -24,8 +24,9 @@ This library contains layer constructors mimicking those in
   are chained / stacked together within the `serial` or `parallel` combinators,
   similarly to `init_fn` and `apply_fn`.
 
-2) In layers with random weights, NTK parameterization is used
-  (https://arxiv.org/abs/1806.07572, page 3).
+2) In layers with random weights, NTK parameterization is used by default
+  (https://arxiv.org/abs/1806.07572, page 3). Standard parameterization can
+  be specified for Conv and Dense layers by a keyword argument.
 
 3) Individual methods may have some new or missing functionality. For instance,
   `CIRCULAR` padding is supported, but certain `dimension_numbers` aren't yet.
@@ -86,6 +87,9 @@ from neural_tangents.utils.kernel import Marginalisation as M
 _CONV_DIMENSION_NUMBERS = ('NHWC', 'HWIO', 'NHWC')
 _CONV_QAB_DIMENSION_NUMBERS = ('NCHW', 'HWIO', 'NCHW')
 _COVARIANCES_REQ = 'covariances_req'
+
+# pylint: disable=invalid-name
+
 
 class Padding(enum.Enum):
   CIRCULAR = 'CIRCULAR'
@@ -184,9 +188,9 @@ def _get_covariance(x1, x2, marginal_type):
   """Computes uncentred covariance (nngp) between two sets of inputs
 
   Args:
-    a: a (2+k)D (k = 0, 2) `np.ndarray` of shape
+    x1: a (2+k)D (k = 0, 2) `np.ndarray` of shape
       `[n1, <k inner dimensions>, n_features]`.
-    b: an optional `np.ndarray` that has the same shape as `a` apart from
+    x2: an optional `np.ndarray` that has the same shape as `a` apart from
       possibly different leading (`n2`) dimension. `None` means `x2 == x1`.
     marginal_type: an instance of `Marginalisation` specifying between which
       dimensions should the covariances be computed.
@@ -373,7 +377,7 @@ def _preprocess_kernel_fn(init_fn, kernel_fn):
     Returns:
       If `get` is a string, returns the requested `np.ndarray`. If `get` is a
       tuple, returns an `AnalyticKernel` namedtuple containing only the
-      requested information.  If `get` is None then a Kernel object is returned
+      requested information. If `get` is None then a Kernel object is returned
       containing all the data.
     """
 
@@ -736,18 +740,55 @@ def _affine(nngp, W_std, b_std):
   return  W_std**2 * nngp + b_std**2
 
 
+# pylint: disable=g-doc-args
 @_layer
-def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0)):
-  """Layer constructor function for a dense (fully-connected) layer.
+def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0),
+          parameterization='ntk'):
+  r"""Layer constructor function for a dense (fully-connected) layer.
 
-  Based on `jax.experimental.stax.Dense`. Has a similar API.
+  Based on `jax.experimental.stax.Dense`. Has a similar API, apart from:
+
+  W_init and b_init only change the behavior of the finite width network, and
+    are not used by kernel_fn. In most cases, W_std and b_std should be used
+    instead
+
+  Args:
+    parameterization: Either 'ntk' or 'standard'.
+      Under ntk parameterization (https://arxiv.org/abs/1806.07572, page 3),
+        weights and biases are initialized as W_ij ~ N(0,1), b_i ~ N(0,1), and
+        the finite width layer equation is z_i = W_std / sqrt([width]) sum_j
+        W_ij x_j + b_std b_i Under standard parameterization, weights and biases
+        are initialized as W_ij ~ N(0,W_std^2/[width]), b_i ~ N(0,b_std^2), and
+        the finite width layer equation is z_i = \sum_j W_ij x_j + b_i
+
+  Returns:
+    init_fn, apply_fn, kernel_fn
   """
-  init_fn, _ = ostax.Dense(out_dim, W_init, b_init)
+  # TODO(jaschasd) after experimentation, evaluate whether to change default
+  # parameterization from "ntk" to "standard"
+
+  parameterization = parameterization.lower()
+
+  ntk_init_fn, _ = ostax.Dense(out_dim, W_init, b_init)
+
+  def standard_init_fn(rng, input_shape):
+    output_shape, (W, b) = ntk_init_fn(rng, input_shape)
+    return output_shape, (W * W_std / np.sqrt(input_shape[-1]), b * b_std)
+
+  if parameterization == 'ntk':
+    init_fn = ntk_init_fn
+  elif parameterization == 'standard':
+    init_fn = standard_init_fn
+  else:
+    raise ValueError('Parameterization not supported: %s' % parameterization)
 
   def apply_fn(params, inputs, **kwargs):
     W, b = params
-    norm = W_std / np.sqrt(inputs.shape[-1])
-    return norm * np.dot(inputs, W) + b_std * b
+    if parameterization == 'ntk':
+      norm = W_std / np.sqrt(inputs.shape[-1])
+      return norm * np.dot(inputs, W) + b_std * b
+    elif parameterization == 'standard':
+      return np.dot(inputs, W) + b
 
   def kernel_fn(kernels):
     """Compute the transformed kernels after a dense layer."""
@@ -757,9 +798,15 @@ def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0)):
     def fc(x):
       return _affine(x, W_std, b_std)
 
-    var1, nngp, var2, ntk = map(fc, (var1, nngp, var2, ntk))
-    if ntk is not None:
-      ntk += nngp - b_std**2
+    if parameterization == 'ntk':
+      var1, nngp, var2 = map(fc, (var1, nngp, var2))
+      if ntk is not None:
+        ntk = nngp + W_std**2 * ntk
+    elif parameterization == 'standard':
+      input_width = kernels.shape1[1]
+      if ntk is not None:
+        ntk = input_width * nngp + 1. + W_std**2 * ntk
+      var1, nngp, var2 = map(fc, (var1, nngp, var2))
 
     return kernels._replace(
         var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=True)
@@ -767,7 +814,6 @@ def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0)):
   setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_ALL,
                                         'cross': M.OVER_ALL})
   return init_fn, apply_fn, kernel_fn
-
 
 
 @_layer
@@ -1141,18 +1187,20 @@ def _conv_var_3d(var1, filter_shape, strides, padding):
 # We disable g-doc-args since we document relative to stax.
 # pylint: disable=g-doc-args
 @_layer
-def _GeneralConv(dimension_numbers, out_chan, filter_shape,
-                 strides=None, padding=Padding.VALID.name,
-                 W_std=1.0, W_init=_randn(1.0),
-                 b_std=0.0, b_init=_randn(1.0)):
+def _GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None,
+                 padding=Padding.VALID.name, W_std=1.0, W_init=_randn(1.0),
+                 b_std=0.0, b_init=_randn(1.0), parameterization='ntk'):
   """Layer construction function for a general convolution layer.
 
   Based on `jax.experimental.stax.GeneralConv`. Has a similar API apart from:
 
   Args:
-    padding: in addition to `VALID` and `SAME' padding, supports `CIRCULAR`,
-      not available in `jax.experimental.stax.GeneralConv`.
+    padding: in addition to `VALID` and `SAME' padding, supports `CIRCULAR`, not
+      available in `jax.experimental.stax.GeneralConv`.
   """
+
+  parameterization = parameterization.lower()
+
   if dimension_numbers != _CONV_DIMENSION_NUMBERS:
     raise NotImplementedError('Dimension numbers %s not implemented.'
                               % str(dimension_numbers))
@@ -1167,15 +1215,33 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape,
   if padding == Padding.CIRCULAR:
     init_padding = Padding.SAME
 
-  init_fn, _ = ostax.GeneralConv(dimension_numbers, out_chan, filter_shape,
-                                 strides, init_padding.name, W_init, b_init)
+  def input_total_dim(input_shape):
+    return input_shape[lhs_spec.index('C')] * np.prod(filter_shape)
+
+  ntk_init_fn, _ = ostax.GeneralConv(dimension_numbers, out_chan, filter_shape,
+                                     strides, init_padding.name, W_init, b_init)
+
+  def standard_init_fn(rng, input_shape):
+    output_shape, (W, b) = ntk_init_fn(rng, input_shape)
+    norm = W_std / np.sqrt(input_total_dim(input_shape))
+    return output_shape, (W * norm, b * b_std)
+
+  if parameterization == 'ntk':
+    init_fn = ntk_init_fn
+  elif parameterization == 'standard':
+    init_fn = standard_init_fn
+  else:
+    raise ValueError('Parameterization not supported: %s' % parameterization)
 
   def apply_fn(params, inputs, **kwargs):
     W, b = params
 
-    norm = inputs.shape[lhs_spec.index('C')]
-    norm *= np.prod(filter_shape)
-    norm = W_std / np.sqrt(norm)
+    if parameterization == 'ntk':
+      norm = W_std / np.sqrt(input_total_dim(inputs.shape))
+      b_rescale = b_std
+    elif parameterization == 'standard':
+      norm = 1.
+      b_rescale = 1.
 
     apply_padding = padding
     if padding == Padding.CIRCULAR:
@@ -1184,8 +1250,11 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape,
                                           'wrap')
 
     return norm * lax.conv_general_dilated(
-        inputs, W, strides, apply_padding.name,
-        dimension_numbers=dimension_numbers) + b_std * b
+        inputs,
+        W,
+        strides,
+        apply_padding.name,
+        dimension_numbers=dimension_numbers) + b_rescale * b
 
   def kernel_fn(kernels):
     """Compute the transformed kernels after a conv layer."""
@@ -1201,17 +1270,17 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape,
       strides_nngp = strides
 
     if cross == M.OVER_PIXELS:
-      def conv_nngp(x):
+
+      def conv_nngp_unscaled(x):
         if _is_array(x):
           x = _conv_nngp_4d(x, filter_shape_nngp, strides_nngp, padding)
-        x = _affine(x, W_std, b_std)
         return x
     elif cross in [M.OVER_POINTS, M.NO]:
-      def conv_nngp(x):
+
+      def conv_nngp_unscaled(x):
         if _is_array(x):
           x = _conv_nngp_5or6d_double_conv(x, filter_shape_nngp,
                                            strides_nngp, padding)
-        x = _affine(x, W_std, b_std)
         return x
 
       is_height_width = not is_height_width
@@ -1219,6 +1288,10 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape,
       raise NotImplementedError(
           "Only implemented for `OVER_PIXELS`, `OVER_POINTS` and `NO`;"
           " supplied {}".format(cross))
+
+    def conv_nngp(x):
+      x = conv_nngp_unscaled(x)
+      return _affine(x, W_std, b_std)
 
     if marginal == M.OVER_PIXELS:
       def conv_var(x):
@@ -1239,8 +1312,17 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape,
 
     var1 = conv_var(var1)
     var2 = conv_var(var2)
-    nngp = conv_nngp(nngp)
-    ntk = conv_nngp(ntk) + nngp - b_std**2 if ntk is not None else ntk
+
+    if parameterization == 'ntk':
+      nngp = conv_nngp(nngp)
+      ntk = conv_nngp(ntk) + nngp - b_std**2 if ntk is not None else ntk
+    elif parameterization == 'standard':
+      nngp_unscaled = conv_nngp_unscaled(nngp)
+      if ntk is not None:
+        ntk = (
+            input_total_dim(kernels.shape1) * nngp_unscaled + 1. +
+            W_std**2 * conv_nngp_unscaled(ntk))
+      nngp = _affine(nngp_unscaled, W_std, b_std)
 
     return kernels._replace(
         var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=True,
@@ -1251,20 +1333,27 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape,
   return init_fn, apply_fn, kernel_fn
 
 
-def Conv(out_chan, filter_shape,
-         strides=None, padding=Padding.VALID.name,
-         W_std=1.0, W_init=_randn(1.0),
-         b_std=0.0, b_init=_randn(1.0)):
+# pylint: disable=g-doc-args
+def Conv(out_chan, filter_shape, strides=None, padding=Padding.VALID.name,
+         W_std=1.0, W_init=_randn(1.0), b_std=0.0, b_init=_randn(1.0),
+         parameterization='ntk'):
   """Layer construction function for a convolution layer.
 
   Based on `jax.experimental.stax.Conv`. Has a similar API apart from:
 
+  W_init and b_init only change the behavior of the finite width network, and
+    are not used by kernel_fn. In most cases, W_std and b_std should be used
+    instead
+
   Args:
     padding: in addition to `VALID` and `SAME' padding, supports `CIRCULAR`,
       not available in `jax.experimental.stax.GeneralConv`.
+    parameterization: Either 'ntk' or 'standard'. These parameterizations are
+      the direct analogues for convolution of the corresponding
+      parameterizations for Dense layers.
   """
-  return _GeneralConv(_CONV_DIMENSION_NUMBERS, out_chan, filter_shape,
-                      strides, padding, W_std, W_init, b_std, b_init)
+  return _GeneralConv(_CONV_DIMENSION_NUMBERS, out_chan, filter_shape, strides,
+                      padding, W_std, W_init, b_std, b_init, parameterization)
 
 
 def _average_pool_nngp_5or6d(mat, window_shape, strides, padding):
@@ -1551,6 +1640,12 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
     NotImplementedError: If `fixed` is `False`, call to `kernel_fn` will result
     in an error as there is no known analytic expression for the kernel.
   """
+  # TODO(jaschasd) incorporate parameterization keyword argument for attention
+  # (the details of this will require some thought. I believe it will be a no-op
+  # for 1/n scaling (ie fixed scaling), but will change the NTK kernel for
+  # 1/sqrt(n) scaling. Will also need to decide whether the 1/sqrt(n) scaling
+  # should be absorbed into one or both of the key and value weight
+  # initializations
   if dimension_spec is None:
     dimension_spec = _CONV_DIMENSION_NUMBERS[0]
   if dimension_spec != _CONV_DIMENSION_NUMBERS[0]:

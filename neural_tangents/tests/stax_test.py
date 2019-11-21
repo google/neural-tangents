@@ -28,6 +28,7 @@ from neural_tangents import stax
 from neural_tangents.utils import monte_carlo
 from neural_tangents.utils import utils
 
+# pylint: disable=invalid-name
 
 jax_config.parse_flags_with_absl()
 
@@ -83,11 +84,10 @@ LAYER_NORM = [
     (1, 2, 3)
 ]
 
-jtu.default_tolerance[np.onp.dtype(np.onp.float32)] = 5e-3
-jtu.default_tolerance[np.onp.dtype(np.onp.float64)] = 1e-5
+PARAMETERIZATIONS = ['NTK', 'STANDARD']
 
-jtu.tpu_default_tolerance[np.onp.dtype(np.onp.float32)] = 3e-2
-jtu.tpu_default_tolerance[np.onp.dtype(np.onp.complex64)] = 1e-3
+jtu._default_tolerance[np.onp.dtype(np.onp.float32)] = 5e-3
+jtu._default_tolerance[np.onp.dtype(np.onp.float64)] = 1e-5
 
 
 def _get_inputs(key, is_conv, same_inputs, input_shape, fn=np.cos):
@@ -98,16 +98,19 @@ def _get_inputs(key, is_conv, same_inputs, input_shape, fn=np.cos):
   return x1, x2
 
 
-def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res,
-             padding, phi, strides, width, is_ntk, proj_into_2d, layer_norm):
-  fc = partial(stax.Dense, W_std=W_std, b_std=b_std)
+def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
+             phi, strides, width, is_ntk, proj_into_2d, layer_norm,
+             parameterization):
+  fc = partial(
+      stax.Dense, W_std=W_std, b_std=b_std, parameterization=parameterization)
   conv = partial(
       stax.Conv,
       filter_shape=filter_shape,
       strides=strides,
       padding=padding,
       W_std=W_std,
-      b_std=b_std)
+      b_std=b_std,
+      parameterization=parameterization)
   affine = conv(width) if is_conv else fc(width)
 
   res_unit = stax.serial((stax.AvgPool(
@@ -157,8 +160,8 @@ class StaxTest(jtu.JaxTestCase):
                   model, phi_name, width, 'same_inputs'
                   if same_inputs else 'different_inputs', 'filter_size=%s' %
                   str(filter_size), 'padding=%s' % padding, 'strides=%s' %
-                  str(strides), 'pool' if use_pooling else 'flatten', 'NTK'
-                  if is_ntk else 'NNGP', 'RESNET' if is_res else 'serial',
+                  str(strides), 'pool' if use_pooling else 'flatten',
+                  'NTK' if is_ntk else 'NNGP', 'RESNET' if is_res else 'serial',
                   proj_into_2d),
           'model':
               model,
@@ -181,12 +184,11 @@ class StaxTest(jtu.JaxTestCase):
           'is_res':
               is_res,
           'proj_into_2d':
-            proj_into_2d
+              proj_into_2d,
       } for model in MODELS for width in WIDTHS
                           for phi, phi_name in ACTIVATIONS.items()
                           for same_inputs in [False, True]
-                          for padding in PADDINGS
-                          for strides in STRIDES
+                          for padding in PADDINGS for strides in STRIDES
                           for filter_size in FILTER_SIZES
                           for use_pooling in [False, True]
                           for is_ntk in [False, True]
@@ -219,11 +221,66 @@ class StaxTest(jtu.JaxTestCase):
 
     W_std, b_std = 2.**0.5, 0.5**0.5
     layer_norm = None
+    parameterization = 'ntk'
 
     self._check_agreement_with_empirical(W_std, b_std, filter_size, is_conv,
                                          is_ntk, is_res, layer_norm, padding,
                                          phi, proj_into_2d, same_inputs,
-                                         strides, use_pooling, width)
+                                         strides, use_pooling, width,
+                                         parameterization)
+
+  # pylint: disable=g-complex-comprehension
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              '_{}_{}_{}_{}_{}_{}_{}'.format(
+                  model, width, 'same_inputs'
+                  if same_inputs else 'different_inputs', 'filter_size=%s' %
+                  str(filter_size), proj_into_2d, 'NTK' if is_ntk else 'NNGP',
+                  'parameterization=%s' % str(parameterization)),
+          'model':
+              model,
+          'width':
+              width,
+          'same_inputs':
+              same_inputs,
+          'filter_size':
+              filter_size,
+          'proj_into_2d':
+              proj_into_2d,
+          'is_ntk':
+              is_ntk,
+          'parameterization':
+              parameterization
+      } for model in MODELS for width in WIDTHS
+                          for same_inputs in [False, True]
+                          for is_ntk in [False, True]
+                          for filter_size in FILTER_SIZES
+                          for proj_into_2d in PROJECTIONS
+                          for parameterization in PARAMETERIZATIONS))
+  def test_parameterizations(self, model, width, same_inputs, is_ntk,
+                             filter_size, proj_into_2d, parameterization):
+    is_conv = 'conv' in model
+
+    W_std, b_std = 2.**0.5, 0.5**0.5
+    padding = PADDINGS[0]
+    strides = STRIDES[0]
+    phi = stax.Relu()
+    use_pooling, is_res = False, False
+    layer_norm = None
+
+    # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
+    if is_conv:
+      if xla_bridge.get_backend().platform == 'cpu':
+        raise jtu.SkipTest('Not running CNN models on CPU to save time.')
+    elif proj_into_2d != PROJECTIONS[0]:
+      raise jtu.SkipTest('FC models do not have these parameters.')
+
+    self._check_agreement_with_empirical(W_std, b_std, filter_size, is_conv,
+                                         is_ntk, is_res, layer_norm, padding,
+                                         phi, proj_into_2d, same_inputs,
+                                         strides, use_pooling, width,
+                                         parameterization)
 
   # pylint: disable=g-complex-comprehension
   @jtu.parameterized.named_parameters(
@@ -268,21 +325,25 @@ class StaxTest(jtu.JaxTestCase):
     strides = STRIDES[0]
     phi = stax.Relu()
     use_pooling, is_res = False, False
+    parameterization = 'ntk'
 
     self._check_agreement_with_empirical(W_std, b_std, filter_size, is_conv,
                                          is_ntk, is_res, layer_norm, padding,
                                          phi, proj_into_2d, same_inputs,
-                                         strides, use_pooling, width)
+                                         strides, use_pooling, width,
+                                         parameterization)
 
   def _check_agreement_with_empirical(self, W_std, b_std, filter_size, is_conv,
-      is_ntk, is_res, layer_norm, padding, phi, proj_into_2d, same_inputs,
-      strides, use_pooling, width):
+                                      is_ntk, is_res, layer_norm, padding, phi,
+                                      proj_into_2d, same_inputs, strides,
+                                      use_pooling, width, parameterization):
     key = random.PRNGKey(1)
     x1, x2 = _get_inputs(key, is_conv, same_inputs, INPUT_SHAPE)
-    init_fn, apply_fn, kernel_fn = _get_net(W_std, b_std, filter_size,
-                                            is_conv, use_pooling, is_res,
-                                            padding, phi, strides, width,
-                                            is_ntk, proj_into_2d, layer_norm)
+    init_fn, apply_fn, kernel_fn = _get_net(W_std, b_std, filter_size, is_conv,
+                                            use_pooling, is_res, padding, phi,
+                                            strides, width, is_ntk,
+                                            proj_into_2d, layer_norm,
+                                            parameterization)
 
     x1_out_shape, params = init_fn(key, x1.shape)
     if x2 is None:
