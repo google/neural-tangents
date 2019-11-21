@@ -1138,6 +1138,8 @@ def _conv_var_3d(var1, filter_shape, strides, padding):
   return var1
 
 
+# We disable g-doc-args since we document relative to stax.
+# pylint: disable=g-doc-args
 @_layer
 def _GeneralConv(dimension_numbers, out_chan, filter_shape,
                  strides=None, padding=Padding.VALID.name,
