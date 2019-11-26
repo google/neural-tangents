@@ -22,6 +22,7 @@ from functools import partial
 from jax.api import device_get
 from jax.api import jit
 from jax.api import pmap
+from jax.interpreters.pxla import ShardedDeviceArray
 from jax.lib import xla_bridge
 import jax.numpy as np
 from jax.tree_util import tree_all
@@ -475,6 +476,9 @@ def _get_jit_or_pmap_broadcast():
     # TODO(romann): adapt this when JAX allows `axis_in` for `pmap`.
     def broadcast(arg):
       if device_count == 0:
+        return arg
+      # If the argument has already been sharded, no need to broadcast it.
+      if isinstance(arg, ShardedDeviceArray) and arg.shape[0] == device_count:
         return arg
       return np.broadcast_to(arg, (device_count,) + arg.shape)
 
