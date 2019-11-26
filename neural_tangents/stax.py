@@ -1395,7 +1395,8 @@ def Conv(out_chan, filter_shape, strides=None, padding=Padding.VALID.name,
                       padding, W_std, W_init, b_std, b_init, parameterization)
 
 
-def _average_pool_nngp_5or6d(mat, window_shape, strides, padding):
+def _average_pool_nngp_5or6d(mat, window_shape, strides, padding,
+                             normalize_edges):
   """Get covariances of average pooling outputs given inputs covariances `mat`.
 
   Args:
@@ -1406,6 +1407,10 @@ def _average_pool_nngp_5or6d(mat, window_shape, strides, padding):
       (e.g. `(3, 3)`).
     strides: tuple of two positive integers, the pooling strides, e.g. `(1, 1)`.
     padding: a `Padding` enum, e.g. `Padding.CIRCULAR`.
+    normalize_edges: `True` to normalize output by the effective receptive
+      field, `False` to normalize by the window size. Only has effect at the
+      edges when `SAME` padding is used. Set to `True` to retain correspondence
+      to `ostax.AvgPool`.
 
   Returns:
     a 5D or 6D `np.ndarray` containing sample-(sample-)pixel-pixel covariances
@@ -1428,7 +1433,7 @@ def _average_pool_nngp_5or6d(mat, window_shape, strides, padding):
   nngp_out = lax.reduce_window(mat, 0., lax.add, window_shape, strides,
                                padding.name)
 
-  if padding == Padding.SAME:
+  if padding == Padding.SAME and normalize_edges:
     # `SAME` padding in `jax.experimental.stax.AvgPool` normalizes by actual
     # window size, which is smaller at the edges.
     one = np.ones(mat.shape, mat.dtype)
@@ -1442,7 +1447,10 @@ def _average_pool_nngp_5or6d(mat, window_shape, strides, padding):
 
 
 @_layer
-def AvgPool(window_shape, strides=None, padding=Padding.VALID.name):
+def AvgPool(window_shape,
+            strides=None,
+            padding=Padding.VALID.name,
+            normalize_edges=True):
   """Layer construction function for a 2D average pooling layer.
 
   Based on `jax.experimental.stax.AvgPool`. Has a similar API apart from:
@@ -1450,6 +1458,10 @@ def AvgPool(window_shape, strides=None, padding=Padding.VALID.name):
   Args:
     padding: in addition to `VALID` and `SAME' padding, supports `CIRCULAR`,
       not available in `jax.experimental.stax.GeneralConv`.
+    normalize_edges: `True` to normalize output by the effective receptive
+      field, `False` to normalize by the window size. Only has effect at the
+      edges when `SAME` padding is used. Set to `True` to retain correspondence
+      to `ostax.AvgPool`.
   """
   strides = strides or (1,) * len(window_shape)
   padding = Padding(padding)
@@ -1463,6 +1475,16 @@ def AvgPool(window_shape, strides=None, padding=Padding.VALID.name):
                                           'wrap')
       res = apply_fn_0(params, inputs, **kwargs)
       return res
+
+  elif not normalize_edges:
+
+    def rescaler(*args, **kwargs):
+      del args, kwargs  # Unused.
+      return lambda outputs, _: outputs / np.prod(window_shape)
+
+    avgPool = ostax._pooling_layer(lax.add, 0., rescaler)
+    init_fn, apply_fn = avgPool(window_shape, strides, padding.name)
+
   else:
     init_fn, apply_fn = ostax.AvgPool(window_shape, strides, padding.name)
 
@@ -1480,15 +1502,15 @@ def AvgPool(window_shape, strides=None, padding=Padding.VALID.name):
       window_shape_nngp = window_shape[::-1]
       strides_nngp = strides[::-1]
 
-    nngp = _average_pool_nngp_5or6d(nngp, window_shape_nngp,
-                                    strides_nngp, padding)
-    ntk = _average_pool_nngp_5or6d(ntk, window_shape_nngp,
-                                   strides_nngp, padding)
-    var1 = _average_pool_nngp_5or6d(var1, window_shape_nngp,
-                                    strides_nngp, padding)
+    nngp = _average_pool_nngp_5or6d(nngp, window_shape_nngp, strides_nngp,
+                                    padding, normalize_edges)
+    ntk = _average_pool_nngp_5or6d(ntk, window_shape_nngp, strides_nngp,
+                                   padding, normalize_edges)
+    var1 = _average_pool_nngp_5or6d(var1, window_shape_nngp, strides_nngp,
+                                    padding, normalize_edges)
     if var2 is not None:
-      var2 = _average_pool_nngp_5or6d(var2, window_shape_nngp,
-                                      strides_nngp, padding)
+      var2 = _average_pool_nngp_5or6d(var2, window_shape_nngp, strides_nngp,
+                                      padding, normalize_edges)
 
     return kernels._replace(
         var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=is_gaussian,

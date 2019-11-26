@@ -331,6 +331,54 @@ class StaxTest(jtu.JaxTestCase):
                                          strides, use_pooling, width,
                                          parameterization)
 
+  def test_avg_pool(self):
+    X1 = np.ones((4, 2, 3, 2))
+    X2 = np.ones((3, 2, 3, 2))
+
+    _, apply_fn, kernel_fn = stax.AvgPool((2, 2), (1, 1), 'SAME', False)
+    _, apply_fn_norm, kernel_fn_norm = stax.AvgPool((2, 2), (1, 1), 'SAME',
+                                                    True)
+    _, apply_fn_stax = stax.ostax.AvgPool((2, 2), (1, 1), 'SAME')
+
+    out1 = apply_fn((), X1)
+    out2 = apply_fn((), X2)
+
+    out1_norm = apply_fn_norm((), X1)
+    out2_norm = apply_fn_norm((), X2)
+
+    out1_stax = apply_fn_stax((), X1)
+    out2_stax = apply_fn_stax((), X2)
+
+    self.assertAllClose((out1_stax, out2_stax), (out1_norm, out2_norm), True)
+
+    out_unnorm = np.array([[1., 1., 0.5], [0.5, 0.5, 0.25]]).reshape(
+        (1, 2, 3, 1))
+    out1_unnormalized = np.broadcast_to(out_unnorm, X1.shape)
+    out2_unnormalized = np.broadcast_to(out_unnorm, X2.shape)
+
+    self.assertAllClose((out1_unnormalized, out2_unnormalized), (out1, out2),
+                        True)
+
+    ker = kernel_fn(X1, X2)
+    ker_norm = kernel_fn_norm(X1, X2)
+
+    self.assertAllClose(np.ones_like(ker_norm.nngp), ker_norm.nngp, True)
+    self.assertAllClose(np.ones_like(ker_norm.var1), ker_norm.var1, True)
+    self.assertAllClose(np.ones_like(ker_norm.var2), ker_norm.var2, True)
+
+    self.assertEqual(ker_norm.nngp.shape, ker.nngp.shape)
+    self.assertEqual(ker_norm.var1.shape, ker.var1.shape)
+    self.assertEqual(ker_norm.var2.shape, ker.var2.shape)
+
+    ker_unnorm = np.outer(out_unnorm, out_unnorm).reshape((2, 3, 2, 3))
+    ker_unnorm = np.transpose(ker_unnorm, axes=(0, 2, 1, 3))
+    nngp = np.broadcast_to(
+        ker_unnorm.reshape((1, 1) + ker_unnorm.shape), ker.nngp.shape)
+    var1 = np.broadcast_to(np.expand_dims(ker_unnorm, 0), ker.var1.shape)
+    var2 = np.broadcast_to(np.expand_dims(ker_unnorm, 0), ker.var2.shape)
+    self.assertAllClose((nngp, var1, var2), (ker.nngp, ker.var1, ker.var2),
+                        True)
+
   def _check_agreement_with_empirical(self, W_std, b_std, filter_size, is_conv,
                                       is_ntk, is_res, layer_norm, padding, phi,
                                       proj_into_2d, same_inputs, strides,
