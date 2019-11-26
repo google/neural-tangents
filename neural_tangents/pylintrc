@@ -15,7 +15,8 @@
 disable=missing-docstring,
         invalid-name,
         redefined-outer-name,
-        g-complex-comprehension
+        g-complex-comprehension,
+        protected-access
 
 [FORMAT]
 
