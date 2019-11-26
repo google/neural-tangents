@@ -16,6 +16,7 @@
 from jax.api import jit
 from jax.api import vmap
 from jax.lib import xla_bridge
+import jax.test_util as jtu
 import jax.numpy as np
 from collections import namedtuple
 from functools import wraps
@@ -26,6 +27,19 @@ import six
 
 def _jit_vmap(f):
   return jit(vmap(f))
+
+
+def update_test_tolerance():
+  # pylint: disable=protected-access
+  jtu._default_tolerance[np.onp.dtype(np.onp.float32)] = 5e-3
+  jtu._default_tolerance[np.onp.dtype(np.onp.float64)] = 1e-5
+  def default_tolerance():
+    if jtu.device_under_test() != 'tpu':
+      return jtu._default_tolerance
+    tol = jtu._default_tolerance.copy()
+    tol[np.onp.dtype(np.onp.float32)] = 5e-2
+    return tol
+  jtu.default_tolerance = default_tolerance
 
 
 def stub_out_pmap(batch, count):

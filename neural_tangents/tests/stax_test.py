@@ -86,8 +86,7 @@ LAYER_NORM = [
 
 PARAMETERIZATIONS = ['NTK', 'STANDARD']
 
-jtu._default_tolerance[np.onp.dtype(np.onp.float32)] = 5e-3
-jtu._default_tolerance[np.onp.dtype(np.onp.float64)] = 1e-5
+utils.update_test_tolerance()
 
 
 def _get_inputs(key, is_conv, same_inputs, input_shape, fn=np.cos):
@@ -311,7 +310,6 @@ class StaxTest(jtu.JaxTestCase):
   def test_layernorm(self, model, width, same_inputs, is_ntk,
       proj_into_2d, layer_norm):
     is_conv = 'conv' in model
-
     # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
     if is_conv:
       if xla_bridge.get_backend().platform == 'cpu':
@@ -371,17 +369,56 @@ class StaxTest(jtu.JaxTestCase):
       self.assertEqual(shape1, x1_out_shape)
       self.assertEqual(shape2, x2_out_shape)
 
-  def test_composition(self):
+  def test_composition_dense(self):
     rng = random.PRNGKey(0)
-    xs = random.normal(rng, (10, 10))
+    x1 = random.normal(rng, (10, 10))
+    x2 = random.normal(rng, (10, 10))
+
     Block = stax.serial(stax.Dense(256), stax.Relu())
 
     _, _, ker_fn = Block
     _, _, composed_ker_fn = stax.serial(Block, Block)
 
-    ker_out = ker_fn(ker_fn(xs))
-    composed_ker_out = composed_ker_fn(xs)
+    ker_out = ker_fn(ker_fn(x1))
+    composed_ker_out = composed_ker_fn(x1)
+    self.assertAllClose(ker_out, composed_ker_out, True)
 
+    ker_out = ker_fn(ker_fn(x1, x2))
+    composed_ker_out = composed_ker_fn(x1, x2)
+    self.assertAllClose(ker_out, composed_ker_out, True)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name': '_avg_pool={}'.format(avg_pool),
+          'avg_pool': avg_pool
+      } for avg_pool in [True, False]))
+  def test_composition_conv(self, avg_pool):
+    rng = random.PRNGKey(0)
+    x1 = random.normal(rng, (5, 10, 10, 3))
+    x2 = random.normal(rng, (5, 10, 10, 3))
+
+    Block = stax.serial(stax.Conv(256, (3, 3)), stax.Relu())
+    if avg_pool:
+      Readout = stax.serial(stax.GlobalAvgPool(), stax.Dense(10))
+      marginalization = 'none'
+    else:
+      Readout = stax.serial(stax.Flatten(), stax.Dense(10))
+      marginalization = 'auto'
+
+    block_ker_fn, readout_ker_fn = Block[2], Readout[2]
+    _, _, composed_ker_fn = stax.serial(Block, Readout)
+
+    ker_out = readout_ker_fn(block_ker_fn(x1, marginalization=marginalization))
+    composed_ker_out = composed_ker_fn(x1)
+    self.assertAllClose(ker_out, composed_ker_out, True)
+
+    if avg_pool:
+      with self.assertRaises(ValueError):
+        ker_out = readout_ker_fn(block_ker_fn(x1))
+
+    ker_out = readout_ker_fn(block_ker_fn(
+        x1, x2, marginalization=marginalization))
+    composed_ker_out = composed_ker_fn(x1, x2)
     self.assertAllClose(ker_out, composed_ker_out, True)
 
 

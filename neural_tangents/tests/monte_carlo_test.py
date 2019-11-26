@@ -44,11 +44,7 @@ N_SAMPLES = 4
 
 ALL_GET = ('nngp', 'ntk', ('nngp', 'ntk'), None)
 
-jtu.default_tolerance[np.onp.dtype(np.onp.float32)] = 5e-3
-jtu.default_tolerance[np.onp.dtype(np.onp.float64)] = 1e-5
-
-jtu.tpu_default_tolerance[np.onp.dtype(np.onp.float32)] = 1e-2
-jtu.tpu_default_tolerance[np.onp.dtype(np.onp.complex64)] = 1e-3
+utils.update_test_tolerance()
 
 
 def _get_inputs_and_model(width=1, n_classes=2, use_conv=True):

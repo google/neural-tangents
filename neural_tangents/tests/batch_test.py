@@ -43,11 +43,7 @@ OUTPUT_LOGITS = [1, 2, 3]
 
 CONVOLUTION_CHANNELS = 256
 
-jtu.default_tolerance[np.onp.dtype(np.onp.float32)] = 5e-3
-jtu.default_tolerance[np.onp.dtype(np.onp.float64)] = 1e-5
-
-jtu.tpu_default_tolerance[np.onp.dtype(np.onp.float32)] = 1e-2
-jtu.tpu_default_tolerance[np.onp.dtype(np.onp.complex64)] = 1e-3
+utils.update_test_tolerance()
 
 
 def _build_network(input_shape, network, out_logits):
@@ -252,6 +248,7 @@ class BatchTest(jtu.JaxTestCase):
                                  data_other)
 
   def _test_analytic_kernel_composition(self, batching_fn):
+    # Check Fully-Connected.
     rng = random.PRNGKey(0)
     rng_self, rng_other = random.split(rng)
     x_self = random.normal(rng_self, (8, 10))
@@ -268,6 +265,28 @@ class BatchTest(jtu.JaxTestCase):
     self.assertAllClose(ker_out, composed_ker_out, True)
 
     ker_out = ker_fn(ker_fn(x_self, x_other))
+    composed_ker_out = composed_ker_fn(x_self, x_other)
+    self.assertAllClose(ker_out, composed_ker_out, True)
+
+    # Check convolutional + pooling.
+    x_self = random.normal(rng, (8, 10, 10, 3))
+    x_other = random.normal(rng, (10, 10, 10, 3))
+
+    Block = stax.serial(stax.Conv(256, (3, 3)), stax.Relu())
+    Readout = stax.serial(stax.GlobalAvgPool(), stax.Dense(10))
+
+    block_ker_fn, readout_ker_fn = Block[2], Readout[2]
+    _, _, composed_ker_fn = stax.serial(Block, Readout)
+
+    block_ker_fn = batching_fn(block_ker_fn)
+    readout_ker_fn = batching_fn(readout_ker_fn)
+
+    ker_out = readout_ker_fn(block_ker_fn(x_self, marginalization='none'))
+    composed_ker_out = composed_ker_fn(x_self)
+    self.assertAllClose(ker_out, composed_ker_out, True)
+
+    ker_out = readout_ker_fn(
+        block_ker_fn(x_self, x_other, marginalization='none'))
     composed_ker_out = composed_ker_fn(x_self, x_other)
     self.assertAllClose(ker_out, composed_ker_out, True)
 

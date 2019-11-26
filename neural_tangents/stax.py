@@ -82,11 +82,15 @@ from jax.scipy.special import erf
 from neural_tangents.utils.kernel import Kernel
 from neural_tangents.utils import utils
 from neural_tangents.utils.kernel import Marginalisation as M
+import frozendict
 
 
 _CONV_DIMENSION_NUMBERS = ('NHWC', 'HWIO', 'NHWC')
 _CONV_QAB_DIMENSION_NUMBERS = ('NCHW', 'HWIO', 'NCHW')
 _COVARIANCES_REQ = 'covariances_req'
+_DEFAULT_MARGINALIZATION = frozendict.frozendict(
+    {'marginal': M.OVER_ALL, 'cross': M.OVER_ALL})
+
 
 # pylint: disable=invalid-name
 
@@ -103,7 +107,7 @@ def _is_array(x):
 
 def _set_covariances_req_attr(combinator_kernel_fn, kernel_fns):
   """Labels which covariances are required by the individual layers
-  combinded in `combinator_kernel_fn` based on `kernel_fns`.
+  combined in `combinator_kernel_fn` based on `kernel_fns`.
 
   Specifically, sets `combinator_kernel_fn`'s attribute `covariances_req`
   to a dictionary with keys `marginal` and `cross` which respectively correspond
@@ -132,7 +136,6 @@ def _set_covariances_req_attr(combinator_kernel_fn, kernel_fns):
       if hasattr(f, _COVARIANCES_REQ):
         marginal = getattr(f, _COVARIANCES_REQ)['marginal']
         cross = getattr(f, _COVARIANCES_REQ)['cross']
-
         if comparison_op(marginal, covs_req['marginal']):
           covs_req['marginal'] = marginal
         if comparison_op(cross, covs_req['cross']):
@@ -142,8 +145,7 @@ def _set_covariances_req_attr(combinator_kernel_fn, kernel_fns):
 
   # `_get_maximal_element` sets up the code for `NO` marginalisation by default
   covs_req = _get_maximal_element(
-      {'marginal': M.OVER_ALL, 'cross': M.OVER_ALL},
-      lambda x, y: x > y)
+      dict(_DEFAULT_MARGINALIZATION), lambda x, y: x > y)
 
   setattr(combinator_kernel_fn, _COVARIANCES_REQ, covs_req)
   return combinator_kernel_fn
@@ -362,8 +364,26 @@ def _apply_kernel(init_fn, kernel_fn, in_kernel):
         ' Found {}.'.format(type(out_kernel))))
 
 
+def _check_marginalization(kernel_fn, kernel):
+  if isinstance(kernel, list):
+    for k in kernel:
+      _check_marginalization(kernel, k)
+    return
+
+  deps = getattr(kernel_fn, _COVARIANCES_REQ, _DEFAULT_MARGINALIZATION)
+  kernel_deps = {'marginal': kernel.marginal, 'cross': kernel.cross}
+  if kernel.marginal < deps['marginal'] or kernel.cross < deps['cross']:
+    raise ValueError((
+        'Attempted to apply a {} layer to a kernel that contains '
+        'insufficient information due to marginalization. Found '
+        'marginalization level {} expected at least {}. To fix this specify '
+        '`marginalization=\'none\' in the kernel_fn or specify a '
+        'marginalization level manually.'
+        ).format(kernel_fn.__name__, kernel_deps, deps))
+
+
 def _preprocess_kernel_fn(init_fn, kernel_fn):
-  def new_kernel_fn(x1_or_kernel, x2=None, get=None):
+  def new_kernel_fn(x1_or_kernel, x2=None, get=None, marginalization='auto'):
     """Returns the `Kernel` resulting from applying `ker_fun` to given inputs.
 
     Args:
@@ -374,6 +394,11 @@ def _preprocess_kernel_fn(init_fn, kernel_fn):
       get: either `None`, a string, or a tuple of strings specifying which data
         should be returned by the kernel function. Can be "nngp", "ntk", "var1",
         "var2", "is_gaussian", "is_height_width", "marginal", "cross".
+      marginalization: Either a string with value "auto" or "none" or a dict.
+        If "auto" then stax attempts to automatically identify which
+        dimensions are most appropriate to marginalize over. If "none" then no
+        marginalization is performed. If a dict then the user can manually
+        specify the marginalization for the self- and cross- correlations.
     Returns:
       If `get` is a string, returns the requested `np.ndarray`. If `get` is a
       tuple, returns an `AnalyticKernel` namedtuple containing only the
@@ -384,11 +409,12 @@ def _preprocess_kernel_fn(init_fn, kernel_fn):
     if (isinstance(x1_or_kernel, Kernel) or
         (isinstance(x1_or_kernel, list) and
          all(isinstance(k, Kernel) for k in x1_or_kernel))):
+      _check_marginalization(kernel_fn, x1_or_kernel)
       return _apply_kernel(init_fn, kernel_fn, x1_or_kernel)
-    return outer_kernel_fn(x1_or_kernel, x2, get)
+    return outer_kernel_fn(x1_or_kernel, x2, get, marginalization)
 
   @utils.get_namedtuple('AnalyticKernel')
-  def outer_kernel_fn(x1, x2, get):
+  def outer_kernel_fn(x1, x2, get, marginalization):
     if not isinstance(x1, np.ndarray):
       raise TypeError('Inputs to a kernel propagation function should be '
                       'a `Kernel`, '
@@ -401,9 +427,21 @@ def _preprocess_kernel_fn(init_fn, kernel_fn):
                       % type(x2))
 
     include_ntk = (get is None) or ('ntk' in get)
-    covs_req = getattr(kernel_fn,
-                       _COVARIANCES_REQ, {'marginal': M.OVER_ALL,
-                                          'cross': M.OVER_ALL})
+
+    covs_req = getattr(
+        kernel_fn, _COVARIANCES_REQ, _DEFAULT_MARGINALIZATION)
+    if marginalization != 'auto':
+      if isinstance(marginalization, dict):
+        for k in covs_req:
+          if marginalization[k] > covs_req[k]:
+            covs_req[k] = marginalization[k]
+      elif marginalization == 'none' and x1.ndim > 2:
+        covs_req = {'marginal': M.OVER_POINTS, 'cross': M.NO}
+      else:
+        raise NotImplementedError(
+            ('marginalization should be set to one of "auto", "none", or a dict'
+             'specifying the marginalization levels of the variance and the '
+             'covariance respectively. Found {}.'.format(marginalization)))
     kernel = _inputs_to_kernel(x1, x2, compute_ntk=include_ntk, **covs_req)
     return _apply_kernel(init_fn, kernel_fn, kernel)
 
@@ -428,15 +466,16 @@ def _layer(layer):
     layer: A layer function returning a triple `(init_fn, apply_fn, kernel_fn)`.
 
   Returns:
-    A function with the same signature as `layer` with `kernel_fn` now accepting
-      `np.ndarray`s as inputs if needed, and optional `n_samples=0`, `key=None`,
-      `compute_ntk=True` arguments to let the user indicate that they want the
-      kernel to be computed by Monte Carlo sampling.
+    A function with the same signature as `layer` with `kernel_fn` now
+    accepting `np.ndarray`s as inputs if needed, and optional `n_samples=0`,
+    `key=None`, `compute_ntk=True` arguments to let the user indicate that
+    they want the kernel to be computed by Monte Carlo sampling.
   """
   @wraps(layer)
   def layer_fn(*args, **kwargs):
     init_fn, apply_fn, kernel_fn = layer(*args, **kwargs)
     kernel_fn = _preprocess_kernel_fn(init_fn, kernel_fn)
+    kernel_fn.__name__ = layer.__name__
     return init_fn, apply_fn, kernel_fn
   return layer_fn
 
@@ -811,8 +850,8 @@ def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0),
     return kernels._replace(
         var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=True)
 
-  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_ALL,
-                                        'cross': M.OVER_ALL})
+  setattr(kernel_fn, _COVARIANCES_REQ,
+          {'marginal': M.OVER_ALL, 'cross': M.OVER_ALL})
   return init_fn, apply_fn, kernel_fn
 
 
@@ -1568,6 +1607,7 @@ def Flatten():
         is_height_width=True, marginal=M.OVER_ALL, cross=M.OVER_ALL)
 
   return init_fn, apply_fn, kernel_fn
+
 
 @_layer
 def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
