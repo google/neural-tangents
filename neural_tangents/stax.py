@@ -92,9 +92,6 @@ _DEFAULT_MARGINALIZATION = frozendict.frozendict(
     {'marginal': M.OVER_ALL, 'cross': M.OVER_ALL})
 
 
-# pylint: disable=invalid-name
-
-
 class Padding(enum.Enum):
   CIRCULAR = 'CIRCULAR'
   SAME = 'SAME'
@@ -779,7 +776,6 @@ def _affine(nngp, W_std, b_std):
   return  W_std**2 * nngp + b_std**2
 
 
-# pylint: disable=g-doc-args
 @_layer
 def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0),
           parameterization='ntk'):
@@ -1223,8 +1219,6 @@ def _conv_var_3d(var1, filter_shape, strides, padding):
   return var1
 
 
-# We disable g-doc-args since we document relative to stax.
-# pylint: disable=g-doc-args
 @_layer
 def _GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None,
                  padding=Padding.VALID.name, W_std=1.0, W_init=_randn(1.0),
@@ -1372,7 +1366,6 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None,
   return init_fn, apply_fn, kernel_fn
 
 
-# pylint: disable=g-doc-args
 def Conv(out_chan, filter_shape, strides=None, padding=Padding.VALID.name,
          W_std=1.0, W_init=_randn(1.0), b_std=0.0, b_init=_randn(1.0),
          parameterization='ntk'):

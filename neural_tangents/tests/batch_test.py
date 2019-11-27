@@ -108,7 +108,6 @@ def _test_kernel_against_batched(cls, kernel_fn, batched_kernel_fn, train,
 
 class BatchTest(jtu.JaxTestCase):
 
-  # pylint: disable=g-complex-comprehension
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list(
           {

@@ -28,7 +28,6 @@ from neural_tangents import stax
 from neural_tangents.utils import monte_carlo
 from neural_tangents.utils import utils
 
-# pylint: disable=invalid-name
 
 jax_config.parse_flags_with_absl()
 
@@ -151,7 +150,6 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
 
 class StaxTest(jtu.JaxTestCase):
 
-  # pylint: disable=g-complex-comprehension
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
@@ -228,7 +226,6 @@ class StaxTest(jtu.JaxTestCase):
                                          strides, use_pooling, width,
                                          parameterization)
 
-  # pylint: disable=g-complex-comprehension
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
@@ -281,7 +278,6 @@ class StaxTest(jtu.JaxTestCase):
                                          strides, use_pooling, width,
                                          parameterization)
 
-  # pylint: disable=g-complex-comprehension
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
