@@ -1,9 +1,13 @@
-# Neural Tangents
+# Neural Tangents [[arXiv](https://arxiv.org/abs/1912.02803)]
  Fast and Easy Infinite Neural Networks in Python
 
 [![Build Status](https://travis-ci.org/google/neural-tangents.svg?branch=master)](https://travis-ci.org/google/neural-tangents) [![PyPI](https://img.shields.io/pypi/v/neural-tangents)](https://pypi.org/project/neural-tangents/) [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/neural-tangents)](https://pypi.org/project/neural-tangents/) [![PyPI - License](https://img.shields.io/pypi/l/neural_tangents)](https://github.com/google/neural-tangents/blob/master/LICENSE)
 
-**News:** we'll be at the [NeurIPS 2019](https://nips.cc/) [Bayesian Deep Learning](http://bayesiandeeplearning.org/) and [Science meets Engineering of Deep Learning](https://sites.google.com/corp/view/sedl-neurips-2019/) workshops, and the [Symposium on
+**News:**
+
+* [arXiv preprint is out](https://arxiv.org/abs/1912.02803)!
+
+* We'll be at the [NeurIPS 2019](https://nips.cc/) [Bayesian Deep Learning](http://bayesiandeeplearning.org/) and [Science meets Engineering of Deep Learning](https://sites.google.com/corp/view/sedl-neurips-2019/) workshops, and the [Symposium on
 Advances in Approximate Bayesian Inference](http://approximateinference.org/). Come tell us about your experience with the library!
 
 ## Overview
@@ -367,7 +371,15 @@ to the list!
 If you use the code in a publication, please cite the repo using the .bib,
 
 ```
-Coming soon.
+@misc{neuraltangents2019,
+    title={Neural Tangents: Fast and Easy Infinite Neural Networks in Python},
+    author={Roman Novak and Lechao Xiao and Jiri Hron and Jaehoon Lee and Alexander A. Alemi and Jascha Sohl-Dickstein and Samuel S. Schoenholz},
+    year={2019},
+    eprint={1912.02803},
+    archivePrefix={arXiv},
+    primaryClass={stat.ML},
+    howpublished={\url{https://github.com/google/neural-tangents}, \url{https://arxiv.org/abs/1912.02803}},
+}
 ```
 
 
