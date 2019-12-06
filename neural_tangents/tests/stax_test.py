@@ -67,7 +67,6 @@ ACTIVATIONS = {
     # TODO(romann): investigate poor erf convergence.
     stax.Erf(): 'erf',
     stax.Relu(): 'Relu',
-    stax.ABRelu(-0.5, 0.7): 'ABRelu(-0.5, 0.7)'
 }
 
 PROJECTIONS = [
