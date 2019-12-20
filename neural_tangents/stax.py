@@ -1473,7 +1473,7 @@ def AvgPool(window_shape,
 
     def rescaler(*args, **kwargs):
       del args, kwargs  # Unused.
-      return lambda outputs, _: outputs / np.prod(window_shape)
+      return lambda outputs, _, __: outputs / np.prod(window_shape)
 
     avgPool = ostax._pooling_layer(lax.add, 0., rescaler)
     init_fn, apply_fn = avgPool(window_shape, strides, padding.name)
