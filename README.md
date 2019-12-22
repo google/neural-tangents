@@ -5,10 +5,11 @@
 
 **News:**
 
-* [arXiv preprint is out](https://arxiv.org/abs/1912.02803)!
+* We will be at [ICLR 2020](https://iclr.cc/), come tell us about your experience with the library!
 
-* We'll be at the [NeurIPS 2019](https://nips.cc/) [Bayesian Deep Learning](http://bayesiandeeplearning.org/) and [Science meets Engineering of Deep Learning](https://sites.google.com/corp/view/sedl-neurips-2019/) workshops, and the [Symposium on
-Advances in Approximate Bayesian Inference](http://approximateinference.org/). Come tell us about your experience with the library!
+* [arXiv preprint is out](https://arxiv.org/abs/1912.02803).
+
+* NeurIPS 2019 [Symposium on Advances in Approximate Bayesian Inference slides (not recorded)](http://approximateinference.org/2019/schedule/Novak2019.pdf) and the [Bayesian Deep Learning workshop video (1:33)](https://slideslive.com/38921874/bayesian-deep-learning-1) are now available.
 
 ## Overview
 
