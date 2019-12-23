@@ -89,7 +89,9 @@ def _flatten_kernel(k, x2_is_none, store_on_device):
           k_dict[key] = None
         else:
           k_dict[key] = fl(value, 0)
-      elif key in ('is_height_width', 'is_gaussian'):
+      elif key == 'x1_is_x2':
+        k_dict[key] = value[(0,) * value.ndim]
+      elif key in ('is_height_width', 'is_gaussian', 'is_input'):
         # NOTE(schsam): Currently we have to make these values concrete so that
         # batched analytic kernels compose.
         k_dict[key] = bool(value[(0,) * value.ndim])
@@ -193,6 +195,10 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
   flatten = partial(_flatten_kernel, store_on_device=store_on_device)
 
   def serial_fn_x1(x1, x2=None, *args, **kwargs):
+    # TODO(xlc): Make batch + dropout work reasonably well.
+    if 'key' in kwargs:
+      raise NotImpletmentError('Batching for the empirical kernel with dropout '
+                               'is not implemented. ')
     x2_is_none = x2 is None
     if x2_is_none:
       # TODO(schsam): Only compute the upper triangular part of the kernel.
@@ -316,6 +322,9 @@ def _parallel(kernel_fn, device_count=-1):
     device_count = xla_bridge.device_count()
 
   def parallel_fn_x1(x1, x2=None, *args, **kwargs):
+    if 'key' in kwargs:
+      raise NotImpletmentError('Batching for the empirical kernel with dropout '
+                               'is not implemented. ')
     x2_is_none = x2 is None
     if x2_is_none:
       # TODO(schsam): Only compute the upper triangular part of the kernel.
@@ -362,6 +371,9 @@ def _parallel(kernel_fn, device_count=-1):
     if var2 is None:
       var2 = kernel_dict['var1']
     kernel_dict['var2'] = np.broadcast_to(var2, (_device_count,) + var2.shape)
+    kernel_dict['x1_is_x2'] = np.broadcast_to(
+        kernel_dict['x1_is_x2'],
+        (_device_count,) + kernel_dict['x1_is_x2'].shape)
 
     for k, v in kernel_dict.items():
       if k in ('nngp', 'ntk', 'var1'):

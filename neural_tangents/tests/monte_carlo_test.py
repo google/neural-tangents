@@ -47,6 +47,7 @@ ALL_GET = ('nngp', 'ntk', ('nngp', 'ntk'), None)
 utils.update_test_tolerance()
 
 
+
 def _get_inputs_and_model(width=1, n_classes=2, use_conv=True):
   key = random.PRNGKey(1)
   key, split = random.split(key)
@@ -146,8 +147,8 @@ class MonteCarloTest(jtu.JaxTestCase):
         1024, 256, xla_bridge.get_backend().platform == 'tpu')
 
     sample = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn, key, 200,
-                                             batch_size, device_count,
-                                             store_on_device)
+                                               batch_size, device_count,
+                                               store_on_device)
 
     ker_empirical = sample(x1, x2, 'nngp')
     ker_analytic = stax_kernel_fn(x1, x2, 'nngp')

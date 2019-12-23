@@ -63,6 +63,7 @@ CONVOLUTION_CHANNELS = 256
 utils.update_test_tolerance()
 
 
+
 def _build_network(input_shape, network, out_logits):
   if len(input_shape) == 1:
     assert network == 'FLAT'

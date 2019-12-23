@@ -65,18 +65,18 @@ Example:
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-from functools import wraps
 import warnings
 import enum
-from functools import partial
+from functools import partial, wraps
 from jax import lax
 from jax import random
 from jax import linear_util as lu
+from jax import ops
 import jax.interpreters.partial_eval as pe
 from jax.abstract_arrays import ShapedArray
 from jax.api_util import flatten_fun
 from jax.tree_util import tree_map, tree_flatten, tree_unflatten
-from jax.experimental import stax as ostax
+import jax.experimental.stax as ostax
 import jax.numpy as np
 from jax.scipy.special import erf
 from neural_tangents.utils.kernel import Kernel
@@ -218,7 +218,53 @@ def _get_covariance(x1, x2, marginal_type):
   return ret / x1.shape[-1]
 
 
-def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk):
+def _diag_mul_over_points(A, mul):
+  if (A.shape[0] != A.shape[1] or
+      A.shape[2] != A.shape[3] or
+      A.shape[4] != A.shape[5]):
+    return A
+
+  batch_idx = np.arange(A.shape[0]).reshape((A.shape[0], 1, 1))
+  x_idx = np.arange(A.shape[2]).reshape((1, A.shape[2], 1))
+  y_idx = np.arange(A.shape[4]).reshape((1, 1, A.shape[4]))
+  idx = (batch_idx,) * 2 + (x_idx,) * 2 + (y_idx,) * 2
+
+  diag = np.diagonal(np.diagonal(np.diagonal(A)))
+  A = ops.index_update(A, idx, diag * mul)
+  return A
+
+
+def _diag_mul_over_pixels(A, mul):
+  if A.shape[0] != A.shape[1]:
+    return A
+
+  idx = np.diag_indices(A.shape[0]) + (Ellipsis,)
+  diag = np.moveaxis(np.diagonal(A), -1, 0)
+  A = ops.index_update(A, idx, diag * mul)
+  return A
+
+
+def _diag_mul_over_all(A, mul):
+  if A.shape[0] != A.shape[1]:
+    return A
+  idx = np.diag_indices(A.shape[0])
+  diag = np.diag(A)
+  A = ops.index_update(A, idx, diag * mul)
+  return A
+
+
+def _diag_mul(A, mul):
+  if A.ndim not in [2, 4, 6]:
+    raise ValueError('The array must be a 2, 4 or 6d tensor. A {}d tensor is '
+                     'provided.'.format(A.ndim))
+  if A.ndim == 2:
+    return _diag_mul_over_all(A, mul)
+  elif A.ndim == 4:
+    return _diag_mul_over_pixels(A, mul)
+  return _diag_mul_over_points(A, mul)
+
+
+def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk, eps=1e-12):
   """Transforms (batches of) inputs to a `Kernel`.
 
   This is a private method. Docstring and example are for internal reference.
@@ -246,6 +292,8 @@ def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk):
       dimensions should the covariances be tracked in `nngp`/`ntk`.
     compute_ntk: a boolean, `True` to compute both NTK and NNGP kernels,
         `False` to only compute NNGP.
+    eps: a small number used to check whether x1 and x2 are the same up to
+        `eps`.
 
     Example:
       ```python
@@ -301,6 +349,7 @@ def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk):
   # promotion.
   x1 = x1.astype(np.float64)
   var1 = _get_variance(x1, marginal_type=marginal)
+  x1_is_x2 = utils.x1_is_x2(x1, x2, eps=eps)
 
   if x2 is None:
     x2 = x1
@@ -319,9 +368,10 @@ def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk):
   ntk = 0. if compute_ntk else None
   is_gaussian = False
   is_height_width = True
+  is_input = True
 
   return Kernel(var1, nngp, var2, ntk, is_gaussian, is_height_width,
-                marginal, cross, x1.shape, x2.shape)
+                marginal, cross, x1.shape, x2.shape, x1_is_x2, is_input)
 
 
 def _propagate_shape(init_fn, shape):
@@ -512,6 +562,7 @@ def ABRelu(a, b, do_backprop=False, do_stabilize=False):
 def LeakyRelu(alpha, do_backprop=False, do_stabilize=False):
   return _elementwise(_ab_relu, a=alpha, b=1, do_backprop=do_backprop,
                       do_stabilize=do_stabilize)
+
 
 @_layer
 def Abs(do_backprop=False, do_stabilize=False):
@@ -844,7 +895,8 @@ def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0),
       var1, nngp, var2 = map(fc, (var1, nngp, var2))
 
     return kernels._replace(
-        var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=True)
+        var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=True,
+        is_input=False)
 
   setattr(kernel_fn, _COVARIANCES_REQ,
           {'marginal': M.OVER_ALL, 'cross': M.OVER_ALL})
@@ -882,6 +934,7 @@ def FanInSum():
   init_fn, apply_fn = ostax.FanInSum
   def kernel_fn(kernels):
     is_gaussian = all(ker.is_gaussian for ker in kernels)
+
     if not is_gaussian:
       raise NotImplementedError('`FanInSum` layer is only implemented for the '
                                 'case if all input layers guaranteed to be mean'
@@ -920,10 +973,13 @@ def FanInSum():
     if not all([k.shape1 == shape1 and k.shape2 == shape2 for k in kernels]):
       raise ValueError('All shapes should be equal in FanInSum.')
 
+    x1_is_x2 = kernels[0].x1_is_x2
     kers = tuple(None if all(ker[i] is None for ker in kernels) else
                  sum(ker[i] for ker in kernels) for i in range(4))
+    is_input = kernels[0].is_input
     return Kernel(*(
-        kers + (is_gaussian, is_height_width, marginal, cross, None, None)))
+        kers + (is_gaussian, is_height_width, marginal, cross, None, None,
+                x1_is_x2, is_input)))
 
   return init_fn, apply_fn, kernel_fn
 
@@ -1359,7 +1415,8 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None,
 
     return kernels._replace(
         var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=True,
-        is_height_width=is_height_width, marginal=marginal, cross=cross)
+        is_height_width=is_height_width, marginal=marginal, cross=cross,
+        is_input=False)
 
   setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_PIXELS,
                                         'cross': M.OVER_PIXELS})
@@ -1873,4 +1930,46 @@ def LayerNorm(axis=-1, eps=1e-12):
   if len(axis) > 1:
     setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_PIXELS,
                                           'cross': M.OVER_PIXELS})
+  return init_fn, apply_fn, kernel_fn
+
+
+@_layer
+def Dropout(rate, mode='train'):
+  """Dropout layer.
+
+  Args:
+    rate: A float specifying the keep `rate`, e.g. `rate=1` is equivalent to
+      keeping all neurons.
+    mode: either `train` or `test`.
+  """
+  if mode not in ['test', 'train']:
+    raise ValueError('The `mode` must be either `test`  or `train`.')
+  if rate <= 0. or rate > 1.:
+    raise ValueError('The `rate` must be > 0. and <= 1.')
+
+  init_fn, apply_fn = ostax.Dropout(rate, mode=mode)
+  kernel_fn_test = lambda kernels: kernels
+
+  def kernel_fn_train(kernels):
+    """kernel_fn for `train` mode. """
+    var1, nngp, var2, ntk, marginal, cross, x1_is_x2, is_input = (
+        kernels.var1, kernels.nngp, kernels.var2, kernels.ntk,
+        kernels.marginal, kernels.cross, kernels.x1_is_x2,
+        kernels.is_input)
+
+    if is_input:
+      raise ValueError('Dropout cannot be applied to the input layer.')
+    factor = 1./rate
+    var1 *= factor
+    if var2 is not None:
+      var2 *= factor
+    new_factor = np.where(x1_is_x2, factor, 1.)
+    nngp = _diag_mul(nngp, new_factor)
+    ntk = _diag_mul(ntk, new_factor) if _is_array(ntk) else ntk
+    # TODO(xlc): under which condition could we leave `is_gaussian` unchanged?
+    return kernels._replace(var1=var1, nngp=nngp, var2=var2, ntk=ntk,
+                            is_gaussian=False)
+
+  kernel_fn = kernel_fn_test if mode == 'test' else kernel_fn_train
+
   return init_fn, apply_fn, kernel_fn

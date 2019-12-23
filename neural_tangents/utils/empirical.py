@@ -18,24 +18,39 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 import operator
-from collections import namedtuple
 from absl import flags
+from jax import random
 from jax.api import eval_shape
 from jax.api import jacobian
 from jax.api import jvp
 from jax.api import vjp
+from functools import partial
 from jax.config import config
 import jax.numpy as np
 from jax.tree_util import tree_multimap
 from jax.tree_util import tree_reduce
 from neural_tangents.utils import flags as internal_flags
-from neural_tangents.utils.utils import get_namedtuple
-
+from neural_tangents.utils import utils
 
 config.parse_flags_with_absl()  # NOTE(schsam): Is this safe?
 
 
 FLAGS = flags.FLAGS
+
+
+def _read_keys(keys):
+  if keys is None or (isinstance(keys, np.ndarray) and keys.shape == (2,)):
+    key1 = key2 = keys
+  elif isinstance(keys, tuple):
+    # assuming x1 and x2 using key1 and key2, resp.
+    key1, key2 = keys
+  elif isinstance(keys, np.ndarray) and keys.shape == (2, 2):
+    key1, key2 = keys[0], keys[1]
+  else:
+    raise ValueError('`keys` must be one of the following: `None`, a PRNG '
+                     'key, a tuple of PRNG keys or a (2, 2) array and dtype '
+                     'unint32')
+  return key1, key2
 
 
 def linearize(f, params):
@@ -149,7 +164,7 @@ def empirical_implicit_ntk_fn(f):
     A function ntk_fn that computes the empirical ntk.
   """
 
-  def ntk_fn(x1, x2, params):
+  def ntk_fn(x1, x2, params, keys=None):
     """Computes the empirical ntk.
 
     Args:
@@ -159,19 +174,27 @@ def empirical_implicit_ntk_fn(f):
         would like to compute the NTK.
       params: A PyTree of parameters about which we would like to compute the
         neural tangent kernel.
+      keys: None or a PRNG key or a tuple of PRNG keys or a (2, 2) array and
+        dtype uint32. If `key == None`, then the function `f` is deterministic and
+        requires no PRNG key; else if `keys` is a single PRNG key, then x1 and
+        x2 must be the same and share the same PRNG key; else x1 and x2 use two
+        different PRNG keys.
 
     Returns:
       A `np.ndarray` of shape [n1, n2] + output_shape + output_shape.
     """
+    key1, key2 = _read_keys(keys)
+    # TODO(xlc): find a good way to check utils.x1_is_x2(x1, x2) == (key1==key2)
     if x2 is None:
       x2 = x1
-    fx2_struct = eval_shape(f, params, x2)
-    fx_dummy = np.ones(fx2_struct.shape, fx2_struct.dtype)
 
+    f_dummy = partial(f, rng=random.PRNGKey(1))
+    fx2_struct = eval_shape(f_dummy, params, x2)
+    fx_dummy = np.ones(fx2_struct.shape, fx2_struct.dtype)
     def delta_vjp_jvp(delta):
       def delta_vjp(delta):
-        return vjp(lambda p: f(p, x2), params)[1](delta)
-      return jvp(lambda p: f(p, x1), (params,), delta_vjp(delta))[1]
+        return vjp(lambda p: f(p, x2, rng=key2), params)[1](delta)
+      return jvp(lambda p: f(p, x1, rng=key1), (params,), delta_vjp(delta))[1]
 
     ntk = jacobian(delta_vjp_jvp)(fx_dummy)
     ndim = len(fx2_struct.shape)
@@ -196,8 +219,6 @@ def empirical_direct_ntk_fn(f):
   Returns:
     A function `ntk_fn` that computes the empirical ntk.
   """
-  jac_fn = jacobian(f)
-
   def sum_and_contract(j1, j2):
     def contract(x, y):
       param_count = int(np.prod(x.shape[2:]))
@@ -207,7 +228,7 @@ def empirical_direct_ntk_fn(f):
 
     return tree_reduce(operator.add, tree_multimap(contract, j1, j2))
 
-  def ntk_fn(x1, x2, params):
+  def ntk_fn(x1, x2, params, keys=None):
     """Computes the empirical ntk.
 
     Args:
@@ -217,15 +238,23 @@ def empirical_direct_ntk_fn(f):
         would like to compute the NTK.
       params: A PyTree of parameters about which we would like to compute the
         neural tangent kernel.
+      keys: None or a PRNG key or a tuple of PRNG keys or a (2, 2) array and
+        dtype uint32. If `key == None`, then the function `f` is deterministic and
+        requires no PRNG key; else if `keys` is a single PRNG key, then x1 and
+        x2 share the same PRNG key; else x1 and x2 use two different PRNG keys.
     Returns:
       A `np.ndarray` of shape [n1, n2] + output_shape + output_shape.
     """
-    j1 = jac_fn(params, x1)
-
+    key1, key2 = _read_keys(keys)
+    f1 = partial(f, rng=key1)
+    jac_fn1 = jacobian(f1)
+    j1 = jac_fn1(params, x1)
     if x2 is None:
       j2 = j1
     else:
-      j2 = jac_fn(params, x2)
+      f2 = partial(f, rng=key2)
+      jac_fn2 = jacobian(f2)
+      j2 = jac_fn2(params, x2)
 
     ntk = sum_and_contract(j1, j2)
     # TODO(schsam): If we care, this will not work if the output is not of
@@ -236,8 +265,8 @@ def empirical_direct_ntk_fn(f):
 
 
 empirical_ntk_fn = (empirical_implicit_ntk_fn
-                     if FLAGS.tangents_optimized else
-                     empirical_direct_ntk_fn)
+                    if FLAGS.tangents_optimized else
+                    empirical_direct_ntk_fn)
 
 
 def empirical_nngp_fn(f):
@@ -260,7 +289,7 @@ def empirical_nngp_fn(f):
   Returns:
      A function to draw a single sample the NNGP of a given network `f`.
   """
-  def nngp_fn(x1, x2, params):
+  def nngp_fn(x1, x2, params, keys=None):
     """Sample a single NNGP of a given network `f` on given inputs and `params`.
 
     This method assumes that slices of the random network outputs along the last
@@ -278,13 +307,21 @@ def empirical_nngp_fn(f):
         `None` means `x2 == x1`.
       params: A PyTree of parameters about which we would like to compute the
         NNGP.
+      keys: None or a PRNG key or a tuple of PRNG keys or a (2, 2) array and
+        dtype uint32. If `key == None`, then the function `f` is deterministic and
+        requires no PRNG key; else if `keys` is a single PRNG key, then x1 and
+        x2 share the same PRNG key; else x1 and x2 use two different PRNG keys.
 
     Returns:
       A Monte Carlo estimate of the NNGP, a `np.ndarray` of shape
       `[batch_size_1] + output_shape[:-1] + [batch_size_2] + output_shape[:-1]`.
     """
-    out1 = f(params, x1)
-    out2 = f(params, x2) if x2 is not None else out1
+    key1, key2 = _read_keys(keys)
+    out1 = f(params, x1, rng=key1)
+    if x2 is None:
+      out2 = out1
+    else:
+      out2 = f(params, x2, rng=key2)
 
     out2 = np.expand_dims(out2, -1)
     nngp_12 = np.dot(out1, out2) / out1.shape[-1]
@@ -301,8 +338,8 @@ def empirical_kernel_fn(f):
       'ntk': empirical_ntk_fn(f)
   }
 
-  @get_namedtuple('EmpiricalKernel')
-  def kernel_fn(x1, x2, params, get=None):
+  @utils.get_namedtuple('EmpiricalKernel')
+  def kernel_fn(x1, x2, params, get=None, keys=None):
     """Returns a draw from the requested empirical kernels.
 
     Args:
@@ -312,6 +349,11 @@ def empirical_kernel_fn(f):
       get: either None, a string, a tuple of strings specifying which data
         should be returned by the kernel function. Can be "nngp" or "ntk". If
         `None` then both "nngp" and "ntk" are returned.
+      keys: None or a PRNG key or a tuple of PRNG keys or a (2, 2) array and
+        dtype uint32. If `key == None`, then the function `f` is deterministic and
+        requires no PRNG key; else if `keys` is a single PRNG key, then x1 and
+        x2 share the same PRNG key; else x1 and x2 use two different PRNG keys.
+
 
     Returns:
       If `get` is a string, returns the requested `np.ndarray`. If `get` is a
@@ -320,6 +362,6 @@ def empirical_kernel_fn(f):
     """
     if get is None:
       get = ('nngp', 'ntk')
-    return {g: kernel_fns[g](x1, x2, params) for g in get}
+    return {g: kernel_fns[g](x1, x2, params, keys) for g in get}
 
   return kernel_fn

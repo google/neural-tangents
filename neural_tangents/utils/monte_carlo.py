@@ -24,11 +24,12 @@ from __future__ import print_function
 from jax import random
 from functools import partial
 import operator
+import jax.numpy as np
 from jax.tree_util import tree_map
 from jax.tree_util import tree_multimap
 from neural_tangents.utils import batch
 from neural_tangents.utils import empirical
-from neural_tangents.utils.utils import get_namedtuple
+from neural_tangents.utils import utils
 
 
 def _sample_once_kernel_fn(kernel_fn,
@@ -40,8 +41,11 @@ def _sample_once_kernel_fn(kernel_fn,
            device_count=device_count,
            store_on_device=store_on_device)
   def kernel_fn_sample_once(x1, x2, key, get):
-    _, params = init_fn(key, x1.shape)
-    return kernel_fn(x1, x2, params, get)
+    init_key, dropout_key1, dropout_key2 = random.split(key, 3)
+    keys = np.where(utils.x1_is_x2(x1, x2), dropout_key1,
+                    (dropout_key1, dropout_key2))
+    _, params = init_fn(init_key, x1.shape)
+    return kernel_fn(x1, x2, params, get, keys=keys)
   return kernel_fn_sample_once
 
 
@@ -65,13 +69,13 @@ def _sample_many_kernel_fn(kernel_fn_sample_once, key, n_samples,
       yield n, ker_sampled
 
   if get_generator:
-    @get_namedtuple('MonteCarloKernel')
+    @utils.get_namedtuple('MonteCarloKernel')
     def get_sampled_kernel(x1, x2, get=None):
       for n, sample in get_samples(x1, x2, get):
         if n in n_samples:
           yield normalize(sample, n)
   else:
-    @get_namedtuple('MonteCarloKernel')
+    @utils.get_namedtuple('MonteCarloKernel')
     def get_sampled_kernel(x1, x2, get=None):
       for n, sample in get_samples(x1, x2, get):
         pass

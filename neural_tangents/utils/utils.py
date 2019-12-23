@@ -13,15 +13,16 @@
 # limitations under the License.
 """General-purpose internal utilities."""
 
-from jax.api import jit
-from jax.api import vmap
-from jax.lib import xla_bridge
-import jax.test_util as jtu
-import jax.numpy as np
 from collections import namedtuple
 from functools import wraps
 import inspect
 import types
+
+from jax import test_util as jtu
+from jax.api import jit
+from jax.api import vmap
+from jax.lib import xla_bridge
+import jax.numpy as np
 import six
 
 
@@ -171,3 +172,20 @@ def _argspec(func):
     return inspect.getfullargspec(func)
   else:
     return inspect.getargspec(func)
+
+
+def x1_is_x2(x1, x2=None, eps=1e-12):
+  if xla_bridge.get_backend().platform == 'tpu':
+    eps = 1e-4
+  if not isinstance(x1, np.ndarray):
+    raise TypeError('`x1` must be an ndarray. A {} is found.'.format(type(x1)))
+  if x2 is None:
+    return True
+
+  if x1 is x2:
+    return True
+
+  if x1.shape != x2.shape:
+    return False
+
+  return np.all(np.abs(x1 - x2) < eps)

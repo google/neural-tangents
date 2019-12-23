@@ -60,7 +60,7 @@ class Marginalisation(enum.IntEnum):
 class Kernel(
     collections.namedtuple('Kernel', [
         'var1', 'nngp', 'var2', 'ntk', 'is_gaussian', 'is_height_width',
-        'marginal', 'cross', 'shape1', 'shape2',
+        'marginal', 'cross', 'shape1', 'shape2', 'x1_is_x2', 'is_input',
     ])):
   """A tuple containing information about the analytic NTK and NNGP of a model.
 
@@ -103,7 +103,7 @@ class Kernel(
   """
 
   def __new__(cls, var1, nngp, var2, ntk, is_gaussian, is_height_width,
-              marginal, cross, shape1, shape2):
+              marginal, cross, shape1, shape2, x1_is_x2, is_input):
     """Returns a `Kernel`.
 
     Args:
@@ -140,11 +140,14 @@ class Kernel(
       cross: an instance of `Marginalisation` enum or its ID, specifying types
         of covariances between spatial dimensions tracked in `nngp`/`ntk`.
       shape1: a tuple specifying the shape of the random variable in the first
-        batch of inputs. These have variance `var1` and covariance with the second
-        batch of inputs given by `nngp`.
+        batch of inputs. These have variance `var1` and covariance with the
+        second batch of inputs given by `nngp`.
       shape2: a tuple specifying the shape of the random variable in the second
-        batch of inputs. These have variance `var2` and covariance with the first
-        batch of inputs given by `nngp`.
+        batch of inputs. These have variance `var2` and covariance with the
+        first batch of inputs given by `nngp`.
+      x1_is_x2: a boolean specifying whether `x1` and `x2` are the same.
+      is_input: a boolean specifying whether the current layer is the input
+        layer and it is used to avoid applying dropout to the input layer.
     Returns:
       A `Kernel`.
     """
@@ -154,7 +157,8 @@ class Kernel(
       cross = int(cross)
     return super(Kernel, cls).__new__(
         cls, var1, nngp, var2, ntk, is_gaussian,
-        is_height_width, marginal, cross, shape1, shape2)
+        is_height_width, marginal, cross, shape1, shape2, x1_is_x2,
+        is_input)
 
   def _replace(self, **kwargs):
     """`namedtuple._replace` with casting `Marginalisation` to `int`s."""
