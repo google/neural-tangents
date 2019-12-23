@@ -251,7 +251,7 @@ class StaxTest(jtu.JaxTestCase):
                           for same_inputs in [False, True]
                           for is_ntk in [False, True]
                           for filter_size in FILTER_SIZES
-                          for proj_into_2d in PROJECTIONS
+                          for proj_into_2d in PROJECTIONS[:2]
                           for parameterization in PARAMETERIZATIONS))
   def test_parameterizations(self, model, width, same_inputs, is_ntk,
                              filter_size, proj_into_2d, parameterization):
