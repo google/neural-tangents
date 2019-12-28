@@ -21,6 +21,7 @@ from __future__ import print_function
 from functools import partial
 
 from jax import test_util as jtu
+from jax import ops
 from jax.config import config as jax_config
 from jax.lib import xla_bridge
 import jax.numpy as np
@@ -466,6 +467,50 @@ class StaxTest(jtu.JaxTestCase):
     ker_out = ker_fn(ker_fn(x1, x2))
     composed_ker_out = composed_ker_fn(x1, x2)
     self.assertAllClose(ker_out, composed_ker_out, True)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name': '_act={}_kernel={}'.format(act, kern),
+          'act': act,
+          'kernel': kern
+      } for act in ['erf', 'relu'] for kern in ['nngp', 'ntk']))
+  def test_sparse_inputs(self, act, kernel):
+    key = random.PRNGKey(1)
+
+    input_count = 4
+    sparse_count = 2
+    input_size = 128
+    width = 4096
+
+    # NOTE(schsam): It seems that convergence is slower when inputs are sparse.
+    samples = N_SAMPLES
+
+    if xla_bridge.get_backend().platform == 'gpu':
+      jtu._default_tolerance[np.onp.dtype(np.onp.float64)] = 5e-4
+      samples = 100 * N_SAMPLES
+    else:
+      jtu._default_tolerance[np.onp.dtype(np.onp.float32)] = 5e-2
+      jtu._default_tolerance[np.onp.dtype(np.onp.float64)] = 5e-3
+
+    # a batch of dense inputs
+    x_dense = random.normal(key, (input_count, input_size))
+    x_sparse = ops.index_update(x_dense, ops.index[:sparse_count, :], 0.)
+
+    activation = stax.Relu() if act == 'relu' else stax.Erf()
+
+    init_fn, apply_fn, kernel_fn = stax.serial(
+        stax.Dense(width),
+        activation,
+        stax.Dense(1 if kernel == 'ntk' else width))
+    exact = kernel_fn(x_sparse, None, kernel)
+    mc = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, random.split(key, 2)[0], samples
+        )(x_sparse, None, kernel)
+    mc = np.reshape(mc, exact.shape)
+
+    assert not np.any(np.isnan(exact))
+    self.assertAllClose(exact[sparse_count:, sparse_count:],
+                        mc[sparse_count:, sparse_count:], True)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({

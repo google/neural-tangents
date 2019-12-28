@@ -588,6 +588,10 @@ def _sqrt(x, do_backprop):
   return np.sqrt(x)
 
 
+def _safe_sqrt(x):
+  return np.sqrt(np.maximum(x, 1e-20))
+
+
 def _arcsin(x, do_backprop):
   if do_backprop:
     # https://github.com/google/jax/issues/654
@@ -685,7 +689,7 @@ def _get_normalising_prod(var1, var2, marginal, axis=()):
 
 
 def _get_ab_relu_kernel(ker_mat, prod, a, b, do_backprop, ntk=None):
-  cosines = ker_mat / np.sqrt(prod)
+  cosines = ker_mat / _safe_sqrt(prod)
   angles = _arccos(cosines, do_backprop)
 
   dot_sigma = (a**2 + b**2 - (a - b)**2 * angles / np.pi) / 2
@@ -743,7 +747,7 @@ def _transform_kernels_ab_relu(kernels, a, b, do_backprop, do_stabilize):
 
 def _get_erf_kernel(ker_mat, prod, do_backprop, ntk=None):
   dot_sigma = 4 / (np.pi * np.sqrt(prod - 4 * ker_mat**2))
-  ker_mat = _arcsin(2 * ker_mat / np.sqrt(prod), do_backprop) * 2 / np.pi
+  ker_mat = _arcsin(2 * ker_mat / _safe_sqrt(prod), do_backprop) * 2 / np.pi
 
   if ntk is not None:
     ntk *= dot_sigma
