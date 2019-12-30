@@ -53,10 +53,10 @@ POOLING = 'POOLING'
 
 # TODO(schsam): Add a pooling test when multiple inputs are supported in
 # Conv + Pooling.
-TRAIN_SHAPES = [(4, 4), (4, 8), (8, 8), (6, 4, 4, 3)]
-TEST_SHAPES = [(2, 4), (6, 8), (16, 8), (2, 4, 4, 3)]
+TRAIN_SHAPES = [(4, 8), (8, 8), (6, 4, 4, 3)]
+TEST_SHAPES = [(6, 8), (16, 8), (2, 4, 4, 3)]
 NETWORK = [FLAT, FLAT, FLAT, FLAT]
-OUTPUT_LOGITS = [1, 2, 3]
+OUTPUT_LOGITS = [1, 2]
 
 CONVOLUTION_CHANNELS = 256
 

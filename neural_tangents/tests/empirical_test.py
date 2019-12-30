@@ -82,7 +82,6 @@ for o in OUTPUT_LOGITS:
 
 class EmpiricalTest(jtu.JaxTestCase):
 
-  # pylint: disable=g-complex-comprehension
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_{}'.format(shape),

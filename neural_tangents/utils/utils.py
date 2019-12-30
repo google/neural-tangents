@@ -30,7 +30,6 @@ def _jit_vmap(f):
 
 
 def update_test_tolerance():
-  # pylint: disable=protected-access
   jtu._default_tolerance[np.onp.dtype(np.onp.float32)] = 5e-3
   jtu._default_tolerance[np.onp.dtype(np.onp.float64)] = 1e-5
   def default_tolerance():

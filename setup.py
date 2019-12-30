@@ -27,8 +27,8 @@ with io.open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
 
 
 INSTALL_REQUIRES = [
-    'jaxlib>=0.1.36',
-    'jax>=0.1.53',
+    'jaxlib>=0.1.37',
+    'jax>=0.1.55',
     'frozendict',
     'quadpy'
 ]
@@ -36,12 +36,18 @@ INSTALL_REQUIRES = [
 
 setuptools.setup(
     name='neural-tangents',
-    version='0.1.3',
+    version='0.1.4',
     license='Apache 2.0',
     author='Google',
     author_email='neural-tangents-dev@google.com',
     install_requires=INSTALL_REQUIRES,
     url='https://github.com/google/neural-tangents',
+    download_url = "https://pypi.org/project/neural-tangents/",
+    project_urls={
+        "Source Code": "https://github.com/google/neural-tangents",
+        "Documentation": "https://arxiv.org/abs/1912.02803",
+        "Bug Tracker": "https://github.com/google/neural-tangents/issues",
+    },
     packages=setuptools.find_packages(),
     long_description=long_description,
     long_description_content_type='text/markdown',
@@ -54,6 +60,10 @@ setuptools.setup(
         'Programming Language :: Python :: 3.7',
         'License :: OSI Approved :: Apache Software License',
         'Operating System :: MacOS',
-        'Operating System :: POSIX :: Linux'
+        'Operating System :: POSIX :: Linux',
+        'Topic :: Software Development',
+        'Topic :: Scientific/Engineering',
+        'Intended Audience :: Science/Research',
+        'Intended Audience :: Developers',
     ]
 )
