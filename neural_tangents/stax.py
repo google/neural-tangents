@@ -82,7 +82,9 @@ from jax.scipy.special import erf
 from neural_tangents.utils.kernel import Kernel
 from neural_tangents.utils import utils
 from neural_tangents.utils.kernel import Marginalisation as M
+from jax.nn.initializers import ones, zeros
 import frozendict
+import quadpy as qp
 
 
 _CONV_DIMENSION_NUMBERS = ('NHWC', 'HWIO', 'NHWC')
@@ -1881,3 +1883,105 @@ def LayerNorm(axis=-1, eps=1e-12):
     setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_PIXELS,
                                           'cross': M.OVER_PIXELS})
   return init_fn, apply_fn, kernel_fn
+
+@_layer
+def BatchNormRelu(axis, epsilon=0., center=True, scale=True,
+                  beta_init=zeros, gamma_init=ones):
+  """Layer construction function for a batch normalization layer.
+
+  See the papers below for the derivation.
+      https://arxiv.org/abs/1902.08129
+      https://arxiv.org/abs/1910.12478
+
+  The implementation here follows the reference implementation in
+      https://github.com/thegregyang/GP4A
+  """
+
+  assert epsilon < 1e-12
+
+  _beta_init = lambda rng, shape: beta_init(rng, shape) if center else ()
+  _gamma_init = lambda rng, shape: gamma_init(rng, shape) if scale else ()
+  axis = (axis,) if np.isscalar(axis) else axis
+
+  init_fn, bn_apply_fn = ostax.BatchNorm(
+      axis, epsilon, center, scale, beta_init, gamma_init)
+
+  def apply_fn(params, xs, **kwargs):
+    xs = bn_apply_fn(params, xs)
+    return _ab_relu(xs, 0, 1)
+
+  # NOTE: Currently assumes var2 is None and computes single batch kernel
+  def kernel_fn(kernels):
+    batch_size = kernels.var1.shape[0]
+    assert kernels.var2 is None
+
+    G = np.eye(batch_size) - np.ones((batch_size, batch_size)) / batch_size
+    eigvals, eigvecs = np.linalg.eigh(G @ kernels.nngp @ G)
+    logeigvals = np.log(eigvals[1:])
+    eigvecs = eigvecs[:, 1:]
+
+    # NOTE: Likely the same as _get_ab_relu_kernel.
+    def VReLU(cov, eps=1e-5):
+      indices = list(range(cov.shape[-1]))
+      d = np.sqrt(cov[..., indices, indices])
+      dd = d[..., np.newaxis] * d[..., np.newaxis, :]
+      c = dd ** (-1) * cov
+      c = np.where(c > 1 - eps, 1 - eps, c)
+      c = np.where(c < -1 + eps, -1 + eps, c)
+      c = (np.sqrt(1 - c ** 2) + (np.pi - np.arccos(c)) * c) / np.pi
+      return np.nan_to_num(0.5 * dd * c)
+
+    # NOTE: eps is a stability factor for the integral, not for batch norm.
+    def integrand(log_s, logmultifactor=0, eps=1e-10):
+      logUeigvals = np.logaddexp(0, np.log(2) + log_s[..., None]  + logeigvals)
+      loginteigvals = logeigvals - logUeigvals
+
+      loginteigvals -= 0.5 * np.sum(logUeigvals, axis=-1, keepdims=True)
+      loginteigvals += logmultifactor
+
+      inteigvals = np.exp(loginteigvals)
+
+      intvals = np.einsum(
+          'ij,...j,jk->...ik', eigvecs, inteigvals, eigvecs.T, optimize=True)
+      return VReLU(intvals)
+
+    # TODO(Greg): Compute the split point correctly.
+    intargmax = -np.log(batch_size - 1)
+    npos = 10  # TODO(Greg): Make these parameters, maybe?
+    nneg = 10
+    alpha = 1 / 8.
+
+    schemepos = qp.e1r.gauss_laguerre(npos)
+    schemeneg = qp.e1r.gauss_laguerre(nneg)
+
+    schemepospoints = schemepos.points
+    schemenegpoints = schemeneg.points
+    schemeposweights = schemepos.weights
+    schemenegweights = schemeneg.weights
+
+
+
+    integrandpos = lambda xs: np.moveaxis(
+        np.moveaxis(
+            alpha * integrand(intargmax + alpha * xs,
+                              logmultifactor=(
+                                  intargmax + (1 + alpha) * xs)[..., np.newaxis]),
+                    2, 0), 3, 1)
+
+    integrandneg = lambda xs: np.moveaxis(
+        np.exp(intargmax) * np.moveaxis(integrand(intargmax - xs), 2, 0), 3, 1)
+
+    new_nngp = batch_size * (
+        np.einsum('...i,i->...',
+              integrandpos(np.array([schemepospoints.T])),
+              schemeposweights)
+        +
+        np.einsum('...i,i->...',
+              integrandneg(np.array([schemenegpoints.T])),
+              schemenegweights)).squeeze(-1)
+
+    var = np.diag(new_nngp)
+    return kernels._replace(var1=var, nngp=new_nngp, var2=var)
+
+  return init_fn, apply_fn, kernel_fn
+

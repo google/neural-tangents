@@ -78,11 +78,13 @@ PROJECTIONS = [
     'ATTN_PARAM'
 ]
 
-LAYER_NORM = [
+NORM_AXIS = [
+    (0,),
     (-1,),
     (1, 3),
     (1, 2, 3)
 ]
+
 
 PARAMETERIZATIONS = ['NTK', 'STANDARD']
 
@@ -98,7 +100,7 @@ def _get_inputs(key, is_conv, same_inputs, input_shape, fn=np.cos):
 
 
 def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
-             phi, strides, width, is_ntk, proj_into_2d, layer_norm,
+             phi, strides, width, is_ntk, proj_into_2d, norm_axis,
              parameterization):
   fc = partial(
       stax.Dense, W_std=W_std, b_std=b_std, parameterization=parameterization)
@@ -116,17 +118,24 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
       (2, 3), None, 'SAME' if padding == 'SAME' else 'CIRCULAR')
                           if use_pooling else stax.Identity()), phi, affine)
 
+  # If norm_axis is 0, then testing batchnorm; otherwise, layernorm
+  if norm_axis is None:
+    norm = stax.Identity()
+  elif norm_axis == 0 or norm_axis == (0,):
+    norm = stax.BatchNormRelu((0,))
+  else:
+    norm = stax.LayerNorm(axis=norm_axis)
   if is_res:
     block = stax.serial(
         affine, stax.FanOut(2),stax.parallel(stax.Identity(), res_unit),
         stax.FanInSum(),
-        stax.Identity() if layer_norm is None
-        else stax.LayerNorm(axis=layer_norm))
+        norm
+        )
   else:
     block = stax.serial(
         affine, res_unit,
-        stax.Identity() if layer_norm is None
-        else stax.LayerNorm(axis=layer_norm))
+        norm
+        )
 
   if proj_into_2d == 'FLAT':
     proj_layer = stax.Flatten()
@@ -219,11 +228,11 @@ class StaxTest(jtu.JaxTestCase):
                          ' the spatial dimensions is singleton.')
 
     W_std, b_std = 2.**0.5, 0.5**0.5
-    layer_norm = None
+    norm_axis = None
     parameterization = 'ntk'
 
     self._check_agreement_with_empirical(W_std, b_std, filter_size, is_conv,
-                                         is_ntk, is_res, layer_norm, padding,
+                                         is_ntk, is_res, norm_axis, padding,
                                          phi, proj_into_2d, same_inputs,
                                          strides, use_pooling, width,
                                          parameterization)
@@ -266,7 +275,7 @@ class StaxTest(jtu.JaxTestCase):
     strides = STRIDES[0]
     phi = stax.Relu()
     use_pooling, is_res = False, False
-    layer_norm = None
+    norm_axis = None
 
     # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
     if is_conv:
@@ -276,7 +285,7 @@ class StaxTest(jtu.JaxTestCase):
       raise jtu.SkipTest('FC models do not have these parameters.')
 
     self._check_agreement_with_empirical(W_std, b_std, filter_size, is_conv,
-                                         is_ntk, is_res, layer_norm, padding,
+                                         is_ntk, is_res, norm_axis, padding,
                                          phi, proj_into_2d, same_inputs,
                                          strides, use_pooling, width,
                                          parameterization)
@@ -289,7 +298,7 @@ class StaxTest(jtu.JaxTestCase):
                 model, width,
                 'same_inputs' if same_inputs else 'different_inputs',
                 'NTK' if is_ntk else 'NNGP', proj_into_2d,
-                'layer_norm=%s' % str(layer_norm)),
+                'norm_axis=%s' % str(norm_axis)),
           'model':
             model,
           'width':
@@ -300,21 +309,21 @@ class StaxTest(jtu.JaxTestCase):
             is_ntk,
           'proj_into_2d':
             proj_into_2d,
-          'layer_norm':
-            layer_norm
+          'norm_axis':
+            norm_axis
       } for model in MODELS for width in WIDTHS
       for same_inputs in [False, True]
       for is_ntk in [False, True]
       for proj_into_2d in PROJECTIONS[:2]
-      for layer_norm in LAYER_NORM))
+      for norm_axis in NORM_AXIS))
   def test_layernorm(self, model, width, same_inputs, is_ntk,
-      proj_into_2d, layer_norm):
+      proj_into_2d, norm_axis):
     is_conv = 'conv' in model
     # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
     if is_conv:
       if xla_bridge.get_backend().platform == 'cpu':
         raise jtu.SkipTest('Not running CNN models on CPU to save time.')
-    elif proj_into_2d != PROJECTIONS[0] or layer_norm != LAYER_NORM[0]:
+    elif proj_into_2d != PROJECTIONS[0] or norm_axis != NORM_AXIS[0]:
       raise jtu.SkipTest('FC models do not have these parameters.')
 
     W_std, b_std = 2.**0.5, 0.5**0.5
@@ -325,11 +334,13 @@ class StaxTest(jtu.JaxTestCase):
     use_pooling, is_res = False, False
     parameterization = 'ntk'
 
+    # when testing batchnorm, use batch size 5 (instead of 2)
+    input_shape = INPUT_SHAPE if 0 not in norm_axis else (5,) + INPUT_SHAPE[1:]
     self._check_agreement_with_empirical(W_std, b_std, filter_size, is_conv,
-                                         is_ntk, is_res, layer_norm, padding,
+                                         is_ntk, is_res, norm_axis, padding,
                                          phi, proj_into_2d, same_inputs,
                                          strides, use_pooling, width,
-                                         parameterization)
+                                         parameterization, input_shape=input_shape)
 
   def test_avg_pool(self):
     X1 = np.ones((4, 2, 3, 2))
@@ -380,15 +391,16 @@ class StaxTest(jtu.JaxTestCase):
                         True)
 
   def _check_agreement_with_empirical(self, W_std, b_std, filter_size, is_conv,
-                                      is_ntk, is_res, layer_norm, padding, phi,
+                                      is_ntk, is_res, norm_axis, padding, phi,
                                       proj_into_2d, same_inputs, strides,
-                                      use_pooling, width, parameterization):
+                                      use_pooling, width, parameterization,
+                                      input_shape=INPUT_SHAPE):
     key = random.PRNGKey(1)
-    x1, x2 = _get_inputs(key, is_conv, same_inputs, INPUT_SHAPE)
+    x1, x2 = _get_inputs(key, is_conv, same_inputs, input_shape)
     init_fn, apply_fn, kernel_fn = _get_net(W_std, b_std, filter_size, is_conv,
                                             use_pooling, is_res, padding, phi,
                                             strides, width, is_ntk,
-                                            proj_into_2d, layer_norm,
+                                            proj_into_2d, norm_axis,
                                             parameterization)
 
     x1_out_shape, params = init_fn(key, x1.shape)
@@ -403,6 +415,9 @@ class StaxTest(jtu.JaxTestCase):
           init_fn, apply_fn, key, n_samples)
       return kernel_fn_empirical(x1, x2, get)
 
+    if (x2 is not None or is_ntk) and norm_axis == (0,):
+      # TODO(Greg): implement
+      return
     if proj_into_2d == 'ATTN_PARAM':
       # no analytic kernel available, just test forward/backward pass
       _get_empirical(1, 'ntk' if is_ntk else 'nngp')
