@@ -37,11 +37,11 @@ INTERMEDIATE_CONV = 'INTERMEDIATE_CONV'
 
 # TODO(schsam): Add a pooling test when multiple inputs are supported in
 # Conv + Pooling.
-TRAIN_SHAPES = [(4, 4), (4, 8), (8, 8), (8, 4, 4, 3), (4, 4, 4, 3)]
-TEST_SHAPES = [(2, 4), (6, 8), (16, 8), (2, 4, 4, 3), (2, 4, 4, 3)]
+TRAIN_SHAPES = [(2, 4), (4, 8), (8, 8), (8, 4, 4, 3), (4, 3, 3, 3)]
+TEST_SHAPES = [(2, 4), (2, 8), (16, 8), (2, 4, 4, 3), (2, 3, 3, 3)]
 NETWORK = [STANDARD, STANDARD, STANDARD, STANDARD, INTERMEDIATE_CONV]
 OUTPUT_LOGITS = [1, 2, 3]
-CONVOLUTION_CHANNELS = 256
+CONVOLUTION_CHANNELS = 4
 WIDTH = 1024
 RTOL = 1e-2
 utils.update_test_tolerance()
@@ -51,24 +51,21 @@ def _build_network(input_shape, network, out_logits, use_dropout):
   dropout = stax.Dropout(0.9, mode='train') if use_dropout else stax.Identity()
   if len(input_shape) == 1:
     assert network == 'FLAT'
-    return stax.serial(stax.Dense(WIDTH, W_std=2.0, b_std=0.5),
-                       dropout,
-                       stax.Dense(out_logits, W_std=2.0, b_std=0.5))
+    return stax.serial(
+        stax.Dense(WIDTH, W_std=2.0, b_std=0.5), dropout,
+        stax.Dense(out_logits, W_std=2.0, b_std=0.5))
   elif len(input_shape) == 3:
     if network == 'POOLING':
       return stax.serial(
-          stax.Conv(CONVOLUTION_CHANNELS, (3, 3), W_std=2.0, b_std=0.05),
-          stax.GlobalAvgPool(),
-          dropout,
+          stax.Conv(CONVOLUTION_CHANNELS, (2, 2), W_std=2.0, b_std=0.05),
+          stax.GlobalAvgPool(), dropout,
           stax.Dense(out_logits, W_std=2.0, b_std=0.5))
     elif network == 'FLAT':
       return stax.serial(
-          stax.Conv(CONVOLUTION_CHANNELS, (3, 3), W_std=2.0, b_std=0.05),
-          stax.Flatten(),
-          dropout,
-          stax.Dense(out_logits, W_std=2.0, b_std=0.5))
+          stax.Conv(CONVOLUTION_CHANNELS, (2, 2), W_std=2.0, b_std=0.05),
+          stax.Flatten(), dropout, stax.Dense(out_logits, W_std=2.0, b_std=0.5))
     elif network == 'INTERMEDIATE_CONV':
-      return stax.Conv(CONVOLUTION_CHANNELS, (3, 3), W_std=2.0, b_std=0.05)
+      return stax.Conv(CONVOLUTION_CHANNELS, (2, 2), W_std=2.0, b_std=0.05)
     else:
       raise ValueError('Unexpected network type found: {}'.format(network))
   else:
@@ -100,14 +97,18 @@ KERNELS = {}
 for o in OUTPUT_LOGITS:
   KERNELS['empirical_logits_{}'.format(o)] = partial(
       _empirical_kernel, out_logits=o, use_dropout=False)
-KERNELS['theoretical'] = partial(_theoretical_kernel, just_theta=True,
-                                 use_dropout=True)
-KERNELS['theoretical_pytree'] = partial(_theoretical_kernel, just_theta=False,
-                                        use_dropout=True)
+KERNELS['theoretical'] = partial(
+    _theoretical_kernel, just_theta=True, use_dropout=True)
+KERNELS['theoretical_pytree'] = partial(
+    _theoretical_kernel, just_theta=False, use_dropout=True)
 
 
-def _test_kernel_against_batched(cls, kernel_fn, batched_kernel_fn, train,
-                                 test, is_parallel_only=False):
+def _test_kernel_against_batched(cls,
+                                 kernel_fn,
+                                 batched_kernel_fn,
+                                 train,
+                                 test,
+                                 is_parallel_only=False):
 
   g = kernel_fn(train, None)
   g_b = batched_kernel_fn(train, None)
@@ -128,35 +129,36 @@ def _test_kernel_against_batched(cls, kernel_fn, batched_kernel_fn, train,
 class BatchTest(jtu.JaxTestCase):
 
   @jtu.parameterized.named_parameters(
-      jtu.cases_from_list(
-          {
-              'testcase_name':
-                '_train_shape={}_test_shape={}_network={}_{}'.format(
-                    train, test, network, name),
-              'train_shape':
-                train,
-              'test_shape':
-                test,
-              'network':
-                network,
-              'name':
-                name,
-              'kernel_fn':
-                kernel_fn,
-          }
-          for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
-          for name, kernel_fn in KERNELS.items()))
-  def testSerial(self, train_shape, test_shape, network, name, kernel_fn):
+      jtu.cases_from_list({
+          'testcase_name':
+              '_train_shape={}_test_shape={}_network={}_{}_batch_size={}'
+              .format(train, test, network, name, batch_size),
+          'train_shape':
+              train,
+          'test_shape':
+              test,
+          'network':
+              network,
+          'name':
+              name,
+          'kernel_fn':
+              kernel_fn,
+          'batch_size':
+              batch_size
+      } for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
+                          for name, kernel_fn in KERNELS.items()
+                          for batch_size in [2, 8]))
+  def testSerial(self, train_shape, test_shape, network, name, kernel_fn,
+                 batch_size):
     key = random.PRNGKey(0)
     key, self_split, other_split = random.split(key, 3)
     data_self = random.normal(self_split, train_shape)
     data_other = random.normal(other_split, test_shape)
     kernel_fn = kernel_fn(key, train_shape[1:], network)
-    kernel_batched = batch._serial(kernel_fn, batch_size=2)
+    kernel_batched = batch._serial(kernel_fn, batch_size=batch_size)
 
     _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
                                  data_other)
-
 
   # We also exclude tests for dropout + parallel. It is not clear what is the
   # best way to handle this case.
@@ -164,18 +166,18 @@ class BatchTest(jtu.JaxTestCase):
       jtu.cases_from_list(
           {
               'testcase_name':
-                '_train_shape={}_test_shape={}_network={}_{}'.format(
-                    train, test, network, name),
+                  '_train_shape={}_test_shape={}_network={}_{}'.format(
+                      train, test, network, name),
               'train_shape':
-                train,
+                  train,
               'test_shape':
-                test,
+                  test,
               'network':
-                network,
+                  network,
               'name':
-                name,
+                  name,
               'kernel_fn':
-                kernel_fn
+                  kernel_fn
           }
           for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
           for name, kernel_fn in KERNELS.items()))
@@ -193,25 +195,27 @@ class BatchTest(jtu.JaxTestCase):
                                  data_other, True)
 
   @jtu.parameterized.named_parameters(
-      jtu.cases_from_list(
-          {
-              'testcase_name':
-                '_train_shape={}_test_shape={}_network={}_{}'.format(
-                      train, test, network, name),
-              'train_shape':
-                  train,
-              'test_shape':
-                  test,
-              'network':
-                  network,
-              'name':
-                  name,
-              'kernel_fn':
-                  kernel_fn
-          }
-          for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
-          for name, kernel_fn in KERNELS.items()))
-  def testComposition(self, train_shape, test_shape, network, name, kernel_fn):
+      jtu.cases_from_list({
+          'testcase_name':
+              '_train_shape={}_test_shape={}_network={}_{}_batch_size={}'
+              .format(train, test, network, name, batch_size),
+          'train_shape':
+              train,
+          'test_shape':
+              test,
+          'network':
+              network,
+          'name':
+              name,
+          'kernel_fn':
+              kernel_fn,
+          'batch_size':
+              batch_size
+      } for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
+                          for name, kernel_fn in KERNELS.items()
+                          for batch_size in [2, 8]))
+  def testComposition(self, train_shape, test_shape, network, name, kernel_fn,
+                      batch_size):
     utils.stub_out_pmap(batch, 2)
 
     key = random.PRNGKey(0)
@@ -221,34 +225,38 @@ class BatchTest(jtu.JaxTestCase):
 
     kernel_fn = kernel_fn(key, train_shape[1:], network)
 
-    kernel_batched = batch._parallel(batch._serial(kernel_fn, batch_size=2))
+    kernel_batched = batch._parallel(
+        batch._serial(kernel_fn, batch_size=batch_size))
     _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
                                  data_other)
 
-    kernel_batched = batch._serial(batch._parallel(kernel_fn), batch_size=2)
+    kernel_batched = batch._serial(
+        batch._parallel(kernel_fn), batch_size=batch_size)
     _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
                                  data_other)
 
   @jtu.parameterized.named_parameters(
-      jtu.cases_from_list(
-          {
-              'testcase_name':
-                '_train_shape={}_test_shape={}_network={}_{}'.format(
-                train, test, network, name),
-              'train_shape':
-                train,
-              'test_shape':
-                test,
-              'network':
-                network,
-              'name':
-                name,
-              'kernel_fn':
-                kernel_fn
-          }
-          for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
-          for name, kernel_fn in KERNELS.items()))
-  def testAutomatic(self, train_shape, test_shape, network, name, kernel_fn):
+      jtu.cases_from_list({
+          'testcase_name':
+              '_train_shape={}_test_shape={}_network={}_{}_batch_size={}'
+              .format(train, test, network, name, batch_size),
+          'train_shape':
+              train,
+          'test_shape':
+              test,
+          'network':
+              network,
+          'name':
+              name,
+          'kernel_fn':
+              kernel_fn,
+          'batch_size':
+              batch_size
+      } for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
+                          for name, kernel_fn in KERNELS.items()
+                          for batch_size in [2, 8]))
+  def testAutomatic(self, train_shape, test_shape, network, name, kernel_fn,
+                    batch_size):
     utils.stub_out_pmap(batch, 2)
 
     key = random.PRNGKey(0)
@@ -258,11 +266,12 @@ class BatchTest(jtu.JaxTestCase):
 
     kernel_fn = kernel_fn(key, train_shape[1:], network)
 
-    kernel_batched = batch.batch(kernel_fn, batch_size=2)
+    kernel_batched = batch.batch(kernel_fn, batch_size=batch_size)
     _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
                                  data_other)
 
-    kernel_batched = batch.batch(kernel_fn, batch_size=2, store_on_device=False)
+    kernel_batched = batch.batch(
+        kernel_fn, batch_size=batch_size, store_on_device=False)
     _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
                                  data_other)
 
@@ -271,7 +280,7 @@ class BatchTest(jtu.JaxTestCase):
     rng = random.PRNGKey(0)
     rng_self, rng_other = random.split(rng)
     x_self = random.normal(rng_self, (8, 10))
-    x_other = random.normal(rng_other, (20, 10))
+    x_other = random.normal(rng_other, (2, 10))
     Block = stax.serial(stax.Dense(256), stax.Relu())
 
     _, _, ker_fn = Block
@@ -295,9 +304,9 @@ class BatchTest(jtu.JaxTestCase):
 
     # Check convolutional + pooling.
     x_self = random.normal(rng, (8, 10, 10, 3))
-    x_other = random.normal(rng, (10, 10, 10, 3))
+    x_other = random.normal(rng, (2, 10, 10, 3))
 
-    Block = stax.serial(stax.Conv(256, (3, 3)), stax.Relu())
+    Block = stax.serial(stax.Conv(256, (2, 2)), stax.Relu())
     Readout = stax.serial(stax.GlobalAvgPool(), stax.Dense(10))
 
     block_ker_fn, readout_ker_fn = Block[2], Readout[2]
@@ -318,38 +327,50 @@ class BatchTest(jtu.JaxTestCase):
     self.assertAllClose(ker_out, composed_ker_out, True)
 
   @jtu.parameterized.named_parameters(
-      jtu.cases_from_list(
-          {
-              'testcase_name':
-                  '_on_device={}'.format(store_on_device),
-              'store_on_device':
-                  store_on_device,
-          }
-          for store_on_device in [True, False]))
-  def testAnalyticKernelComposeSerial(self, store_on_device):
+      jtu.cases_from_list({
+          'testcase_name':
+              '_on_device={}_batch_size={}'.format(store_on_device, batch_size),
+          'store_on_device':
+              store_on_device,
+          'batch_size':
+              batch_size
+      } for store_on_device in [True, False] for batch_size in [2, 8]))
+  def testAnalyticKernelComposeSerial(self, store_on_device, batch_size):
     self._test_analytic_kernel_composition(
-        partial(batch._serial, batch_size=2, store_on_device=store_on_device))
+        partial(
+            batch._serial,
+            batch_size=batch_size,
+            store_on_device=store_on_device))
 
   def testAnalyticKernelComposeParallel(self):
     utils.stub_out_pmap(batch, 2)
     self._test_analytic_kernel_composition(batch._parallel)
 
   @jtu.parameterized.named_parameters(
-      jtu.cases_from_list(
-          {
-              'testcase_name':
-                '_on_device={}'.format(store_on_device),
-              'store_on_device':
-                store_on_device,
-          }
-          for store_on_device in [True, False]))
-  def testAnalyticKernelComposeAutomatic(self, store_on_device):
+      jtu.cases_from_list({
+          'testcase_name':
+              '_on_device={}_batch_size={}'.format(store_on_device, batch_size),
+          'store_on_device':
+              store_on_device,
+          'batch_size':
+              batch_size
+      } for store_on_device in [True, False] for batch_size in [2, 8]))
+  def testAnalyticKernelComposeAutomatic(self, store_on_device, batch_size):
     utils.stub_out_pmap(batch, 2)
     self._test_analytic_kernel_composition(
-        partial(batch.batch, batch_size=2, store_on_device=store_on_device))
+        partial(
+            batch.batch, batch_size=batch_size,
+            store_on_device=store_on_device))
 
   def test_jit_or_pmap_broadcast(self):
-    def kernel_fn(x1, x2, do_flip, keys, do_square, params, _unused=None,
+
+    def kernel_fn(x1,
+                  x2,
+                  do_flip,
+                  keys,
+                  do_square,
+                  params,
+                  _unused=None,
                   p=0.65):
       res = np.abs(np.matmul(x1, x2))
       if do_square:

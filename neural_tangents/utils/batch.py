@@ -18,7 +18,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from functools import partial
-
+import warnings
 from jax.api import device_get
 from jax.api import jit
 from jax.api import pmap
@@ -183,9 +183,7 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
     by batching over the dataset serially with the specified batch_size.
   """
 
-  is_parallel = hasattr(kernel_fn, 'is_parallel')
-  if is_parallel:
-    device_count = kernel_fn.device_count
+  device_count = max(getattr(kernel_fn, 'device_count', 1), 1)
 
   if not store_on_device:
     _kernel_fn = kernel_fn
@@ -197,37 +195,22 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
   def serial_fn_x1(x1, x2=None, *args, **kwargs):
     # TODO(xlc): Make batch + dropout work reasonably well.
     if 'key' in kwargs:
-      raise NotImpletmentError('Batching for the empirical kernel with dropout '
-                               'is not implemented. ')
+      raise NotImplementedError('Batching for the empirical kernel with dropout'
+                                ' is not implemented. ')
     x2_is_none = x2 is None
     if x2_is_none:
       # TODO(schsam): Only compute the upper triangular part of the kernel.
       x2 = x1
 
-    n1 = x1.shape[0]
-    n2 = x2.shape[0]
+    n1, n2 = x1.shape[0], x2.shape[0]
+    (n1_batches, n1_batch_size,
+     n2_batches, n2_batch_size) = _get_n_batches_and_batch_sizes(n1, n2,
+                                                                 batch_size,
+                                                                 device_count)
+
     input_shape = x1.shape[1:]
-
-    n1_batch_size = batch_size if not is_parallel else batch_size * device_count
-    n1_batches, ragged = divmod(n1, n1_batch_size)
-    if ragged:
-      # TODO(schsam): Relax this constraint.
-      msg = ('Number of examples in x1 must divide batch size. Found |x1| = {} '
-             'and batch size = {}.').format(n1, n1_batch_size)
-      if is_parallel:
-        msg += (' Note that device parallelism was detected and so the batch '
-                'size was expanded by a factor of {}.'.format(device_count))
-      raise ValueError(msg)
-
-    n2_batches, ragged = divmod(n2, batch_size)
-    if ragged:
-      # TODO(schsam): Relax this constraint.
-      raise ValueError((
-          'Number of examples in x2 must divide batch size. Found |x2| = {} '
-          'and batch size = {}').format(n2, batch_size))
-
     x1s = np.reshape(x1, (n1_batches, n1_batch_size,) + input_shape)
-    x2s = np.reshape(x2, (n2_batches, batch_size,) + input_shape)
+    x2s = np.reshape(x2, (n2_batches, n2_batch_size,) + input_shape)
 
     def row_fn(_, x1):
       return _, _scan(col_fn, x1, x2s, store_on_device)[1]
@@ -239,29 +222,14 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
     return flatten(kernel, x2_is_none)
 
   def serial_fn_kernel(kernel, *args, **kwargs):
-    n1 = kernel.var1.shape[0]
-    n2 = n1 if kernel.var2 is None else kernel.var2.shape[0]
-
-    n1_batch_size = batch_size if not is_parallel else batch_size * device_count
-    n1_batches, ragged = divmod(n1, n1_batch_size)
-    if ragged:
-      # TODO(schsam): Relax this constraint.
-      msg = ('Number of rows of kernel must divide batch size. Found n1 = {} '
-             'and batch size = {}.').format(n1, n1_batch_size)
-      if is_parallel:
-        msg += (' Note that device parallelism was detected and so the batch '
-                'size was expanded by a factor of {}.'.format(device_count))
-      raise ValueError(msg)
-
-    n2_batches, ragged = divmod(n2, batch_size)
-    if ragged:
-      # TODO(schsam): Relax this constraint.
-      raise ValueError((
-          'Number of columns of kernel must divide batch size. Found n2 = {} '
-          'and batch size = {}').format(n2, batch_size))
+    n1, n2 = kernel.nngp.shape[:2]
+    (n1_batches, n1_batch_size,
+     n2_batches, n2_batch_size) = _get_n_batches_and_batch_sizes(n1, n2,
+                                                                 batch_size,
+                                                                 device_count)
 
     n1s = np.arange(0, n1, n1_batch_size)
-    n2s = np.arange(0, n2, batch_size)
+    n2s = np.arange(0, n2, n2_batch_size)
 
     def row_fn(_, n1):
       return _, _scan(col_fn, n1, n2s, store_on_device)[1]
@@ -270,7 +238,7 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
       # NOTE(schsam): If we end up wanting to enable jit-of-batch then we will
       # probably have to change this to dynamic slicing.
       n1_slice = slice(n1, n1 + n1_batch_size)
-      n2_slice = slice(n2, n2 + batch_size)
+      n2_slice = slice(n2, n2 + n2_batch_size)
       in_kernel = _slice_kernel(kernel, n1_slice, n2_slice)
       return n1, kernel_fn(in_kernel, *args, **kwargs)
 
@@ -323,8 +291,8 @@ def _parallel(kernel_fn, device_count=-1):
 
   def parallel_fn_x1(x1, x2=None, *args, **kwargs):
     if 'key' in kwargs:
-      raise NotImpletmentError('Batching for the empirical kernel with dropout '
-                               'is not implemented. ')
+      raise NotImplementedError('Batching for the empirical kernel with dropout'
+                                ' is not implemented. ')
     x2_is_none = x2 is None
     if x2_is_none:
       # TODO(schsam): Only compute the upper triangular part of the kernel.
@@ -396,9 +364,7 @@ def _parallel(kernel_fn, device_count=-1):
 
   # Set function attributes so that `serial` can detect whether or not it is
   # acting on a parallel function.
-  parallel_fn.is_parallel = True
   parallel_fn.device_count = device_count
-
   return parallel_fn
 
 
@@ -434,6 +400,37 @@ def batch(kernel_fn, batch_size=0, device_count=-1, store_on_device=True):
     return kernel_fn
 
   return _serial(kernel_fn, batch_size, store_on_device)
+
+
+def _get_n_batches_and_batch_sizes(n1, n2, batch_size, device_count):
+  # TODO(romann): if dropout batching works for different batch sizes, relax.
+  max_serial_batch_size = np.onp.gcd(n1, n2) // device_count
+
+  n2_batch_size = min(batch_size, max_serial_batch_size)
+  if n2_batch_size != batch_size:
+    warnings.warn(
+        'Batch size is reduced from requested %d to effective %d to '
+        'fit the dataset.' % (batch_size, n2_batch_size))
+
+  n1_batch_size = n2_batch_size * device_count
+
+  n1_batches, ragged = divmod(n1, n1_batch_size)
+  if ragged:
+    # TODO(schsam): Relax this constraint.
+    msg = ('Number of rows of kernel must divide batch size. Found n1 = {} '
+           'and batch size = {}.').format(n1, n1_batch_size)
+    if device_count > 1:
+      msg += (' Note that device parallelism was detected and so the batch '
+              'size was expanded by a factor of {}.'.format(device_count))
+    raise ValueError(msg)
+
+  n2_batches, ragged = divmod(n2, n2_batch_size)
+  if ragged:
+    # TODO(schsam): Relax this constraint.
+    raise ValueError(('Number of columns of kernel must divide batch '
+                      'size. Found n2 = {} '
+                      'and batch size = {}').format(n2, n2_batch_size))
+  return n1_batches, n1_batch_size, n2_batches, n2_batch_size
 
 
 def _is_np_ndarray(x):
