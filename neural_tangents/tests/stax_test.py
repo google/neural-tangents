@@ -14,9 +14,7 @@
 
 """Tests for stax.py."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
 
 from functools import partial
 
@@ -287,6 +285,7 @@ class StaxTest(jtu.JaxTestCase):
                                          phi, proj_into_2d, same_inputs,
                                          strides, use_pooling, width,
                                          parameterization, use_dropout)
+
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
@@ -336,7 +335,6 @@ class StaxTest(jtu.JaxTestCase):
                                          phi, proj_into_2d, same_inputs,
                                          strides, use_pooling, width,
                                          parameterization, use_dropout)
-
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -404,7 +402,6 @@ class StaxTest(jtu.JaxTestCase):
                                          phi, proj_into_2d, same_inputs,
                                          strides, use_pooling, width,
                                          parameterization, use_dropout)
-
 
   def _check_agreement_with_empirical(self, W_std, b_std, filter_size, is_conv,
       is_ntk, is_res, layer_norm, padding, phi, proj_into_2d, same_inputs,
@@ -545,6 +542,7 @@ class StaxTest(jtu.JaxTestCase):
         x1, x2, marginalization=marginalization))
     composed_ker_out = composed_ker_fn(x1, x2)
     self.assertAllClose(ker_out, composed_ker_out, True)
+
 
 @jtu.parameterized.parameters([
     {

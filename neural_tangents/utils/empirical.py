@@ -14,9 +14,7 @@
 
 """Compute the empirical NTK and approximate functions via Taylor series."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
 import operator
 from absl import flags
 from jax import random
@@ -175,10 +173,10 @@ def empirical_implicit_ntk_fn(f):
       params: A PyTree of parameters about which we would like to compute the
         neural tangent kernel.
       keys: None or a PRNG key or a tuple of PRNG keys or a (2, 2) array and
-        dtype uint32. If `key == None`, then the function `f` is deterministic and
-        requires no PRNG key; else if `keys` is a single PRNG key, then x1 and
-        x2 must be the same and share the same PRNG key; else x1 and x2 use two
-        different PRNG keys.
+        dtype uint32. If `key == None`, then the function `f` is deterministic
+        and requires no PRNG key; else if `keys` is a single PRNG key, then x1
+        and x2 must be the same and share the same PRNG key; else x1 and x2 use
+        two different PRNG keys.
 
     Returns:
       A `np.ndarray` of shape [n1, n2] + output_shape + output_shape.
@@ -239,9 +237,11 @@ def empirical_direct_ntk_fn(f):
       params: A PyTree of parameters about which we would like to compute the
         neural tangent kernel.
       keys: None or a PRNG key or a tuple of PRNG keys or a (2, 2) array and
-        dtype uint32. If `key == None`, then the function `f` is deterministic and
-        requires no PRNG key; else if `keys` is a single PRNG key, then x1 and
-        x2 share the same PRNG key; else x1 and x2 use two different PRNG keys.
+        dtype uint32. If `key == None`, then the function `f` is deterministic
+        and requires no PRNG key; else if `keys` is a single PRNG key, then x1
+        and x2 share the same PRNG key; else x1 and x2 use two different PRNG
+        keys.
+
     Returns:
       A `np.ndarray` of shape [n1, n2] + output_shape + output_shape.
     """
@@ -308,9 +308,10 @@ def empirical_nngp_fn(f):
       params: A PyTree of parameters about which we would like to compute the
         NNGP.
       keys: None or a PRNG key or a tuple of PRNG keys or a (2, 2) array and
-        dtype uint32. If `key == None`, then the function `f` is deterministic and
-        requires no PRNG key; else if `keys` is a single PRNG key, then x1 and
-        x2 share the same PRNG key; else x1 and x2 use two different PRNG keys.
+        dtype uint32. If `key == None`, then the function `f` is deterministic
+        and requires no PRNG key; else if `keys` is a single PRNG key, then x1
+        and x2 share the same PRNG key; else x1 and x2 use two different PRNG
+        keys.
 
     Returns:
       A Monte Carlo estimate of the NNGP, a `np.ndarray` of shape
@@ -350,10 +351,10 @@ def empirical_kernel_fn(f):
         should be returned by the kernel function. Can be "nngp" or "ntk". If
         `None` then both "nngp" and "ntk" are returned.
       keys: None or a PRNG key or a tuple of PRNG keys or a (2, 2) array and
-        dtype uint32. If `key == None`, then the function `f` is deterministic and
-        requires no PRNG key; else if `keys` is a single PRNG key, then x1 and
-        x2 share the same PRNG key; else x1 and x2 use two different PRNG keys.
-
+        dtype uint32. If `key == None`, then the function `f` is deterministic
+        and requires no PRNG key; else if `keys` is a single PRNG key, then x1
+        and x2 share the same PRNG key; else x1 and x2 use two different PRNG
+        keys.
 
     Returns:
       If `get` is a string, returns the requested `np.ndarray`. If `get` is a

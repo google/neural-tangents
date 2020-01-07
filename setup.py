@@ -16,13 +16,12 @@
 """Setup the package with pip."""
 
 
-import io
 import os
 import setuptools
 
 # https://packaging.python.org/guides/making-a-pypi-friendly-readme/
 this_directory = os.path.abspath(os.path.dirname(__file__))
-with io.open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
+with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
   long_description = f.read()
 
 
@@ -35,7 +34,7 @@ INSTALL_REQUIRES = [
 
 setuptools.setup(
     name='neural-tangents',
-    version='0.1.4',
+    version='0.1.5',
     license='Apache 2.0',
     author='Google',
     author_email='neural-tangents-dev@google.com',
@@ -51,9 +50,8 @@ setuptools.setup(
     long_description=long_description,
     long_description_content_type='text/markdown',
     description='Fast and Easy Infinite Neural Networks in Python',
-    python_requires='>=2.7',
+    python_requires='>=3.5',
     classifiers=[
-        'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',

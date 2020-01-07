@@ -18,9 +18,7 @@ The library has a public method `monte_carlo_kernel_fn` that allow to compute
   Monte Carlo estimates of NNGP and NTK kernels of arbitrary functions.
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
 from jax import random
 from functools import partial
 import operator

@@ -14,9 +14,7 @@
 
 """Batch kernel calculations serially or in parallel."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
 from functools import partial
 import warnings
 from jax.api import device_get
@@ -28,7 +26,8 @@ import jax.numpy as np
 from jax.tree_util import tree_all
 from jax.tree_util import tree_map
 from jax.tree_util import tree_multimap
-from .kernel import Kernel
+from neural_tangents.utils.kernel import Kernel
+from neural_tangents.utils import utils
 
 
 def _scan(f, init, xs, store_on_device):
@@ -187,6 +186,7 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
 
   if not store_on_device:
     _kernel_fn = kernel_fn
+    @utils.wraps(_kernel_fn)
     def kernel_fn(x1, x2=None, *args, **kwargs):
       return _move_kernel_to_cpu(_kernel_fn(x1, x2, *args, **kwargs))
 
@@ -248,6 +248,7 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
       kernel = kernel._replace(var2=None)
     return flatten(kernel, var2_is_none)
 
+  @utils.wraps(kernel_fn)
   def serial_fn(x1_or_kernel, x2=None, *args, **kwargs):
     if isinstance(x1_or_kernel, np.ndarray):
       return serial_fn_x1(x1_or_kernel, x2, *args, **kwargs)
@@ -354,6 +355,7 @@ def _parallel(kernel_fn, device_count=-1):
       kernel = kernel._replace(var2=None)
     return _flatten_kernel(kernel, var2_is_none, True)
 
+  @utils.wraps(kernel_fn)
   def parallel_fn(x1_or_kernel, x2=None, *args, **kwargs):
     if isinstance(x1_or_kernel, np.ndarray):
       return parallel_fn_x1(x1_or_kernel, x2, *args, **kwargs)
@@ -437,13 +439,6 @@ def _is_np_ndarray(x):
   return tree_all(tree_map(lambda y: isinstance(y, np.ndarray), x))
 
 
-def _merge_dicts(a, b):
-  # TODO(schsam): Replace by {**a, **b} when Python 2 is depricated.
-  merged = dict(a)
-  merged.update(b)
-  return merged
-
-
 def _get_jit_or_pmap_broadcast():
   """Initializes a cache of pmapped functions closed over non-`np.ndarray` args.
 
@@ -491,6 +486,7 @@ def _get_jit_or_pmap_broadcast():
         return arg
       return np.broadcast_to(arg, (device_count,) + arg.shape)
 
+    @utils.wraps(f)
     def f_pmapped(x_or_kernel, *args, **kwargs):
       args_np, args_np_idxs = [], []
       args_other = {}
@@ -531,11 +527,11 @@ def _get_jit_or_pmap_broadcast():
         def _f(_x_or_kernel_np, *_args_np):
           # Merge Kernel.
           if is_input_kernel:
-            _x_or_kernel_np = _merge_dicts(_x_or_kernel_np, x_or_kernel_other)
+            _x_or_kernel_np = {**_x_or_kernel_np, **x_or_kernel_other}
             _x_or_kernel_np = Kernel(**_x_or_kernel_np)
           # Merge args.
           _args_np = {i: _arg_np for i, _arg_np in zip(args_np_idxs, _args_np)}
-          _args = _merge_dicts(_args_np, args_other)
+          _args = {**_args_np, **args_other}
           _args = tuple(v for k, v in sorted(_args.items()))
           return f(_x_or_kernel_np, *_args, **kwargs)
 

@@ -5,6 +5,8 @@
 
 **News:**
 
+* We no longer support Python 2 starting from NT 0.1.5.
+
 * We will be at [ICLR 2020](https://iclr.cc/), come tell us about your experience with the library!
 
 * [arXiv preprint is out](https://arxiv.org/abs/1912.02803).
@@ -246,8 +248,8 @@ We remark the following differences between our library and the JAX one.
 * All layers with trainable parameters use the _NTK parameterization_ by default (see [[10]](#5-neural-tangent-kernel-convergence-and-generalization-in-neural-networks-neurips-2018-arthur-jacot-franck-gabriel-clément-hongler), Remark 1). However, Dense and Conv layers also support the _standard parameterization_ via a `parameterization` keyword argument. <!-- TODO(jaschasd) add link to note deriving NTK for standard parameterization -->
 * `nt.stax` and `jax.experimental.stax` may have different layers and options available (for example `nt.stax` layers support `CIRCULAR` padding, but only `NHWC` data format).
 
-### Python 2
-We will be dropping python 2 support before 2020.
+### Python 2 is not supported
+We only support versions of Python 3 supported by [JAX](https://github.com/google/jax).
 
 
 ## Training dynamics of wide but finite networks

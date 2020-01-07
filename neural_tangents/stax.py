@@ -62,12 +62,10 @@ Example:
   ```
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
 import warnings
 import enum
-from functools import partial, wraps
+from functools import partial
 from jax import lax
 from jax import random
 from jax import linear_util as lu
@@ -414,7 +412,7 @@ def _apply_kernel(init_fn, kernel_fn, in_kernel):
 def _check_marginalization(kernel_fn, kernel):
   if isinstance(kernel, list):
     for k in kernel:
-      _check_marginalization(kernel, k)
+      _check_marginalization(kernel_fn, k)
     return
 
   deps = getattr(kernel_fn, _COVARIANCES_REQ, _DEFAULT_MARGINALIZATION)
@@ -518,11 +516,11 @@ def _layer(layer):
     `key=None`, `compute_ntk=True` arguments to let the user indicate that
     they want the kernel to be computed by Monte Carlo sampling.
   """
-  @wraps(layer)
+  @utils.wraps(layer)
   def layer_fn(*args, **kwargs):
     init_fn, apply_fn, kernel_fn = layer(*args, **kwargs)
     kernel_fn = _preprocess_kernel_fn(init_fn, kernel_fn)
-    kernel_fn.__name__ = layer.__name__
+    init_fn.__name__ = apply_fn.__name__ = kernel_fn.__name__ = layer.__name__
     return init_fn, apply_fn, kernel_fn
   return layer_fn
 
@@ -1532,9 +1530,9 @@ def AvgPool(window_shape,
 
   elif not normalize_edges:
 
-    def rescaler(*args, **kwargs):
-      del args, kwargs  # Unused.
-      return lambda outputs, _, __: outputs / np.prod(window_shape)
+    def rescaler(dims, strides, padding):
+      del dims, strides, padding  # Unused.
+      return lambda outputs, inputs, spec: outputs / np.prod(window_shape)
 
     avgPool = ostax._pooling_layer(lax.add, 0., rescaler)
     init_fn, apply_fn = avgPool(window_shape, strides, padding.name)

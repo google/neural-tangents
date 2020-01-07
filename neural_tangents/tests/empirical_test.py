@@ -14,9 +14,7 @@
 
 """Tests for `utils/empirical.py`."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
 from functools import partial
 from jax import test_util as jtu
 from jax.api import jit

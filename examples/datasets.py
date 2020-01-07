@@ -14,9 +14,7 @@
 
 """Datasets used in examples."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
 from jax import random
 import numpy as np
 import tensorflow_datasets as tfds

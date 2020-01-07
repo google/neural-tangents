@@ -13,9 +13,7 @@
 # limitations under the License.
 """Functions to make predictions on the test set using NTK kernel."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
 
 import collections
 import functools
@@ -54,10 +52,11 @@ def gradient_descent_mse(g_dd, y_train, g_td=None, diag_reg=0.):
 
   Example:
     ```python
+    >>> from neural_tangents import empirical_ntk_fn
     >>> from neural_tangents import predict
     >>>
     >>> train_time = 1e-7
-    >>> kernel_fn = empirical(f)
+    >>> kernel_fn = empirical_ntk_fn(f)
     >>> g_td = kernel_fn(x_test, x_train, params)
     >>>
     >>> predict_fn = predict.gradient_descent_mse(g_dd, y_train, g_td)
@@ -169,11 +168,12 @@ def gradient_descent(g_dd, y_train, loss, g_td=None):
 
   Example:
     ```python
+    >>> from neural_tangents import empirical_ntk_fn
     >>> from jax.experimental import stax
     >>> from neural_tangents import predict
     >>>
     >>> train_time = 1e-7
-    >>> kernel_fn = empirical(f)
+    >>> kernel_fn = empirical_ntk_fn(f)
     >>> g_td = kernel_fn(x_test, x_train, params)
     >>>
     >>> from jax.experimental import stax
@@ -303,10 +303,13 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
 
   Example:
     ```python
+    >>> from neural_tangents import empirical_ntk_fn
+    >>> from neural_tangents import predict
+    >>>
     >>> train_time = 1e-7
     >>> learning_rate = 1e-2
     >>>
-    >>> kernel_fn = empirical(f)
+    >>> kernel_fn = empirical_ntk_fn(f)
     >>> g_td = kernel_fn(x_test, x_train, params)
     >>>
     >>> from jax.experimental import stax

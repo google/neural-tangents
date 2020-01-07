@@ -14,16 +14,14 @@
 """General-purpose internal utilities."""
 
 from collections import namedtuple
-from functools import wraps
+import functools
 import inspect
 import types
-
 from jax import test_util as jtu
 from jax.api import jit
 from jax.api import vmap
 from jax.lib import xla_bridge
 import jax.numpy as np
-import six
 
 
 def _jit_vmap(f):
@@ -112,10 +110,22 @@ def _output_to_dict(output):
   raise ValueError(type(output))
 
 
+def wraps(f,
+          assigned=functools.WRAPPER_ASSIGNMENTS,
+          updated=functools.WRAPPER_UPDATES):
+  def wrapper(g):
+    @functools.wraps(f, assigned, updated)
+    def h(*args, **kwargs):
+      return g(*args, **kwargs)
+    h.__signature__ = inspect.signature(f)
+    return h
+  return wrapper
+
+
 def get_namedtuple(name):
   def getter_decorator(fn):
     try:
-      argspec = _argspec(fn)
+      argspec = inspect.getfullargspec(fn)
       get_index = argspec.args.index('get')
       defaults = argspec.defaults
     except:
@@ -164,14 +174,6 @@ def get_namedtuple(name):
     return getter_fn
 
   return getter_decorator
-
-
-def _argspec(func):
-  """Python 2 and 3 compatible argspec."""
-  if six.PY3:
-    return inspect.getfullargspec(func)
-  else:
-    return inspect.getargspec(func)
 
 
 def x1_is_x2(x1, x2=None, eps=1e-12):

@@ -13,9 +13,7 @@
 # limitations under the License.
 """Tests for `utils/monte_carlo.py`."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
 
 from jax import test_util as jtu
 from jax.config import config as jax_config

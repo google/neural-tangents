@@ -15,9 +15,7 @@
 """A set of utility operations for running examples.
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
 import jax.numpy as np
 
 

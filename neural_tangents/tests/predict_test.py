@@ -13,9 +13,7 @@
 # limitations under the License.
 """Tests for `utils/predict.py`."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
 import math
 
 from jax import test_util as jtu
