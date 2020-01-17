@@ -14,10 +14,8 @@
 
 """Tests for stax.py."""
 
-
-
 from functools import partial
-
+import random as prandom
 from jax import test_util as jtu
 from jax import ops
 from jax.config import config as jax_config
@@ -77,12 +75,13 @@ PROJECTIONS = [
 ]
 
 LAYER_NORM = [
-    (-1,),
-    (1, 3),
-    (1, 2, 3)
+    'C',
+    'HC',
+    'CHW',
 ]
 
 PARAMETERIZATIONS = ['NTK', 'STANDARD']
+
 
 utils.update_test_tolerance()
 
@@ -98,32 +97,51 @@ def _get_inputs(key, is_conv, same_inputs, input_shape, fn=np.cos):
 
 def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
              phi, strides, width, is_ntk, proj_into_2d, layer_norm,
-             parameterization, use_dropout):
-  fc = partial(stax.Dense, W_std=W_std, b_std=b_std,
-               parameterization=parameterization)
-  conv = partial(
-      stax.Conv,
+             parameterization, use_dropout, dimension_numbers):
+  fc = partial(
+      stax.Dense, W_std=W_std, b_std=b_std, parameterization=parameterization)
+
+  def conv(out_chan): return stax.GeneralConv(
+      dimension_numbers=dimension_numbers,
+      out_chan=out_chan,
       filter_shape=filter_shape,
       strides=strides,
       padding=padding,
       W_std=W_std,
       b_std=b_std,
-      parameterization=parameterization)
+      parameterization=parameterization
+  )
   affine = conv(width) if is_conv else fc(width)
+
+  spec = dimension_numbers[-1]
+
   rate = np.onp.random.uniform(0.5, 0.9)
   dropout = stax.Dropout(rate, mode='train')
-  ave_pool = stax.AvgPool(
-      (2, 3), None, 'SAME' if padding == 'SAME' else 'CIRCULAR')
-  ave_pool_or_identity = ave_pool if use_pooling else stax.Identity()
+
   dropout_or_identity = dropout if use_dropout else stax.Identity()
+  avg_pool_or_identity = stax.AvgPool(
+      window_shape=(2, 3),
+      strides=None,
+      padding='SAME' if padding == 'SAME' else 'CIRCULAR',
+      spec=spec
+  ) if use_pooling else stax.Identity()
   layer_norm_or_identity = (stax.Identity() if layer_norm is None
-                            else stax.LayerNorm(axis=layer_norm))
-  res_unit = stax.serial(ave_pool_or_identity, phi, dropout_or_identity, affine)
+                            else stax.LayerNorm(axis=layer_norm, spec=spec))
+
+  res_unit = stax.serial(
+      avg_pool_or_identity,
+      phi,
+      dropout_or_identity,
+      affine)
+
+
+
   if is_res:
     block = stax.serial(
         affine,
         stax.FanOut(2),
-        stax.parallel(stax.Identity(), res_unit),
+        stax.parallel(stax.Identity(),
+                      res_unit),
         stax.FanInSum(),
         layer_norm_or_identity)
   else:
@@ -133,9 +151,9 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
         layer_norm_or_identity)
 
   if proj_into_2d == 'FLAT':
-    proj_layer = stax.Flatten()
+    proj_layer = stax.Flatten(spec=spec)
   elif proj_into_2d == 'POOL':
-    proj_layer = stax.GlobalAvgPool()
+    proj_layer = stax.GlobalAvgPool(spec=spec)
   elif proj_into_2d.startswith('ATTN'):
     n_heads = int(np.sqrt(width))
     n_chan_val = int(np.round(float(width) / n_heads))
@@ -144,8 +162,8 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
         stax.GlobalSelfAttention(
             width, n_chan_key=width, n_chan_val=n_chan_val, n_heads=n_heads,
             fixed=fixed, W_key_std=W_std, W_value_std=W_std, W_query_std=W_std,
-            W_out_std=1.0, b_std=b_std),
-        stax.Flatten())
+            W_out_std=1.0, b_std=b_std, spec=spec),
+        stax.Flatten(spec=spec))
   else:
     raise ValueError(proj_into_2d)
   readout = stax.serial(proj_layer, fc(1 if is_ntk else width))
@@ -336,6 +354,55 @@ class StaxTest(jtu.JaxTestCase):
                                          strides, use_pooling, width,
                                          parameterization, use_dropout)
 
+  def test_avg_pool(self):
+    X1 = np.ones((4, 2, 3, 2))
+    X2 = np.ones((3, 2, 3, 2))
+
+    _, apply_fn, kernel_fn = stax.AvgPool((2, 2), (1, 1), 'SAME',
+                                          normalize_edges=False)
+    _, apply_fn_norm, kernel_fn_norm = stax.AvgPool((2, 2), (1, 1), 'SAME',
+                                                    normalize_edges=True)
+    _, apply_fn_stax = stax.ostax.AvgPool((2, 2), (1, 1), 'SAME')
+
+    out1 = apply_fn((), X1)
+    out2 = apply_fn((), X2)
+
+    out1_norm = apply_fn_norm((), X1)
+    out2_norm = apply_fn_norm((), X2)
+
+    out1_stax = apply_fn_stax((), X1)
+    out2_stax = apply_fn_stax((), X2)
+
+    self.assertAllClose((out1_stax, out2_stax), (out1_norm, out2_norm), True)
+
+    out_unnorm = np.array([[1., 1., 0.5], [0.5, 0.5, 0.25]]).reshape(
+        (1, 2, 3, 1))
+    out1_unnormalized = np.broadcast_to(out_unnorm, X1.shape)
+    out2_unnormalized = np.broadcast_to(out_unnorm, X2.shape)
+
+    self.assertAllClose((out1_unnormalized, out2_unnormalized), (out1, out2),
+                        True)
+
+    ker = kernel_fn(X1, X2)
+    ker_norm = kernel_fn_norm(X1, X2)
+
+    self.assertAllClose(np.ones_like(ker_norm.nngp), ker_norm.nngp, True)
+    self.assertAllClose(np.ones_like(ker_norm.var1), ker_norm.var1, True)
+    self.assertAllClose(np.ones_like(ker_norm.var2), ker_norm.var2, True)
+
+    self.assertEqual(ker_norm.nngp.shape, ker.nngp.shape)
+    self.assertEqual(ker_norm.var1.shape, ker.var1.shape)
+    self.assertEqual(ker_norm.var2.shape, ker.var2.shape)
+
+    ker_unnorm = np.outer(out_unnorm, out_unnorm).reshape((2, 3, 2, 3))
+    ker_unnorm = np.transpose(ker_unnorm, axes=(0, 2, 1, 3))
+    nngp = np.broadcast_to(
+        ker_unnorm.reshape((1, 1) + ker_unnorm.shape), ker.nngp.shape)
+    var1 = np.broadcast_to(np.expand_dims(ker_unnorm, 0), ker.var1.shape)
+    var2 = np.broadcast_to(np.expand_dims(ker_unnorm, 0), ker.var2.shape)
+    self.assertAllClose((nngp, var1, var2), (ker.nngp, ker.var1, ker.var2),
+                        True)
+
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
@@ -407,15 +474,37 @@ class StaxTest(jtu.JaxTestCase):
       is_ntk, is_res, layer_norm, padding, phi, proj_into_2d, same_inputs,
       strides, use_pooling, width, parameterization, use_dropout):
 
-    num_samples = N_SAMPLES * 5 if use_dropout else N_SAMPLES
+    if is_conv:
+      # Select a random dimension order.
+      default_spec = 'NHWC'
+      if xla_bridge.get_backend().platform == 'tpu':
+        # Keep batch dimension leading for TPU for batching to work.
+        specs = ['NHWC', 'NHCW', 'NCHW']
+      else:
+        specs = ['NHWC', 'NHCW', 'NCHW', 'CHWN', 'CHNW', 'CNHW']
+      spec = prandom.choice(specs)
+      input_shape = tuple(INPUT_SHAPE[default_spec.index(c)] for c in spec)
 
+      if layer_norm:
+        layer_norm = tuple(spec.index(c) for c in layer_norm)
+
+    else:
+      # Only `NC` dimension order is supported and is enforced by layers.
+      spec = None
+      input_shape = INPUT_SHAPE
+      if layer_norm:
+        layer_norm = prandom.choice([(1,), (-1,)])
+
+    num_samples = N_SAMPLES * 5 if use_dropout else N_SAMPLES
     key = random.PRNGKey(1)
-    x1, x2 = _get_inputs(key, is_conv, same_inputs, INPUT_SHAPE)
-    init_fn, apply_fn, kernel_fn = _get_net(W_std, b_std, filter_size,
-                                            is_conv, use_pooling, is_res,
-                                            padding, phi, strides, width,
-                                            is_ntk, proj_into_2d, layer_norm,
-                                            parameterization, use_dropout)
+    dimension_numbers = (spec, 'HWIO', spec)
+    x1, x2 = _get_inputs(key, is_conv, same_inputs, input_shape)
+    init_fn, apply_fn, kernel_fn = _get_net(W_std, b_std, filter_size, is_conv,
+                                            use_pooling, is_res, padding, phi,
+                                            strides, width, is_ntk,
+                                            proj_into_2d, layer_norm,
+                                            parameterization, use_dropout,
+                                            dimension_numbers)
 
     x1_out_shape, params = init_fn(key, x1.shape)
     if same_inputs:

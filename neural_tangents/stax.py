@@ -28,8 +28,9 @@ This library contains layer constructors mimicking those in
   (https://arxiv.org/abs/1806.07572, page 3). Standard parameterization can
   be specified for Conv and Dense layers by a keyword argument.
 
-3) Individual methods may have some new or missing functionality. For instance,
-  `CIRCULAR` padding is supported, but certain `dimension_numbers` aren't yet.
+3) Some functionality may be missing (e.g. `BatchNorm`), and some may be present
+  only in our library (e.g. `CIRCULAR` padding, `LayerNorm`, `GlobalAvgPool`,
+  `GlobalSelfAttention` etc.).
 
 Example:
   ```python
@@ -62,32 +63,32 @@ Example:
   ```
 """
 
-
+import functools
+import operator as op
 import warnings
+
 import enum
-from functools import partial
+import frozendict
 from jax import lax
-from jax import random
 from jax import linear_util as lu
 from jax import ops
-import jax.interpreters.partial_eval as pe
+from jax import random
 from jax.abstract_arrays import ShapedArray
 from jax.api_util import flatten_fun
-from jax.tree_util import tree_map, tree_flatten, tree_unflatten
 import jax.experimental.stax as ostax
+import jax.interpreters.partial_eval as pe
 import jax.numpy as np
 from jax.scipy.special import erf
-from neural_tangents.utils.kernel import Kernel
+from jax.tree_util import tree_map, tree_flatten, tree_unflatten
 from neural_tangents.utils import utils
+from neural_tangents.utils.kernel import Kernel
 from neural_tangents.utils.kernel import Marginalisation as M
-import frozendict
 
 
-_CONV_DIMENSION_NUMBERS = ('NHWC', 'HWIO', 'NHWC')
 _CONV_QAB_DIMENSION_NUMBERS = ('NCHW', 'HWIO', 'NCHW')
 _COVARIANCES_REQ = 'covariances_req'
-_DEFAULT_MARGINALIZATION = frozendict.frozendict(
-    {'marginal': M.OVER_ALL, 'cross': M.OVER_ALL})
+_DEFAULT_MARGINALIZATION = frozendict.frozendict({'marginal': M.OVER_ALL,
+                                                  'cross': M.OVER_ALL})
 
 
 class Padding(enum.Enum):
@@ -127,14 +128,20 @@ def _set_covariances_req_attr(combinator_kernel_fn, kernel_fns):
       the needs of their corresponding layer
   """
   def _get_maximal_element(covs_req, comparison_op):
-    for f in kernel_fns:
+    for f in reversed(kernel_fns):
       if hasattr(f, _COVARIANCES_REQ):
-        marginal = getattr(f, _COVARIANCES_REQ)['marginal']
-        cross = getattr(f, _COVARIANCES_REQ)['cross']
+        reqs = getattr(f, _COVARIANCES_REQ)
+
+        marginal = reqs['marginal']
         if comparison_op(marginal, covs_req['marginal']):
           covs_req['marginal'] = marginal
+
+        cross = reqs['cross']
         if comparison_op(cross, covs_req['cross']):
           covs_req['cross'] = cross
+
+        if 'spec' in reqs:
+          covs_req['spec'] = reqs['spec']
 
     return covs_req
 
@@ -157,63 +164,109 @@ def _double_tuple(x):
   return tuple(v for v in x for _ in range(2))
 
 
-def _point_marg(x):
-  n, X, Y, channels = x.shape
-  x_flat = np.reshape(x, (n, -1, channels))
-  x_flat_t = np.transpose(x_flat, (0, 2, 1))
+def _interleave_axes(mat, start_axis=0):
+  """Interleave axes starting from `start_axis`.
+
+  Changes the shape as follows:
+  [..., X, Y, Z, ..., X, Y, Z, ...] -> [..., X, X, ..., Y, Y, ..., Z, Z, ...]
+
+  Args:
+    mat: `np.ndarray` with an even number of dimensions following `start_axis`.
+    start_axis: `int`, number of axis from which to interleave.
+
+  Returns:
+    A `np.ndarray` with a new shape.
+  """
+  n_axes, ragged = divmod(mat.ndim - start_axis, 2)
+  if ragged:
+    raise ValueError('Need even number of axes to interleave, got %d.'
+                     % (mat.ndim - start_axis))
+
+  mat = np.moveaxis(mat,
+                    range(mat.ndim)[-n_axes:],
+                    range(start_axis + 1, start_axis + 1 + n_axes * 2, 2))
+  return mat
+
+
+def _point_marg(x, batch_axis, channel_axis):
+  n, channels = x.shape[batch_axis], x.shape[channel_axis]
+  spatial_shape = tuple(s for i, s in enumerate(x.shape)
+                        if i not in (batch_axis, channel_axis))
+  x_flat = np.reshape(np.moveaxis(x, (batch_axis, channel_axis), (0, -1)),
+                      (n, -1, channels))
+  x_flat_t = np.reshape(np.moveaxis(x, (batch_axis, channel_axis), (0, 1)),
+                        (n, channels, -1))
   ret = np.matmul(x_flat, x_flat_t)
-  return np.swapaxes(np.reshape(ret, (n, X, Y, X, Y)), 3, 2)
+  ret = np.reshape(ret, (n,) + spatial_shape * 2)
+
+  ret = _interleave_axes(ret, start_axis=1)
+  return ret
 
 
-def _get_variance(x, marginal_type):
+def _get_variance(x, marginal_type, batch_axis, channel_axis):
   if marginal_type in (M.OVER_ALL, M.OVER_PIXELS):
-    ret = np.sum(x**2, axis=-1, keepdims=False)
+    ret = np.sum(x**2, axis=channel_axis, keepdims=True)
+    ret = np.moveaxis(ret, (batch_axis, channel_axis), (0, -1))
+    ret = np.squeeze(ret, axis=-1)
+
   elif marginal_type == M.OVER_POINTS:
-    ret = _point_marg(x)
+    ret = _point_marg(x, batch_axis, channel_axis)
+
   elif marginal_type == M.NO:
-    ret = np.squeeze(np.dot(x, x[..., None]), -1)
-    ret = np.transpose(ret, (0, 3, 1, 4, 2, 5))
+    x_c = np.moveaxis(x, (batch_axis, channel_axis), (0, -1))
+    ret = np.squeeze(np.dot(x_c, x_c[..., None]), -1)
+    ret = _interleave_axes(ret)
+
   else:
     raise NotImplementedError(
         "Only implemented for `OVER_ALL`, `OVER_PIXELS`, `OVER_POINTS` "
         "and `NO`; supplied {}".format(marginal_type))
 
-  return ret / x.shape[-1]
+  return ret / x.shape[channel_axis]
 
 
-def _get_covariance(x1, x2, marginal_type):
+def _get_covariance(x1, x2, marginal_type, batch_axis, channel_axis):
   """Computes uncentred covariance (nngp) between two sets of inputs
 
   Args:
     x1: a (2+k)D (k = 0, 2) `np.ndarray` of shape
-      `[n1, <k inner dimensions>, n_features]`.
+      `[n1, <k inner dimensions>, n_features]`.`n1`, `n_features` may be in a
+      different position based on `batch_axis` and `channel_axis`.
     x2: an optional `np.ndarray` that has the same shape as `a` apart from
-      possibly different leading (`n2`) dimension. `None` means `x2 == x1`.
+      possibly different batch (`n2`) dimension. `None` means `x2 == x1`.
     marginal_type: an instance of `Marginalisation` specifying between which
       dimensions should the covariances be computed.
+    batch_axis: integer, specifying which axis is the batch axis.
+    channel_axis: integer, specifying which axis is the channel / feature axis.
 
   Returns:
     an `np.ndarray` with uncentred batch covariance with shape
     `[n1, n2]`
     `+ [<k inner dimensions>]` (if `covar_type` is `OVER_PIXELS`)
     `+ [<k inner dimensions>, <k spatial dimensions>]` (if `covar_type` is
-    `OVER_POINTS` or `NO`)
+    `OVER_POINTS` or `NO`).
   """
   x2 = x1 if x2 is None else x2
 
   if marginal_type in (M.OVER_ALL, M.OVER_PIXELS):
-    ret = np.matmul(np.moveaxis(x1, 0, -2), np.moveaxis(x2, 0, -1))
+    ret = np.matmul(np.moveaxis(x1, (batch_axis, channel_axis), (-2, -1)),
+                    np.moveaxis(x2, (batch_axis, channel_axis), (-1, -2)))
     ret = np.moveaxis(ret, (-2, -1), (0, 1))
+
   elif marginal_type in (M.OVER_POINTS, M.NO):
     # OVER_POINTS and NO coincide for the cross term
-    ret = np.squeeze(np.dot(x1, x2[..., None]), -1)
-    ret = np.transpose(ret, (0, 3, 1, 4, 2, 5))
+    ret = np.squeeze(np.dot(
+        np.moveaxis(x1, (batch_axis, channel_axis), (0, -1)),
+        np.moveaxis(x2, (batch_axis, channel_axis), (0, -1))[..., None]),
+        -1)
+    ret = _interleave_axes(ret)
+
   else:
     raise NotImplementedError(
         "Only implemented for `OVER_ALL`, `OVER_PIXELS`, `OVER_POINTS` "
         "and `NO`; supplied {}".format(marginal_type))
 
-  return ret / x1.shape[-1]
+  return ret / x1.shape[channel_axis]
 
 
 def _diag_mul_over_points(A, mul):
@@ -262,7 +315,13 @@ def _diag_mul(A, mul):
   return _diag_mul_over_points(A, mul)
 
 
-def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk, eps=1e-12):
+def _inputs_to_kernel(x1,
+                      x2,
+                      marginal,
+                      cross,
+                      compute_ntk,
+                      spec=None,
+                      eps=1e-12):
   """Transforms (batches of) inputs to a `Kernel`.
 
   This is a private method. Docstring and example are for internal reference.
@@ -289,7 +348,9 @@ def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk, eps=1e-12):
     cross: an instance of `Marginalisation` specifying for which spatial
       dimensions should the covariances be tracked in `nngp`/`ntk`.
     compute_ntk: a boolean, `True` to compute both NTK and NNGP kernels,
-        `False` to only compute NNGP.
+      `False` to only compute NNGP.
+    spec: an optional `string`, specifying the dimension order of
+      the input, e.g. `NCHW` or `NHWC`.
     eps: a small number used to check whether x1 and x2 are the same up to
         `eps`.
 
@@ -333,36 +394,69 @@ def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk, eps=1e-12):
     raise ValueError('`OVER_ALL` marginalisation should be used for 2D inputs; '
                      'was: `marginal`={}, `cross`={}'.format(marginal, cross))
 
-  if cross == marginal == M.OVER_ALL:
-    x1 = np.reshape(x1, (x1.shape[0], -1))
-    if x2 is not None:
-      x2 = np.reshape(x2, (x2.shape[0], -1))
-
   if cross == M.OVER_POINTS:
     raise ValueError('Required `OVER_POINTS` to be computed for `nngp`/`ntk`. '
                      '`OVER_POINTS` is only meant for `var1`/`var2`. '
                      'Use `NO` instead to compute all covariances.')
 
+  if spec and 'N' not in spec:
+    raise NotImplementedError('A separate batch dimension `N` is required, got'
+                              ' spec = %s.' % spec)
+  batch_axis = spec.index('N') if spec else 0
+  if batch_axis != 0:
+    # TODO(romann): add support or clear error for batching.
+    warnings.warn('!!! Non-leading (!= 0) batch dimension (`N`) in the '
+                  'input layer is not supported for batching and on '
+                  'TPUs, got spec = %s. !!!' % spec)
+
+  if spec == 'CN':
+    raise NotImplementedError('Fully-connected models only support `NC` (batch '
+                              '- features) dimension order, '
+                              'got spec = %s.' % spec)
+
+  # Flatten inputs if marginalizing over everything.
+  if cross == marginal == M.OVER_ALL:
+    n1 = x1.shape[batch_axis]
+    x1 = np.reshape(np.moveaxis(x1, batch_axis, 0), (n1, -1))
+    if x2 is not None:
+      n2 = x2.shape[batch_axis]
+      x2 = np.reshape(np.moveaxis(x2, batch_axis, 0), (n2, -1))
+
+    batch_axis, channel_axis = 0, 1
+
+  else:
+    if spec and 'C' not in spec:
+      raise NotImplementedError('A separate channel dimension `C` is required, '
+                                'got spec = %s.' % spec)
+    channel_axis = spec.index('C') if spec else x1.ndim - 1
+
   # TODO(schsam, romann): Think more about dtype automatic vs manual dtype
   # promotion.
   x1 = x1.astype(np.float64)
-  var1 = _get_variance(x1, marginal_type=marginal)
+  var1 = _get_variance(x1, marginal, batch_axis, channel_axis)
   x1_is_x2 = utils.x1_is_x2(x1, x2, eps=eps)
 
   if x2 is None:
     x2 = x1
     var2 = None
+
   else:
-    if x1.shape[1:] != x2.shape[1:]:
+    x1_non_batch_shape = list(x1.shape)
+    x1_non_batch_shape.pop(batch_axis)
+
+    x2_non_batch_shape = list(x2.shape)
+    x2_non_batch_shape.pop(batch_axis)
+
+    if x1_non_batch_shape != x2_non_batch_shape:
       raise ValueError('`x1` and `x2` are expected to be batches of inputs'
                        ' with the same shape (apart from the batch size),'
                        ' got %s and %s.' %
                        (str(x1.shape), str(x2.shape)))
 
     x2 = x2.astype(np.float64)
-    var2 = _get_variance(x2, marginal_type=marginal)
+    var2 = _get_variance(x2, marginal, batch_axis, channel_axis)
 
-  nngp = _get_covariance(x1, x2, marginal_type=cross)
+  nngp = _get_covariance(x1, x2, cross, batch_axis, channel_axis)
   ntk = 0. if compute_ntk else None
   is_gaussian = False
   is_height_width = True
@@ -375,7 +469,7 @@ def _inputs_to_kernel(x1, x2, marginal, cross, compute_ntk, eps=1e-12):
 def _propagate_shape(init_fn, shape):
   """Statically, abstractly, evaluate the init_fn to get shape information."""
   akey = ShapedArray((2,), np.uint32)
-  closed_init_fn = partial(init_fn, input_shape=shape)
+  closed_init_fn = functools.partial(init_fn, input_shape=shape)
   args_flat, in_tree = tree_flatten(((akey,), {}))
   fun, out_tree = flatten_fun(lu.wrap_init(closed_init_fn), in_tree)
   out = pe.abstract_eval_fun(fun.call_wrapped, akey)
@@ -428,7 +522,10 @@ def _check_marginalization(kernel_fn, kernel):
 
 
 def _preprocess_kernel_fn(init_fn, kernel_fn):
-  def new_kernel_fn(x1_or_kernel, x2=None, get=None, marginalization='auto'):
+  def new_kernel_fn(x1_or_kernel,
+                    x2=None,
+                    get=None,
+                    marginalization='auto'):
     """Returns the `Kernel` resulting from applying `ker_fun` to given inputs.
 
     Args:
@@ -471,8 +568,6 @@ def _preprocess_kernel_fn(init_fn, kernel_fn):
                       'should be `None` or a `np.ndarray`, got %s.'
                       % type(x2))
 
-    include_ntk = (get is None) or ('ntk' in get)
-
     covs_req = getattr(
         kernel_fn, _COVARIANCES_REQ, _DEFAULT_MARGINALIZATION)
     if marginalization != 'auto':
@@ -487,7 +582,9 @@ def _preprocess_kernel_fn(init_fn, kernel_fn):
             ('marginalization should be set to one of "auto", "none", or a dict'
              'specifying the marginalization levels of the variance and the '
              'covariance respectively. Found {}.'.format(marginalization)))
-    kernel = _inputs_to_kernel(x1, x2, compute_ntk=include_ntk, **covs_req)
+
+    compute_ntk = (get is None) or ('ntk' in get)
+    kernel = _inputs_to_kernel(x1, x2, compute_ntk=compute_ntk, **covs_req)
     return _apply_kernel(init_fn, kernel_fn, kernel)
 
   if hasattr(kernel_fn, _COVARIANCES_REQ):
@@ -830,15 +927,19 @@ def _affine(nngp, W_std, b_std):
 
 
 @_layer
-def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0),
+def Dense(out_dim,
+          W_std=1.,
+          b_std=0.,
+          W_init=_randn(1.0),
+          b_init=_randn(1.0),
           parameterization='ntk'):
   r"""Layer constructor function for a dense (fully-connected) layer.
 
   Based on `jax.experimental.stax.Dense`. Has a similar API, apart from:
 
-  W_init and b_init only change the behavior of the finite width network, and
-    are not used by kernel_fn. In most cases, W_std and b_std should be used
-    instead
+  `W_init` and `b_init` only change the behavior of the finite width network,
+    and are not used by `kernel_fn`. In most cases, `W_std` and `b_std` should
+    be used instead.
 
   Args:
     parameterization: Either 'ntk' or 'standard'.
@@ -847,10 +948,11 @@ def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0),
         the finite width layer equation is z_i = W_std / sqrt([width]) sum_j
         W_ij x_j + b_std b_i Under standard parameterization, weights and biases
         are initialized as W_ij ~ N(0,W_std^2/[width]), b_i ~ N(0,b_std^2), and
-        the finite width layer equation is z_i = \sum_j W_ij x_j + b_i
+        the finite width layer equation is z_i = \sum_j W_ij x_j + b_i.
+
 
   Returns:
-    init_fn, apply_fn, kernel_fn
+    `(init_fn, apply_fn, kernel_fn)`.
   """
   # TODO(jaschasd) after experimentation, evaluate whether to change default
   # parameterization from "ntk" to "standard"
@@ -900,8 +1002,8 @@ def Dense(out_dim, W_std=1., b_std=0., W_init=_randn(1.0), b_init=_randn(1.0),
         var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=True,
         is_input=False)
 
-  setattr(kernel_fn, _COVARIANCES_REQ,
-          {'marginal': M.OVER_ALL, 'cross': M.OVER_ALL})
+  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_ALL,
+                                        'cross': M.OVER_ALL})
   return init_fn, apply_fn, kernel_fn
 
 
@@ -1278,9 +1380,16 @@ def _conv_var_3d(var1, filter_shape, strides, padding):
 
 
 @_layer
-def _GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None,
-                 padding=Padding.VALID.name, W_std=1.0, W_init=_randn(1.0),
-                 b_std=0.0, b_init=_randn(1.0), parameterization='ntk'):
+def GeneralConv(dimension_numbers,
+                out_chan,
+                filter_shape,
+                strides=None,
+                padding=Padding.VALID.name,
+                W_std=1.0,
+                W_init=_randn(1.0),
+                b_std=0.0,
+                b_init=_randn(1.0),
+                parameterization='ntk'):
   """Layer construction function for a general convolution layer.
 
   Based on `jax.experimental.stax.GeneralConv`. Has a similar API apart from:
@@ -1291,10 +1400,6 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None,
   """
 
   parameterization = parameterization.lower()
-
-  if dimension_numbers != _CONV_DIMENSION_NUMBERS:
-    raise NotImplementedError('Dimension numbers %s not implemented.'
-                              % str(dimension_numbers))
 
   lhs_spec, rhs_spec, out_spec = dimension_numbers
 
@@ -1337,8 +1442,12 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None,
     apply_padding = padding
     if padding == Padding.CIRCULAR:
       apply_padding = Padding.VALID
-      inputs = _same_pad_for_filter_shape(inputs, filter_shape, strides, (1, 2),
-                                          'wrap')
+      non_spatial_axes = (dimension_numbers[0].index('N'),
+                          dimension_numbers[0].index('C'))
+      spatial_axes = tuple(i for i in range(inputs.ndim)
+                           if i not in non_spatial_axes)
+      inputs = _same_pad_for_filter_shape(inputs, filter_shape, strides,
+                                          spatial_axes, 'wrap')
 
     return norm * lax.conv_general_dilated(
         inputs,
@@ -1421,12 +1530,19 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None,
         is_input=False)
 
   setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_PIXELS,
-                                        'cross': M.OVER_PIXELS})
+                                        'cross': M.OVER_PIXELS,
+                                        'spec': dimension_numbers[0]})
   return init_fn, apply_fn, kernel_fn
 
 
-def Conv(out_chan, filter_shape, strides=None, padding=Padding.VALID.name,
-         W_std=1.0, W_init=_randn(1.0), b_std=0.0, b_init=_randn(1.0),
+def Conv(out_chan,
+         filter_shape,
+         strides=None,
+         padding=Padding.VALID.name,
+         W_std=1.0,
+         W_init=_randn(1.0),
+         b_std=0.0,
+         b_init=_randn(1.0),
          parameterization='ntk'):
   """Layer construction function for a convolution layer.
 
@@ -1443,8 +1559,16 @@ def Conv(out_chan, filter_shape, strides=None, padding=Padding.VALID.name,
       the direct analogues for convolution of the corresponding
       parameterizations for Dense layers.
   """
-  return _GeneralConv(_CONV_DIMENSION_NUMBERS, out_chan, filter_shape, strides,
-                      padding, W_std, W_init, b_std, b_init, parameterization)
+  return GeneralConv(('NHWC', 'HWIO', 'NHWC'),
+                     out_chan,
+                     filter_shape,
+                     strides,
+                     padding,
+                     W_std,
+                     W_init,
+                     b_std,
+                     b_init,
+                     parameterization)
 
 
 def _average_pool_nngp_5or6d(mat, window_shape, strides, padding,
@@ -1502,6 +1626,7 @@ def _average_pool_nngp_5or6d(mat, window_shape, strides, padding,
 def AvgPool(window_shape,
             strides=None,
             padding=Padding.VALID.name,
+            spec='NHWC',
             normalize_edges=True):
   """Layer construction function for a 2D average pooling layer.
 
@@ -1510,6 +1635,8 @@ def AvgPool(window_shape,
   Args:
     padding: in addition to `VALID` and `SAME' padding, supports `CIRCULAR`,
       not available in `jax.experimental.stax.GeneralConv`.
+    spec: an optional `string`, specifying the dimension order of
+      the input, e.g. `NCHW` or `NHWC`.
     normalize_edges: `True` to normalize output by the effective receptive
       field, `False` to normalize by the window size. Only has effect at the
       edges when `SAME` padding is used. Set to `True` to retain correspondence
@@ -1519,26 +1646,30 @@ def AvgPool(window_shape,
   padding = Padding(padding)
 
   if padding == Padding.CIRCULAR:
-    init_fn, _ = ostax.AvgPool(window_shape, strides, Padding.SAME.name)
-    _, apply_fn_0 = ostax.AvgPool(window_shape, strides, Padding.VALID.name)
+    init_fn, _ = ostax.AvgPool(window_shape, strides, Padding.SAME.name,
+                               spec)
+    _, apply_fn_0 = ostax.AvgPool(window_shape, strides, Padding.VALID.name,
+                                  spec)
 
     def apply_fn(params, inputs, **kwargs):
-      inputs = _same_pad_for_filter_shape(inputs, window_shape, strides, (1, 2),
-                                          'wrap')
+      non_spatial_axes = (spec.index('N'), spec.index('C'))
+      spatial_axes = tuple(i for i in range(inputs.ndim)
+                           if i not in non_spatial_axes)
+      inputs = _same_pad_for_filter_shape(inputs, window_shape, strides,
+                                          spatial_axes, 'wrap')
       res = apply_fn_0(params, inputs, **kwargs)
       return res
 
-  elif not normalize_edges:
-
-    def rescaler(dims, strides, padding):
-      del dims, strides, padding  # Unused.
-      return lambda outputs, inputs, spec: outputs / np.prod(window_shape)
-
-    avgPool = ostax._pooling_layer(lax.add, 0., rescaler)
-    init_fn, apply_fn = avgPool(window_shape, strides, padding.name)
+  elif normalize_edges:
+    init_fn, apply_fn = ostax.AvgPool(window_shape, strides, padding.name, spec)
 
   else:
-    init_fn, apply_fn = ostax.AvgPool(window_shape, strides, padding.name)
+    def rescaler(*args, **kwargs):
+      del args, kwargs  # Unused.
+      return lambda outputs, _inputs, _spec: outputs / np.prod(window_shape)
+
+    avgPool = ostax._pooling_layer(lax.add, 0., rescaler)
+    init_fn, apply_fn = avgPool(window_shape, strides, padding.name, spec)
 
   def kernel_fn(kernels):
     """Kernel transformation."""
@@ -1569,31 +1700,35 @@ def AvgPool(window_shape,
         is_height_width=is_height_width, marginal=marginal, cross=cross)
 
   setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_POINTS,
-                                        'cross': M.NO})
+                                        'cross': M.NO,
+                                        'spec': spec})
   return init_fn, apply_fn, kernel_fn
 
 
 @_layer
-def GlobalAvgPool():
+def GlobalAvgPool(spec='NHWC'):
   """Layer construction function for a global average pooling layer.
 
-  Pools over and removes (`keepdims=False`) all inner dimensions (from 1 to -2),
-    e.g. appropriate for `NHWC`, `NWHC`, `CHWN`, `CWHN` inputs.
+  Pools over and removes (`keepdims=False`) all spatial dimensions, making the
+    batch dimension (`N`) leading.
 
-  Warnings: assumes the next layer will be Dense (optionally preceded by
-   a nonlinearity), otherwise the kernels will not be correct
+  Args:
+    spec: an optional `string`, specifying the dimension order of
+      the input, e.g. `NCHW` or `NHWC`.
   """
-  warnings.warn("GlobalAvgPool assumes the next layer will be Dense"
-                " (optionally preceded by a nonlinearity),"
-                " otherwise the kernels will not be correct!")
+  non_spatial_axes = (spec.index('N'), spec.index('C'))
 
   def init_fn(rng, input_shape):
-    output_shape = input_shape[0], input_shape[-1]
+    output_shape = tuple(input_shape[i] for i in non_spatial_axes)
     return output_shape, ()
 
   def apply_fn(params, inputs, **kwargs):
-    pixel_axes = tuple(range(1, inputs.ndim - 1))
-    return np.mean(inputs, axis=pixel_axes)
+    spatial_axes = tuple(i for i in range(inputs.ndim)
+                       if i not in non_spatial_axes)
+    out = np.mean(inputs, axis=spatial_axes, keepdims=True)
+    out = np.moveaxis(out, non_spatial_axes, (0, 1))
+    out = np.squeeze(out, range(inputs.ndim)[len(non_spatial_axes):])
+    return out
 
   def kernel_fn(kernels):
     var1, nngp, var2, ntk, is_gaussian, marginal, cross = (
@@ -1601,8 +1736,8 @@ def GlobalAvgPool():
         kernels.is_gaussian, kernels.marginal, kernels.cross)
 
     def _average_pool(ker_mat):
-      pixel_axes = tuple(range(ker_mat.ndim)[-4:])
-      return np.mean(ker_mat, axis=pixel_axes)
+      spatial_axes = tuple(range(ker_mat.ndim)[-4:])
+      return np.mean(ker_mat, axis=spatial_axes)
 
     nngp = _average_pool(nngp)
     ntk = _average_pool(ntk) if _is_array(ntk) else ntk
@@ -1615,24 +1750,39 @@ def GlobalAvgPool():
         is_height_width=True, marginal=M.OVER_ALL, cross=M.OVER_ALL)
 
   setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_POINTS,
-                                        'cross': M.NO})
+                                        'cross': M.NO,
+                                        'spec': spec})
   return init_fn, apply_fn, kernel_fn
 
 
 @_layer
-def Flatten():
-  """Layer construction function for flattening all but the leading dim.
+def Flatten(spec=None):
+  """Layer construction function for flattening all but the batch (`N`) dim.
 
   Based on `jax.experimental.stax.Flatten`. Has a similar API.
 
-  Warnings: assumes the next layer will be Dense (optionally preceded by
-   a nonlinearity), otherwise the kernels will not be correct
+  Args:
+    spec: an optional string specifying ordering of the input dimensions, e.g.,
+      `'NHWC'` for `[batch_size, height, width, channels] or `'NCHW'` for
+      `[batch_size, channels, height, width]`.
   """
-  warnings.warn("Flatten assumes the next layer will be Dense"
-                " (optionally preceded by a nonlinearity),"
-                " otherwise the kernels will not be correct!")
+  batch_axis = spec.index('N') if spec else 0
 
-  init_fn, apply_fn = ostax.Flatten
+  def get_output_shape(input_shape):
+    return (
+        input_shape[batch_axis],
+        functools.reduce(op.mul,
+            input_shape[:batch_axis] + input_shape[batch_axis + 1:],
+            1))
+
+  def init_fn(rng, input_shape):
+    output_shape = get_output_shape(input_shape)
+    return output_shape, ()
+
+  def apply_fn(params, inputs, **kwargs):
+    output_shape = get_output_shape(inputs.shape)
+    inputs = np.moveaxis(inputs, batch_axis, 0)
+    return np.reshape(inputs, output_shape)
 
   def kernel_fn(kernels):
     """Compute kernels."""
@@ -1652,6 +1802,7 @@ def Flatten():
     if marginal == M.OVER_PIXELS:
       var1 = np.mean(var1, axis=(1, 2))
       var2 = var2 if var2 is None else np.mean(var2, axis=(1, 2))
+
     elif marginal in [M.OVER_POINTS, M.NO]:
       if marginal == M.NO:
         var1 = np.moveaxis(np.diagonal(var1, axis1=0, axis2=1), -1, 0)
@@ -1660,6 +1811,7 @@ def Flatten():
 
       var1 = trace(var1)
       var2 = var2 if var2 is None else trace(var2)
+
     elif marginal != M.OVER_ALL:
       raise NotImplementedError(
           "Only implemented for , `OVER_ALL`, `OVER_PIXELS`, `OVER_POINTS` and "
@@ -1668,9 +1820,11 @@ def Flatten():
     if cross == M.OVER_PIXELS:
       nngp = np.mean(nngp, axis=(2, 3))
       ntk =  np.mean(ntk, axis=(2, 3)) if _is_array(ntk) else ntk
+
     elif cross in [M.OVER_POINTS, M.NO]:
       nngp = trace(nngp)
       ntk = trace(ntk) if _is_array(ntk) else ntk
+
     elif cross != M.OVER_ALL:
       raise NotImplementedError(
           "Only implemented for , `OVER_ALL`, `OVER_PIXELS`, `OVER_POINTS` and "
@@ -1680,15 +1834,29 @@ def Flatten():
         var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=is_gaussian,
         is_height_width=True, marginal=M.OVER_ALL, cross=M.OVER_ALL)
 
+  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_ALL,
+                                        'cross': M.OVER_ALL,
+                                        'spec': spec})
   return init_fn, apply_fn, kernel_fn
 
 
 @_layer
-def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
-    fixed=True, W_key_std=1.0, W_value_std=1.0, W_query_std=1.0,
-    W_out_std=1.0, b_std=0.0, W_key_init=_randn(1.0), W_value_init=_randn(1.0),
-    W_query_init=_randn(1.0), W_out_init=_randn(1.0), b_init=_randn(1.0),
-    dimension_spec=_CONV_DIMENSION_NUMBERS[0]):
+def GlobalSelfAttention(n_chan_out,
+                        n_chan_key,
+                        n_chan_val,
+                        n_heads,
+                        fixed=True,
+                        W_key_std=1.0,
+                        W_value_std=1.0,
+                        W_query_std=1.0,
+                        W_out_std=1.0,
+                        b_std=0.0,
+                        W_key_init=_randn(1.0),
+                        W_value_init=_randn(1.0),
+                        W_query_init=_randn(1.0),
+                        W_out_init=_randn(1.0),
+                        b_init=_randn(1.0),
+                        spec='NHWC'):
   """Layer construction function for (global) scaled dot-product self-attention
   with multiple attention heads.
 
@@ -1743,9 +1911,9 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
     W_key_init: function used to sample the initial (unscaled) key weights
     W_query_init: function used to sample the initial (unscaled) query weights
       unless `fixed` is `True` in which case the argument is ignored (see above)
-    dimension_spec: a string specifying ordering of the input dimensions, e.g.,
+    spec: a string specifying ordering of the input dimensions, e.g.,
       `'NHWC'` for `[batch_size, height, width, channels] or `'NCHW'` for
-      `[batch_size, channels, height, width]`
+      `[batch_size, channels, height, width]`.
 
   Warnings:
     Currently only works with image data.
@@ -1760,19 +1928,18 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
   # 1/sqrt(n) scaling. Will also need to decide whether the 1/sqrt(n) scaling
   # should be absorbed into one or both of the key and value weight
   # initializations
-  if dimension_spec is None:
-    dimension_spec = _CONV_DIMENSION_NUMBERS[0]
-  if dimension_spec != _CONV_DIMENSION_NUMBERS[0]:
-    raise NotImplementedError(
-        'Dimension specification %s not implemented.' % str(dimension_spec))
+
+  # TODO(romann): optimize different `spec` values to minimize transpositions.
 
   OV_gain = W_out_std * W_value_std
   QK_gain = W_query_std * W_key_std
   QK_prod_scaling = float(n_chan_key if fixed else n_chan_key**0.5)
+  batch_axis, channel_axis = spec.index('N'), spec.index('C')
 
   def init_fn(rng, input_shape):
-    _, height, width, n_chan_in = input_shape
-    output_shape = input_shape[:-1] + (n_chan_out,)
+    n_chan_in = input_shape[channel_axis]
+    output_shape = (input_shape[:channel_axis] + (n_chan_out,) +
+                    input_shape[channel_axis + 1:])
 
     rng_Q, rng_K, rng_V, rng_O, rng_b = random.split(rng, 5)
     key_matrices = W_key_init(rng_K, shape=(n_heads, n_chan_in, n_chan_key))
@@ -1792,11 +1959,14 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
 
   def apply_fn(params, inputs, **kwargs):
     query_matrices, key_matrices, val_matrices, W_out, b = params
-    n_chan_in = inputs.shape[dimension_spec.index('C')]
-    height = inputs.shape[dimension_spec.index('H')]
-    width = inputs.shape[dimension_spec.index('W')]
+    n = inputs.shape[batch_axis]
+    n_chan_in = inputs.shape[channel_axis]
+    spatial_shape = tuple(s for i, s in enumerate(inputs.shape)
+                          if i not in (batch_axis, channel_axis))
 
-    inputs = inputs.reshape((len(inputs), -1, n_chan_in))
+    inputs = np.moveaxis(inputs, (batch_axis, channel_axis), (0, -1))
+    inputs = inputs.reshape((n, -1, n_chan_in))
+
     def _inputs_dot(matrices, std):
       ret = np.dot(inputs, std * matrices / np.sqrt(n_chan_in))
       return np.moveaxis(ret, 2, 0)
@@ -1817,7 +1987,9 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
     heads = np.reshape(heads, heads.shape[:-2] + (-1,))
 
     ret = np.matmul(heads, W_out_std * W_out / np.sqrt(n_chan_val * n_heads))
-    return np.reshape(ret, (-1, height, width, n_chan_out)) + b_std * b
+    ret = np.reshape(ret, (n,) + spatial_shape + (n_chan_out,)) + b_std * b
+    ret = np.moveaxis(ret, (0, -1), (batch_axis, channel_axis))
+    return ret
 
   def kernel_fn(kernels):
     var1, nngp, var2, ntk, is_height_width, marginal, cross = (
@@ -1857,27 +2029,26 @@ def GlobalSelfAttention(n_chan_out, n_chan_key, n_chan_val, n_heads,
     return kernels._replace(
         var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=True,
         is_height_width=is_height_width, marginal=marginal, cross=cross)
-  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_POINTS,
-                                        'cross': M.NO})
 
+  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_POINTS,
+                                        'cross': M.NO,
+                                        'spec': spec})
   return init_fn, apply_fn, kernel_fn
 
 
 @_layer
-def LayerNorm(axis=-1, eps=1e-12):
+def LayerNorm(axis=-1, eps=1e-12, spec=None):
   """Layer normalisation.
 
   Args:
     axis: int or a tuple, specifies dimensions over which to normalise
     eps: float, specifies (small) positive constant to be added to the variance
-      estimates in order to prevent division by zero
-
-  Warnings:
-    For image data, `kernel_fn` assumes they have been fed in in the NHWC format
+      estimates in order to prevent division by zero.
+    spec: an optional `string`, specifying the dimension order of the input,
+      e.g. `NCHW` or `NHWC`.
   """
-  warnings.warn("For image data, `kernel_fn` assumes they have been fed in "
-                "in the NHWC format.")
   axis = (axis,) if isinstance(axis, int) else tuple(axis)
+  _spec = spec if spec else 'NHWC'
 
   def init_fn(rng, input_shape):
     return input_shape, ()
@@ -1885,7 +2056,6 @@ def LayerNorm(axis=-1, eps=1e-12):
   def apply_fn(params, inputs, **kwargs):
     mean = np.mean(inputs, axis=axis, keepdims=True)
     var = np.var(inputs, axis=axis, keepdims=True)
-
     return (inputs - mean) / np.sqrt(eps + var)
 
   def kernel_fn(kernels):
@@ -1895,21 +2065,33 @@ def LayerNorm(axis=-1, eps=1e-12):
     _axis = axis
 
     if marginal != M.OVER_ALL or cross != M.OVER_ALL:
-      if not all(a in [-3, -2, -1, 1, 2, 3] for a in _axis):
-        raise ValueError(_axis)
-      _axis = list(set(np.arange(4)[list(_axis)]))
-      if 3 not in _axis:
-        raise ValueError("Normalisation over channels necessary for convergence"
-                         " to an asymptotic kernel; axis={}".format(_axis))
-      _axis.remove(3)
+      _axis = list(set(np.arange(len(_spec))[list(_axis)]))
+
+      channel_axis = _spec.index('C')
+      if channel_axis not in _axis:
+        raise ValueError("Normalisation over channels (axis %d) necessary for "
+                         "convergence to an asymptotic kernel; "
+                         "got axis=%s" % (channel_axis, _axis))
+
+      batch_axis = _spec.index('N')
+      if batch_axis in _axis:
+        raise ValueError("Normalisation over batch (axis %d) not supported for "
+                         "convergence to an asymptotic kernel; "
+                         "got axis=%s" % (batch_axis, _axis))
+
+      _axis.remove(channel_axis)
 
       kernel_axis = []
-      if 1 in _axis:
+      h_axis, w_axis = sorted((_spec.index('H'), _spec.index('W')))
+      if h_axis in _axis:
         kernel_axis += [1] if is_height_width else [2]
-      if 2 in _axis:
+      if w_axis in _axis:
         kernel_axis += [2] if is_height_width else [1]
+
     else:
-      if len(_axis) > 1 or _axis[0] not in [-1, 1]:
+      __spec = [c for c in _spec if c in ('N', 'C')]
+      _axis = list(set(np.arange(len(__spec))[list(_axis)]))
+      if _axis != [__spec.index('C')]:
         raise ValueError("Normalisation over features necessary for convergence"
                          " to an asymptotic kernel; axis={}".format(_axis))
       kernel_axis = []
@@ -1931,7 +2113,8 @@ def LayerNorm(axis=-1, eps=1e-12):
 
   if len(axis) > 1:
     setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_PIXELS,
-                                          'cross': M.OVER_PIXELS})
+                                          'cross': M.OVER_PIXELS,
+                                          'spec': spec})
   return init_fn, apply_fn, kernel_fn
 
 
