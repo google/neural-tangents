@@ -986,6 +986,77 @@ def FanInSum():
   return init_fn, apply_fn, kernel_fn
 
 
+
+@_layer
+def FanInConcat(axis=-1):
+  """Layer construction function for a fan-in sum layer.
+
+  Based on `jax.experimental.stax.FanInConcat`.
+  """
+  init_fn, apply_fn = ostax.FanInConcat(axis=axis)
+  def kernel_fn(kernels):
+    is_gaussian = all(ker.is_gaussian for ker in kernels)
+
+    if not is_gaussian:
+      raise NotImplementedError('`FanInConcat` layer is only implemented for the '
+                                'case if all input layers guaranteed to be mean'
+                                '-zero gaussian, i.e. having all `is_gaussian'
+                                'set to `True`.')
+
+    marginal, cross = kernels[0].marginal, kernels[0].cross
+    shape1, shape2 = kernels[0].shape1, kernels[0].shape2
+    if not all(k.marginal == marginal and
+               k.cross == cross
+               for k in kernels):
+      raise NotImplementedError('`FanInConcat` layer is only implemented for the '
+                                'case if all input layers output the same type'
+                                'of covariance matrices, i.e. having all '
+                                'matching `marginal` and `cross` attributes')
+
+    # If kernels have different height/width order, transpose some of them.
+    n_kernels = len(kernels)
+    n_height_width = sum(ker.is_height_width for ker in kernels)
+
+    if n_height_width == n_kernels:
+      is_height_width = True
+
+    elif n_height_width >= n_kernels / 2:
+      is_height_width = True
+      for i in range(n_kernels):
+        if not kernels[i].is_height_width:
+          kernels[i] = _flip_height_width(kernels[i])
+
+    else:
+      is_height_width = False
+      for i in range(n_kernels):
+        if kernels[i].is_height_width:
+          kernels[i] = _flip_height_width(kernels[i])
+
+    if not all([k.shape1 == shape1 and k.shape2 == shape2 for k in kernels]):
+      raise ValueError('All shapes should be equal in FanInConcat.')
+
+    x1_is_x2 = kernels[0].x1_is_x2
+    kers = []
+    for i in range(4):
+      if all(ker[i] is None for ker in kernels):
+        kers.append(None)
+      else:
+        #kers.append(np.concatenate( [ker[i] for ker in kernels] ,axis=axis))
+        kers.append( [ker[i] for ker in kernels]  )
+    kers = tuple(kers)
+    #kers = tuple(None if all(ker[i] is None for ker in kernels) else
+    #             sum(ker[i] for ker in kernels) for i in range(4))
+    is_input = kernels[0].is_input
+    return Kernel(*(
+        kers + (is_gaussian, is_height_width, marginal, cross, None, None,
+                x1_is_x2, is_input)))
+
+  return init_fn, apply_fn, kernel_fn
+
+
+
+
+
 def _flip_height_width(kernels):
   """Flips the order of spatial axes in the covariance matrices.
 
@@ -1144,7 +1215,7 @@ def _pad_one_side(x, pads, axes, mode):
   return x
 
 
-def _conv_nngp_5or6d_double_conv(mat, filter_shape, strides, padding):
+def _conv_nngp_5or6d_double_conv(mat, filter_shape, strides, padding, transpose=False):
   """Compute covariance of the CNN outputs given inputs with covariance `nngp`.
 
   Uses 2D convolution and works on any hardware platform.
@@ -1184,10 +1255,17 @@ def _conv_nngp_5or6d_double_conv(mat, filter_shape, strides, padding):
   ker_y = np.reshape(ker_y, (filter_y, filter_y, 1, 1))
 
   channel_axis = _CONV_QAB_DIMENSION_NUMBERS[0].index('C')
-  mat = lax.conv_general_dilated(
+  if not(transpose):
+    mat = lax.conv_general_dilated(
+        np.expand_dims(mat.reshape((-1, Y, Y)), channel_axis),
+        ker_y, (stride_y, stride_y), padding.name,
+        dimension_numbers=_CONV_QAB_DIMENSION_NUMBERS)
+  else:
+    mat = lax.conv_transpose(
       np.expand_dims(mat.reshape((-1, Y, Y)), channel_axis),
       ker_y, (stride_y, stride_y), padding.name,
       dimension_numbers=_CONV_QAB_DIMENSION_NUMBERS)
+
   out_Y = mat.shape[-2]
   mat = mat.reshape(data_dim + (X, X, out_Y, out_Y))
 
@@ -1195,17 +1273,24 @@ def _conv_nngp_5or6d_double_conv(mat, filter_shape, strides, padding):
   ker_x = np.reshape(ker_x, (filter_x, filter_x, 1, 1))
 
   mat = np.moveaxis(mat, (-2, -1), (-4, -3))
-  mat = lax.conv_general_dilated(
+  if not(transpose):
+    mat = lax.conv_general_dilated(
       np.expand_dims(mat.reshape((-1, X, X)), channel_axis),
       ker_x, (stride_x, stride_x), padding.name,
       dimension_numbers=_CONV_QAB_DIMENSION_NUMBERS)
+  else:
+    mat = lax.conv_transpose(
+      np.expand_dims(mat.reshape((-1, X, X)), channel_axis),
+      ker_x, (stride_x, stride_x), padding.name,
+      dimension_numbers=_CONV_QAB_DIMENSION_NUMBERS)
+
   out_X = mat.shape[-2]
   mat = mat.reshape(data_dim + (out_Y, out_Y, out_X, out_X))
 
   return mat
 
 
-def _conv_nngp_4d(nngp, filter_shape, strides, padding):
+def _conv_nngp_4d(nngp, filter_shape, strides, padding, transpose=False):
   """Compute covariance of the CNN outputs given inputs with covariance `nngp`.
 
   Uses 2D convolution and works on any platform, but only works with
@@ -1236,14 +1321,18 @@ def _conv_nngp_4d(nngp, filter_shape, strides, padding):
   batch1, batch2, X, Y = nngp.shape
   nngp = np.reshape(nngp, (-1, X, Y))
   nngp = np.expand_dims(nngp, channel_axis)
-  nngp = lax.conv_general_dilated(nngp, ker_nngp, strides, padding.name,
+  if not(transpose):
+    nngp = lax.conv_general_dilated(nngp, ker_nngp, strides, padding.name,
                                   dimension_numbers=_CONV_QAB_DIMENSION_NUMBERS)
+  else:
+    nngp = lax.conv_transpose(nngp, ker_nngp, strides, padding.name,
+                              dimension_numbers=_CONV_QAB_DIMENSION_NUMBERS)
   nngp = np.squeeze(nngp, channel_axis)
   nngp = nngp.reshape((batch1, batch2,) + nngp.shape[1:])
   return nngp
 
 
-def _conv_var_3d(var1, filter_shape, strides, padding):
+def _conv_var_3d(var1, filter_shape, strides, padding, transpose=False):
   """Compute variances of the CNN outputs given inputs with variances `var1`.
 
   Args:
@@ -1271,8 +1360,14 @@ def _conv_var_3d(var1, filter_shape, strides, padding):
   var1 = np.expand_dims(var1, channel_axis)
   ker_var1 = np.full(filter_shape + (1, 1), 1. / np.prod(filter_shape),
                      var1.dtype)
-  var1 = lax.conv_general_dilated(var1, ker_var1, strides, padding.name,
-                                  dimension_numbers=_CONV_QAB_DIMENSION_NUMBERS)
+
+  if not(transpose):
+    var1 = lax.conv_general_dilated(var1, ker_var1, strides, padding.name,
+                                    dimension_numbers=_CONV_QAB_DIMENSION_NUMBERS)
+  else:
+    var1 = lax.conv_transpose(var1, ker_var1, strides, padding.name,
+                       dimension_numbers=_CONV_QAB_DIMENSION_NUMBERS)
+
   var1 = np.squeeze(var1, channel_axis)
   return var1
 
@@ -1445,6 +1540,183 @@ def Conv(out_chan, filter_shape, strides=None, padding=Padding.VALID.name,
   """
   return _GeneralConv(_CONV_DIMENSION_NUMBERS, out_chan, filter_shape, strides,
                       padding, W_std, W_init, b_std, b_init, parameterization)
+
+
+
+
+
+@_layer
+def _GeneralConvTranspose(dimension_numbers, out_chan, filter_shape, strides=None,
+                 padding=Padding.VALID.name, W_std=1.0, W_init=_randn(1.0),
+                 b_std=0.0, b_init=_randn(1.0), parameterization='ntk'):
+  """Layer construction function for a general transposed-convolution layer.
+
+  Based on `jax.experimental.stax.GeneralConvTranspose`. Has a similar API apart from:
+
+  Args:
+    padding: in addition to `VALID` and `SAME' padding, supports `CIRCULAR`, not
+      available in `jax.experimental.stax.GeneralConvTranpose`.
+  """
+
+  parameterization = parameterization.lower()
+
+  if dimension_numbers != _CONV_DIMENSION_NUMBERS:
+    raise NotImplementedError('Dimension numbers %s not implemented.'
+                              % str(dimension_numbers))
+
+  lhs_spec, rhs_spec, out_spec = dimension_numbers
+
+  one = (1,) * len(filter_shape)
+  strides = strides or one
+
+  padding = Padding(padding)
+  init_padding = padding
+  if padding == Padding.CIRCULAR:
+    init_padding = Padding.SAME
+
+  def input_total_dim(input_shape):
+    return input_shape[lhs_spec.index('C')] * np.prod(filter_shape)
+
+  ntk_init_fn, _ = ostax.GeneralConvTranspose(dimension_numbers, out_chan, filter_shape,
+                                     strides, init_padding.name, W_init, b_init)
+
+  def standard_init_fn(rng, input_shape):
+    output_shape, (W, b) = ntk_init_fn(rng, input_shape)
+    norm = W_std / np.sqrt(input_total_dim(input_shape))
+    return output_shape, (W * norm, b * b_std)
+
+  if parameterization == 'ntk':
+    init_fn = ntk_init_fn
+  elif parameterization == 'standard':
+    init_fn = standard_init_fn
+  else:
+    raise ValueError('Parameterization not supported: %s' % parameterization)
+
+  def apply_fn(params, inputs, **kwargs):
+    W, b = params
+
+    if parameterization == 'ntk':
+      norm = W_std / np.sqrt(input_total_dim(inputs.shape))
+      b_rescale = b_std
+    elif parameterization == 'standard':
+      norm = 1.
+      b_rescale = 1.
+
+    apply_padding = padding
+    if padding == Padding.CIRCULAR:
+      apply_padding = Padding.VALID
+      inputs = _same_pad_for_filter_shape(inputs, filter_shape, strides, (1, 2),
+                                          'wrap')
+
+    return norm * lax.conv_transpose(
+        inputs,
+        W,
+        strides,
+        apply_padding.name,
+        dimension_numbers=dimension_numbers) + b_rescale * b
+
+  def kernel_fn(kernels):
+    """Compute the transformed kernels after a conv layer."""
+    var1, nngp, var2, ntk, is_height_width, marginal, cross = (
+        kernels.var1, kernels.nngp, kernels.var2, kernels.ntk,
+        kernels.is_height_width, kernels.marginal, kernels.cross)
+
+    if cross > M.OVER_PIXELS and not is_height_width:
+      filter_shape_nngp = filter_shape[::-1]
+      strides_nngp = strides[::-1]
+    else:
+      filter_shape_nngp = filter_shape
+      strides_nngp = strides
+
+    if cross == M.OVER_PIXELS:
+
+      def conv_nngp_unscaled(x):
+        if _is_array(x):
+          x = _conv_nngp_4d(x, filter_shape_nngp, strides_nngp, padding, transpose=True)
+        return x
+    elif cross in [M.OVER_POINTS, M.NO]:
+
+      def conv_nngp_unscaled(x):
+        if _is_array(x):
+          x = _conv_nngp_5or6d_double_conv(x, filter_shape_nngp,
+                                           strides_nngp, padding, transpose=True)
+        return x
+
+      is_height_width = not is_height_width
+    else:
+      raise NotImplementedError(
+          "Only implemented for `OVER_PIXELS`, `OVER_POINTS` and `NO`;"
+          " supplied {}".format(cross))
+
+    def conv_nngp(x):
+      x = conv_nngp_unscaled(x)
+      return _affine(x, W_std, b_std)
+
+    if marginal == M.OVER_PIXELS:
+      def conv_var(x):
+        x = _conv_var_3d(x, filter_shape_nngp, strides_nngp, padding, transpose=True)
+        x = _affine(x, W_std, b_std)
+        return x
+    elif marginal in [M.OVER_POINTS, M.NO]:
+      def conv_var(x):
+        if _is_array(x):
+          x = _conv_nngp_5or6d_double_conv(x, filter_shape_nngp,
+                                           strides_nngp, padding, transpose=True)
+        x = _affine(x, W_std, b_std)
+        return x
+    else:
+      raise NotImplementedError(
+          "Only implemented for `OVER_PIXELS`, `OVER_POINTS` and `NO`;"
+          " supplied {}".format(marginal))
+
+    var1 = conv_var(var1)
+    var2 = conv_var(var2)
+
+    if parameterization == 'ntk':
+      nngp = conv_nngp(nngp)
+      ntk = conv_nngp(ntk) + nngp - b_std**2 if ntk is not None else ntk
+    elif parameterization == 'standard':
+      nngp_unscaled = conv_nngp_unscaled(nngp)
+      if ntk is not None:
+        ntk = (
+            input_total_dim(kernels.shape1) * nngp_unscaled + 1. +
+            W_std**2 * conv_nngp_unscaled(ntk))
+      nngp = _affine(nngp_unscaled, W_std, b_std)
+
+    return kernels._replace(
+        var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=True,
+        is_height_width=is_height_width, marginal=marginal, cross=cross)
+
+  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_PIXELS,
+                                        'cross': M.OVER_PIXELS})
+  return init_fn, apply_fn, kernel_fn
+
+
+def ConvTranspose(out_chan, filter_shape, strides=None, padding=Padding.VALID.name,
+         W_std=1.0, W_init=_randn(1.0), b_std=0.0, b_init=_randn(1.0),
+         parameterization='ntk'):
+  """Layer construction function for a convolution-transpose layer.
+
+  Based on `jax.experimental.stax.ConvTranspose`. Has a similar API apart from:
+
+  W_init and b_init only change the behavior of the finite width network, and
+    are not used by kernel_fn. In most cases, W_std and b_std should be used
+    instead
+
+  Args:
+    padding: in addition to `VALID` and `SAME' padding, supports `CIRCULAR`,
+      not available in `jax.experimental.stax.ConvTranspose`.
+    parameterization: Either 'ntk' or 'standard'. These parameterizations are
+      the direct analogues for convolution of the corresponding
+      parameterizations for Dense layers.
+  """
+  return _GeneralConvTranspose(_CONV_DIMENSION_NUMBERS, out_chan, filter_shape, strides,
+                      padding, W_std, W_init, b_std, b_init, parameterization)
+
+
+
+
+
 
 
 def _average_pool_nngp_5or6d(mat, window_shape, strides, padding,
