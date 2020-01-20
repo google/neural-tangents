@@ -355,15 +355,22 @@ a small dataset using a small learning rate.
 
 ## Papers
 
-Neural tangents has been used in the following papers:
+Neural Tangents has been used in the following papers:
+
+
+* [Disentangling Trainability and Generalization in Deep Learning](https://arxiv.org/abs/1912.13053) \
+Lechao Xiao, Jeffrey Pennington, Samuel S. Schoenholz
+
+* [Information in Infinite Ensembles of Infinitely-Wide Neural Networks](https://arxiv.org/abs/1911.09189) \
+Ravid Shwartz-Ziv, Alexander A. Alemi
+
+* [Training Dynamics of Deep Networks using Stochastic Gradient Descent via Neural Tangent Kernel.](https://arxiv.org/abs/1905.13654) \
+Soufiane Hayou, Arnaud Doucet, Judith Rousseau
 
 * [Wide Neural Networks of Any Depth Evolve as Linear Models Under Gradient
 Descent.](https://arxiv.org/abs/1902.06720) \
 Jaehoon Lee*, Lechao Xiao*, Samuel S. Schoenholz, Yasaman Bahri, Roman Novak, Jascha
 Sohl-Dickstein, Jeffrey Pennington
-
-* [Training Dynamics of Deep Networks using Stochastic Gradient Descent via Neural Tangent Kernel.](https://arxiv.org/abs/1905.13654) \
-Soufiane Hayou, Arnaud Doucet, Judith Rousseau
 
 Please let us know if you make use of the code in a publication and we'll add it
 to the list!
