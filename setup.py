@@ -46,7 +46,7 @@ setuptools.setup(
         "Documentation": "https://arxiv.org/abs/1912.02803",
         "Bug Tracker": "https://github.com/google/neural-tangents/issues",
     },
-    packages=setuptools.find_packages(),
+    packages=setuptools.find_packages(exclude=('presentation',)),
     long_description=long_description,
     long_description_content_type='text/markdown',
     description='Fast and Easy Infinite Neural Networks in Python',
