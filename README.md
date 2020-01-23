@@ -50,7 +50,8 @@ pip install neural-tangents
 ```
 or, to use the bleeding-edge version from GitHub source,
 ```
-pip install git+https://www.github.com/google/neural-tangents
+git clone https://github.com/google/neural-tangents
+pip install -e neural-tangents
 ```
 
 You can now run the examples (using [`tensorflow_datasets`](https://github.com/tensorflow/datasets)) by calling:
