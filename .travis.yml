@@ -6,7 +6,6 @@ python:
 install:
   - pip install --upgrade pip
   - pip install tensorflow tensorflow-datasets
-  - git clone https://github.com/google/neural-tangents
-  - pip install -e neural-tangents
+  - pip install git+https://www.github.com/google/neural-tangents
 script:
   - for f in neural-tangents/neural_tangents/tests/*.py; do python $f; done
