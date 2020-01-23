@@ -390,7 +390,7 @@ def _inputs_to_kernel(x1,
                      '`[batch_size, height, width, channels]`, '
                      'got %s.' % str(x1.shape))
 
-  if x1.ndim == 2 and not (marginal == cross == M.OVER_ALL):
+  if x1.ndim == 2 and not marginal == cross == M.OVER_ALL:
     raise ValueError('`OVER_ALL` marginalisation should be used for 2D inputs; '
                      'was: `marginal`={}, `cross`={}'.format(marginal, cross))
 
@@ -1036,56 +1036,123 @@ def FanInSum():
   Based on `jax.experimental.stax.FanInSum`.
   """
   init_fn, apply_fn = ostax.FanInSum
-  def kernel_fn(kernels):
-    is_gaussian = all(ker.is_gaussian for ker in kernels)
+  kernel_fn = lambda kernels: _fan_in_kernel_fn(kernels, axis=None, spec=None)
+  return init_fn, apply_fn, kernel_fn
 
-    if not is_gaussian:
-      raise NotImplementedError('`FanInSum` layer is only implemented for the '
-                                'case if all input layers guaranteed to be mean'
-                                '-zero gaussian, i.e. having all `is_gaussian'
-                                'set to `True`.')
 
-    marginal, cross = kernels[0].marginal, kernels[0].cross
-    shape1, shape2 = kernels[0].shape1, kernels[0].shape2
-    if not all(k.marginal == marginal and
-               k.cross == cross
-               for k in kernels):
-      raise NotImplementedError('`FanInSum` layer is only implemented for the '
-                                'case if all input layers output the same type'
-                                'of covariance matrices, i.e. having all '
-                                'matching `marginal` and `cross` attributes')
+@_layer
+def FanInConcat(axis=-1, spec=None):
+  """Layer construction function for a fan-in concatenation layer.
 
-    # If kernels have different height/width order, transpose some of them.
-    n_kernels = len(kernels)
-    n_height_width = sum(ker.is_height_width for ker in kernels)
+  Based on `jax.experimental.stax.FanInConcat`.
+  """
+  init_fn, apply_fn = ostax.FanInConcat(axis)
+  kernel_fn = lambda kernels: _fan_in_kernel_fn(kernels, axis=axis, spec=spec)
+  return init_fn, apply_fn, kernel_fn
 
-    if n_height_width == n_kernels:
-      is_height_width = True
 
-    elif n_height_width >= n_kernels / 2:
-      is_height_width = True
-      for i in range(n_kernels):
-        if not kernels[i].is_height_width:
-          kernels[i] = _flip_height_width(kernels[i])
+def _fan_in_kernel_fn(kernels, axis, spec):
+  marginal, cross = kernels[0].marginal, kernels[0].cross
+  shape1, shape2 = kernels[0].shape1, kernels[0].shape2
 
-    else:
-      is_height_width = False
-      for i in range(n_kernels):
-        if kernels[i].is_height_width:
-          kernels[i] = _flip_height_width(kernels[i])
+  # Check marginalization
+  if not all(k.marginal == marginal and
+             k.cross == cross
+             for k in kernels):
+    raise NotImplementedError('`FanIn` layers are only implemented for the '
+                              'case if all input layers output the same type'
+                              'of covariance matrices, i.e. having all '
+                              'matching `marginal` and `cross` attributes.')
 
+  # If kernels have different height/width order, transpose some of them.
+  n_kernels = len(kernels)
+  n_height_width = sum(ker.is_height_width for ker in kernels)
+
+  if n_height_width == n_kernels:
+    is_height_width = True
+
+  elif n_height_width == 0:
+    is_height_width = False
+
+  elif n_height_width >= n_kernels / 2:
+    is_height_width = True
+    for i in range(n_kernels):
+      if not kernels[i].is_height_width:
+        kernels[i] = _flip_height_width(kernels[i])
+
+  else:
+    is_height_width = False
+    for i in range(n_kernels):
+      if kernels[i].is_height_width:
+        kernels[i] = _flip_height_width(kernels[i])
+
+  axis = None if axis is None else range(len(shape1))[axis]
+  batch_axis = 0 if spec is None else spec.index('N')
+  channel_axis = (len(shape1) - 1) if spec is None else spec.index('C')
+
+  # Check shapes.
+  if axis is None:
     if not all([k.shape1 == shape1 and k.shape2 == shape2 for k in kernels]):
       raise ValueError('All shapes should be equal in FanInSum.')
 
-    x1_is_x2 = kernels[0].x1_is_x2
-    kers = tuple(None if all(ker[i] is None for ker in kernels) else
-                 sum(ker[i] for ker in kernels) for i in range(4))
-    is_input = kernels[0].is_input
-    return Kernel(*(
-        kers + (is_gaussian, is_height_width, marginal, cross, None, None,
-                x1_is_x2, is_input)))
+  else:
+    new_shape1 = shape1[:axis] + shape1[axis + 1:]
+    new_shape2 = shape2[:axis] + shape2[axis + 1:]
+    for k in kernels:
+      k_shape1 = k.shape1[:axis] + k.shape1[axis + 1:]
+      k_shape2 = k.shape2[:axis] + k.shape2[axis + 1:]
+      if k_shape1 != new_shape1 or k_shape2 != new_shape2:
+        raise ValueError('All non-axis shapes should be equal in FanInConcat.')
 
-  return init_fn, apply_fn, kernel_fn
+  # Check if inputs are independent Gaussians.
+  if axis is None or axis != channel_axis:
+    is_gaussian = all(k.is_gaussian for k in kernels)
+    if not is_gaussian:
+      raise NotImplementedError('`FanInSum` or `FanInConcat` layer along the '
+                                'non-channel axis is only implemented for the '
+                                'case if all input layers guaranteed to be mean'
+                                '-zero Gaussian, i.e. having all `is_gaussian '
+                                'set to `True`.')
+  else:
+    # TODO(romann): allow to apply nonlinearity after channelwise concatenation.
+    is_gaussian = False
+
+  # Warnings.
+  warnings.warn('`FanIn` layers assume independent inputs which is not verified '
+                'in the code. Please make sure to have at least one Dense or '
+                'CNN layer in each branch.')
+  if axis == batch_axis:
+    warnings.warn('Concatenation along the batch axis (%d) gives inconsistent'
+                  ' covariances when batching - proceed with caution.' % axis)
+
+  spatial_axes = [i for i in range(len(shape1))
+                  if i not in (channel_axis, batch_axis)]
+  # Flip spatial axis if `is_height_width` is `False`.
+  if axis in spatial_axes:
+    axis = spatial_axes[(spatial_axes.index(axis) + ~is_height_width)
+                        % len(spatial_axes)]
+
+  # Map activation tensor axis to the covariance tensor axis.
+  kernel_axis = {
+      **{
+          None: None,
+          batch_axis: 0,
+          channel_axis: -1,
+      },
+      **{
+          spatial_axis: idx + 1 for idx, spatial_axis in enumerate(spatial_axes)
+      }
+  }[axis]
+
+  var1 = _concat_covariance([k.var1 for k in kernels], kernel_axis, marginal)
+  var2 = _concat_covariance([k.var2 for k in kernels], kernel_axis, marginal)
+  nngp = _concat_covariance([k.nngp for k in kernels], kernel_axis, cross)
+  ntk = _concat_covariance([k.ntk for k in kernels], kernel_axis, cross)
+  kers = (var1, nngp, var2, ntk)
+
+  return Kernel(*(
+      kers + (is_gaussian, is_height_width, marginal, cross, None, None,
+              kernels[0].x1_is_x2, kernels[0].is_input)))
 
 
 def _flip_height_width(kernels):
@@ -1128,6 +1195,64 @@ def _flip_height_width(kernels):
 
   return kernels._replace(var1=var1, nngp=nngp, var2=var2, ntk=ntk,
                           is_height_width=not is_height_width)
+
+
+def _concat_covariance(mats, axis, marginalisation):
+  """Compute the covariance of concatenated activations with given covariances.
+
+  Args:
+    mats: a list of `np.ndarrray` covariance tensors of the same shape.
+    axis: an `int` along which the covariances (not activations) are
+      concatenated. `None` corresponds to sum, `-1` to averaging.
+    marginalisation: a single `Kernel.Marginalisation` of all covariance
+      matrices.
+
+  Returns:
+    A new `np.ndarray` representing covariance between concatenated activations.
+  """
+  if mats[0] is None:
+    return None
+
+  n_mats = len(mats)
+  mat_ndim = mats[0].ndim
+
+  # Sum if `axis == None` i.e. called from `FanInSum`.
+  if axis is None:
+    mat = sum(mats)
+
+  # Averaging if concatenating along features or marginalized dimension.
+  elif (axis == -1 or
+        (marginalisation == M.OVER_ALL and axis != 0)):
+    mat = sum(mats) / n_mats
+
+  # Simple concatenation along the axis if the axis is not duplicated.
+  elif ((axis != 0 and marginalisation == M.OVER_PIXELS) or
+        (axis == 0 and mat_ndim % 2)):
+    concat_axis = axis + 1 - mat_ndim % 2
+    mat = np.concatenate(mats, concat_axis)
+
+  # 2D concatenation with insertion of 0-blocks if the axis is present twice.
+  elif axis == 0 or marginalisation in (M.NO, M.OVER_POINTS):
+    rows = []
+    pad_axis = max(0, 2 * axis - mat_ndim % 2)
+    for i, mat in enumerate(mats):
+      pads = [(0, 0)] * mat_ndim
+      pads[pad_axis] = (
+          sum(mats[j].shape[pad_axis] for j in range(i)),
+          sum(mats[j].shape[pad_axis] for j in range(i + 1, n_mats))
+      )
+      rows.append(np.pad(mat, pads))
+    mat = np.concatenate(rows, pad_axis + 1)
+
+  else:
+    raise NotImplementedError('Asked to concatenate along axis %d given '
+        'covariance tensors of marginalization %s, which is not implemented. '
+        'Please file a bug at '
+        'https://github.com/google/neural-tangents/issues/new'
+        % (axis, M(marginalisation)))
+
+  return mat
+
 
 @_layer
 def serial(*layers):

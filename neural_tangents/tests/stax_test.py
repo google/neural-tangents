@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Tests for stax.py."""
 
 from functools import partial
@@ -95,9 +94,22 @@ def _get_inputs(key, is_conv, same_inputs, input_shape, fn=np.cos):
   return x1, x2
 
 
-def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
-             phi, strides, width, is_ntk, proj_into_2d, layer_norm,
-             parameterization, use_dropout, dimension_numbers):
+def _get_net(W_std,
+             b_std,
+             filter_shape,
+             is_conv,
+             use_pooling,
+             is_res,
+             padding,
+             phi,
+             strides,
+             width,
+             is_ntk,
+             proj_into_2d,
+             layer_norm,
+             parameterization,
+             use_dropout,
+             dimension_numbers):
   fc = partial(
       stax.Dense, W_std=W_std, b_std=b_std, parameterization=parameterization)
 
@@ -134,8 +146,6 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
       dropout_or_identity,
       affine)
 
-
-
   if is_res:
     block = stax.serial(
         affine,
@@ -160,9 +170,17 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
     fixed = proj_into_2d == 'ATTN_FIXED'
     proj_layer = stax.serial(
         stax.GlobalSelfAttention(
-            width, n_chan_key=width, n_chan_val=n_chan_val, n_heads=n_heads,
-            fixed=fixed, W_key_std=W_std, W_value_std=W_std, W_query_std=W_std,
-            W_out_std=1.0, b_std=b_std, spec=spec),
+            n_chan_out=width,
+            n_chan_key=width,
+            n_chan_val=n_chan_val,
+            n_heads=n_heads,
+            fixed=fixed,
+            W_key_std=W_std,
+            W_value_std=W_std,
+            W_query_std=W_std,
+            W_out_std=1.0,
+            b_std=b_std,
+            spec=spec),
         stax.Flatten(spec=spec))
   else:
     raise ValueError(proj_into_2d)
@@ -177,11 +195,16 @@ class StaxTest(jtu.JaxTestCase):
       jtu.cases_from_list({
           'testcase_name':
               '_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}'.format(
-                  model, phi_name, width, 'same_inputs'
-                  if same_inputs else 'different_inputs', 'filter_size=%s' %
-                  str(filter_size), 'padding=%s' % padding, 'strides=%s' %
-                  str(strides), 'pool' if use_pooling else 'flatten',
-                  'NTK' if is_ntk else 'NNGP', 'RESNET' if is_res else 'serial',
+                  model,
+                  phi_name,
+                  width,
+                  'same_inputs' if same_inputs else 'different_inputs',
+                  'filter_size=%s' % str(filter_size),
+                  'padding=%s' % padding,
+                  'strides=%s' % str(strides),
+                  'pool' if use_pooling else 'flatten',
+                  'NTK' if is_ntk else 'NNGP',
+                  'RESNET' if is_res else 'serial',
                   proj_into_2d),
           'model':
               model,
@@ -204,18 +227,30 @@ class StaxTest(jtu.JaxTestCase):
           'is_res':
               is_res,
           'proj_into_2d':
-            proj_into_2d
-      } for model in MODELS for width in WIDTHS
-                          for phi, phi_name in ACTIVATIONS.items()
-                          for same_inputs in [False, True]
-                          for padding in PADDINGS for strides in STRIDES
-                          for filter_size in FILTER_SIZES
-                          for use_pooling in [False, True]
-                          for is_ntk in [False, True]
-                          for is_res in [False, True]
-                          for proj_into_2d in PROJECTIONS))
-  def test_exact(self, model, width, strides, padding, phi, same_inputs,
-                 filter_size, use_pooling, is_ntk, is_res, proj_into_2d):
+              proj_into_2d
+      } for model in MODELS
+        for width in WIDTHS
+        for phi, phi_name in ACTIVATIONS.items()
+        for same_inputs in [False, True]
+        for padding in PADDINGS
+        for strides in STRIDES
+        for filter_size in FILTER_SIZES
+        for use_pooling in [False, True]
+        for is_ntk in [False, True]
+        for is_res in [False, True]
+        for proj_into_2d in PROJECTIONS))
+  def test_exact(self,
+                 model,
+                 width,
+                 strides,
+                 padding,
+                 phi,
+                 same_inputs,
+                 filter_size,
+                 use_pooling,
+                 is_ntk,
+                 is_res,
+                 proj_into_2d):
     is_conv = 'conv' in model
 
     # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
@@ -255,9 +290,12 @@ class StaxTest(jtu.JaxTestCase):
       jtu.cases_from_list({
           'testcase_name':
               '_{}_{}_{}_{}_{}_{}_{}'.format(
-                  model, width, 'same_inputs'
-                  if same_inputs else 'different_inputs', 'filter_size=%s' %
-                  str(filter_size), proj_into_2d, 'NTK' if is_ntk else 'NNGP',
+                  model,
+                  width,
+                  'same_inputs' if same_inputs else 'different_inputs',
+                  'filter_size=%s' % str(filter_size),
+                  proj_into_2d,
+                  'NTK' if is_ntk else 'NNGP',
                   'parameterization=%s' % str(parameterization)),
           'model':
               model,
@@ -274,13 +312,19 @@ class StaxTest(jtu.JaxTestCase):
           'parameterization':
               parameterization
       } for model in MODELS for width in WIDTHS
-                          for same_inputs in [False, True]
-                          for is_ntk in [False, True]
-                          for filter_size in FILTER_SIZES
-                          for proj_into_2d in PROJECTIONS[:2]
-                          for parameterization in PARAMETERIZATIONS))
-  def test_parameterizations(self, model, width, same_inputs, is_ntk,
-                             filter_size, proj_into_2d, parameterization):
+        for same_inputs in [False, True]
+        for is_ntk in [False, True]
+        for filter_size in FILTER_SIZES
+        for proj_into_2d in PROJECTIONS[:2]
+        for parameterization in PARAMETERIZATIONS))
+  def test_parameterizations(self,
+                             model,
+                             width,
+                             same_inputs,
+                             is_ntk,
+                             filter_size,
+                             proj_into_2d,
+                             parameterization):
     is_conv = 'conv' in model
 
     W_std, b_std = 2.**0.5, 0.5**0.5
@@ -307,30 +351,38 @@ class StaxTest(jtu.JaxTestCase):
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
-            '_{}_{}_{}_{}_{}_{}'.format(
-                model, width,
-                'same_inputs' if same_inputs else 'different_inputs',
-                'NTK' if is_ntk else 'NNGP', proj_into_2d,
-                'layer_norm=%s' % str(layer_norm)),
+              '_{}_{}_{}_{}_{}_{}'.format(
+                  model,
+                  width,
+                  'same_inputs' if same_inputs else 'different_inputs',
+                  'NTK' if is_ntk else 'NNGP',
+                  proj_into_2d,
+                  'layer_norm=%s' % str(layer_norm)),
           'model':
-            model,
+              model,
           'width':
-            width,
+              width,
           'same_inputs':
-            same_inputs,
+              same_inputs,
           'is_ntk':
-            is_ntk,
+              is_ntk,
           'proj_into_2d':
-            proj_into_2d,
+              proj_into_2d,
           'layer_norm':
-            layer_norm
-      } for model in MODELS for width in WIDTHS
-      for same_inputs in [False, True]
-      for is_ntk in [False, True]
-      for proj_into_2d in PROJECTIONS[:2]
-      for layer_norm in LAYER_NORM))
-  def test_layernorm(self, model, width, same_inputs, is_ntk,
-      proj_into_2d, layer_norm):
+              layer_norm
+      } for model in MODELS
+        for width in WIDTHS
+        for same_inputs in [False, True]
+        for is_ntk in [False, True]
+        for proj_into_2d in PROJECTIONS[:2]
+        for layer_norm in LAYER_NORM))
+  def test_layernorm(self,
+                     model,
+                     width,
+                     same_inputs,
+                     is_ntk,
+                     proj_into_2d,
+                     layer_norm):
     is_conv = 'conv' in model
     # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
     if is_conv:
@@ -427,21 +479,31 @@ class StaxTest(jtu.JaxTestCase):
           'phi': phi,
           'use_pooling': use_pooling,
           'proj_into_2d': proj_into_2d
-      } for model in MODELS for width in WIDTHS
-                          for same_inputs in [True, False]
-                          for phi, phi_name in ACTIVATIONS.items()
-                          for padding in PADDINGS
-                          for strides in STRIDES
-                          for filter_size in FILTER_SIZES
-                          for is_ntk in [True, False]
-                          for use_pooling in [True, False]
-                          for proj_into_2d in ['FLAT', 'POOL']))
-  def test_dropout(self, model, width, same_inputs, is_ntk, padding, strides,
-                   filter_size, phi,
-                   use_pooling, proj_into_2d):
+      } for model in MODELS
+        for width in WIDTHS
+        for same_inputs in [True, False]
+        for phi, phi_name in ACTIVATIONS.items()
+        for padding in PADDINGS
+        for strides in STRIDES
+        for filter_size in FILTER_SIZES
+        for is_ntk in [True, False]
+        for use_pooling in [True, False]
+        for proj_into_2d in ['FLAT', 'POOL']))
+  def test_dropout(self,
+                   model,
+                   width,
+                   same_inputs,
+                   is_ntk,
+                   padding,
+                   strides,
+                   filter_size,
+                   phi,
+                   use_pooling,
+                   proj_into_2d):
     if xla_bridge.get_backend().platform == 'tpu' and same_inputs:
-      raise jtu.SkipTest('Skip TPU test for `same_inputs`. Need to handle '
-                         'random keys carefully for dropout + empirical kernel.')
+      raise jtu.SkipTest(
+          'Skip TPU test for `same_inputs`. Need to handle '
+          'random keys carefully for dropout + empirical kernel.')
 
     use_dropout = True
     is_conv = 'conv' in model
@@ -470,10 +532,23 @@ class StaxTest(jtu.JaxTestCase):
                                          strides, use_pooling, width,
                                          parameterization, use_dropout)
 
-  def _check_agreement_with_empirical(self, W_std, b_std, filter_size, is_conv,
-      is_ntk, is_res, layer_norm, padding, phi, proj_into_2d, same_inputs,
-      strides, use_pooling, width, parameterization, use_dropout):
-
+  def _check_agreement_with_empirical(self,
+                                      W_std,
+                                      b_std,
+                                      filter_size,
+                                      is_conv,
+                                      is_ntk,
+                                      is_res,
+                                      layer_norm,
+                                      padding,
+                                      phi,
+                                      proj_into_2d,
+                                      same_inputs,
+                                      strides,
+                                      use_pooling,
+                                      width,
+                                      parameterization,
+                                      use_dropout):
     if is_conv:
       # Select a random dimension order.
       default_spec = 'NHWC'
@@ -508,18 +583,18 @@ class StaxTest(jtu.JaxTestCase):
 
     x1_out_shape, params = init_fn(key, x1.shape)
     if same_inputs:
-      assert(x2 is None)
+      assert (x2 is None)
     if x2 is None:
       x2_out_shape = x1_out_shape
     else:
       x2_out_shape, params = init_fn(key, x2.shape)
-    del(params)
+    del (params)
 
     def _get_empirical(n_samples, get):
       kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
           init_fn, apply_fn, key, n_samples)
       if same_inputs:
-        assert(x2 is None)
+        assert (x2 is None)
       return kernel_fn_empirical(x1, x2, get)
 
     if proj_into_2d == 'ATTN_PARAM':
@@ -559,7 +634,8 @@ class StaxTest(jtu.JaxTestCase):
           'testcase_name': '_act={}_kernel={}'.format(act, kern),
           'act': act,
           'kernel': kern
-      } for act in ['erf', 'relu'] for kern in ['nngp', 'ntk']))
+      } for act in ['erf', 'relu']
+        for kern in ['nngp', 'ntk']))
   def test_sparse_inputs(self, act, kernel):
     key = random.PRNGKey(1)
 
@@ -589,9 +665,9 @@ class StaxTest(jtu.JaxTestCase):
         activation,
         stax.Dense(1 if kernel == 'ntk' else width))
     exact = kernel_fn(x_sparse, None, kernel)
-    mc = monte_carlo.monte_carlo_kernel_fn(
-        init_fn, apply_fn, random.split(key, 2)[0], samples
-        )(x_sparse, None, kernel)
+    mc = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn,
+                                           random.split(key, 2)[0],
+                                           samples)(x_sparse, None, kernel)
     mc = np.reshape(mc, exact.shape)
 
     assert not np.any(np.isnan(exact))
@@ -627,8 +703,8 @@ class StaxTest(jtu.JaxTestCase):
       with self.assertRaises(ValueError):
         ker_out = readout_ker_fn(block_ker_fn(x1))
 
-    ker_out = readout_ker_fn(block_ker_fn(
-        x1, x2, marginalization=marginalization))
+    ker_out = readout_ker_fn(
+        block_ker_fn(x1, x2, marginalization=marginalization))
     composed_ker_out = composed_ker_fn(x1, x2)
     self.assertAllClose(ker_out, composed_ker_out, True)
 
@@ -685,8 +761,7 @@ class ABReluTest(jtu.JaxTestCase):
         X1_1_ab_relu = apply_ab_relu(params, X0_1)
         self.assertAllClose(X1_1_id, X1_1_ab_relu, True)
 
-        kernels_id = kernel_fn_id(
-            X0_1 * a, None if X0_2 is None else a * X0_2)
+        kernels_id = kernel_fn_id(X0_1 * a, None if X0_2 is None else a * X0_2)
         kernels_ab_relu = kernel_fn_ab_relu(X0_1, X0_2)
         self.assertAllClose(kernels_id, kernels_ab_relu, True)
 
@@ -761,6 +836,216 @@ class FlattenTest(jtu.JaxTestCase):
     K_flat = fc_flat(X0_1_flat, X0_2_flat)
     K = fc(X0_1, X0_2)
     self.assertAllClose(K_flat, K, True)
+
+
+class FanInTest(jtu.JaxTestCase):
+
+  @classmethod
+  def _get_phi(cls, i):
+    return {
+        0: stax.Relu(),
+        1: stax.Erf(),
+        2: stax.Abs()
+    }[i % 3]
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list(
+          {
+              'testcase_name':
+                  ' [{}_axis={}_n_branches={}_{}_{}]'.format(
+                      'same_inputs' if same_inputs else 'different_inputs',
+                      axis,
+                      n_branches,
+                      get,
+                      branch_in),
+              'same_inputs':
+                  same_inputs,
+              'axis':
+                  axis,
+              'n_branches':
+                  n_branches,
+              'get':
+                  get,
+              'branch_in':
+                  branch_in
+          } for same_inputs in [False, True]
+            for axis in [None, 0, 1]
+            for n_branches in [1, 2, 3] for get in ['nngp', 'ntk']
+            for branch_in in ['dense_before_branch_in',
+                              'dense_after_branch_in']))
+  def test_fan_in_fc(self, same_inputs, axis, n_branches, get, branch_in):
+    if axis in (None, 0) and branch_in == 'dense_after_branch_in':
+      raise jtu.SkipTest('`FanInSum` and `FanInConcat(0)` '
+                         'require `is_gaussian`.')
+
+    if axis == 1 and branch_in == 'dense_before_branch_in':
+      raise jtu.SkipTest('`FanInConcat` on feature axis requires a dense layer'
+                         'after concatenation.')
+
+    key = random.PRNGKey(1)
+    X0_1 = random.normal(key, (10, 20))
+    X0_2 = None if same_inputs else random.normal(key, (8, 20))
+
+    if xla_bridge.get_backend().platform == 'tpu':
+      width = 2048
+      n_samples = 1024
+      tol = 0.02
+    else:
+      width = 1024
+      n_samples = 256
+      tol = 0.01
+
+    dense = stax.Dense(width, 1.25, 0.1)
+    input_layers = [dense,
+                    stax.FanOut(n_branches)]
+
+    branches = []
+    for b in range(n_branches):
+      branch_layers = [FanInTest._get_phi(b)]
+      for i in range(b):
+        branch_layers += [
+            stax.Dense(width, 1. + 2 * i, 0.5 + i),
+            FanInTest._get_phi(i)]
+
+      if branch_in == 'dense_before_branch_in':
+        branch_layers += [dense]
+      branches += [stax.serial(*branch_layers)]
+
+    output_layers = [
+        stax.FanInSum() if axis is None else stax.FanInConcat(axis),
+        stax.Relu()
+    ]
+    if branch_in == 'dense_after_branch_in':
+      output_layers.insert(1, dense)
+
+    nn = stax.serial(*(input_layers + [stax.parallel(*branches)] +
+                       output_layers))
+
+    if get == 'nngp':
+      init_fn, apply_fn, kernel_fn = nn
+    elif get == 'ntk':
+      init_fn, apply_fn, kernel_fn = stax.serial(nn, stax.Dense(1, 1.25, 0.5))
+    else:
+      raise ValueError(get)
+
+    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, key, n_samples, device_count=0)
+
+    exact = kernel_fn(X0_1, X0_2, get=get)
+    empirical = kernel_fn_mc(X0_1, X0_2, get=get)
+    empirical = empirical.reshape(exact.shape)
+    utils.assert_close_matrices(self, empirical, exact, tol)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list(
+          {
+              'testcase_name':
+                  ' [{}_axis={}_n_branches={}_{}_{}_{}]'.format(
+                      'same_inputs' if same_inputs else 'different_inputs',
+                      axis,
+                      n_branches,
+                      get,
+                      branch_in,
+                      readout),
+              'same_inputs':
+                  same_inputs,
+              'axis':
+                  axis,
+              'n_branches':
+                  n_branches,
+              'get':
+                  get,
+              'branch_in':
+                  branch_in,
+              'readout':
+                  readout
+          } for same_inputs in [False, True]
+            for axis in [None, 0, 1, 2, 3]
+            for n_branches in [1, 2, 3] for get in ['nngp', 'ntk']
+            for branch_in in ['dense_before_branch_in', 'dense_after_branch_in']
+            for readout in ['pool', 'flatten']))
+  def test_fan_in_conv(self,
+                       same_inputs,
+                       axis,
+                       n_branches,
+                       get,
+                       branch_in,
+                       readout):
+    if xla_bridge.get_backend().platform == 'cpu':
+      raise jtu.SkipTest('Not running CNNs on CPU to save time.')
+
+    if axis in (None, 0, 1, 2) and branch_in == 'dense_after_branch_in':
+      raise jtu.SkipTest('`FanInSum` and `FanInConcat(0/1/2)` '
+                         'require `is_gaussian`.')
+
+    if axis == 3 and branch_in == 'dense_before_branch_in':
+      raise jtu.SkipTest('`FanInConcat` on feature axis requires a dense layer '
+                         'after concatenation.')
+
+    key = random.PRNGKey(1)
+    X0_1 = random.normal(key, (2, 5, 6, 3))
+    X0_2 = None if same_inputs else random.normal(key, (3, 5, 6, 3))
+
+    if xla_bridge.get_backend().platform == 'tpu':
+      width = 2048
+      n_samples = 1024
+      tol = 0.02
+    else:
+      width = 1024
+      n_samples = 512
+      tol = 0.01
+
+    conv = stax.Conv(out_chan=width,
+                     filter_shape=(3, 3),
+                     padding='SAME',
+                     W_std=1.25,
+                     b_std=0.1)
+
+    input_layers = [conv,
+                    stax.FanOut(n_branches)]
+
+    branches = []
+    for b in range(n_branches):
+      branch_layers = [FanInTest._get_phi(b)]
+      for i in range(b):
+        branch_layers += [
+            stax.Conv(
+                out_chan=width,
+                filter_shape=(i + 1, 4 - i),
+                padding='SAME',
+                W_std=1.25 + i,
+                b_std=0.1 + i),
+            FanInTest._get_phi(i)]
+
+      if branch_in == 'dense_before_branch_in':
+        branch_layers += [conv]
+      branches += [stax.serial(*branch_layers)]
+
+    output_layers = [
+        stax.FanInSum() if axis is None else stax.FanInConcat(axis),
+        stax.Relu(),
+        stax.GlobalAvgPool() if readout == 'pool' else stax.Flatten()
+    ]
+    if branch_in == 'dense_after_branch_in':
+      output_layers.insert(1, conv)
+
+    nn = stax.serial(*(input_layers + [stax.parallel(*branches)] +
+                       output_layers))
+
+    init_fn, apply_fn, kernel_fn = stax.serial(
+        nn, stax.Dense(1 if get == 'ntk' else width, 1.25, 0.5))
+
+    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+        init_fn,
+        apply_fn,
+        key,
+        n_samples,
+        device_count=0 if axis in (0, -4) else -1)
+
+    exact = kernel_fn(X0_1, X0_2, get=get)
+    empirical = kernel_fn_mc(X0_1, X0_2, get=get)
+    empirical = empirical.reshape(exact.shape)
+    utils.assert_close_matrices(self, empirical, exact, tol)
 
 
 if __name__ == '__main__':
