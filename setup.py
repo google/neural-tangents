@@ -34,7 +34,7 @@ INSTALL_REQUIRES = [
 
 setuptools.setup(
     name='neural-tangents',
-    version='0.1.6',
+    version='0.1.7',
     license='Apache 2.0',
     author='Google',
     author_email='neural-tangents-dev@google.com',
