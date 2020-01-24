@@ -97,6 +97,11 @@ class Padding(enum.Enum):
   VALID = 'VALID'
 
 
+class Pooling(enum.Enum):
+  AVG = 'AVG'
+  SUM = 'SUM'
+
+
 def _is_array(x):
   return isinstance(x, np.ndarray) and hasattr(x, 'shape') and x.shape
 
@@ -1696,14 +1701,15 @@ def Conv(out_chan,
                      parameterization)
 
 
-def _average_pool_nngp_5or6d(mat, window_shape, strides, padding,
-                             normalize_edges):
-  """Get covariances of average pooling outputs given inputs covariances `mat`.
+def _pool_nngp_5or6d(mat, pool_type, window_shape, strides, padding,
+                     normalize_edges):
+  """Get covariances of pooling outputs given inputs covariances `mat`.
 
   Args:
     mat: a 5D or 6D `np.ndarray` containing sample-(sample-)pixel-pixel
-      covariances. Has shape
-      `[batch_size_1, (batch_size_2,) height, height, width, width]`.
+      covariances. Has shape `[batch_size_1, (batch_size_2,) height, height,
+      width, width]`.
+    pool_type: a `Pooling` enum, e.g. `Pooling.AVG`.
     window_shape: tuple of two positive integers, the pooling spatial shape
       (e.g. `(3, 3)`).
     strides: tuple of two positive integers, the pooling strides, e.g. `(1, 1)`.
@@ -1734,47 +1740,57 @@ def _average_pool_nngp_5or6d(mat, window_shape, strides, padding,
   nngp_out = lax.reduce_window(mat, 0., lax.add, window_shape, strides,
                                padding.name)
 
-  if padding == Padding.SAME and normalize_edges:
-    # `SAME` padding in `jax.experimental.stax.AvgPool` normalizes by actual
-    # window size, which is smaller at the edges.
-    one = np.ones(mat.shape, mat.dtype)
-    window_sizes = lax.reduce_window(one, 0., lax.add, window_shape, strides,
-                                     padding.name)
-    nngp_out /= window_sizes
-  else:
-    nngp_out /= np.prod(window_shape)
+  if pool_type == Pooling.AVG:
+    if padding == Padding.SAME and normalize_edges:
+      # `SAME` padding in `jax.experimental.stax.AvgPool` normalizes by actual
+      # window size, which is smaller at the edges.
+      one = np.ones(mat.shape, mat.dtype)
+      window_sizes = lax.reduce_window(one, 0., lax.add, window_shape, strides,
+                                       padding.name)
+      nngp_out /= window_sizes
+    else:
+      nngp_out /= np.prod(window_shape)
 
   return nngp_out
 
-
 @_layer
-def AvgPool(window_shape,
-            strides=None,
-            padding=Padding.VALID.name,
-            spec='NHWC',
-            normalize_edges=True):
-  """Layer construction function for a 2D average pooling layer.
+def _Pool(pool_type,
+          window_shape,
+          strides,
+          padding,
+          spec,
+          normalize_edges):
+  """Layer construction function for a 2D pooling layer.
 
-  Based on `jax.experimental.stax.AvgPool`. Has a similar API apart from:
+  Based on `jax.experimental.stax.AvgPool` and `jax.experimental.stax.SumPool`.
+  Has a similar API apart from:
 
   Args:
-    padding: in addition to `VALID` and `SAME' padding, supports `CIRCULAR`,
-      not available in `jax.experimental.stax.GeneralConv`.
-    spec: an optional `string`, specifying the dimension order of
-      the input, e.g. `NCHW` or `NHWC`.
+    pool_type: specifies whether average or sum pooling should be performed.
+      (`Pooling.AVG` or `Pooling.SUM`)
+    padding: in addition to `VALID` and `SAME` padding, supports `CIRCULAR`, not
+      available in `jax.experimental.stax.GeneralConv`.
+    spec: an optional `string`, specifying the dimension order of the input,
+      e.g. `NCHW` or `NHWC`.
     normalize_edges: `True` to normalize output by the effective receptive
       field, `False` to normalize by the window size. Only has effect at the
       edges when `SAME` padding is used. Set to `True` to retain correspondence
       to `ostax.AvgPool`.
   """
+
   strides = strides or (1,) * len(window_shape)
   padding = Padding(padding)
 
+  if pool_type == Pooling.AVG:
+    pool_fn = ostax.AvgPool
+  elif pool_type == Pooling.SUM:
+    pool_fn = ostax.SumPool
+  else:
+    raise ValueError('Invalid pooling type {}'.format(pool_type))
+
   if padding == Padding.CIRCULAR:
-    init_fn, _ = ostax.AvgPool(window_shape, strides, Padding.SAME.name,
-                               spec)
-    _, apply_fn_0 = ostax.AvgPool(window_shape, strides, Padding.VALID.name,
-                                  spec)
+    init_fn, _ = pool_fn(window_shape, strides, Padding.SAME.name, spec)
+    _, apply_fn_0 = pool_fn(window_shape, strides, Padding.VALID.name, spec)
 
     def apply_fn(params, inputs, **kwargs):
       non_spatial_axes = (spec.index('N'), spec.index('C'))
@@ -1785,16 +1801,17 @@ def AvgPool(window_shape,
       res = apply_fn_0(params, inputs, **kwargs)
       return res
 
-  elif normalize_edges:
-    init_fn, apply_fn = ostax.AvgPool(window_shape, strides, padding.name, spec)
-
+  elif normalize_edges or pool_type == Pooling.SUM:
+    init_fn, apply_fn = pool_fn(window_shape, strides, padding.name, spec)
   else:
-    def rescaler(*args, **kwargs):
-      del args, kwargs  # Unused.
-      return lambda outputs, _inputs, _spec: outputs / np.prod(window_shape)
 
-    avgPool = ostax._pooling_layer(lax.add, 0., rescaler)
-    init_fn, apply_fn = avgPool(window_shape, strides, padding.name, spec)
+    def rescaler(dims, strides, padding):
+      del dims, strides, padding  # Unused.
+      return lambda outputs, inputs, spec: outputs / np.prod(window_shape)
+
+    pool_fn = ostax._pooling_layer(lax.add, 0., rescaler)
+    init_fn, apply_fn = pool_fn(window_shape, strides, padding.name, spec)
+
 
   def kernel_fn(kernels):
     """Kernel transformation."""
@@ -1810,15 +1827,15 @@ def AvgPool(window_shape,
       window_shape_nngp = window_shape[::-1]
       strides_nngp = strides[::-1]
 
-    nngp = _average_pool_nngp_5or6d(nngp, window_shape_nngp, strides_nngp,
-                                    padding, normalize_edges)
-    ntk = _average_pool_nngp_5or6d(ntk, window_shape_nngp, strides_nngp,
-                                   padding, normalize_edges)
-    var1 = _average_pool_nngp_5or6d(var1, window_shape_nngp, strides_nngp,
-                                    padding, normalize_edges)
+    nngp = _pool_nngp_5or6d(nngp, pool_type, window_shape_nngp, strides_nngp,
+                            padding, normalize_edges)
+    ntk = _pool_nngp_5or6d(ntk, pool_type, window_shape_nngp, strides_nngp,
+                           padding, normalize_edges)
+    var1 = _pool_nngp_5or6d(var1, pool_type, window_shape_nngp, strides_nngp,
+                            padding, normalize_edges)
     if var2 is not None:
-      var2 = _average_pool_nngp_5or6d(var2, window_shape_nngp, strides_nngp,
-                                      padding, normalize_edges)
+      var2 = _pool_nngp_5or6d(var2, pool_type, window_shape_nngp, strides_nngp,
+                              padding, normalize_edges)
 
     return kernels._replace(
         var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=is_gaussian,
@@ -1830,17 +1847,75 @@ def AvgPool(window_shape,
   return init_fn, apply_fn, kernel_fn
 
 
-@_layer
+def AvgPool(window_shape,
+            strides=None,
+            padding=Padding.VALID.name,
+            spec='NHWC',
+            normalize_edges=True):
+  """Layer construction function for a 2D average pooling layer.
+
+  Based on `jax.experimental.stax.AvgPool`. Has a similar API apart from:
+
+  Args:
+    padding: in addition to `VALID` and `SAME` padding, supports `CIRCULAR`, not
+      available in `jax.experimental.stax.AvgPool`.
+    spec: an optional `string`, specifying the dimension order of the input,
+      e.g. `NCHW` or `NHWC`.
+    normalize_edges: `True` to normalize output by the effective receptive
+      field, `False` to normalize by the window size. Only has effect at the
+      edges when `SAME` padding is used. Set to `True` to retain correspondence
+      to `ostax.AvgPool`.
+  """
+  return _Pool(Pooling.AVG, window_shape, strides, padding, spec, normalize_edges)
+
+
+def SumPool(window_shape,
+            strides=None,
+            padding=Padding.VALID.name,
+            spec='NHWC'):
+  """Layer construction function for a 2D sum pooling layer.
+
+  Based on `jax.experimental.stax.SumPool`. Has a similar API apart from:
+
+  Args:
+    padding: in addition to `VALID` and `SAME` padding, supports `CIRCULAR`, not
+      available in `jax.experimental.stax.SumPool`.
+    spec: an optional `string`, specifying the dimension order of the input,
+      e.g. `NCHW` or `NHWC`.
+  """
+  return _Pool(Pooling.SUM, window_shape, strides, padding, spec, False)
+
+
+def GlobalSumPool(spec='NHWC'):
+  return _GlobalPool(Pooling.SUM, spec=spec)
+
 def GlobalAvgPool(spec='NHWC'):
+  return _GlobalPool(Pooling.AVG, spec=spec)
+
+@_layer
+def _GlobalPool(pool_type, spec):
   """Layer construction function for a global average pooling layer.
 
   Pools over and removes (`keepdims=False`) all spatial dimensions, making the
     batch dimension (`N`) leading.
 
   Args:
+    pool_type: specifies whether average or sum pooling should be performed.
+      (Pooling.AVG or Pooling.SUM)
     spec: an optional `string`, specifying the dimension order of
       the input, e.g. `NCHW` or `NHWC`.
+
+  Warnings: assumes the next layer will be Dense (optionally preceded by
+   a nonlinearity), otherwise the kernels will not be correct
   """
+
+  if pool_type == Pooling.AVG:
+    pool_fn = np.mean
+  elif pool_type == Pooling.SUM:
+    pool_fn = np.sum
+  else:
+    raise ValueError('Invalid pooling type {}'.format(pool_type))
+
   non_spatial_axes = (spec.index('N'), spec.index('C'))
 
   def init_fn(rng, input_shape):
@@ -1850,7 +1925,7 @@ def GlobalAvgPool(spec='NHWC'):
   def apply_fn(params, inputs, **kwargs):
     spatial_axes = tuple(i for i in range(inputs.ndim)
                        if i not in non_spatial_axes)
-    out = np.mean(inputs, axis=spatial_axes, keepdims=True)
+    out = pool_fn(inputs, axis=spatial_axes, keepdims=True)
     out = np.moveaxis(out, non_spatial_axes, (0, 1))
     out = np.squeeze(out, range(inputs.ndim)[len(non_spatial_axes):])
     return out
@@ -1860,15 +1935,15 @@ def GlobalAvgPool(spec='NHWC'):
         kernels.var1, kernels.nngp, kernels.var2, kernels.ntk,
         kernels.is_gaussian, kernels.marginal, kernels.cross)
 
-    def _average_pool(ker_mat):
+    def _pool(ker_mat):
       spatial_axes = tuple(range(ker_mat.ndim)[-4:])
-      return np.mean(ker_mat, axis=spatial_axes)
+      return pool_fn(ker_mat, axis=spatial_axes)
 
-    nngp = _average_pool(nngp)
-    ntk = _average_pool(ntk) if _is_array(ntk) else ntk
-    var1 = _average_pool(var1)
+    nngp = _pool(nngp)
+    ntk = _pool(ntk) if _is_array(ntk) else ntk
+    var1 = _pool(var1)
     if var2 is not None:
-      var2 = _average_pool(var2)
+      var2 = _pool(var2)
 
     return kernels._replace(
         var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=is_gaussian,

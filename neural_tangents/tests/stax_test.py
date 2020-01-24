@@ -42,11 +42,7 @@ N_SAMPLES = 100
 
 RTOL = 0.02
 
-FILTER_SIZES = [
-    (1, 1),
-    (2, 1),
-    (3, 2)
-]
+FILTER_SHAPES = [(1, 1), (2, 1), (3, 2)]
 
 PADDINGS = [
     'SAME',
@@ -79,6 +75,8 @@ LAYER_NORM = [
     'CHW',
 ]
 
+POOL_TYPES = ['SUM', 'AVG']
+
 PARAMETERIZATIONS = ['NTK', 'STANDARD']
 
 
@@ -94,22 +92,33 @@ def _get_inputs(key, is_conv, same_inputs, input_shape, fn=np.cos):
   return x1, x2
 
 
-def _get_net(W_std,
-             b_std,
-             filter_shape,
-             is_conv,
-             use_pooling,
-             is_res,
-             padding,
-             phi,
-             strides,
-             width,
-             is_ntk,
-             proj_into_2d,
-             layer_norm,
-             parameterization,
-             use_dropout,
-             dimension_numbers):
+def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
+             phi, strides, width, is_ntk, proj_into_2d, pool_type, layer_norm,
+             parameterization, use_dropout):
+
+  if is_conv:
+    # Select a random dimension order.
+    default_spec = 'NHWC'
+    if xla_bridge.get_backend().platform == 'tpu':
+      # Keep batch dimension leading for TPU for batching to work.
+      specs = ['NHWC', 'NHCW', 'NCHW']
+    else:
+      specs = ['NHWC', 'NHCW', 'NCHW', 'CHWN', 'CHNW', 'CNHW']
+    spec = prandom.choice(specs)
+    input_shape = tuple(INPUT_SHAPE[default_spec.index(c)] for c in spec)
+
+    if layer_norm:
+      layer_norm = tuple(spec.index(c) for c in layer_norm)
+
+  else:
+    # Only `NC` dimension order is supported and is enforced by layers.
+    spec = None
+    input_shape = INPUT_SHAPE
+    if layer_norm:
+      layer_norm = prandom.choice([(1,), (-1,)])
+
+  dimension_numbers = (spec, 'HWIO', spec)
+
   fc = partial(
       stax.Dense, W_std=W_std, b_std=b_std, parameterization=parameterization)
 
@@ -130,22 +139,24 @@ def _get_net(W_std,
   rate = np.onp.random.uniform(0.5, 0.9)
   dropout = stax.Dropout(rate, mode='train')
 
+  if pool_type == 'AVG':
+    pool_fn = stax.AvgPool
+    globalPool_fn = stax.GlobalAvgPool
+  elif pool_type == 'SUM':
+    pool_fn = stax.SumPool
+    globalPool_fn = stax.GlobalSumPool
+
+  if use_pooling:
+    pool_or_identity = pool_fn((2, 3),
+                               None,
+                               'SAME' if padding == 'SAME' else 'CIRCULAR',
+                               spec=spec)
+  else:
+    pool_or_identity = stax.Identity()
   dropout_or_identity = dropout if use_dropout else stax.Identity()
-  avg_pool_or_identity = stax.AvgPool(
-      window_shape=(2, 3),
-      strides=None,
-      padding='SAME' if padding == 'SAME' else 'CIRCULAR',
-      spec=spec
-  ) if use_pooling else stax.Identity()
   layer_norm_or_identity = (stax.Identity() if layer_norm is None
                             else stax.LayerNorm(axis=layer_norm, spec=spec))
-
-  res_unit = stax.serial(
-      avg_pool_or_identity,
-      phi,
-      dropout_or_identity,
-      affine)
-
+  res_unit = stax.serial(pool_or_identity, phi, dropout_or_identity, affine)
   if is_res:
     block = stax.serial(
         affine,
@@ -163,7 +174,7 @@ def _get_net(W_std,
   if proj_into_2d == 'FLAT':
     proj_layer = stax.Flatten(spec=spec)
   elif proj_into_2d == 'POOL':
-    proj_layer = stax.GlobalAvgPool(spec=spec)
+    proj_layer = globalPool_fn(spec=spec)
   elif proj_into_2d.startswith('ATTN'):
     n_heads = int(np.sqrt(width))
     n_chan_val = int(np.round(float(width) / n_heads))
@@ -180,13 +191,43 @@ def _get_net(W_std,
             W_query_std=W_std,
             W_out_std=1.0,
             b_std=b_std,
-            spec=spec),
-        stax.Flatten(spec=spec))
+            spec=spec), stax.Flatten(spec=spec))
   else:
     raise ValueError(proj_into_2d)
   readout = stax.serial(proj_layer, fc(1 if is_ntk else width))
 
-  return stax.serial(block, readout)
+  return stax.serial(block, readout), input_shape
+
+
+def _get_net_pool(width, is_ntk, pool_type, padding,
+                  filter_shape, strides, normalize_edges):
+  W_std, b_std = 2.**0.5, 0.5**0.5
+  phi = stax.Relu()
+  parameterization = 'ntk'
+
+  fc = partial(
+      stax.Dense, W_std=W_std, b_std=b_std, parameterization=parameterization)
+  conv = partial(
+      stax.Conv,
+      filter_shape=(3, 2),
+      strides=None,
+      padding='SAME',
+      W_std=W_std,
+      b_std=b_std,
+      parameterization=parameterization)
+
+  if pool_type == 'AVG':
+    pool_fn = partial(stax.AvgPool, normalize_edges=normalize_edges)
+    global_pool_fn = stax.GlobalAvgPool
+  elif pool_type == 'SUM':
+    pool_fn = stax.SumPool
+    global_pool_fn = stax.GlobalSumPool
+
+  pool = pool_fn(filter_shape, strides, padding)
+
+  return stax.serial(
+      conv(width), phi, pool, conv(width), phi, global_pool_fn(),
+      fc(1 if is_ntk else width)), INPUT_SHAPE
 
 
 class StaxTest(jtu.JaxTestCase):
@@ -195,16 +236,11 @@ class StaxTest(jtu.JaxTestCase):
       jtu.cases_from_list({
           'testcase_name':
               '_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}'.format(
-                  model,
-                  phi_name,
-                  width,
-                  'same_inputs' if same_inputs else 'different_inputs',
-                  'filter_size=%s' % str(filter_size),
-                  'padding=%s' % padding,
-                  'strides=%s' % str(strides),
-                  'pool' if use_pooling else 'flatten',
-                  'NTK' if is_ntk else 'NNGP',
-                  'RESNET' if is_res else 'serial',
+                  model, phi_name, width, 'same_inputs'
+                  if same_inputs else 'different_inputs', 'filter_shape=%s' %
+                  str(filter_shape), 'padding=%s' % padding, 'strides=%s' %
+                  str(strides), 'pool' if use_pooling else 'flatten',
+                  'NTK' if is_ntk else 'NNGP', 'RESNET' if is_res else 'serial',
                   proj_into_2d),
           'model':
               model,
@@ -218,8 +254,8 @@ class StaxTest(jtu.JaxTestCase):
               phi,
           'same_inputs':
               same_inputs,
-          'filter_size':
-              filter_size,
+          'filter_shape':
+              filter_shape,
           'use_pooling':
               use_pooling,
           'is_ntk':
@@ -228,29 +264,17 @@ class StaxTest(jtu.JaxTestCase):
               is_res,
           'proj_into_2d':
               proj_into_2d
-      } for model in MODELS
-        for width in WIDTHS
-        for phi, phi_name in ACTIVATIONS.items()
-        for same_inputs in [False, True]
-        for padding in PADDINGS
-        for strides in STRIDES
-        for filter_size in FILTER_SIZES
-        for use_pooling in [False, True]
-        for is_ntk in [False, True]
-        for is_res in [False, True]
-        for proj_into_2d in PROJECTIONS))
-  def test_exact(self,
-                 model,
-                 width,
-                 strides,
-                 padding,
-                 phi,
-                 same_inputs,
-                 filter_size,
-                 use_pooling,
-                 is_ntk,
-                 is_res,
-                 proj_into_2d):
+      } for model in MODELS for width in WIDTHS
+                          for phi, phi_name in ACTIVATIONS.items()
+                          for same_inputs in [False, True]
+                          for padding in PADDINGS for strides in STRIDES
+                          for filter_shape in FILTER_SHAPES
+                          for use_pooling in [False, True]
+                          for is_ntk in [False, True]
+                          for is_res in [False, True]
+                          for proj_into_2d in PROJECTIONS))
+  def test_exact(self, model, width, strides, padding, phi, same_inputs,
+                 filter_shape, use_pooling, is_ntk, is_res, proj_into_2d):
     is_conv = 'conv' in model
 
     # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
@@ -259,11 +283,11 @@ class StaxTest(jtu.JaxTestCase):
         raise jtu.SkipTest('Not running CNN models on CPU to save time.')
 
       if (is_res and is_conv and ((strides is not None and strides != (1, 1)) or
-                                  (padding == 'VALID' and filter_size !=
+                                  (padding == 'VALID' and filter_shape !=
                                    (1, 1)))):
         raise jtu.SkipTest('Different paths in a residual models need to return'
                            ' outputs of the same shape.')
-    elif (filter_size != FILTER_SIZES[0] or padding != PADDINGS[0] or
+    elif (filter_shape != FILTER_SHAPES[0] or padding != PADDINGS[0] or
           strides != STRIDES[0] or proj_into_2d != PROJECTIONS[0] or
           use_pooling):
       raise jtu.SkipTest('FC models do not have these parameters.')
@@ -274,28 +298,26 @@ class StaxTest(jtu.JaxTestCase):
       raise jtu.SkipTest('ATTN forward pass on TPU is broken if one of'
                          ' the spatial dimensions is singleton.')
 
+    pool_type = 'AVG'
     W_std, b_std = 2.**0.5, 0.5**0.5
     layer_norm = None
     parameterization = 'ntk'
     use_dropout = False
 
-    self._check_agreement_with_empirical(W_std, b_std, filter_size, is_conv,
-                                         is_ntk, is_res, layer_norm, padding,
-                                         phi, proj_into_2d, same_inputs,
-                                         strides, use_pooling, width,
-                                         parameterization, use_dropout)
+    net = _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res,
+                   padding, phi, strides, width, is_ntk, proj_into_2d,
+                   pool_type, layer_norm, parameterization, use_dropout)
+    self._check_agreement_with_empirical(net, same_inputs, is_conv, use_dropout,
+                                         is_ntk, proj_into_2d)
 
   # pylint: disable=g-complex-comprehension
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_{}_{}_{}_{}_{}_{}_{}'.format(
-                  model,
-                  width,
-                  'same_inputs' if same_inputs else 'different_inputs',
-                  'filter_size=%s' % str(filter_size),
-                  proj_into_2d,
-                  'NTK' if is_ntk else 'NNGP',
+                  model, width, 'same_inputs'
+                  if same_inputs else 'different_inputs', 'filter_shape=%s' %
+                  str(filter_shape), proj_into_2d, 'NTK' if is_ntk else 'NNGP',
                   'parameterization=%s' % str(parameterization)),
           'model':
               model,
@@ -303,8 +325,8 @@ class StaxTest(jtu.JaxTestCase):
               width,
           'same_inputs':
               same_inputs,
-          'filter_size':
-              filter_size,
+          'filter_shape':
+              filter_shape,
           'proj_into_2d':
               proj_into_2d,
           'is_ntk':
@@ -312,19 +334,13 @@ class StaxTest(jtu.JaxTestCase):
           'parameterization':
               parameterization
       } for model in MODELS for width in WIDTHS
-        for same_inputs in [False, True]
-        for is_ntk in [False, True]
-        for filter_size in FILTER_SIZES
-        for proj_into_2d in PROJECTIONS[:2]
-        for parameterization in PARAMETERIZATIONS))
-  def test_parameterizations(self,
-                             model,
-                             width,
-                             same_inputs,
-                             is_ntk,
-                             filter_size,
-                             proj_into_2d,
-                             parameterization):
+                          for same_inputs in [False, True]
+                          for is_ntk in [False, True]
+                          for filter_shape in FILTER_SHAPES
+                          for proj_into_2d in PROJECTIONS[:2]
+                          for parameterization in PARAMETERIZATIONS))
+  def test_parameterizations(self, model, width, same_inputs, is_ntk,
+                             filter_shape, proj_into_2d, parameterization):
     is_conv = 'conv' in model
 
     W_std, b_std = 2.**0.5, 0.5**0.5
@@ -333,6 +349,7 @@ class StaxTest(jtu.JaxTestCase):
     phi = stax.Relu()
     use_pooling, is_res = False, False
     layer_norm = None
+    pool_type = 'AVG'
     use_dropout = False
 
     # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
@@ -342,11 +359,11 @@ class StaxTest(jtu.JaxTestCase):
     elif proj_into_2d != PROJECTIONS[0]:
       raise jtu.SkipTest('FC models do not have these parameters.')
 
-    self._check_agreement_with_empirical(W_std, b_std, filter_size, is_conv,
-                                         is_ntk, is_res, layer_norm, padding,
-                                         phi, proj_into_2d, same_inputs,
-                                         strides, use_pooling, width,
-                                         parameterization, use_dropout)
+    net = _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res,
+                   padding, phi, strides, width, is_ntk, proj_into_2d,
+                   pool_type, layer_norm, parameterization, use_dropout)
+    self._check_agreement_with_empirical(net, same_inputs, is_conv, use_dropout,
+                                         is_ntk, proj_into_2d)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -392,19 +409,68 @@ class StaxTest(jtu.JaxTestCase):
       raise jtu.SkipTest('FC models do not have these parameters.')
 
     W_std, b_std = 2.**0.5, 0.5**0.5
-    filter_size = FILTER_SIZES[0]
+    filter_shape = FILTER_SHAPES[0]
     padding = PADDINGS[0]
     strides = STRIDES[0]
     phi = stax.Relu()
     use_pooling, is_res = False, False
     parameterization = 'ntk'
+    pool_type = 'AVG'
     use_dropout = False
 
-    self._check_agreement_with_empirical(W_std, b_std, filter_size, is_conv,
-                                         is_ntk, is_res, layer_norm, padding,
-                                         phi, proj_into_2d, same_inputs,
-                                         strides, use_pooling, width,
-                                         parameterization, use_dropout)
+    net = _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res,
+                   padding, phi, strides, width, is_ntk, proj_into_2d,
+                   pool_type, layer_norm, parameterization, use_dropout)
+    self._check_agreement_with_empirical(net, same_inputs, is_conv, use_dropout,
+                                         is_ntk, proj_into_2d)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              '_{}_{}_{}_{}_{}_{}_{}_{}'.format(
+                  width, 'same_inputs' if same_inputs else 'different_inputs',
+                  'filter_shape=%s' % str(filter_shape), 'padding=%s' %
+                  padding, 'strides=%s' % str(strides),
+                  'NTK' if is_ntk else 'NNGP', 'pool_type=%s' %
+                  str(pool_type), 'normalize_edges=%s' % str(normalize_edges)),
+          'width':
+              width,
+          'same_inputs':
+              same_inputs,
+          'is_ntk':
+              is_ntk,
+          'pool_type':
+              pool_type,
+          'padding':
+              padding,
+          'filter_shape':
+              filter_shape,
+          'strides':
+              strides,
+          'normalize_edges':
+              normalize_edges
+      } for width in WIDTHS for same_inputs in [False, True]
+                          for is_ntk in [False, True]
+                          for pool_type in POOL_TYPES for padding in PADDINGS
+                          for filter_shape in FILTER_SHAPES
+                          for strides in STRIDES
+                          for normalize_edges in [True, False]))
+  def test_pool(self, width, same_inputs, is_ntk, pool_type,
+                padding, filter_shape, strides, normalize_edges):
+    is_conv = True
+    use_dropout = False
+    proj_into_2d = 'POOL'
+    # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
+
+    if xla_bridge.get_backend().platform == 'cpu':
+      raise jtu.SkipTest('Not running CNN models on CPU to save time.')
+    if pool_type == 'SUM' and normalize_edges:
+      raise jtu.SkipTest('normalize_edges not applicable to SumPool.')
+
+    net = _get_net_pool(width, is_ntk, pool_type,
+                        padding, filter_shape, strides, normalize_edges)
+    self._check_agreement_with_empirical(net, same_inputs, is_conv, use_dropout,
+                                         is_ntk, proj_into_2d)
 
   def test_avg_pool(self):
     X1 = np.ones((4, 2, 3, 2))
@@ -459,52 +525,47 @@ class StaxTest(jtu.JaxTestCase):
       jtu.cases_from_list({
           'testcase_name':
               '_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}'.format(
-                  model,
-                  phi_name,
-                  width,
-                  'same_inputs' if same_inputs else 'different_inputs',
-                  'filter_size=%s' % str(filter_size),
-                  'padding=%s' % padding,
-                  'strides=%s' % str(strides),
-                  'pool' if use_pooling else 'flatten',
-                  'NTK' if is_ntk else 'NNGP',
-                  proj_into_2d),
-          'model': model,
-          'width': width,
-          'same_inputs': same_inputs,
-          'is_ntk': is_ntk,
-          'padding': padding,
-          'strides': strides,
-          'filter_size': filter_size,
-          'phi': phi,
-          'use_pooling': use_pooling,
-          'proj_into_2d': proj_into_2d
-      } for model in MODELS
-        for width in WIDTHS
-        for same_inputs in [True, False]
-        for phi, phi_name in ACTIVATIONS.items()
-        for padding in PADDINGS
-        for strides in STRIDES
-        for filter_size in FILTER_SIZES
-        for is_ntk in [True, False]
-        for use_pooling in [True, False]
-        for proj_into_2d in ['FLAT', 'POOL']))
-  def test_dropout(self,
-                   model,
-                   width,
-                   same_inputs,
-                   is_ntk,
-                   padding,
-                   strides,
-                   filter_size,
-                   phi,
-                   use_pooling,
-                   proj_into_2d):
+                  model, phi_name, width, 'same_inputs'
+                  if same_inputs else 'different_inputs', 'filter_shape=%s' %
+                  str(filter_shape), 'padding=%s' % padding, 'strides=%s' %
+                  str(strides), 'pool' if use_pooling else 'flatten',
+                  'NTK' if is_ntk else 'NNGP', proj_into_2d),
+          'model':
+              model,
+          'width':
+              width,
+          'same_inputs':
+              same_inputs,
+          'is_ntk':
+              is_ntk,
+          'padding':
+              padding,
+          'strides':
+              strides,
+          'filter_shape':
+              filter_shape,
+          'phi':
+              phi,
+          'use_pooling':
+              use_pooling,
+          'proj_into_2d':
+              proj_into_2d
+      } for model in MODELS for width in WIDTHS
+                          for same_inputs in [True, False]
+                          for phi, phi_name in ACTIVATIONS.items()
+                          for padding in PADDINGS for strides in STRIDES
+                          for filter_shape in FILTER_SHAPES
+                          for is_ntk in [True, False]
+                          for use_pooling in [True, False]
+                          for proj_into_2d in ['FLAT', 'POOL']))
+  def test_dropout(self, model, width, same_inputs, is_ntk, padding, strides,
+                   filter_shape, phi, use_pooling, proj_into_2d):
     if xla_bridge.get_backend().platform == 'tpu' and same_inputs:
       raise jtu.SkipTest(
           'Skip TPU test for `same_inputs`. Need to handle '
           'random keys carefully for dropout + empirical kernel.')
 
+    pool_type = 'AVG'
     use_dropout = True
     is_conv = 'conv' in model
     is_res = False
@@ -517,69 +578,30 @@ class StaxTest(jtu.JaxTestCase):
         raise jtu.SkipTest('Not running CNN models on CPU to save time.')
 
       if (is_res and is_conv and ((strides is not None and strides != (1, 1)) or
-                                  (padding == 'VALID' and filter_size !=
+                                  (padding == 'VALID' and filter_shape !=
                                    (1, 1)))):
         raise jtu.SkipTest('Different paths in a residual models need to return'
                            ' outputs of the same shape.')
-    elif (filter_size != FILTER_SIZES[0] or padding != PADDINGS[0] or
+    elif (filter_shape != FILTER_SHAPES[0] or padding != PADDINGS[0] or
           strides != STRIDES[0] or proj_into_2d != PROJECTIONS[0] or
           use_pooling):
       raise jtu.SkipTest('FC models do not have these parameters.')
 
-    self._check_agreement_with_empirical(W_std, b_std, filter_size, is_conv,
-                                         is_ntk, is_res, layer_norm, padding,
-                                         phi, proj_into_2d, same_inputs,
-                                         strides, use_pooling, width,
-                                         parameterization, use_dropout)
+    net = _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res,
+                   padding, phi, strides, width, is_ntk, proj_into_2d,
+                   pool_type, layer_norm, parameterization, use_dropout)
+    self._check_agreement_with_empirical(net, same_inputs, is_conv, use_dropout,
+                                         is_ntk, proj_into_2d)
 
-  def _check_agreement_with_empirical(self,
-                                      W_std,
-                                      b_std,
-                                      filter_size,
-                                      is_conv,
-                                      is_ntk,
-                                      is_res,
-                                      layer_norm,
-                                      padding,
-                                      phi,
-                                      proj_into_2d,
-                                      same_inputs,
-                                      strides,
-                                      use_pooling,
-                                      width,
-                                      parameterization,
-                                      use_dropout):
-    if is_conv:
-      # Select a random dimension order.
-      default_spec = 'NHWC'
-      if xla_bridge.get_backend().platform == 'tpu':
-        # Keep batch dimension leading for TPU for batching to work.
-        specs = ['NHWC', 'NHCW', 'NCHW']
-      else:
-        specs = ['NHWC', 'NHCW', 'NCHW', 'CHWN', 'CHNW', 'CNHW']
-      spec = prandom.choice(specs)
-      input_shape = tuple(INPUT_SHAPE[default_spec.index(c)] for c in spec)
+  def _check_agreement_with_empirical(self, net, same_inputs, is_conv,
+                                      use_dropout, is_ntk, proj_into_2d):
 
-      if layer_norm:
-        layer_norm = tuple(spec.index(c) for c in layer_norm)
+    (init_fn, apply_fn, kernel_fn), input_shape = net
 
-    else:
-      # Only `NC` dimension order is supported and is enforced by layers.
-      spec = None
-      input_shape = INPUT_SHAPE
-      if layer_norm:
-        layer_norm = prandom.choice([(1,), (-1,)])
 
     num_samples = N_SAMPLES * 5 if use_dropout else N_SAMPLES
     key = random.PRNGKey(1)
-    dimension_numbers = (spec, 'HWIO', spec)
     x1, x2 = _get_inputs(key, is_conv, same_inputs, input_shape)
-    init_fn, apply_fn, kernel_fn = _get_net(W_std, b_std, filter_size, is_conv,
-                                            use_pooling, is_res, padding, phi,
-                                            strides, width, is_ntk,
-                                            proj_into_2d, layer_norm,
-                                            parameterization, use_dropout,
-                                            dimension_numbers)
 
     x1_out_shape, params = init_fn(key, x1.shape)
     if same_inputs:
@@ -607,7 +629,7 @@ class StaxTest(jtu.JaxTestCase):
       else:
         exact, shape1, shape2 = kernel_fn(x1, x2, ('nngp', 'shape1', 'shape2'))
         empirical = _get_empirical(num_samples, 'nngp')
-      utils.assert_close_matrices(self, empirical, exact, RTOL)
+      utils.assert_close_matrices(self, exact, empirical, RTOL)
       self.assertEqual(shape1, x1_out_shape)
       self.assertEqual(shape2, x2_out_shape)
 
