@@ -123,7 +123,7 @@ x2 = random.normal(key2, (20, 100))
 
 kernel = kernel_fn(x1, x2, 'nngp')
 ```
-Note that `kernel_fn` can compute _two_ covariance matrices corresponding to the Neural Network Gaussian Process (NNGP) and Neural Tangent (NT) kernels respectively. The NNGP kernel corresponds to the _Bayesian_ infinite neural network [[1-5]](#1-deep-neural-networks-as-gaussian-processes-iclr-2018-jaehoon-lee-yasaman-bahri-roman-novak-samuel-s-schoenholz-jeffrey-pennington-jascha-sohl-dickstein). The NTK corresponds to the _(continuous) gradient descent trained_ infinite network [[10]](#5-neural-tangent-kernel-convergence-and-generalization-in-neural-networks-neurips-2018-arthur-jacot-franck-gabriel-clément-hongler). In the above example, we compute the NNGP kernel but we could compute the NTK or both:
+Note that `kernel_fn` can compute _two_ covariance matrices corresponding to the Neural Network Gaussian Process (NNGP) and Neural Tangent (NT) kernels respectively. The NNGP kernel corresponds to the _Bayesian_ infinite neural network [[1-5]](#5-deep-neural-networks-as-gaussian-processes-iclr-2018-jaehoon-lee-yasaman-bahri-roman-novak-samuel-s-schoenholz-jeffrey-pennington-jascha-sohl-dickstein). The NTK corresponds to the _(continuous) gradient descent trained_ infinite network [[10]](#10-neural-tangent-kernel-convergence-and-generalization-in-neural-networks-neurips-2018-arthur-jacot-franck-gabriel-clément-hongler). In the above example, we compute the NNGP kernel but we could compute the NTK or both:
 
 ```python
 # Get kernel of a single type
