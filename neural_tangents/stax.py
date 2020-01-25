@@ -25,8 +25,9 @@ This library contains layer constructors mimicking those in
   similarly to `init_fn` and `apply_fn`.
 
 2) In layers with random weights, NTK parameterization is used by default
-  (https://arxiv.org/abs/1806.07572, page 3). Standard parameterization can
-  be specified for Conv and Dense layers by a keyword argument.
+  (https://arxiv.org/abs/1806.07572, page 3). Standard parameterization
+  (https://arxiv.org/abs/2001.07301) can be specified for Conv and Dense layers
+  by a keyword argument.
 
 3) Some functionality may be missing (e.g. `BatchNorm`), and some may be present
   only in our library (e.g. `CIRCULAR` padding, `LayerNorm`, `GlobalAvgPool`,
@@ -951,8 +952,9 @@ def Dense(out_dim,
       Under ntk parameterization (https://arxiv.org/abs/1806.07572, page 3),
         weights and biases are initialized as W_ij ~ N(0,1), b_i ~ N(0,1), and
         the finite width layer equation is z_i = W_std / sqrt([width]) sum_j
-        W_ij x_j + b_std b_i Under standard parameterization, weights and biases
-        are initialized as W_ij ~ N(0,W_std^2/[width]), b_i ~ N(0,b_std^2), and
+        W_ij x_j + b_std b_i Under standard parameterization
+        (https://arxiv.org/abs/2001.07301), weights and biases are initialized
+        as W_ij ~ N(0,W_std^2/[width]), b_i ~ N(0,b_std^2), and
         the finite width layer equation is z_i = \sum_j W_ij x_j + b_i.
 
 
