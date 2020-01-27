@@ -5,8 +5,6 @@
 
 **News:**
 
-* We no longer support Python 2 starting from NT 0.1.5.
-
 * We will be at [ICLR 2020](https://iclr.cc/), come tell us about your experience with the library!
 
 * [arXiv preprint is out](https://arxiv.org/abs/1912.02803).
@@ -41,14 +39,19 @@ We happily welcome contributions!
 
 ## Installation
 
-To use GPU, first follow [JAX's](https://www.github.com/google/jax/)
- GPU installation instructions (not necessary for CPU-only usage).
+To use GPU, first follow [JAX's](https://www.github.com/google/jax/) GPU installation instructions. Otherwise, install JAX on CPU by running
 
-Then either run
+```
+pip install jaxlib jax --upgrade
+```
+
+Once JAX is installed install Neural Tangents by running
+
 ```
 pip install neural-tangents
 ```
 or, to use the bleeding-edge version from GitHub source,
+
 ```
 git clone https://github.com/google/neural-tangents
 pip install -e neural-tangents
@@ -227,10 +230,6 @@ The `neural_tangents` (`nt`) package contains the following modules and methods:
 
 ## Technical gotchas
 
-### GPU
-
-You must follow [JAX's](https://www.github.com/google/jax/) GPU installation instructions to enable GPU support.
-
 
 ### 64-bit precision
 To enable 64-bit precision, set the respective JAX flag _before_ importing `neural_tangents` (see the JAX [guide](https://colab.research.google.com/github/google/jax/blob/master/notebooks/Common_Gotchas_in_JAX.ipynb#scrollTo=YTktlwTTMgFl)), for example:
@@ -248,10 +247,6 @@ We remark the following differences between our library and the JAX one.
 * All `nt.stax` layers are instantiated with a function call, i.e. `nt.stax.Relu()` vs `jax.experimental.stax.Relu`.
 * All layers with trainable parameters use the _NTK parameterization_ by default (see [[10]](#10-neural-tangent-kernel-convergence-and-generalization-in-neural-networks-neurips-2018-arthur-jacot-franck-gabriel-clément-hongler), Remark 1). However, Dense and Conv layers also support the _standard parameterization_ via a `parameterization` keyword argument (see [[15]](#15-on-the-infinite-width-limit-of-neural-networks-with-a-standard-parameterization-arxiv-2020-jascha-sohl-dickstein-roman-novak-samuel-s-schoenholz-jaehoon-lee)).
 * `nt.stax` and `jax.experimental.stax` may have different layers and options available (for example `nt.stax` layers support `CIRCULAR` padding, but only `NHWC` data format).
-
-### Python 2 is not supported
-We only support versions of Python 3 supported by [JAX](https://github.com/google/jax).
-
 
 ## Training dynamics of wide but finite networks
 
