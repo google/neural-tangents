@@ -23,7 +23,7 @@ import jax.numpy as np
 import jax.random as random
 from neural_tangents import stax
 from neural_tangents.utils import empirical
-from neural_tangents.utils import utils
+from neural_tangents.utils import test_utils
 
 jax_config.parse_flags_with_absl()
 
@@ -40,7 +40,7 @@ NETWORK = [STANDARD, STANDARD, STANDARD, STANDARD, POOLING]
 OUTPUT_LOGITS = [1, 2, 3]
 
 CONVOLUTION_CHANNELS = 256
-utils.update_test_tolerance()
+test_utils.update_test_tolerance()
 
 
 def _build_network(input_shape, network, out_logits):

@@ -17,53 +17,10 @@ from collections import namedtuple
 import functools
 import inspect
 import types
-from jax import test_util as jtu
 from jax.api import jit
 from jax.api import vmap
 from jax.lib import xla_bridge
 import jax.numpy as np
-
-
-def _jit_vmap(f):
-  return jit(vmap(f))
-
-
-def update_test_tolerance():
-  jtu._default_tolerance[np.onp.dtype(np.onp.float32)] = 5e-3
-  jtu._default_tolerance[np.onp.dtype(np.onp.float64)] = 1e-5
-  def default_tolerance():
-    if jtu.device_under_test() != 'tpu':
-      return jtu._default_tolerance
-    tol = jtu._default_tolerance.copy()
-    tol[np.onp.dtype(np.onp.float32)] = 5e-2
-    return tol
-  jtu.default_tolerance = default_tolerance
-
-
-def stub_out_pmap(batch, count):
-  # If we are using GPU or CPU stub out pmap with vmap to simulate multi-core.
-  if count > 0:
-
-    class xla_bridge_stub(object):
-
-      def device_count(self):
-        return count
-
-    platform = xla_bridge.get_backend().platform
-    if platform == 'gpu' or platform == 'cpu':
-      batch.pmap = _jit_vmap
-      batch.xla_bridge = xla_bridge_stub()
-
-
-def assert_close_matrices(self, expected, actual, rtol):
-  self.assertEqual(expected.shape, actual.shape)
-  relative_error = (
-      np.linalg.norm(actual - expected) /
-      np.maximum(np.linalg.norm(expected), 1e-12))
-  if relative_error > rtol or np.isnan(relative_error):
-    self.fail(self.failureException(float(relative_error), expected, actual))
-  else:
-    print('PASSED with %f relative error.' % relative_error)
 
 
 def canonicalize_get(get):

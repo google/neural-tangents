@@ -24,7 +24,7 @@ from neural_tangents import stax
 from neural_tangents.utils import batch
 from neural_tangents.utils import empirical
 from neural_tangents.utils import monte_carlo
-from neural_tangents.utils import utils
+from neural_tangents.utils import test_utils
 
 jax_config.parse_flags_with_absl()
 
@@ -42,7 +42,7 @@ N_SAMPLES = 4
 
 ALL_GET = ('nngp', 'ntk', ('nngp', 'ntk'), None)
 
-utils.update_test_tolerance()
+test_utils.update_test_tolerance()
 
 
 
@@ -83,7 +83,7 @@ class MonteCarloTest(jtu.JaxTestCase):
                           for get in ALL_GET))
   def test_sample_once_batch(self, batch_size, device_count, store_on_device,
                              get):
-    utils.stub_out_pmap(batch, device_count)
+    test_utils.stub_out_pmap(batch, device_count)
 
     x1, x2, init_fn, apply_fn, _, key = _get_inputs_and_model()
     kernel_fn = empirical.empirical_kernel_fn(apply_fn)
@@ -113,7 +113,7 @@ class MonteCarloTest(jtu.JaxTestCase):
                           for get in ALL_GET))
   def test_batch_sample_once(self, batch_size, device_count, store_on_device,
                              get):
-    utils.stub_out_pmap(batch, device_count)
+    test_utils.stub_out_pmap(batch, device_count)
 
     x1, x2, init_fn, apply_fn, _, key = _get_inputs_and_model()
     kernel_fn = empirical.empirical_kernel_fn(apply_fn)
@@ -139,7 +139,7 @@ class MonteCarloTest(jtu.JaxTestCase):
                           for store_on_device in STORE_ON_DEVICE))
   def test_sample_vs_analytic_nngp(self, batch_size, device_count,
                                    store_on_device):
-    utils.stub_out_pmap(batch, device_count)
+    test_utils.stub_out_pmap(batch, device_count)
 
     x1, x2, init_fn, apply_fn, stax_kernel_fn, key = _get_inputs_and_model(
         1024, 256, xla_bridge.get_backend().platform == 'tpu')
@@ -151,7 +151,7 @@ class MonteCarloTest(jtu.JaxTestCase):
     ker_empirical = sample(x1, x2, 'nngp')
     ker_analytic = stax_kernel_fn(x1, x2, 'nngp')
 
-    utils.assert_close_matrices(self, ker_analytic, ker_empirical, 2e-2)
+    test_utils.assert_close_matrices(self, ker_analytic, ker_empirical, 2e-2)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -167,7 +167,7 @@ class MonteCarloTest(jtu.JaxTestCase):
                           for store_on_device in STORE_ON_DEVICE))
   def test_monte_carlo_vs_analytic_ntk(self, batch_size, device_count,
                                        store_on_device):
-    utils.stub_out_pmap(batch, device_count)
+    test_utils.stub_out_pmap(batch, device_count)
 
     x1, x2, init_fn, apply_fn, stax_kernel_fn, key = _get_inputs_and_model(
         256, 2, xla_bridge.get_backend().platform == 'tpu')
@@ -182,7 +182,7 @@ class MonteCarloTest(jtu.JaxTestCase):
 
     ker_analytic = stax_kernel_fn(x1, x2, 'ntk')
 
-    utils.assert_close_matrices(self, ker_analytic, ker_empirical, 2e-2)
+    test_utils.assert_close_matrices(self, ker_analytic, ker_empirical, 2e-2)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -201,7 +201,7 @@ class MonteCarloTest(jtu.JaxTestCase):
                           for get in ALL_GET))
   def test_monte_carlo_generator(self, batch_size, device_count,
                                  store_on_device, get):
-    utils.stub_out_pmap(batch, device_count)
+    test_utils.stub_out_pmap(batch, device_count)
 
     x1, x2, init_fn, apply_fn, stax_kernel_fn, key = _get_inputs_and_model(8, 1)
     x3, x4, _, _, _, _ = _get_inputs_and_model(8, 1)

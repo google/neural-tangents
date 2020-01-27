@@ -24,7 +24,7 @@ from jax.tree_util import tree_map
 from neural_tangents import stax
 from neural_tangents.utils import batch
 from neural_tangents.utils import empirical
-from neural_tangents.utils import utils
+from neural_tangents.utils import test_utils
 from neural_tangents.utils.kernel import Kernel
 
 jax_config.parse_flags_with_absl()
@@ -42,7 +42,7 @@ OUTPUT_LOGITS = [1, 2, 3]
 CONVOLUTION_CHANNELS = 4
 WIDTH = 1024
 RTOL = 1e-2
-utils.update_test_tolerance()
+test_utils.update_test_tolerance()
 
 
 def _build_network(input_shape, network, out_logits, use_dropout):
@@ -180,7 +180,7 @@ class BatchTest(jtu.JaxTestCase):
           for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
           for name, kernel_fn in KERNELS.items()))
   def testParallel(self, train_shape, test_shape, network, name, kernel_fn):
-    utils.stub_out_pmap(batch, 2)
+    test_utils.stub_out_pmap(batch, 2)
     key = random.PRNGKey(0)
     key, self_split, other_split = random.split(key, 3)
     data_self = random.normal(self_split, train_shape)
@@ -214,7 +214,7 @@ class BatchTest(jtu.JaxTestCase):
                           for batch_size in [2, 8]))
   def testComposition(self, train_shape, test_shape, network, name, kernel_fn,
                       batch_size):
-    utils.stub_out_pmap(batch, 2)
+    test_utils.stub_out_pmap(batch, 2)
 
     key = random.PRNGKey(0)
     key, self_split, other_split = random.split(key, 3)
@@ -255,7 +255,7 @@ class BatchTest(jtu.JaxTestCase):
                           for batch_size in [2, 8]))
   def testAutomatic(self, train_shape, test_shape, network, name, kernel_fn,
                     batch_size):
-    utils.stub_out_pmap(batch, 2)
+    test_utils.stub_out_pmap(batch, 2)
 
     key = random.PRNGKey(0)
     key, self_split, other_split = random.split(key, 3)
@@ -341,7 +341,7 @@ class BatchTest(jtu.JaxTestCase):
             store_on_device=store_on_device))
 
   def testAnalyticKernelComposeParallel(self):
-    utils.stub_out_pmap(batch, 2)
+    test_utils.stub_out_pmap(batch, 2)
     self._test_analytic_kernel_composition(batch._parallel)
 
   @jtu.parameterized.named_parameters(
@@ -354,7 +354,7 @@ class BatchTest(jtu.JaxTestCase):
               batch_size
       } for store_on_device in [True, False] for batch_size in [2, 8]))
   def testAnalyticKernelComposeAutomatic(self, store_on_device, batch_size):
-    utils.stub_out_pmap(batch, 2)
+    test_utils.stub_out_pmap(batch, 2)
     self._test_analytic_kernel_composition(
         partial(
             batch.batch, batch_size=batch_size,
@@ -394,7 +394,7 @@ class BatchTest(jtu.JaxTestCase):
               x1, x2, do_flip, keys, do_square, params, _unused=True)
           self.assertAllClose(res_1, res_2, True)
 
-    utils.stub_out_pmap(batch, 1)
+    test_utils.stub_out_pmap(batch, 1)
     x1 = np.arange(0, 10).reshape((1, 10))
     kernel_fn_pmapped = batch._jit_or_pmap_broadcast(kernel_fn, device_count=1)
     for do_flip in [True, False]:
@@ -411,7 +411,7 @@ class BatchTest(jtu.JaxTestCase):
 
     kernel_fn_pmapped = batch._jit_or_pmap_broadcast(kernel_fn, device_count=2)
     x1 = np.arange(0, 20).reshape((2, 10))
-    utils.stub_out_pmap(batch, 2)
+    test_utils.stub_out_pmap(batch, 2)
 
     def broadcast(arg):
       return np.broadcast_to(arg, (2,) + arg.shape)

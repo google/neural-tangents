@@ -30,7 +30,7 @@ from neural_tangents import predict
 from neural_tangents import stax
 from neural_tangents.utils import batch
 from neural_tangents.utils import empirical
-from neural_tangents.utils import utils
+from neural_tangents.utils import test_utils
 
 config.parse_flags_with_absl()
 
@@ -58,7 +58,7 @@ OUTPUT_LOGITS = [1, 2]
 
 CONVOLUTION_CHANNELS = 256
 
-utils.update_test_tolerance()
+test_utils.update_test_tolerance()
 
 
 

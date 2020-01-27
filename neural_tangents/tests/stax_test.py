@@ -23,7 +23,7 @@ import jax.numpy as np
 import jax.random as random
 from neural_tangents import stax
 from neural_tangents.utils import monte_carlo
-from neural_tangents.utils import utils
+from neural_tangents.utils import test_utils
 
 
 jax_config.parse_flags_with_absl()
@@ -79,8 +79,7 @@ POOL_TYPES = ['SUM', 'AVG']
 
 PARAMETERIZATIONS = ['NTK', 'STANDARD']
 
-
-utils.update_test_tolerance()
+test_utils.update_test_tolerance()
 
 
 def _get_inputs(key, is_conv, same_inputs, input_shape, fn=np.cos):
@@ -629,7 +628,7 @@ class StaxTest(jtu.JaxTestCase):
       else:
         exact, shape1, shape2 = kernel_fn(x1, x2, ('nngp', 'shape1', 'shape2'))
         empirical = _get_empirical(num_samples, 'nngp')
-      utils.assert_close_matrices(self, exact, empirical, RTOL)
+      test_utils.assert_close_matrices(self, exact, empirical, RTOL)
       self.assertEqual(shape1, x1_out_shape)
       self.assertEqual(shape2, x2_out_shape)
 
@@ -956,7 +955,7 @@ class FanInTest(jtu.JaxTestCase):
     exact = kernel_fn(X0_1, X0_2, get=get)
     empirical = kernel_fn_mc(X0_1, X0_2, get=get)
     empirical = empirical.reshape(exact.shape)
-    utils.assert_close_matrices(self, empirical, exact, tol)
+    test_utils.assert_close_matrices(self, empirical, exact, tol)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list(
@@ -1067,7 +1066,7 @@ class FanInTest(jtu.JaxTestCase):
     exact = kernel_fn(X0_1, X0_2, get=get)
     empirical = kernel_fn_mc(X0_1, X0_2, get=get)
     empirical = empirical.reshape(exact.shape)
-    utils.assert_close_matrices(self, empirical, exact, tol)
+    test_utils.assert_close_matrices(self, empirical, exact, tol)
 
 
 if __name__ == '__main__':
