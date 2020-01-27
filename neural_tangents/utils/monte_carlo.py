@@ -18,10 +18,10 @@ The library has a public method `monte_carlo_kernel_fn` that allow to compute
   Monte Carlo estimates of NNGP and NTK kernels of arbitrary functions.
 """
 
-
-from jax import random
 from functools import partial
 import operator
+
+from jax import random
 import jax.numpy as np
 from jax.tree_util import tree_map
 from jax.tree_util import tree_multimap

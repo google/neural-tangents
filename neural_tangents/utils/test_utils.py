@@ -17,8 +17,8 @@
 from jax.api import jit
 from jax.api import vmap
 from jax.lib import xla_bridge
-import jax.test_util as jtu
 import jax.numpy as np
+import jax.test_util as jtu
 
 
 def _jit_vmap(f):

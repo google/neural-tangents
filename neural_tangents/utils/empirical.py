@@ -14,15 +14,15 @@
 
 """Compute the empirical NTK and approximate functions via Taylor series."""
 
-
+from functools import partial
 import operator
+
 from absl import flags
 from jax import random
 from jax.api import eval_shape
 from jax.api import jacobian
 from jax.api import jvp
 from jax.api import vjp
-from functools import partial
 from jax.config import config
 import jax.numpy as np
 from jax.tree_util import tree_multimap

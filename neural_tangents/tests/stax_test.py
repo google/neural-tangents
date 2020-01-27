@@ -15,8 +15,9 @@
 
 from functools import partial
 import random as prandom
-from jax import test_util as jtu
+
 from jax import ops
+from jax import test_util as jtu
 from jax.config import config as jax_config
 from jax.lib import xla_bridge
 import jax.numpy as np
@@ -24,7 +25,6 @@ import jax.random as random
 from neural_tangents import stax
 from neural_tangents.utils import monte_carlo
 from neural_tangents.utils import test_utils
-
 
 jax_config.parse_flags_with_absl()
 

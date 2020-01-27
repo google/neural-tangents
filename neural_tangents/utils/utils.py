@@ -17,8 +17,6 @@ from collections import namedtuple
 import functools
 import inspect
 import types
-from jax.api import jit
-from jax.api import vmap
 from jax.lib import xla_bridge
 import jax.numpy as np
 
