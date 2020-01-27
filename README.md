@@ -57,7 +57,7 @@ pip install -e neural-tangents
 You can now run the examples (using [`tensorflow_datasets`](https://github.com/tensorflow/datasets)) by calling:
 
 ```
-pip install tensorflow tensorflow-datasets
+pip install tensorflow "tensorflow-datasets>=2.0.0"
 
 python neural-tangents/examples/infinite_fcn.py
 python neural-tangents/examples/weight_space.py
@@ -68,7 +68,7 @@ Finally, you can run tests by calling:
 
 ```
 # NOTE: a few tests will fail without
-# pip install tensorflow tensorflow-datasets
+# pip install tensorflow "tensorflow-datasets>=2.0.0"
 
 for f in neural-tangents/neural_tangents/tests/*.py; do python $f; done
 ```
