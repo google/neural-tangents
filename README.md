@@ -60,6 +60,8 @@ pip install -e neural-tangents
 You can now run the examples (using [`tensorflow_datasets`](https://github.com/tensorflow/datasets)) by calling:
 
 ```
+# Note that Tensorflow does not work with Python 3.8
+# https://github.com/tensorflow/tensorflow/issues/33374
 pip install tensorflow "tensorflow-datasets>=2.0.0"
 
 python neural-tangents/examples/infinite_fcn.py
