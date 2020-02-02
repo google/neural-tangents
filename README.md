@@ -355,6 +355,8 @@ a small dataset using a small learning rate.
 
 Neural Tangents has been used in the following papers:
 
+* [On the Infinite Width Limit of Neural Networks with a Standard Parameterization.](https://arxiv.org/pdf/2001.07301.pdf) \
+Jascha Sohl-Dickstein, Roman Novak, Samuel S. Schoenholz, Jaehoon Lee
 
 * [Disentangling Trainability and Generalization in Deep Learning.](https://arxiv.org/abs/1912.13053) \
 Lechao Xiao, Jeffrey Pennington, Samuel S. Schoenholz
@@ -370,26 +372,21 @@ Descent.](https://arxiv.org/abs/1902.06720) \
 Jaehoon Lee*, Lechao Xiao*, Samuel S. Schoenholz, Yasaman Bahri, Roman Novak, Jascha
 Sohl-Dickstein, Jeffrey Pennington
 
-* [On the Infinite Width Limit of Neural Networks with a Standard Parameterization.](https://arxiv.org/pdf/2001.07301.pdf) \
-Jascha Sohl-Dickstein, Roman Novak, Samuel S. Schoenholz, Jaehoon Lee
-
 Please let us know if you make use of the code in a publication and we'll add it
 to the list!
 
 
 ## Citation
 
-If you use the code in a publication, please cite the repo using the .bib,
+If you use the code in a publication, please cite out ICLR 2020 paper:
 
 ```
-@misc{neuraltangents2019,
+@inproceedings{neuraltangents2020,
     title={Neural Tangents: Fast and Easy Infinite Neural Networks in Python},
     author={Roman Novak and Lechao Xiao and Jiri Hron and Jaehoon Lee and Alexander A. Alemi and Jascha Sohl-Dickstein and Samuel S. Schoenholz},
-    year={2019},
-    eprint={1912.02803},
-    archivePrefix={arXiv},
-    primaryClass={stat.ML},
-    howpublished={\url{https://github.com/google/neural-tangents}, \url{https://arxiv.org/abs/1912.02803}},
+    booktitle={International Conference on Learning Representations},
+    year={2020},
+    url={https://github.com/google/neural-tangents}
 }
 ```
 
