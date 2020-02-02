@@ -1305,7 +1305,7 @@ def _conv_var_3d(var1, filter_shape, strides, padding, transpose=False):
 @_layer
 def _GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None,
                  padding=Padding.VALID.name, W_std=1.0, W_init=_randn(1.0),
-                 b_std=0.0, b_init=_randn(1.0), parameterization='ntk'):
+                 b_std=0.0, b_init=_randn(1.0), parameterization='ntk',transpose=False):
   """Layer construction function for a general convolution layer.
 
   Based on `jax.experimental.stax.GeneralConv`. Has a similar API apart from:
@@ -1334,8 +1334,13 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None,
   def input_total_dim(input_shape):
     return input_shape[lhs_spec.index('C')] * np.prod(filter_shape)
 
-  ntk_init_fn, _ = ostax.GeneralConv(dimension_numbers, out_chan, filter_shape,
+  if not(transpose):
+      ntk_init_fn, _ = ostax.GeneralConv(dimension_numbers, out_chan, filter_shape,
                                      strides, init_padding.name, W_init, b_init)
+  else:
+      ntk_init_fn, _ = ostax.GeneralConvTranspose(dimension_numbers, out_chan, filter_shape,
+                                     strides, init_padding.name, W_init, b_init)
+
 
   def standard_init_fn(rng, input_shape):
     output_shape, (W, b) = ntk_init_fn(rng, input_shape)
@@ -1364,13 +1369,21 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None,
       apply_padding = Padding.VALID
       inputs = _same_pad_for_filter_shape(inputs, filter_shape, strides, (1, 2),
                                           'wrap')
+    if not(transpose):
+        return norm * lax.conv_general_dilated(
+            inputs,
+            W,
+            strides,
+            apply_padding.name,
+            dimension_numbers=dimension_numbers) + b_rescale * b
+    else:
+        return norm * lax.conv_transpose(
+            inputs,
+            W,
+            strides,
+            apply_padding.name,
+            dimension_numbers=dimension_numbers) + b_rescale * b
 
-    return norm * lax.conv_general_dilated(
-        inputs,
-        W,
-        strides,
-        apply_padding.name,
-        dimension_numbers=dimension_numbers) + b_rescale * b
 
   def kernel_fn(kernels):
     """Compute the transformed kernels after a conv layer."""
@@ -1389,14 +1402,14 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None,
 
       def conv_nngp_unscaled(x):
         if _is_array(x):
-          x = _conv_nngp_4d(x, filter_shape_nngp, strides_nngp, padding)
+          x = _conv_nngp_4d(x, filter_shape_nngp, strides_nngp, padding, transpose)
         return x
     elif cross in [M.OVER_POINTS, M.NO]:
 
       def conv_nngp_unscaled(x):
         if _is_array(x):
           x = _conv_nngp_5or6d_double_conv(x, filter_shape_nngp,
-                                           strides_nngp, padding)
+                                           strides_nngp, padding, transpose)
         return x
 
       is_height_width = not is_height_width
@@ -1411,14 +1424,14 @@ def _GeneralConv(dimension_numbers, out_chan, filter_shape, strides=None,
 
     if marginal == M.OVER_PIXELS:
       def conv_var(x):
-        x = _conv_var_3d(x, filter_shape_nngp, strides_nngp, padding)
+        x = _conv_var_3d(x, filter_shape_nngp, strides_nngp, padding, transpose)
         x = _affine(x, W_std, b_std)
         return x
     elif marginal in [M.OVER_POINTS, M.NO]:
       def conv_var(x):
         if _is_array(x):
           x = _conv_nngp_5or6d_double_conv(x, filter_shape_nngp,
-                                           strides_nngp, padding)
+                                           strides_nngp, padding, transpose)
         x = _affine(x, W_std, b_std)
         return x
     else:
@@ -1475,151 +1488,151 @@ def Conv(out_chan, filter_shape, strides=None, padding=Padding.VALID.name,
 
 
 
-@_layer
-def _GeneralConvTranspose(dimension_numbers, out_chan, filter_shape, strides=None,
-                 padding=Padding.VALID.name, W_std=1.0, W_init=_randn(1.0),
-                 b_std=0.0, b_init=_randn(1.0), parameterization='ntk'):
-  """Layer construction function for a general transposed-convolution layer.
+# @_layer
+# def _GeneralConvTranspose(dimension_numbers, out_chan, filter_shape, strides=None,
+#                  padding=Padding.VALID.name, W_std=1.0, W_init=_randn(1.0),
+#                  b_std=0.0, b_init=_randn(1.0), parameterization='ntk'):
+#   """Layer construction function for a general transposed-convolution layer.
 
-  Based on `jax.experimental.stax.GeneralConvTranspose`. Has a similar API apart from:
+#   Based on `jax.experimental.stax.GeneralConvTranspose`. Has a similar API apart from:
 
-  Args:
-    padding: in addition to `VALID` and `SAME' padding, supports `CIRCULAR`, not
-      available in `jax.experimental.stax.GeneralConvTranpose`.
-  """
+#   Args:
+#     padding: in addition to `VALID` and `SAME' padding, supports `CIRCULAR`, not
+#       available in `jax.experimental.stax.GeneralConvTranpose`.
+#   """
 
-  parameterization = parameterization.lower()
+#   parameterization = parameterization.lower()
 
-  if dimension_numbers != _CONV_DIMENSION_NUMBERS:
-    raise NotImplementedError('Dimension numbers %s not implemented.'
-                              % str(dimension_numbers))
+#   if dimension_numbers != _CONV_DIMENSION_NUMBERS:
+#     raise NotImplementedError('Dimension numbers %s not implemented.'
+#                               % str(dimension_numbers))
 
-  lhs_spec, rhs_spec, out_spec = dimension_numbers
+#   lhs_spec, rhs_spec, out_spec = dimension_numbers
 
-  one = (1,) * len(filter_shape)
-  strides = strides or one
+#   one = (1,) * len(filter_shape)
+#   strides = strides or one
 
-  padding = Padding(padding)
-  init_padding = padding
-  if padding == Padding.CIRCULAR:
-    init_padding = Padding.SAME
+#   padding = Padding(padding)
+#   init_padding = padding
+#   if padding == Padding.CIRCULAR:
+#     init_padding = Padding.SAME
 
-  def input_total_dim(input_shape):
-    return input_shape[lhs_spec.index('C')] * np.prod(filter_shape)
+#   def input_total_dim(input_shape):
+#     return input_shape[lhs_spec.index('C')] * np.prod(filter_shape)
 
-  ntk_init_fn, _ = ostax.GeneralConvTranspose(dimension_numbers, out_chan, filter_shape,
-                                     strides, init_padding.name, W_init, b_init)
+#   ntk_init_fn, _ = ostax.GeneralConvTranspose(dimension_numbers, out_chan, filter_shape,
+#                                      strides, init_padding.name, W_init, b_init)
 
-  def standard_init_fn(rng, input_shape):
-    output_shape, (W, b) = ntk_init_fn(rng, input_shape)
-    norm = W_std / np.sqrt(input_total_dim(input_shape))
-    return output_shape, (W * norm, b * b_std)
+#   def standard_init_fn(rng, input_shape):
+#     output_shape, (W, b) = ntk_init_fn(rng, input_shape)
+#     norm = W_std / np.sqrt(input_total_dim(input_shape))
+#     return output_shape, (W * norm, b * b_std)
 
-  if parameterization == 'ntk':
-    init_fn = ntk_init_fn
-  elif parameterization == 'standard':
-    init_fn = standard_init_fn
-  else:
-    raise ValueError('Parameterization not supported: %s' % parameterization)
+#   if parameterization == 'ntk':
+#     init_fn = ntk_init_fn
+#   elif parameterization == 'standard':
+#     init_fn = standard_init_fn
+#   else:
+#     raise ValueError('Parameterization not supported: %s' % parameterization)
 
-  def apply_fn(params, inputs, **kwargs):
-    W, b = params
+#   def apply_fn(params, inputs, **kwargs):
+#     W, b = params
 
-    if parameterization == 'ntk':
-      norm = W_std / np.sqrt(input_total_dim(inputs.shape))
-      b_rescale = b_std
-    elif parameterization == 'standard':
-      norm = 1.
-      b_rescale = 1.
+#     if parameterization == 'ntk':
+#       norm = W_std / np.sqrt(input_total_dim(inputs.shape))
+#       b_rescale = b_std
+#     elif parameterization == 'standard':
+#       norm = 1.
+#       b_rescale = 1.
 
-    apply_padding = padding
-    if padding == Padding.CIRCULAR:
-      apply_padding = Padding.VALID
-      inputs = _same_pad_for_filter_shape(inputs, filter_shape, strides, (1, 2),
-                                          'wrap')
+#     apply_padding = padding
+#     if padding == Padding.CIRCULAR:
+#       apply_padding = Padding.VALID
+#       inputs = _same_pad_for_filter_shape(inputs, filter_shape, strides, (1, 2),
+#                                           'wrap')
 
-    return norm * lax.conv_transpose(
-        inputs,
-        W,
-        strides,
-        apply_padding.name,
-        dimension_numbers=dimension_numbers) + b_rescale * b
+#     return norm * lax.conv_transpose(
+#         inputs,
+#         W,
+#         strides,
+#         apply_padding.name,
+#         dimension_numbers=dimension_numbers) + b_rescale * b
 
-  def kernel_fn(kernels):
-    """Compute the transformed kernels after a conv layer."""
-    var1, nngp, var2, ntk, is_height_width, marginal, cross = (
-        kernels.var1, kernels.nngp, kernels.var2, kernels.ntk,
-        kernels.is_height_width, kernels.marginal, kernels.cross)
+#   def kernel_fn(kernels):
+#     """Compute the transformed kernels after a conv layer."""
+#     var1, nngp, var2, ntk, is_height_width, marginal, cross = (
+#         kernels.var1, kernels.nngp, kernels.var2, kernels.ntk,
+#         kernels.is_height_width, kernels.marginal, kernels.cross)
 
-    if cross > M.OVER_PIXELS and not is_height_width:
-      filter_shape_nngp = filter_shape[::-1]
-      strides_nngp = strides[::-1]
-    else:
-      filter_shape_nngp = filter_shape
-      strides_nngp = strides
+#     if cross > M.OVER_PIXELS and not is_height_width:
+#       filter_shape_nngp = filter_shape[::-1]
+#       strides_nngp = strides[::-1]
+#     else:
+#       filter_shape_nngp = filter_shape
+#       strides_nngp = strides
 
-    if cross == M.OVER_PIXELS:
+#     if cross == M.OVER_PIXELS:
 
-      def conv_nngp_unscaled(x):
-        if _is_array(x):
-          x = _conv_nngp_4d(x, filter_shape_nngp, strides_nngp, padding, transpose=True)
-        return x
-    elif cross in [M.OVER_POINTS, M.NO]:
+#       def conv_nngp_unscaled(x):
+#         if _is_array(x):
+#           x = _conv_nngp_4d(x, filter_shape_nngp, strides_nngp, padding, transpose=True)
+#         return x
+#     elif cross in [M.OVER_POINTS, M.NO]:
 
-      def conv_nngp_unscaled(x):
-        if _is_array(x):
-          x = _conv_nngp_5or6d_double_conv(x, filter_shape_nngp,
-                                           strides_nngp, padding, transpose=True)
-        return x
+#       def conv_nngp_unscaled(x):
+#         if _is_array(x):
+#           x = _conv_nngp_5or6d_double_conv(x, filter_shape_nngp,
+#                                            strides_nngp, padding, transpose=True)
+#         return x
 
-      is_height_width = not is_height_width
-    else:
-      raise NotImplementedError(
-          "Only implemented for `OVER_PIXELS`, `OVER_POINTS` and `NO`;"
-          " supplied {}".format(cross))
+#       is_height_width = not is_height_width
+#     else:
+#       raise NotImplementedError(
+#           "Only implemented for `OVER_PIXELS`, `OVER_POINTS` and `NO`;"
+#           " supplied {}".format(cross))
 
-    def conv_nngp(x):
-      x = conv_nngp_unscaled(x)
-      return _affine(x, W_std, b_std)
+#     def conv_nngp(x):
+#       x = conv_nngp_unscaled(x)
+#       return _affine(x, W_std, b_std)
 
-    if marginal == M.OVER_PIXELS:
-      def conv_var(x):
-        x = _conv_var_3d(x, filter_shape_nngp, strides_nngp, padding, transpose=True)
-        x = _affine(x, W_std, b_std)
-        return x
-    elif marginal in [M.OVER_POINTS, M.NO]:
-      def conv_var(x):
-        if _is_array(x):
-          x = _conv_nngp_5or6d_double_conv(x, filter_shape_nngp,
-                                           strides_nngp, padding, transpose=True)
-        x = _affine(x, W_std, b_std)
-        return x
-    else:
-      raise NotImplementedError(
-          "Only implemented for `OVER_PIXELS`, `OVER_POINTS` and `NO`;"
-          " supplied {}".format(marginal))
+#     if marginal == M.OVER_PIXELS:
+#       def conv_var(x):
+#         x = _conv_var_3d(x, filter_shape_nngp, strides_nngp, padding, transpose=True)
+#         x = _affine(x, W_std, b_std)
+#         return x
+#     elif marginal in [M.OVER_POINTS, M.NO]:
+#       def conv_var(x):
+#         if _is_array(x):
+#           x = _conv_nngp_5or6d_double_conv(x, filter_shape_nngp,
+#                                            strides_nngp, padding, transpose=True)
+#         x = _affine(x, W_std, b_std)
+#         return x
+#     else:
+#       raise NotImplementedError(
+#           "Only implemented for `OVER_PIXELS`, `OVER_POINTS` and `NO`;"
+#           " supplied {}".format(marginal))
 
-    var1 = conv_var(var1)
-    var2 = conv_var(var2)
+#     var1 = conv_var(var1)
+#     var2 = conv_var(var2)
 
-    if parameterization == 'ntk':
-      nngp = conv_nngp(nngp)
-      ntk = conv_nngp(ntk) + nngp - b_std**2 if ntk is not None else ntk
-    elif parameterization == 'standard':
-      nngp_unscaled = conv_nngp_unscaled(nngp)
-      if ntk is not None:
-        ntk = (
-            input_total_dim(kernels.shape1) * nngp_unscaled + 1. +
-            W_std**2 * conv_nngp_unscaled(ntk))
-      nngp = _affine(nngp_unscaled, W_std, b_std)
+#     if parameterization == 'ntk':
+#       nngp = conv_nngp(nngp)
+#       ntk = conv_nngp(ntk) + nngp - b_std**2 if ntk is not None else ntk
+#     elif parameterization == 'standard':
+#       nngp_unscaled = conv_nngp_unscaled(nngp)
+#       if ntk is not None:
+#         ntk = (
+#             input_total_dim(kernels.shape1) * nngp_unscaled + 1. +
+#             W_std**2 * conv_nngp_unscaled(ntk))
+#       nngp = _affine(nngp_unscaled, W_std, b_std)
 
-    return kernels._replace(
-        var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=True,
-        is_height_width=is_height_width, marginal=marginal, cross=cross)
+#     return kernels._replace(
+#         var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=True,
+#         is_height_width=is_height_width, marginal=marginal, cross=cross)
 
-  setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_PIXELS,
-                                        'cross': M.OVER_PIXELS})
-  return init_fn, apply_fn, kernel_fn
+#   setattr(kernel_fn, _COVARIANCES_REQ, {'marginal': M.OVER_PIXELS,
+#                                         'cross': M.OVER_PIXELS})
+#   return init_fn, apply_fn, kernel_fn
 
 
 def ConvTranspose(out_chan, filter_shape, strides=None, padding=Padding.VALID.name,
@@ -1640,8 +1653,8 @@ def ConvTranspose(out_chan, filter_shape, strides=None, padding=Padding.VALID.na
       the direct analogues for convolution of the corresponding
       parameterizations for Dense layers.
   """
-  return _GeneralConvTranspose(_CONV_DIMENSION_NUMBERS, out_chan, filter_shape, strides,
-                      padding, W_std, W_init, b_std, b_init, parameterization)
+  return _GeneralConv(_CONV_DIMENSION_NUMBERS, out_chan, filter_shape, strides,
+                      padding, W_std, W_init, b_std, b_init, parameterization, transpose=True)
 
 
 
