@@ -855,7 +855,7 @@ def _arr_is_on_cpu(x):
   # TODO(romann): revisit when https://github.com/google/jax/issues/1431 and
   # https://github.com/google/jax/issues/1432 are fixed.
   if hasattr(x, 'device_buffer'):
-    return 'CPU' in str(x.device_buffer.device())
+    return 'cpu' in str(x.device_buffer.device()).lower()
 
   if isinstance(x, np.ndarray):
     return True
