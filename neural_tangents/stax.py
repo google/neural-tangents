@@ -1154,7 +1154,7 @@ def _fan_in_kernel_fn(kernels, axis, spec):
                         % len(spatial_axes)]
 
   # Map activation tensor axis to the covariance tensor axis.
-  kernel_axis = {
+  axis = {
       **{
           None: None,
           batch_axis: 0,
@@ -1165,10 +1165,11 @@ def _fan_in_kernel_fn(kernels, axis, spec):
       }
   }[axis]
 
-  var1 = _concat_covariance([k.var1 for k in kernels], kernel_axis, marginal)
-  var2 = _concat_covariance([k.var2 for k in kernels], kernel_axis, marginal)
-  nngp = _concat_covariance([k.nngp for k in kernels], kernel_axis, cross)
-  ntk = _concat_covariance([k.ntk for k in kernels], kernel_axis, cross)
+  widths = [k.shape1[channel_axis] for k in kernels]
+  var1 = _concat_covariance([k.var1 for k in kernels], axis, marginal, widths)
+  var2 = _concat_covariance([k.var2 for k in kernels], axis, marginal, widths)
+  nngp = _concat_covariance([k.nngp for k in kernels], axis, cross, widths)
+  ntk = _concat_covariance([k.ntk for k in kernels], axis, cross, widths)
   kers = (var1, nngp, var2, ntk)
 
   return Kernel(*(
@@ -1218,7 +1219,7 @@ def _flip_height_width(kernels):
                           is_height_width=not is_height_width)
 
 
-def _concat_covariance(mats, axis, marginalisation):
+def _concat_covariance(mats, axis, marginalisation, widths=None):
   """Compute the covariance of concatenated activations with given covariances.
 
   Args:
@@ -1227,6 +1228,7 @@ def _concat_covariance(mats, axis, marginalisation):
       concatenated. `None` corresponds to sum, `-1` to averaging.
     marginalisation: a single `Kernel.Marginalisation` of all covariance
       matrices.
+    widths: list of integer channel widths of the finite model inputs.
 
   Returns:
     A new `np.ndarray` representing covariance between concatenated activations.
@@ -1244,7 +1246,10 @@ def _concat_covariance(mats, axis, marginalisation):
   # Averaging if concatenating along features or marginalized dimension.
   elif (axis == -1 or
         (marginalisation == M.OVER_ALL and axis != 0)):
-    mat = sum(mats) / n_mats
+    if widths is None or all(w == widths[0] for w in widths):
+      mat = sum(mats) / n_mats
+    else:
+      mat = sum(mats[i] * widths[i] for i in range(n_mats)) / sum(widths)
 
   # Simple concatenation along the axis if the axis is not duplicated.
   elif ((axis != 0 and marginalisation == M.OVER_PIXELS) or

@@ -950,8 +950,9 @@ class FanInTest(jtu.JaxTestCase):
     for b in range(n_branches):
       branch_layers = [FanInTest._get_phi(b)]
       for i in range(b):
+        multiplier = 1 if axis not in (1, -1) else (1 + 0.25 * i)
         branch_layers += [
-            stax.Dense(width, 1. + 2 * i, 0.5 + i),
+            stax.Dense(int(width * multiplier), 1. + 2 * i, 0.5 + i),
             FanInTest._get_phi(i)]
 
       if branch_in == 'dense_before_branch_in':
@@ -1056,9 +1057,10 @@ class FanInTest(jtu.JaxTestCase):
     for b in range(n_branches):
       branch_layers = [FanInTest._get_phi(b)]
       for i in range(b):
+        multiplier = 1 if axis not in (3, -1) else (1 + 0.25 * i)
         branch_layers += [
             stax.Conv(
-                out_chan=width,
+                out_chan=int(width * multiplier),
                 filter_shape=(i + 1, 4 - i),
                 padding='SAME',
                 W_std=1.25 + i,
