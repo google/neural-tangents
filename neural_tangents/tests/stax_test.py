@@ -15,7 +15,8 @@
 
 from functools import partial
 import random as prandom
-
+import itertools
+import logging
 from jax import ops
 from jax import test_util as jtu
 from jax.config import config as jax_config
@@ -42,7 +43,11 @@ N_SAMPLES = 100
 
 RTOL = 0.02
 
-FILTER_SHAPES = [(1, 1), (2, 1), (3, 2)]
+FILTER_SHAPES = [
+    (1, 1),
+    (2, 1),
+    (3, 2)
+]
 
 PADDINGS = [
     'SAME',
@@ -51,7 +56,7 @@ PADDINGS = [
 ]
 
 STRIDES = [
-    None,
+    (1, 1),
     (1, 2),
     (2, 1),
 ]
@@ -75,9 +80,15 @@ LAYER_NORM = [
     'CHW',
 ]
 
-POOL_TYPES = ['SUM', 'AVG']
+POOL_TYPES = [
+    'SUM',
+    'AVG'
+]
 
-PARAMETERIZATIONS = ['NTK', 'STANDARD']
+PARAMETERIZATIONS = [
+    'NTK',
+    'STANDARD'
+]
 
 test_utils.update_test_tolerance()
 
@@ -96,13 +107,24 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
              parameterization, use_dropout):
 
   if is_conv:
-    # Select a random dimension order.
+    # Select a random filter order.
+    default_filter_spec = 'HW'
+    filter_specs = [''.join(p) for p in itertools.permutations('HWIO')]
+    filter_spec = prandom.choice(filter_specs)
+    filter_shape = tuple(filter_shape[default_filter_spec.index(c)]
+                         for c in filter_spec if c in default_filter_spec)
+    strides = tuple(strides[default_filter_spec.index(c)]
+                    for c in filter_spec if c in default_filter_spec)
+
+    # Select a activation order.
     default_spec = 'NHWC'
     if xla_bridge.get_backend().platform == 'tpu':
       # Keep batch dimension leading for TPU for batching to work.
-      specs = ['NHWC', 'NHCW', 'NCHW']
+      specs = ['N' + ''.join(p) for p in itertools.permutations('CHW')]
     else:
-      specs = ['NHWC', 'NHCW', 'NCHW', 'CHWN', 'CHNW', 'CNHW']
+      # Keep batch dimension before channel dimension for empirical kernel.
+      specs = [''.join(p) for p in itertools.permutations('NCHW')
+               if p.index('N') < p.index('C')]
     spec = prandom.choice(specs)
     input_shape = tuple(INPUT_SHAPE[default_spec.index(c)] for c in spec)
 
@@ -110,13 +132,15 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
       layer_norm = tuple(spec.index(c) for c in layer_norm)
 
   else:
-    # Only `NC` dimension order is supported and is enforced by layers.
-    spec = None
+    # Only `NC` dimension order is supported by empirical kernel.
+    spec = 'NC'
+    filter_spec = None
     input_shape = INPUT_SHAPE
     if layer_norm:
       layer_norm = prandom.choice([(1,), (-1,)])
 
-  dimension_numbers = (spec, 'HWIO', spec)
+  dimension_numbers = (spec, filter_spec, spec)
+  logging.warning(f'DIMENSION NUMBERS: {dimension_numbers}')
 
   fc = partial(
       stax.Dense, W_std=W_std, b_std=b_std, parameterization=parameterization)
@@ -140,10 +164,12 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
 
   if pool_type == 'AVG':
     pool_fn = stax.AvgPool
-    globalPool_fn = stax.GlobalAvgPool
+    global_pool_fn = stax.GlobalAvgPool
   elif pool_type == 'SUM':
     pool_fn = stax.SumPool
-    globalPool_fn = stax.GlobalSumPool
+    global_pool_fn = stax.GlobalSumPool
+  else:
+    raise ValueError(pool_type)
 
   if use_pooling:
     pool_or_identity = pool_fn((2, 3),
@@ -173,7 +199,7 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
   if proj_into_2d == 'FLAT':
     proj_layer = stax.Flatten(spec=spec)
   elif proj_into_2d == 'POOL':
-    proj_layer = globalPool_fn(spec=spec)
+    proj_layer = global_pool_fn(spec=spec)
   elif proj_into_2d.startswith('ATTN'):
     n_heads = int(np.sqrt(width))
     n_chan_val = int(np.round(float(width) / n_heads))
@@ -747,7 +773,7 @@ class ABReluTest(jtu.JaxTestCase):
 
     # Test that ABRelu(0, 1) == ReLU
     init_fn, apply_relu, kernel_fn_relu = stax.serial(fc, stax.Relu())
-    params = init_fn(key, input_shape=(-1, 7))
+    _, params = init_fn(key, input_shape=(-1, 7))
 
     X0_2 = None if same_inputs else random.normal(key, (9, 7))
 
@@ -772,7 +798,7 @@ class ABReluTest(jtu.JaxTestCase):
 
     # Test that ABRelu(a, a) == a * Identity
     init_fn, apply_id, kernel_fn_id = stax.serial(fc, stax.Identity())
-    params = init_fn(key, input_shape=(-1, 7))
+    _, params = init_fn(key, input_shape=(-1, 7))
 
     for a in [-5, -1, -0.5, 0, 0.5, 1, 5]:
       with self.subTest(a=a):
@@ -800,7 +826,7 @@ class ABReluTest(jtu.JaxTestCase):
             fc, stax.LeakyRelu(a))
         _, apply_ab_relu, kernel_fn_ab_relu = stax.serial(fc, stax.ABRelu(a, 1))
 
-        params = init_fn(key, input_shape=(-1, 7))
+        _, params = init_fn(key, input_shape=(-1, 7))
         X1_1_leaky_relu = apply_leaky_relu(params, X0_1)
         X1_1_ab_relu = apply_ab_relu(params, X0_1)
         self.assertAllClose(X1_1_leaky_relu, X1_1_ab_relu, True)
@@ -820,7 +846,7 @@ class ABReluTest(jtu.JaxTestCase):
     init_fn, apply_leaky_relu, kernel_fn_abs = stax.serial(fc, stax.Abs())
     _, apply_ab_relu, kernel_fn_ab_relu = stax.serial(fc, stax.ABRelu(-1, 1))
 
-    params = init_fn(key, input_shape=(-1, 7))
+    _, params = init_fn(key, input_shape=(-1, 7))
     X1_1_abs = apply_leaky_relu(params, X0_1)
     X1_1_ab_relu = apply_ab_relu(params, X0_1)
     self.assertAllClose(X1_1_abs, X1_1_ab_relu, True)
@@ -950,7 +976,8 @@ class FanInTest(jtu.JaxTestCase):
       raise ValueError(get)
 
     kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
-        init_fn, apply_fn, key, n_samples, device_count=0)
+        init_fn, apply_fn, key, n_samples,
+        device_count=0 if axis in (0, -2) else -1)
 
     exact = kernel_fn(X0_1, X0_2, get=get)
     empirical = kernel_fn_mc(X0_1, X0_2, get=get)
