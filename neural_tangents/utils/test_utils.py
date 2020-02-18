@@ -14,6 +14,7 @@
 
 """Utilities for testing."""
 
+import logging
 from jax.api import jit
 from jax.api import vmap
 from jax.lib import xla_bridge
@@ -52,12 +53,32 @@ def stub_out_pmap(batch, count):
       batch.xla_bridge = xla_bridge_stub()
 
 
+def _log(relative_error, expected, actual, did_pass):
+  msg = 'PASSED' if did_pass else 'FAILED'
+  logging.info(f'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n'
+               f'\n{msg} with {relative_error} relative error: \n'
+               f'---------------------------------------------\n'
+               f'EXPECTED: \n'
+               f'{expected}\n'
+               f'---------------------------------------------\n'
+               f'ACTUAL: \n'
+               f'{actual}\n'
+               f'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n'
+               )
+
+
 def assert_close_matrices(self, expected, actual, rtol):
   self.assertEqual(expected.shape, actual.shape)
   relative_error = (
       np.linalg.norm(actual - expected) /
       np.maximum(np.linalg.norm(expected), 1e-12))
   if relative_error > rtol or np.isnan(relative_error):
-    self.fail(self.failureException(float(relative_error), expected, actual))
+    _log(relative_error, expected, actual, False)
+    self.fail(self.failureException('Relative ERROR: ',
+                                    float(relative_error),
+                                    'EXPECTED:' + ' ' * 50,
+                                    expected,
+                                    'ACTUAL:' + ' ' * 50,
+                                    actual))
   else:
-    print('PASSED with %f relative error.' % relative_error)
+    _log(relative_error, expected, actual, True)
