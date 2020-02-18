@@ -317,12 +317,6 @@ class StaxTest(jtu.JaxTestCase):
           use_pooling):
       raise jtu.SkipTest('FC models do not have these parameters.')
 
-    if (proj_into_2d.startswith('ATTN') and strides == (2, 1) and
-        padding == 'VALID' and xla_bridge.get_backend().platform == 'tpu'):
-      #TODO(jirihron): speed up the vmap alternative impl or fix the current one
-      raise jtu.SkipTest('ATTN forward pass on TPU is broken if one of'
-                         ' the spatial dimensions is singleton.')
-
     pool_type = 'AVG'
     W_std, b_std = 2.**0.5, 0.5**0.5
     layer_norm = None
