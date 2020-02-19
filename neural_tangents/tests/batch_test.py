@@ -27,6 +27,7 @@ from neural_tangents.utils import empirical
 from neural_tangents.utils import test_utils
 from neural_tangents.utils.kernel import Kernel
 
+
 jax_config.parse_flags_with_absl()
 
 STANDARD = 'FLAT'

@@ -14,7 +14,6 @@
 
 """Tests for `utils/empirical.py`."""
 
-
 from functools import partial
 from jax import test_util as jtu
 from jax.api import jit
@@ -24,6 +23,7 @@ import jax.random as random
 from neural_tangents import stax
 from neural_tangents.utils import empirical
 from neural_tangents.utils import test_utils
+
 
 jax_config.parse_flags_with_absl()
 

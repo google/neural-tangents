@@ -27,6 +27,7 @@ from neural_tangents import stax
 from neural_tangents.utils import monte_carlo
 from neural_tangents.utils import test_utils
 
+
 jax_config.parse_flags_with_absl()
 
 
@@ -62,7 +63,6 @@ STRIDES = [
 ]
 
 ACTIVATIONS = {
-    # TODO(romann): investigate poor erf convergence.
     stax.Erf(): 'erf',
     stax.Relu(): 'Relu',
 }

@@ -151,7 +151,7 @@ def empirical_implicit_ntk_fn(f):
   to fx_dummy for the outputs of the network. fx_dummy has the same shape as
   the output of the network on a single piece of input data.
 
-  TODO(schsam): Write up a better description of the implicit method.
+  TODO: Write up a better description of the implicit method.
 
   Args:
     f: The function whose NTK we are computing. f should have the signature
@@ -182,7 +182,7 @@ def empirical_implicit_ntk_fn(f):
       A `np.ndarray` of shape [n1, n2] + output_shape + output_shape.
     """
     key1, key2 = _read_keys(keys)
-    # TODO(xlc): find a good way to check utils.x1_is_x2(x1, x2) == (key1==key2)
+    # TODO: find a good way to check utils.x1_is_x2(x1, x2) == (key1==key2)
     if x2 is None:
       x2 = x1
 
@@ -257,7 +257,7 @@ def empirical_direct_ntk_fn(f):
       j2 = jac_fn2(params, x2)
 
     ntk = sum_and_contract(j1, j2)
-    # TODO(schsam): If we care, this will not work if the output is not of
+    # TODO: If we care, this will not work if the output is not of
     # shape [n, output_dim].
     return np.transpose(ntk, (0, 2, 1, 3))
 

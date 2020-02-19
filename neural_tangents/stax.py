@@ -121,7 +121,7 @@ def _set_input_req_attr(combinator_kernel_fn, kernel_fns):
       average pooling is used
     (`Marginalisation.OVER_POINTS`, `Marginalisation.NO`) if CNN and average
       pooling or attention are used
-  #TODO(jirihron): make `NO` marginalisation the default
+  #TODO: make `NO` marginalisation the default
 
   Args:
     combinator_kernel_fn: a 'kernel_fn` of a `serial` or `parallel` combinator.
@@ -410,7 +410,7 @@ def _inputs_to_kernel(x1,
                               ' spec = %s.' % spec)
   batch_axis = spec.index('N') if spec else 0
   if batch_axis != 0:
-    # TODO(romann): add support or clear error for batching.
+    # TODO: add support or clear error for batching.
     warnings.warn('!!! Non-leading (!= 0) batch dimension (`N`) in the '
                   'input layer is not supported for batching and empirical '
                   'kernels, got spec = %s. !!!' % spec)
@@ -431,8 +431,7 @@ def _inputs_to_kernel(x1,
                                 'got spec = %s.' % spec)
     channel_axis = spec.index('C') if spec else x1.ndim - 1
 
-  # TODO(schsam, romann): Think more about dtype automatic vs manual dtype
-  # promotion.
+  # TODO: Think more about dtype automatic vs manual dtype promotion.
   x1 = x1.astype(np.float64)
   var1 = _get_variance(x1, marginal, batch_axis, channel_axis)
   x1_is_x2 = utils.x1_is_x2(x1, x2, eps=eps)
@@ -898,7 +897,7 @@ def _transform_kernels(kernels, fn, **fn_kwargs):
     return _transform_kernels_ab_relu(kernels, **fn_kwargs)
   if fn is _erf:
     return _transform_kernels_erf(kernels, **fn_kwargs)
-  # TODO(xlc): Monte Carlo approximation to the integral (suggested by schsam.)
+  # TODO: Monte Carlo approximation to the integral (suggested by schsam.)
   raise NotImplementedError('Analaytic kernel for activiation {} is not '
                             'implmented'.format(fn))
 
@@ -958,7 +957,7 @@ def Dense(out_dim,
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
-  # TODO(jaschasd) after experimentation, evaluate whether to change default
+  # TODO: after experimentation, evaluate whether to change default
   # parameterization from "ntk" to "standard"
 
   parameterization = parameterization.lower()
@@ -1023,8 +1022,8 @@ def Dense(out_dim,
         is_input=False)
 
   setattr(kernel_fn, _INPUT_REQ, {'marginal': M.OVER_ALL,
-                                        'cross': M.OVER_ALL,
-                                        'spec': spec})
+                                  'cross': M.OVER_ALL,
+                                  'spec': spec})
   return init_fn, apply_fn, kernel_fn
 
 
@@ -1135,7 +1134,7 @@ def _fan_in_kernel_fn(kernels, axis, spec):
                                 '-zero Gaussian, i.e. having all `is_gaussian '
                                 'set to `True`.')
   else:
-    # TODO(romann): allow to apply nonlinearity after channelwise concatenation.
+    # TODO: allow to apply nonlinearity after channelwise concatenation.
     is_gaussian = False
 
   # Warnings.
@@ -1686,8 +1685,8 @@ def GeneralConv(dimension_numbers,
         is_input=False)
 
   setattr(kernel_fn, _INPUT_REQ, {'marginal': M.OVER_PIXELS,
-                                        'cross': M.OVER_PIXELS,
-                                        'spec': dimension_numbers[0]})
+                                  'cross': M.OVER_PIXELS,
+                                  'spec': dimension_numbers[0]})
   return init_fn, apply_fn, kernel_fn
 
 
@@ -1869,8 +1868,8 @@ def _Pool(pool_type,
         is_height_width=is_height_width, marginal=marginal, cross=cross)
 
   setattr(kernel_fn, _INPUT_REQ, {'marginal': M.OVER_POINTS,
-                                        'cross': M.NO,
-                                        'spec': spec})
+                                  'cross': M.NO,
+                                  'spec': spec})
   return init_fn, apply_fn, kernel_fn
 
 
@@ -1972,8 +1971,8 @@ def _GlobalPool(pool_type, spec):
                             cross=M.OVER_ALL)
 
   setattr(kernel_fn, _INPUT_REQ, {'marginal': M.OVER_POINTS,
-                                        'cross': M.NO,
-                                        'spec': spec})
+                                  'cross': M.NO,
+                                  'spec': spec})
   return init_fn, apply_fn, kernel_fn
 
 
@@ -2057,8 +2056,8 @@ def Flatten(spec=None):
         is_height_width=True, marginal=M.OVER_ALL, cross=M.OVER_ALL)
 
   setattr(kernel_fn, _INPUT_REQ, {'marginal': M.OVER_ALL,
-                                        'cross': M.OVER_ALL,
-                                        'spec': spec})
+                                  'cross': M.OVER_ALL,
+                                  'spec': spec})
   return init_fn, apply_fn, kernel_fn
 
 
@@ -2144,15 +2143,6 @@ def GlobalSelfAttention(n_chan_out,
     NotImplementedError: If `fixed` is `False`, call to `kernel_fn` will result
     in an error as there is no known analytic expression for the kernel.
   """
-  # TODO(jaschasd) incorporate parameterization keyword argument for attention
-  # (the details of this will require some thought. I believe it will be a no-op
-  # for 1/n scaling (ie fixed scaling), but will change the NTK kernel for
-  # 1/sqrt(n) scaling. Will also need to decide whether the 1/sqrt(n) scaling
-  # should be absorbed into one or both of the key and value weight
-  # initializations
-
-  # TODO(romann): optimize different `spec` values to minimize transpositions.
-
   OV_gain = W_out_std * W_value_std
   QK_gain = W_query_std * W_key_std
   QK_prod_scaling = float(n_chan_key if fixed else n_chan_key**0.5)
@@ -2219,7 +2209,6 @@ def GlobalSelfAttention(n_chan_out,
         kernels.is_height_width, kernels.marginal, kernels.cross)
 
     if not fixed:
-      # TODO(jirihron): implement the approximation and raise a warning
       raise NotImplementedError("No known closed form expression.")
 
     def _get_G_softmax(mat):
@@ -2253,8 +2242,8 @@ def GlobalSelfAttention(n_chan_out,
         is_height_width=is_height_width, marginal=marginal, cross=cross)
 
   setattr(kernel_fn, _INPUT_REQ, {'marginal': M.OVER_POINTS,
-                                        'cross': M.NO,
-                                        'spec': spec})
+                                  'cross': M.NO,
+                                  'spec': spec})
   return init_fn, apply_fn, kernel_fn
 
 
@@ -2335,8 +2324,8 @@ def LayerNorm(axis=-1, eps=1e-12, spec=None):
 
   if len(axis) > 1:
     setattr(kernel_fn, _INPUT_REQ, {'marginal': M.OVER_PIXELS,
-                                          'cross': M.OVER_PIXELS,
-                                          'spec': spec})
+                                    'cross': M.OVER_PIXELS,
+                                    'spec': spec})
   return init_fn, apply_fn, kernel_fn
 
 
@@ -2373,7 +2362,7 @@ def Dropout(rate, mode='train'):
     new_factor = np.where(x1_is_x2, factor, 1.)
     nngp = _diag_mul(nngp, new_factor)
     ntk = _diag_mul(ntk, new_factor) if _is_array(ntk) else ntk
-    # TODO(xlc): under which condition could we leave `is_gaussian` unchanged?
+    # TODO: under which condition could we leave `is_gaussian` unchanged?
     return kernels._replace(var1=var1, nngp=nngp, var2=var2, ntk=ntk,
                             is_gaussian=False)
 
