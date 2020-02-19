@@ -20,7 +20,6 @@ import functools
 
 from jax.api import grad
 from jax.api import jit
-from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.scipy as sp
 
@@ -634,7 +633,7 @@ def gradient_descent_mse_gp(kernel_fn,
       for g in get:
         k = kdd.nngp if g == 'nngp' else kdd.ntk
         k_dd_plus_reg = _add_diagonal_regularizer(k, diag_reg)
-        eigenspace[g] = _eigh(k_dd_plus_reg)
+        eigenspace[g] = np.linalg.eigh(k_dd_plus_reg)
 
     out = {}
 
@@ -700,19 +699,6 @@ def _get_dependency(get, compute_cov):
   return get_dependency
 
 
-def _eigh(mat):
-  """Platform specific eigh."""
-  # TODO(schsam): Eventually, we may want to handle non-symmetric kernels for
-  # e.g. masking. Additionally, once JAX supports eigh on TPU, we probably want
-  # to switch to JAX's eigh.
-  if xla_bridge.get_backend().platform == 'tpu':
-    eigh = np.onp.linalg.eigh
-  else:
-    eigh = np.linalg.eigh
-    eigh = jit(eigh, backend='cpu') if _is_on_cpu(mat) else jit(eigh)
-  return eigh(mat)
-
-
 def _eigen_fns(mat, fns):
   """Build functions of a matrix in its eigenbasis.
 
@@ -726,7 +712,7 @@ def _eigen_fns(mat, fns):
       acting on vectors:
         transform(vec, dt) = fn(mat, dt) @ vec
   """
-  evals, evecs = _eigh(mat)
+  evals, evecs = np.linalg.eigh(mat)
 
   def transform(fn):
     """Generates a transform given a function on the eigenvalues."""
@@ -908,9 +894,10 @@ def max_learning_rate(kdd, num_outputs=-1, eps=1e-12):
   if kdd.shape[0] != kdd.shape[1]:
     raise ValueError('`kdd` must be a square matrix.')
   if _is_on_cpu(kdd):
-    max_eva = osp.linalg.eigh(kdd, eigvals_only=True,
-                              eigvals=(kdd.shape[0] - 1, kdd.shape[0] - 1))[-1]
+    max_eva = osp.linalg.eigvalsh(
+        kdd,
+        eigvals=(kdd.shape[0] - 1, kdd.shape[0] - 1))[-1]
   else:
-    max_eva = _eigh(kdd)[0][-1]
+    max_eva = np.linalg.eigvalsh(kdd)[-1]
   lr = 2 * factor / (max_eva + eps)
   return lr
