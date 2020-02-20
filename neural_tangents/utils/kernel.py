@@ -13,8 +13,13 @@
 # limitations under the License.
 """The `Kernel` class containing NTK and NNGP `np.ndarray`s as fields."""
 
+
 import collections
+
 import enum
+import jax.numpy as np
+from neural_tangents.utils import utils
+
 
 class Marginalisation(enum.IntEnum):
   """Types of marginal distributions for which covariances can be computed.
@@ -24,24 +29,25 @@ class Marginalisation(enum.IntEnum):
   multiple entries). Then and instance of `Kernel` with `marginal`/`cross`:
 
   `OVER_ALL`: (used for architectures with no spatial dimensions)
-    `var1`/`var2`: k(x, x), shape is (batch_size,)
-    `nnpg`/`ntk`: k(x, y), shape is (batch_size_1, batch_size_2)
+    `var1`/`var2`: k(x, x), shape is `(batch_size,)`
+    `nnpg`/`ntk`: k(x, y), shape is `(batch_size_1, batch_size_2)`
   `OVER_PIXELS`:
     `var1`/`var2`: k_{ii}(x, x), shape is
-     (batch_size, spatial_dim_1, spatial_dim_2)
+     `(batch_size, spatial_dim_1, spatial_dim_2, ...)`
     `nngp`/`ntk`: k_{ii}(x, y), shape is
-     (batch_size_1, batch_size_2, spatial_dim_1, spatial_dim_2)
+     `(batch_size_1, batch_size_2, spatial_dim_1, spatial_dim_2, ...)`
   `OVER_POINTS`:
     `var1`/`var2`: k_{ij}(x, x), shape is
-     (batch_size, spatial_dim_1, spatial_dim_1, spatial_dim_2, spatial_dim_2)
+     `(batch_size, spatial_dim_1, spatial_dim_1, spatial_dim_2, spatial_dim_2,
+       ...)`
     `nngp`/`ntk`: not allowed; please use `NO` instead
   `NO`:
     `var1`/`var2`: k_{ij}(x, y), shape is
-     (batch_size, batch_size,
-      spatial_dim_1, spatial_dim_1, spatial_dim_2, spatial_dim_2)
+     `(batch_size, batch_size,
+      spatial_dim_1, spatial_dim_1, spatial_dim_2, spatial_dim_2, ...)`
     `nngp`/`ntk`: k_{ij}(x, y)
-     (batch_size_1, batch_size_2,
-      spatial_dim_1, spatial_dim_1, spatial_dim_2, spatial_dim_2)
+     `(batch_size_1, batch_size_2,
+      spatial_dim_1, spatial_dim_1, spatial_dim_2, spatial_dim_2, ...)`
 
   The number associated with each instance of this enum represents the relative
   amount of information being tracked compared to the other options, i.e.,
@@ -59,8 +65,8 @@ class Marginalisation(enum.IntEnum):
 
 class Kernel(
     collections.namedtuple('Kernel', [
-        'var1', 'nngp', 'var2', 'ntk', 'is_gaussian', 'is_height_width',
-        'marginal', 'cross', 'shape1', 'shape2', 'x1_is_x2', 'is_input',
+        'var1', 'nngp', 'var2', 'ntk', 'is_gaussian', 'is_reversed',
+        'marginal', 'cross', 'shape1', 'shape2', 'x1_is_x2', 'is_input'
     ])):
   """A tuple containing information about the analytic NTK and NNGP of a model.
 
@@ -85,11 +91,12 @@ class Kernel(
       example, passing an input through a CNN layer with i.i.d. Gaussian weights
       and biases produces i.i.d. Gaussian random variables along the channel
       dimension, while passing an input through a nonlinearity does not.
-    is_height_width: a boolean specifying whether the covariance matrices
-      `nngp`, `var1`, `var2`, and `ntk` have `height` dimensions preceding
-      `width` or the other way around. Is always set to `True` if `nngp` and
-      `ntk` are less than 6-dimensional and alternates between consecutive CNN
-      layers otherwise to avoid self-cancelling transpositions.
+    is_reversed: a boolean specifying whether the covariance matrices `nngp`,
+      `var1`, `var2`, and `ntk` have spatial dimensions reversed. Set to `False`
+      and ignored unless `marginal` and `cross` are at least
+      `Marginalisation.OVER_POINTS` and `Marginalisation.NO` respectively.
+      Used internally to avoid self-cancelling transpositions in a sequence of
+      CNN layers that flip the order of kernel spatial dimensions.
     marginal: an instance of `Marginalisation` enum or its ID, specifying types
       of covariances between spatial dimensions tracked in `var1`/`var2`.
     cross: an instance of `Marginalisation` enum or its ID, specifying types of
@@ -100,9 +107,12 @@ class Kernel(
     shape2: a tuple specifying the shape of the random variable in the second
       batch of inputs. These have variance `var2` and covariance with the first
       batch of inputs given by `nngp`.
+    x1_is_x2: a boolean specifying whether `x1` and `x2` are the same.
+    is_input: a boolean specifying whether the current layer is the input
+        layer and it is used to avoid applying dropout to the input layer.
   """
 
-  def __new__(cls, var1, nngp, var2, ntk, is_gaussian, is_height_width,
+  def __new__(cls, var1, nngp, var2, ntk, is_gaussian, is_reversed,
               marginal, cross, shape1, shape2, x1_is_x2, is_input):
     """Returns a `Kernel`.
 
@@ -129,11 +139,12 @@ class Kernel(
         weights and biases produces i.i.d. Gaussian random variables along the
         channel dimension, while passing an input through a nonlinearity does
         not.
-      is_height_width: a boolean specifying whether the covariance matrices
-        `nngp`, `var1`, `var2`, and `ntk` have `height` dimensions preceding
-        `width` or the other way around. Is always set to `True` if `nngp` and
-        `ntk` are less than 6-dimensional and alternates between consecutive CNN
-        layers otherwise to avoid self-cancelling transpositions.
+      is_reversed: a boolean specifying whether the covariance matrices
+        `nngp`, `var1`, `var2`, and `ntk` have spatial dimensions reversed.
+        Set to `False` and ignored unless `marginal` and `cross` are at least
+        `Marginalisation.OVER_POINTS` and `Marginalisation.NO` respectively.
+        Used internally to avoid self-cancelling transpositions in a sequence of
+        CNN layers that flip the order of kernel spatial dimensions.
       marginal: an instance of `Marginalisation` enum or its ID, specifying
         types of covariances between spatial dimensions tracked in
         `var1`/`var2`.
@@ -157,8 +168,7 @@ class Kernel(
       cross = int(cross)
     return super(Kernel, cls).__new__(
         cls, var1, nngp, var2, ntk, is_gaussian,
-        is_height_width, marginal, cross, shape1, shape2, x1_is_x2,
-        is_input)
+        is_reversed, marginal, cross, shape1, shape2, x1_is_x2, is_input)
 
   def _replace(self, **kwargs):
     """`namedtuple._replace` with casting `Marginalisation` to `int`s."""
@@ -166,3 +176,38 @@ class Kernel(
       if isinstance(kwargs[k], Marginalisation):
         kwargs[k] = int(kwargs[k])
     return super(Kernel, self)._replace(**kwargs)
+
+  def reverse(self):
+    """Reverse the order of spatial axes in the covariance matrices.
+
+    Args:
+      self: a `Kernel` object.
+
+    Returns:
+      A `Kernel` object with spatial axes order flipped in
+      all covariance matrices. For example, if `kernels.nngp` has shape
+      `[batch_size_1, batch_size_2, H, H, W, W, D, D, ...]`, then
+      `reverse(kernels).nngp` has shape
+      `[batch_size_1, batch_size_2, ..., D, D, W, W, H, H]`.
+    """
+    var1, nngp, var2, ntk, shape1 = (self.var1, self.nngp, self.var2,
+                                     self.ntk, self.shape1)
+
+    # Number of spatial dimensions = total - (1 for batch + 1 for channels)
+    ndim = len(self.shape1) - 2
+
+    # ndim == 3: (-5, -6, -3, -4, -1, -2)
+    source_axes = tuple(j for i in range(-ndim * 2, 0, 2) for j in (i + 1, i))
+
+    # ndim == 3: (-1, -2, -3, -4, -5, -6)
+    target_axes = tuple(range(-1, -ndim * 2 - 1, -1))
+
+    def reverse(mat):
+      if utils.is_array(mat):
+        return np.moveaxis(mat, source_axes, target_axes)
+      return mat
+
+    var1, nngp, var2, ntk = map(reverse, (var1, nngp, var2, ntk))
+
+    return self._replace(var1=var1, nngp=nngp, var2=var2, ntk=ntk,
+                         is_reversed=not self.is_reversed)

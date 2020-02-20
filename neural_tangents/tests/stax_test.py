@@ -247,6 +247,8 @@ def _get_net_pool(width, is_ntk, pool_type, padding,
   elif pool_type == 'SUM':
     pool_fn = stax.SumPool
     global_pool_fn = stax.GlobalSumPool
+  else:
+    raise ValueError(pool_type)
 
   pool = pool_fn(filter_shape, strides, padding)
 
@@ -612,46 +614,6 @@ class StaxTest(jtu.JaxTestCase):
     self._check_agreement_with_empirical(net, same_inputs, is_conv, use_dropout,
                                          is_ntk, proj_into_2d)
 
-  def _check_agreement_with_empirical(self, net, same_inputs, is_conv,
-                                      use_dropout, is_ntk, proj_into_2d):
-
-    (init_fn, apply_fn, kernel_fn), input_shape = net
-
-
-    num_samples = N_SAMPLES * 5 if use_dropout else N_SAMPLES
-    key = random.PRNGKey(1)
-    x1, x2 = _get_inputs(key, is_conv, same_inputs, input_shape)
-
-    x1_out_shape, params = init_fn(key, x1.shape)
-    if same_inputs:
-      assert (x2 is None)
-    if x2 is None:
-      x2_out_shape = x1_out_shape
-    else:
-      x2_out_shape, params = init_fn(key, x2.shape)
-    del (params)
-
-    def _get_empirical(n_samples, get):
-      kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
-          init_fn, apply_fn, key, n_samples)
-      if same_inputs:
-        assert (x2 is None)
-      return kernel_fn_empirical(x1, x2, get)
-
-    if proj_into_2d == 'ATTN_PARAM':
-      # no analytic kernel available, just test forward/backward pass
-      _get_empirical(1, 'ntk' if is_ntk else 'nngp')
-    else:
-      if is_ntk:
-        exact, shape1, shape2 = kernel_fn(x1, x2, ('ntk', 'shape1', 'shape2'))
-        empirical = np.reshape(_get_empirical(num_samples, 'ntk'), exact.shape)
-      else:
-        exact, shape1, shape2 = kernel_fn(x1, x2, ('nngp', 'shape1', 'shape2'))
-        empirical = _get_empirical(num_samples, 'nngp')
-      test_utils.assert_close_matrices(self, exact, empirical, RTOL)
-      self.assertEqual(shape1, x1_out_shape)
-      self.assertEqual(shape2, x2_out_shape)
-
   def test_composition_dense(self):
     rng = random.PRNGKey(0)
     x1 = random.normal(rng, (10, 10))
@@ -748,6 +710,44 @@ class StaxTest(jtu.JaxTestCase):
         block_ker_fn(x1, x2, marginalization=marginalization))
     composed_ker_out = composed_ker_fn(x1, x2)
     self.assertAllClose(ker_out, composed_ker_out, True)
+
+  def _check_agreement_with_empirical(self, net, same_inputs, is_conv,
+                                      use_dropout, is_ntk, proj_into_2d):
+    (init_fn, apply_fn, kernel_fn), input_shape = net
+
+    num_samples = N_SAMPLES * 5 if use_dropout else N_SAMPLES
+    key = random.PRNGKey(1)
+    x1, x2 = _get_inputs(key, is_conv, same_inputs, input_shape)
+
+    x1_out_shape, params = init_fn(key, x1.shape)
+    if same_inputs:
+      assert (x2 is None)
+    if x2 is None:
+      x2_out_shape = x1_out_shape
+    else:
+      x2_out_shape, params = init_fn(key, x2.shape)
+    del (params)
+
+    def _get_empirical(n_samples, get):
+      kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
+          init_fn, apply_fn, key, n_samples)
+      if same_inputs:
+        assert (x2 is None)
+      return kernel_fn_empirical(x1, x2, get)
+
+    if proj_into_2d == 'ATTN_PARAM':
+      # no analytic kernel available, just test forward/backward pass
+      _get_empirical(1, 'ntk' if is_ntk else 'nngp')
+    else:
+      if is_ntk:
+        exact, shape1, shape2 = kernel_fn(x1, x2, ('ntk', 'shape1', 'shape2'))
+        empirical = np.reshape(_get_empirical(num_samples, 'ntk'), exact.shape)
+      else:
+        exact, shape1, shape2 = kernel_fn(x1, x2, ('nngp', 'shape1', 'shape2'))
+        empirical = _get_empirical(num_samples, 'nngp')
+      test_utils.assert_close_matrices(self, exact, empirical, RTOL)
+      self.assertEqual(shape1, x1_out_shape)
+      self.assertEqual(shape2, x2_out_shape)
 
 
 @jtu.parameterized.parameters([
@@ -1085,6 +1085,129 @@ class FanInTest(jtu.JaxTestCase):
         key,
         n_samples,
         device_count=0 if axis in (0, -4) else -1)
+
+    exact = kernel_fn(X0_1, X0_2, get=get)
+    empirical = kernel_fn_mc(X0_1, X0_2, get=get)
+    empirical = empirical.reshape(exact.shape)
+    test_utils.assert_close_matrices(self, empirical, exact, tol)
+
+
+class ConvNDTest(jtu.JaxTestCase):
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              ' [{}_n={}_{}_{}_{}_{}_{}_{}]'.format(
+                  'same_inputs' if same_inputs else 'different_inputs', n, get,
+                  proj,
+                  'attn' if use_attn else '',
+                  'channels_first' if channels_first else 'channels_last',
+                  'dropout' if use_dropout else '',
+                  'layernorm' if use_layernorm else ''
+              ),
+          'same_inputs':
+              same_inputs,
+          'n':
+              n,
+          'get':
+              get,
+          'proj':
+              proj,
+          'use_attn':
+              use_attn,
+          'channels_first':
+              channels_first,
+          'use_dropout':
+              use_dropout,
+          'use_layernorm':
+              use_layernorm
+      } for same_inputs in [False, True] for n in [0, 1, 2, 3, 4, 5, 6]
+                          for get in ['nngp', 'ntk']
+                          for proj in ['flatten', 'pool']
+                          for use_attn in [True, False]
+                          for channels_first in [True, False]
+                          for use_dropout in [True, False]
+                          for use_layernorm in [True, False]))
+  def test_conv_nd(self, same_inputs, n, get, proj, use_attn, channels_first,
+                   use_dropout, use_layernorm):
+    platform = xla_bridge.get_backend().platform
+    if platform == 'cpu':
+      raise jtu.SkipTest('Skipping CPU CNN tests for speed.')
+    elif platform == 'gpu' and n not in (0, 1, 2, 3):
+      raise jtu.SkipTest('>=4D CNN does not work on GPU.')
+    elif platform == 'tpu' and use_dropout and same_inputs:
+      raise jtu.SkipTest('Batched empirical kernel with dropout not supported.')
+
+    width = 1024
+    n_samples = 512
+    tol = 0.03 if platform == 'tpu' else 0.015
+    key = random.PRNGKey(1)
+    spatial_shape = (2, 3, 5, 4, 3, 1)[:n]
+    filter_shape = (1, 2, 3, 1, 1, 1)[:n]
+    strides = (1, 1, 2, 1, 2, 1)[:n]
+    spatial_spec = 'HWDXYZ'[:n]
+    filter_spec = spatial_spec + 'IO'
+
+    if channels_first:
+      dimension_numbers = ('NC' + spatial_spec, filter_spec,
+                           'NC' + spatial_spec)
+      X0_1 = random.normal(key, (2, 3) + spatial_shape)
+      X0_2 = None if same_inputs else random.normal(key, (4, 3) + spatial_shape)
+    else:
+      dimension_numbers = ('N' + spatial_spec + 'C', filter_spec,
+                           'N' + spatial_spec + 'C')
+      X0_1 = random.normal(key, (2,) + spatial_shape + (3,))
+      X0_2 = None if same_inputs else random.normal(key,
+                                                    (4,) + spatial_shape + (3,))
+
+    layernorm_axes = (dimension_numbers[2].index('C'),)
+    if 'H' in dimension_numbers[2]:
+      layernorm_axes += (dimension_numbers[2].index('H'),)
+
+    if proj == 'pool':
+      proj = stax.GlobalAvgPool(dimension_numbers[2])
+    elif proj == 'flatten':
+      proj = stax.Flatten(dimension_numbers[2])
+    else:
+      raise ValueError(proj)
+
+    if use_attn:
+      n_heads = int(np.sqrt(width))
+      n_chan_val = int(np.round(float(width) / n_heads))
+      proj = stax.serial(stax.GlobalSelfAttention(
+          n_chan_out=width,
+          n_chan_key=width,
+          n_chan_val=n_chan_val,
+          n_heads=n_heads,
+          fixed=True,
+          W_key_std=2.,
+          W_value_std=1.,
+          W_query_std=1.,
+          W_out_std=1.0,
+          b_std=0.01,
+          spec=dimension_numbers[2]), proj)
+
+    nn = stax.serial(
+        stax.GeneralConv(dimension_numbers, width, filter_shape, None, 'SAME'),
+        (stax.LayerNorm(layernorm_axes, spec=dimension_numbers[2])
+         if use_layernorm else stax.Identity()),
+        stax.Relu(),
+        (stax.Dropout(0.8) if use_dropout else stax.Identity()),
+        stax.GeneralConv(dimension_numbers, width, filter_shape, strides,
+                         'CIRCULAR'),
+        stax.Abs(),
+        proj
+    )
+
+    if get == 'nngp':
+      init_fn, apply_fn, kernel_fn = stax.serial(nn, stax.Dense(width, 2., 0.5))
+    elif get == 'ntk':
+      init_fn, apply_fn, kernel_fn = stax.serial(nn, stax.Dense(1, 2., 0.5))
+    else:
+      raise ValueError(get)
+
+    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, key, n_samples)
 
     exact = kernel_fn(X0_1, X0_2, get=get)
     empirical = kernel_fn_mc(X0_1, X0_2, get=get)

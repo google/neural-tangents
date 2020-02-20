@@ -90,7 +90,7 @@ def _flatten_kernel(k, x2_is_none, store_on_device):
           k_dict[key] = fl(value, 0)
       elif key == 'x1_is_x2':
         k_dict[key] = value[(0,) * value.ndim]
-      elif key in ('is_height_width', 'is_gaussian', 'is_input'):
+      elif key in ('is_reversed', 'is_gaussian', 'is_input'):
         # NOTE(schsam): Currently we have to make these values concrete so that
         # batched analytic kernels compose.
         k_dict[key] = bool(value[(0,) * value.ndim])

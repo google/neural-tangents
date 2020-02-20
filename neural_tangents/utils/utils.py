@@ -146,3 +146,10 @@ def x1_is_x2(x1, x2=None, eps=1e-12):
     return False
 
   return np.all(np.abs(x1 - x2) < eps)
+
+
+def is_array(x):
+  return (isinstance(x, np.ndarray) and
+          hasattr(x, 'shape') and
+          x.shape != () and
+          x.shape != [])
