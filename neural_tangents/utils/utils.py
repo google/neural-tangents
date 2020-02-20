@@ -153,3 +153,19 @@ def is_array(x):
           hasattr(x, 'shape') and
           x.shape != () and
           x.shape != [])
+
+
+def revert_zipped(mat, shape):
+  if is_array(mat):
+    # Number of spatial dimensions = total - (1 for batch + 1 for channels)
+    ndim = len(shape) - 2
+
+    # ndim == 3: (-5, -6, -3, -4, -1, -2)
+    source_axes = tuple(j for i in range(-ndim * 2, 0, 2) for j in (i + 1, i))
+
+    # ndim == 3: (-1, -2, -3, -4, -5, -6)
+    target_axes = tuple(range(-1, -ndim * 2 - 1, -1))
+
+    mat = np.moveaxis(mat, source_axes, target_axes)
+
+  return mat

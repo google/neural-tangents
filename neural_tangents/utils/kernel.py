@@ -56,9 +56,10 @@ class Marginalisation(enum.IntEnum):
   (and `>`, `<=`, `>=` as would be expected given this definition).
   """
   OVER_ALL = 0
-  OVER_PIXELS = 1
-  OVER_POINTS = 2
-  NO = 3
+  OVER_PIXELS_AND_POINTS = 1
+  OVER_PIXELS = 2
+  OVER_POINTS = 3
+  NO = 4
 
 
 class Kernel(
@@ -208,19 +209,8 @@ class Kernel(
     var1, nngp, var2, ntk, shape1 = (self.var1, self.nngp, self.var2,
                                      self.ntk, self.shape1)
 
-    # Number of spatial dimensions = total - (1 for batch + 1 for channels)
-    ndim = len(self.shape1) - 2
-
-    # ndim == 3: (-5, -6, -3, -4, -1, -2)
-    source_axes = tuple(j for i in range(-ndim * 2, 0, 2) for j in (i + 1, i))
-
-    # ndim == 3: (-1, -2, -3, -4, -5, -6)
-    target_axes = tuple(range(-1, -ndim * 2 - 1, -1))
-
     def reverse(mat):
-      if utils.is_array(mat):
-        return np.moveaxis(mat, source_axes, target_axes)
-      return mat
+      return utils.revert_zipped(mat, self.shape1)
 
     var1, nngp, var2, ntk = map(reverse, (var1, nngp, var2, ntk))
 

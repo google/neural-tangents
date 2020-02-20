@@ -220,7 +220,12 @@ def _zip_axes(mat, start_axis=0, unzip=False):
 
 
 def _size_at(x, axis):
-  return functools.reduce(op.mul, (x.shape[i] for i in axis), 1)
+  if isinstance(x, np.ndarray):
+    x = x.shape
+  elif not isinstance(x, tuple):
+    raise TypeError(x, type(x))
+
+  return functools.reduce(op.mul, (x[i] for i in axis), 1)
 
 
 def _parse_axes(spec, x):
@@ -469,6 +474,7 @@ def _inputs_to_kernel(x1,
   # Batch axis first, channel / feature axis last by default.
   batch_axis, channel_axis, _ = _parse_axes(spec, x1)
 
+  batch_axis = spec.index('N') if spec else 0
   if batch_axis != 0:
     # TODO: add support or clear error for batching.
     warnings.warn('!!! Non-leading (!= 0) batch dimension (`N`) in the '
@@ -1914,8 +1920,8 @@ def _Pool(pool_type,
         mask1.shape[channel_axis] > 1 and
         pool_type == Pooling.AVG):
       # TODO: implement.
-      raise NotImplementedError('Average pooling over different per-channel '
-                                'masks is not implemented.')
+      warnings.warn('Average pooling over different per-channel '
+                    'masks is not implemented.')
 
     mask1 = _pool_mask(mask1, window_shape, strides, padding, spec)
     mask2 = _pool_mask(mask2, window_shape, strides, padding, spec)
@@ -2057,8 +2063,8 @@ def _GlobalPool(pool_type, spec):
         mask1.shape[channel_axis] > 1 and
         pool_type == Pooling.AVG):
       # TODO: implement.
-      raise NotImplementedError('Average pooling over different per-channel '
-                                'masks is not implemented.')
+      warnings.warn('Average pooling over different per-channel '
+                    'masks is not implemented.')
 
     def _pool(ker_mat, mask1, mask2, marginal, batch_ndim):
       if not utils.is_array(ker_mat):
@@ -2192,6 +2198,22 @@ def Flatten(spec=None):
   return init_fn, apply_fn, kernel_fn
 
 
+class PositionalEmbedding(enum.Enum):
+  NONE = 'NONE'
+  SUM = 'SUM'
+  CONCAT = 'CONCAT'
+  DECAYING = 'DECAYING'
+
+
+def _attention_mechanism(name):
+  return {
+      'softmax': ostax.softmax,
+      'identity': lambda x: x,
+      'abs': np.abs,
+      'relu': lambda x: np.maximum(x, 0.)
+  }[name.lower()]
+
+
 @_layer
 def GlobalSelfAttention(n_chan_out,
                         n_chan_key,
@@ -2208,6 +2230,12 @@ def GlobalSelfAttention(n_chan_out,
                         W_query_init=_randn(1.0),
                         W_out_init=_randn(1.0),
                         b_init=_randn(1.0),
+                        attention_mechanism='SOFTMAX',
+                        pos_emb_type=PositionalEmbedding.NONE.name,
+                        n_chan_pos_emb=None,  # None for same as n_chan_in
+                        W_pos_emb_std=1.0,  # sqrt(rho)
+                        pos_emb_decay_rate=5.0,  # phi
+                        val_pos_emb=False,
                         spec=None):
   """Layer construction function for (global) scaled dot-product self-attention
   with multiple attention heads.
@@ -2263,27 +2291,73 @@ def GlobalSelfAttention(n_chan_out,
     W_key_init: function used to sample the initial (unscaled) key weights
     W_query_init: function used to sample the initial (unscaled) query weights
       unless `fixed` is `True` in which case the argument is ignored (see above)
+    attention_mechanism: a string, `"SOFTMAX"`, `"IDENTITY"`, `"ABS"`,
+      or `"RELU"`, the transformation applied to dot product attention weights.
+    pos_emb_type: a string, `"NONE"`, `"SUM"`, `"CONCAT"` or `"DECAYING"`, the
+      type of positional embeddings to use.
+    n_chan_pos_emb: int, the number of channels in positional embeddings. `None`
+      means use the same number of channels as in the layer inputs.
+    W_pos_emb_std: float, init standard deviation of the random positional
+      embeddings.
+    pos_emb_decay_rate: float, the rate at which correlations at different
+      positions in the positional embeddings decay as positions get more
+      distant. Used only if `pos_emb_type == "DECAYING"`.
+    val_pos_emb: a boolean, `True` indicates using positional embeddings when
+      computing all of the keys/queries/values matrices, `False` makes them
+      only used for keys and queries, but not values.
     spec: a string specifying ordering of the input dimensions, e.g.,
       `'NHWC'` for `[batch_size, height, width, channels] or `'NCHW'` for
       `[batch_size, channels, height, width]`.
 
   Raises:
     NotImplementedError: If `fixed` is `False`, call to `kernel_fn` will result
-    in an error as there is no known analytic expression for the kernel.
+      in an error as there is no knwn analytic expression for the kernel.
+    NotImplementedError: if a finite-width model forward pass is called with
+      `pos_emb_type == "DECAYING"`, which is not currently implemented in the
+      finite width. TODO: implement.
   """
-  OV_gain = W_out_std * W_value_std
   QK_gain = W_query_std * W_key_std
   QK_prod_scaling = float(n_chan_key if fixed else n_chan_key**0.5)
 
+  pos_emb_type = PositionalEmbedding(pos_emb_type)
+  attn_fn = _attention_mechanism(attention_mechanism)
+
   def init_fn(rng, input_shape):
-    _, channel_axis, _ = _parse_axes(spec, input_shape)
-    n_chan_in = input_shape[channel_axis]
+    batch_axis, channel_axis, _ = _parse_axes(spec, input_shape)
     output_shape = (input_shape[:channel_axis] + (n_chan_out,) +
                     input_shape[channel_axis + 1:])
 
-    rng_Q, rng_K, rng_V, rng_O, rng_b = random.split(rng, 5)
-    key_matrices = W_key_init(rng_K, shape=(n_heads, n_chan_in, n_chan_key))
-    val_matrices = W_value_init(rng_V, shape=(n_heads, n_chan_in, n_chan_val))
+    rng_Q, rng_K, rng_V, rng_O, rng_b, rng_pe = random.split(rng, 6)
+    n_chan_in_keys = n_chan_in_vals = input_shape[channel_axis]
+
+    # Generate and add / append positional embeddings.
+    if pos_emb_type == PositionalEmbedding.NONE:
+      pos_emb = None
+    else:
+      # `None` means positional embeddings have the same number of channels
+      # as inputs.
+      _n_chan_pos_emb = (n_chan_in_keys if n_chan_pos_emb is None
+                         else n_chan_pos_emb)
+
+      pos_emb_shape = list(input_shape)
+      pos_emb_shape[channel_axis] = _n_chan_pos_emb
+      pos_emb_shape[batch_axis] = 1
+      pos_emb = random.normal(rng_pe, pos_emb_shape) * W_pos_emb_std
+
+      if pos_emb_type == PositionalEmbedding.CONCAT:
+        n_chan_in_keys += _n_chan_pos_emb
+        if val_pos_emb:
+          n_chan_in_vals += _n_chan_pos_emb
+
+      elif pos_emb_type != PositionalEmbedding.SUM:
+        warnings.warn(f'pos_emb_type={pos_emb_type} not supported in finite-'
+                      f'width networks. Exception will be raise in the forward '
+                      f'pass.')
+
+    key_matrices = W_key_init(rng_K, shape=(n_heads, n_chan_in_keys,
+                                            n_chan_key))
+    val_matrices = W_value_init(rng_V, shape=(n_heads, n_chan_in_vals,
+                                              n_chan_val))
     W_out = W_out_init(rng_O, shape=(n_chan_val * n_heads, n_chan_out))
     b = b_init(rng_b, shape=(n_chan_out,))
 
@@ -2292,66 +2366,121 @@ def GlobalSelfAttention(n_chan_out,
       warnings.warn("Fixed attention used -> `W_query_init` ignored, tying"
                     " the weights (see docstring for more details).")
     else:
-      query_matrices = W_query_init(rng_Q,
-                                    shape=(n_heads, n_chan_in, n_chan_key))
+      query_matrices = W_query_init(rng_Q, (n_heads, n_chan_in_keys,
+                                            n_chan_key))
 
-    return output_shape, (query_matrices, key_matrices, val_matrices, W_out, b)
+    return (output_shape,
+           (query_matrices, key_matrices, val_matrices, W_out, b, pos_emb))
 
   def apply_fn(params, inputs, mask_constant=None, **kwargs):
-    query_matrices, key_matrices, val_matrices, W_out, b = params
+    query_matrices, key_matrices, val_matrices, W_out, b, pos_emb = params
     inputs, mask = _get_masked_inputs_and_mask(inputs, mask_constant)
     batch_axis, channel_axis, spatial_axes = _parse_axes(spec, inputs)
 
-    n = inputs.shape[batch_axis]
+    # Collapse channel dimension of masks, since an FC layer is applied at each
+    # spatial location.
+    if mask is not None:
+      mask = np.all(mask, channel_axis, keepdims=True)
 
+    # Mask embeddings.
+    if mask is not None and pos_emb is not None:
+      pos_emb = np.where(mask, np.zeros((), inputs.dtype), pos_emb)
+
+    # Add / concat positional embeddings.
+    if pos_emb_type == PositionalEmbedding.SUM:
+      inputs_val = inputs if not val_pos_emb else None
+      inputs = pos_emb + inputs
+
+    elif pos_emb_type == PositionalEmbedding.CONCAT:
+      inputs_val = inputs if not val_pos_emb else None
+      _n_chan_pos_emb = (inputs.shape[channel_axis] if n_chan_pos_emb is None
+                         else n_chan_pos_emb)
+      pos_emb = np.broadcast_to(pos_emb,
+          inputs.shape[:channel_axis] + (_n_chan_pos_emb,) +
+          inputs.shape[channel_axis + 1:])
+      inputs = np.concatenate([inputs, pos_emb], axis=channel_axis)
+
+    elif pos_emb_type == PositionalEmbedding.NONE:
+      inputs_val = None
+
+    else:
+      raise NotImplementedError(f'Positional embeddings of type {pos_emb_type} '
+                                f'not implemented for finite-width networks.')
+
+    n = inputs.shape[batch_axis]
     n_chan_in = inputs.shape[channel_axis]
     spatial_shape = tuple(inputs.shape[i] for i in spatial_axes)
 
+    # Prepare separate inputs for values if asked to not add positional
+    # embeddings to values.
+    if inputs_val is not None:
+      inputs_val = np.moveaxis(inputs_val, (batch_axis, channel_axis), (0, -1))
+      inputs_val = inputs_val.reshape((n, -1, inputs_val.shape[-1]))
+
+    # Flatten all spatial dimensions and make input of shape
+    # `[batch_size, total_spatial_size, n_channels]`.
     inputs = np.moveaxis(inputs, (batch_axis, channel_axis), (0, -1))
     inputs = inputs.reshape((n, -1, n_chan_in))
 
-    def _inputs_dot(matrices, std):
-      ret = np.dot(inputs, std * matrices / np.sqrt(n_chan_in))
+    def _inputs_dot(matrices, std, _inputs=inputs):
+      ret = np.dot(_inputs, std * matrices / np.sqrt(n_chan_in))
       return np.moveaxis(ret, 2, 0)
 
+    # Drop positional embedding information for value matrices if requested.
+    if inputs_val is not None:
+      values = _inputs_dot(val_matrices, W_value_std, inputs_val)
+    else:
+      values = _inputs_dot(val_matrices, W_value_std)
+
     keys = _inputs_dot(key_matrices, W_key_std)
-    values = _inputs_dot(val_matrices, W_value_std)
     if fixed:
       queries = keys * W_query_std / W_key_std
     else:
       queries = _inputs_dot(query_matrices, W_query_std)
 
-    G_mat  = np.matmul(queries, np.moveaxis(keys, -1, -2))
-    G_mat /= QK_prod_scaling
+    G_mat = np.matmul(queries, np.moveaxis(keys, -1, -2)) / QK_prod_scaling
 
     if mask is not None:
-      mask = np.all(mask, channel_axis, keepdims=True)
+      # Flatten all spatial dimensions and make mask of shape
+      # `[1, batch_size, 1, total_spatial_size]`.
       mask_flat = np.moveaxis(mask, (batch_axis, channel_axis), (0, -1))
-      mask_flat = mask_flat.reshape((1, mask.shape[0], 1, -1))
-      G_mat = np.where(mask_flat, _NEG_INF, G_mat)
+      mask_flat = mask_flat.reshape((1, mask.shape[0], 1,
+                                     _size_at(mask, spatial_axes)))
+      if attention_mechanism.lower() == 'softmax':
+          G_mat = np.where(mask_flat, _NEG_INF, G_mat)
+      elif attention_mechanism.lower() in ('identity', 'relu', 'abs'):
+          G_mat = np.where(mask_flat, np.zeros((), G_mat.dtype), G_mat)
+      else:
+        raise NotImplementedError(attention_mechanism, mask)
 
-    G_mat = ostax.softmax(G_mat, axis=-1)
-
+    G_mat = attn_fn(G_mat)
     heads = np.matmul(G_mat, values)
     heads = np.moveaxis(heads, 0, -1)
     heads = np.reshape(heads, heads.shape[:-2] + (-1,))
 
-    outputs = np.matmul(heads, W_out_std * W_out / np.sqrt(n_chan_val * n_heads))
-    outputs = np.reshape(outputs, (n,) + spatial_shape + (n_chan_out,)) + b_std * b
+    outputs = np.matmul(heads,
+                        W_out_std * W_out / np.sqrt(n_chan_val * n_heads))
+    outputs = np.reshape(outputs,
+                         (n,) + spatial_shape + (n_chan_out,)) + b_std * b
     outputs = np.moveaxis(outputs, (0, -1), (batch_axis, channel_axis))
     return _drop_mask(outputs, mask)
 
   def kernel_fn(kernels):
-    var1, nngp, var2, ntk, cross, marginal, mask1, mask2, is_reversed = (
+    (var1, nngp, var2, ntk, cross, marginal, shape1, shape2, mask1, mask2,
+    is_reversed) = (
         kernels.var1, kernels.nngp, kernels.var2, kernels.ntk, kernels.cross,
-        kernels.marginal, kernels.mask1, kernels.mask2, kernels.is_reversed)
+        kernels.marginal, kernels.shape1, kernels.shape2, kernels.mask1,
+        kernels.mask2, kernels.is_reversed)
 
     batch_axis, channel_axis, _ = _parse_axes(spec, kernels.shape1)
 
     if not fixed:
       raise NotImplementedError("No known closed form expression.")
 
-    def _get_G_softmax(mat, mask):
+    def _get_weighting(mat, mask):
+      if mat is None:
+        return None
+
       if marginal == M.NO:
         mat = np.moveaxis(np.diagonal(mat, axis1=0, axis2=1), -1, 0)
       axes = tuple(range(mat.ndim))
@@ -2363,11 +2492,17 @@ def GlobalSelfAttention(n_chan_out,
           mask = np.moveaxis(mask, range(1, mask.ndim),
                                    range(mask.ndim -1, 0, -1))
         mask = _interleave_ones(mask, 1, False)
-        mat = np.where(mask, _NEG_INF, mat)
+        if attention_mechanism.lower() == 'softmax':
+          mat = np.where(mask, _NEG_INF, mat)
+        else:
+          mat = np.where(mask, np.zeros((), mat.dtype), mat)
 
-      return ostax.softmax(QK_gain * mat, axis=axes[2::2])
+      if attention_mechanism.lower() == 'softmax':
+        return attn_fn(QK_gain * mat, axis=axes[2::2])
+      else:
+        return attn_fn(QK_gain * mat)
 
-    def _transform_kernel(mat, G1, G2=None):
+    def _weigh_kernel(mat, G1, G2=None):
       if not utils.is_array(mat):
         return mat
 
@@ -2379,38 +2514,92 @@ def GlobalSelfAttention(n_chan_out,
       mat_dims = _zip_flat(G1_dims[1::2], G2_dims[1::2])
       res_dims = _zip_flat(G1_dims[::2], G2_dims[::2])
 
-      # Batch axes
-      if mat.ndim % 2:
-        G1_dims = (0,) + G1_dims
-        G2_dims = (0,) + G2_dims
-        mat_dims = (0,) + mat_dims
-        res_dims = (0,) + res_dims
+      if G1.shape[0] == 1:
+        G1 = np.squeeze(G1, 0)
       else:
         G1_dims = (0,) + G1_dims
-        G2_dims = (-1,) + G2_dims
-        mat_dims = (0, -1) + mat_dims
+
+      # Batch axes
+      if mat.ndim % 2:
+        if G2.shape[0] == 1:
+          G2 = np.squeeze(G2, 0)
+        else:
+          G2_dims = (0,) + G2_dims
+
+        if mat.shape[0] == 1:
+          mat = np.squeeze(mat, 0)
+        else:
+          mat_dims = (0,) + mat_dims
+        res_dims = (0,) + res_dims
+
+      else:
+        if G2.shape[0] == 1:
+          G2 = np.squeeze(G2, 0)
+        else:
+          G2_dims = (-1,) + G2_dims
+
+        if mat.shape[0] == mat.shape[1] == 1:
+          mat = np.squeeze(mat, (0, 1))
+        else:
+          mat_dims = (0, -1) + mat_dims
         res_dims = (0, -1) + res_dims
 
       res = np.einsum(G1, G1_dims, mat, mat_dims, G2, G2_dims, res_dims,
                       optimize=True)
+
+      OV_gain = W_out_std * W_value_std
+      if pos_emb_type == PositionalEmbedding.CONCAT and not val_pos_emb:
+        inputs_weight, _ = _get_pos_emb_coeffs(shape1[channel_axis],
+                                               n_chan_pos_emb)
+        OV_gain *= inputs_weight ** 0.5
+
       return _affine(res, OV_gain, b_std)
 
-    G1 = _get_G_softmax(var1, mask1)
-    G2 = _get_G_softmax(var2, mask2) if var2 is not None else G1
-
-    var1 = _transform_kernel(var1, G1)
-    var2 = _transform_kernel(var2, G2) if var2 is not None else var2
-    nngp = _transform_kernel(nngp, G1, G2)
-    ntk = (_transform_kernel(ntk, G1, G2) + 2 * (nngp - b_std**2)
-           if ntk is not None else ntk)
-
-    var1, nngp, var2, ntk = _mask_kernels(var1, nngp, var2, ntk, cross,
-                                          marginal, is_reversed, mask1, mask2,
-                                          spec)
+    # Collapse channel dimension of masks, since an FC layer is applied at each
+    # spatial location.
     if mask1 is not None:
       mask1 = np.all(mask1, channel_axis, keepdims=True)
     if mask2 is not None:
       mask2 = np.all(mask2, channel_axis, keepdims=True)
+
+    # Generate (optional) positional embedding covariances.
+    R1, R12, R2 = _get_all_pos_emb(shape1, shape2, mask1, mask2, spec, cross,
+                                   marginal, is_reversed, pos_emb_type,
+                                   pos_emb_decay_rate)
+
+    def _get_interpolation_coefficients():
+      mat_weight, pos_emb_weight = 1, W_pos_emb_std**2
+
+      if pos_emb_type == PositionalEmbedding.CONCAT:
+        # Reweight based on relative widths of inputs and channels.
+        inputs_weight, emb_weight = _get_pos_emb_coeffs(shape1[channel_axis],
+                                                        n_chan_pos_emb)
+        mat_weight *= inputs_weight
+        pos_emb_weight *= emb_weight
+
+      return mat_weight, pos_emb_weight
+
+    # Generate kernel interpolations.
+    kern_weight, pos_emb_weight = _get_interpolation_coefficients()
+    var1_interp = _weighted_sum(var1, R1, kern_weight, pos_emb_weight)
+    var2_interp = _weighted_sum(var2, R2, kern_weight, pos_emb_weight)
+    if val_pos_emb:
+      nngp = _weighted_sum(nngp, R12, kern_weight, pos_emb_weight)
+      ntk = _weighted_sum(ntk, R12, kern_weight, pos_emb_weight)
+
+    G1 = _get_weighting(var1_interp, mask1)
+    G2 = _get_weighting(var2_interp, mask2)
+
+    var1 = _weigh_kernel(var1_interp if val_pos_emb else var1, G1)
+    var2 = _weigh_kernel(var2_interp if val_pos_emb else var2, G2)
+
+    nngp = _weigh_kernel(nngp, G1, G2)
+    if ntk is not None:
+      ntk = _weigh_kernel(ntk, G1, G2) + 2 * (nngp - b_std**2)
+
+    var1, nngp, var2, ntk = _mask_kernels(var1, nngp, var2, ntk, cross,
+                                          marginal, is_reversed, mask1, mask2,
+                                          spec)
 
     return kernels._replace(var1=var1, nngp=nngp, var2=var2, ntk=ntk,
                             is_gaussian=True, mask1=mask1, mask2=mask2)
@@ -2419,6 +2608,104 @@ def GlobalSelfAttention(n_chan_out,
                                   'cross': M.NO,
                                   'spec': spec})
   return init_fn, apply_fn, kernel_fn
+
+
+def _get_pos_emb_coeffs(n_chan_input, n_chan_pos_emb):
+  n_chan_inputs = n_chan_input
+  _n_chan_pos_emb = (n_chan_inputs if n_chan_pos_emb is None
+                     else n_chan_pos_emb)
+  n_chan_total = n_chan_inputs + _n_chan_pos_emb
+  inputs_weight = n_chan_inputs / n_chan_total
+  pos_emb_weight = _n_chan_pos_emb / n_chan_total
+  return inputs_weight, pos_emb_weight
+
+
+def _weighted_sum(x, y, x_weight, y_weight):
+  if x is None or y is None:
+    return x
+  return x_weight * x + y_weight * y
+
+
+def _pos_emb_identity(shape, mask1, mask2, batch_ndim, spec, marginal,
+                      is_reversed):
+  if shape is None:
+    return None
+
+  _, _, spatial_axes = _parse_axes(spec, shape)
+  spatial_size = _size_at(shape, spatial_axes)
+  spatial_shape = tuple(shape[i] for i in spatial_axes)
+
+  R = np.eye(spatial_size)
+  R = np.reshape(R, (1,) * batch_ndim + spatial_shape * 2)
+  R = _zip_axes(R, batch_ndim)
+  R = _mask_kernel(R, mask1, mask2, batch_ndim, spec, marginal, False)
+  if is_reversed:
+    R = utils.revert_zipped(R, shape)
+  return R
+
+
+def _pos_emb_decay(shape1, shape2, mask1, mask2, batch_ndim, spec, marginal,
+                   is_reversed, pos_emb_decay_rate):
+  if shape1 is None:
+    return None
+
+  _, channel_axis, spatial_axes = _parse_axes(spec, shape1)
+
+  def get_dist_arr(shape, mask, axis):
+    if shape is None:
+      return None
+
+    arange = np.arange(shape[axis])
+    size = len(arange)
+    s = (1,) * axis + (size,) +  (1,) * (len(spatial_axes) - axis + 1)
+    arange = np.reshape(arange, s)
+    if mask is not None:
+      size -= np.expand_dims(np.count_nonzero(mask, axis), axis)
+    return np.squeeze(arange / np.maximum(size, 1), channel_axis)
+
+  def get_pdist_arr(d1, d2):
+    d2 = d1 if d2 is None else d2
+    return _outer_prod(d1, d2, 2 - batch_ndim, op.sub)
+
+  R = np.zeros((1,) * (batch_ndim + len(spatial_axes) * 2))
+  for axis in spatial_axes:
+    d1 = get_dist_arr(shape1, mask1, axis)
+    d2 = get_dist_arr(shape2, mask2, axis)
+    pd = get_pdist_arr(d1, d2)
+    R += pd**2
+
+  R /= max(len(spatial_axes), 1)
+  R = np.exp(-pos_emb_decay_rate * R)
+
+  R = _mask_kernel(R, mask1, mask2, batch_ndim, spec, marginal, False)
+  if is_reversed:
+    R = utils.revert_zipped(R, shape1)
+  return R
+
+
+def _get_all_pos_emb(shape1, shape2, mask1, mask2, spec, cross, marginal,
+                     is_reversed, pos_emb_type, pos_emb_decay_rate):
+  if pos_emb_type in (PositionalEmbedding.SUM, PositionalEmbedding.CONCAT):
+    R1 = _pos_emb_identity(shape1, mask1, None, 1, spec, marginal, is_reversed)
+    R2 = _pos_emb_identity(shape2, mask2, None, 1, spec, marginal, is_reversed)
+    R12 = _pos_emb_identity(shape1, mask1, mask2, 2, spec, cross, is_reversed)
+
+  elif pos_emb_type == PositionalEmbedding.DECAYING:
+    R1 = _pos_emb_decay(shape1, None, mask1, None, 1, spec, marginal,
+                        is_reversed, pos_emb_decay_rate)
+    R2 = _pos_emb_decay(shape2, None, mask2, None, 1, spec, marginal,
+                        is_reversed, pos_emb_decay_rate)
+    R12 = _pos_emb_decay(shape1, shape2, mask1, mask2, 2, spec, cross,
+                         is_reversed, pos_emb_decay_rate)
+
+  elif pos_emb_type == PositionalEmbedding.NONE:
+    R1, R12, R2 = None, None, None
+
+  else:
+    raise NotImplementedError(f'Positional embeddings of type {pos_emb_type} '
+                              f'not implemented for infinite-width networks.')
+  return R1, R12, R2
+
 
 
 @_layer

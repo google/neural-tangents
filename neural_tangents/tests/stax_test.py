@@ -1339,12 +1339,12 @@ class MaskingTest(jtu.JaxTestCase):
                           for mask_constant in [None, 10.]
                           for p in ([0.5] if mask_constant is None
                                     else [0.1, 0.5, 0.9])
-                          for mask_axis in [(-1,)]
+                          for mask_axis in [(0,), (1,)]
                           ))
   def test_mask_conv(self, same_inputs, get, mask_axis, mask_constant, concat,
                      proj, p, use_attn, n):
     if xla_bridge.get_backend().platform == 'cpu':
-      raise jtu.SkipTest('Skipping CNN tests on CPU for speed.')
+      raise jtu.SkipTest('Skipping CNN masking tests on CPU for speed.')
     elif xla_bridge.get_backend().platform == 'gpu' and n > 3:
       raise jtu.SkipTest('>=4D-CNN is not supported on GPUs.')
     elif concat == n and not use_attn and proj == 'avg':
@@ -1353,7 +1353,7 @@ class MaskingTest(jtu.JaxTestCase):
                          'not implemented.')
 
     width = 256
-    n_samples = 512
+    n_samples = 256
     tol = 0.1
     key = random.PRNGKey(1)
 
@@ -1481,6 +1481,154 @@ class MaskingTest(jtu.JaxTestCase):
 
     kernel_fn = jit(kernel_fn, static_argnums=(2, 3, 4))
     exact = kernel_fn(X0_1, X0_2, get, 'auto', mask_constant)
+    empirical = kernel_fn_mc(X0_1, X0_2, get=get, mask_constant=mask_constant)
+    empirical = empirical.reshape(exact.shape)
+    test_utils.assert_close_matrices(self, empirical, exact, tol)
+
+
+class AttentionTest(jtu.JaxTestCase):
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+            f'[same_inputs={same_inputs}_get={get}_axis={mask_axis}'
+            f'_mask={mask_constant}_{proj}_p={p}_attn={attn}_'
+            f'n={n}_pos_emb_type={pos_emb_type}_n_chan_pos_emb={n_chan_pos_emb}'
+            f'_pos_emb_decay_rate={pos_emb_decay_rate}_'
+            f'val_pos_emb={val_pos_emb}_W_pos_emb_std={W_pos_emb_std}]',
+                              'proj': proj,
+                              'same_inputs': same_inputs,
+                              'get': get,
+                              'n': n,
+                              'attn': attn,
+                              'mask_constant': mask_constant,
+                              'p': p,
+                              'mask_axis': mask_axis,
+                              'pos_emb_type': pos_emb_type,
+                              'n_chan_pos_emb': n_chan_pos_emb,
+                              'pos_emb_decay_rate': pos_emb_decay_rate,
+                              'val_pos_emb': val_pos_emb,
+                              'W_pos_emb_std': W_pos_emb_std
+      }
+                          for proj in ['avg']
+                          for same_inputs in [True]
+                          for get in ['ntk', 'nngp']
+                          for n in [0, 1, 2]
+                          for attn in [
+                              'SOFTMAX',
+                              'IDENTITY',
+                              'RELU',
+                              'ABS'
+                          ]
+                          for mask_constant in [None]
+                          for p in [1.]
+                          for mask_axis in [(-1,)]
+                          for pos_emb_type in [
+                                               'NONE',
+                                               'SUM',
+                                               'CONCAT',
+                                               'DECAYING',
+                                               ]
+                          for n_chan_pos_emb in ([None]
+                                                 if pos_emb_type != 'CONCAT'
+                                                 else [None, 2048, 512])
+                          for pos_emb_decay_rate in [5.]
+                          for val_pos_emb in [True, False]
+                          for W_pos_emb_std in [0., 1., 2.5, 4.]
+                          ))
+  def test_attention(self, proj, same_inputs, get, n, attn, mask_constant, p,
+                     mask_axis, pos_emb_type, n_chan_pos_emb,
+                     pos_emb_decay_rate, val_pos_emb, W_pos_emb_std):
+    if xla_bridge.get_backend().platform == 'cpu':
+      raise jtu.SkipTest('Skipping attention tests on CPU for speed.')
+    elif xla_bridge.get_backend().platform == 'gpu' and n > 3:
+      raise jtu.SkipTest('>=4D-CNN is not supported on GPUs.')
+
+    width = 1024
+    n_samples = 128
+    tol = 0.05
+    key = random.PRNGKey(1)
+    n_chan_in = 3
+    spatial_shape = (2, 3, 4)[:n]
+    spatial_spec = 'HWD'[:n]
+    dimension_numbers = ('N' + spatial_spec + 'C',
+                         'OI' + spatial_spec,
+                         'N' + spatial_spec + 'C')
+
+    X0_1 = random.normal(key, (4,) + spatial_shape + (n_chan_in,))
+    if mask_constant is not None:
+      mask_shape = [1 if i in mask_axis else s
+                    for i, s in enumerate(X0_1.shape)]
+      mask = random.bernoulli(key, p=p, shape=mask_shape)
+      X0_1 = np.where(mask, mask_constant, X0_1)
+      X0_1 = np.sort(X0_1, 1)
+
+    if same_inputs:
+      X0_2 = None
+    else:
+      X0_2 = random.normal(key, (2,) + spatial_shape + (n_chan_in,))
+      if mask_constant is not None:
+        mask_shape = [1 if i in mask_axis else s
+                      for i, s in enumerate(X0_2.shape)]
+        mask = random.bernoulli(key, p=p, shape=mask_shape)
+        X0_2 = np.where(mask, mask_constant, X0_2)
+        X0_2 = np.sort(X0_2, 1)
+
+    def get_attn():
+      return stax.GlobalSelfAttention(
+          n_chan_out=width,
+          n_chan_key=width,
+          n_chan_val=int(np.round(float(width) / int(np.sqrt(width)))),
+          n_heads=int(np.sqrt(width)),
+          n_chan_pos_emb=n_chan_pos_emb,
+          attention_mechanism=attn,
+          pos_emb_type=pos_emb_type,
+          W_pos_emb_std=W_pos_emb_std,
+          pos_emb_decay_rate=pos_emb_decay_rate,
+          val_pos_emb=val_pos_emb,
+          W_key_std=1.2,
+          W_out_std=0.9,
+          W_query_std=1.5,
+          W_value_std=2.5,
+          b_std=0.2
+      )
+
+    nn = stax.serial(
+        stax.GeneralConv(
+            dimension_numbers=dimension_numbers,
+            out_chan=width,
+            strides=(1,) * n,
+            filter_shape=(1,) * n,
+            padding='SAME',
+            W_std=1.1,
+            b_std=0.1),
+        get_attn(),
+        {
+            'avg': stax.GlobalAvgPool(),
+            'sum': stax.GlobalSumPool(),
+            'flatten': stax.Flatten(),
+        }[proj]
+    )
+
+    if get == 'nngp':
+      init_fn, apply_fn, kernel_fn = stax.serial(nn, stax.Dense(width, 1., 0.))
+    elif get == 'ntk':
+      init_fn, apply_fn, kernel_fn = stax.serial(nn, stax.Dense(1, 1., 0.))
+    else:
+      raise ValueError(get)
+
+    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, key, n_samples,
+        device_count=-1
+    )
+
+    kernel_fn = jit(kernel_fn, static_argnums=(2, 3, 4))
+    exact = kernel_fn(X0_1, X0_2, get, 'auto', mask_constant)
+
+    if pos_emb_type == stax.PositionalEmbedding.DECAYING.value:
+      # TODO: implement decaying embedding in finite width.
+      raise jtu.SkipTest('Hit an unimplemented finite variant.')
+
     empirical = kernel_fn_mc(X0_1, X0_2, get=get, mask_constant=mask_constant)
     empirical = empirical.reshape(exact.shape)
     test_utils.assert_close_matrices(self, empirical, exact, tol)
