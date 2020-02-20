@@ -71,9 +71,10 @@ def linearize(f, params):
     A function f_lin(new_params, inputs) whose signature is the same as f.
     Here f_lin implements the first-order taylor series of f about params.
   """
-  def f_lin(p, x):
+  def f_lin(p, x, *args, **kwargs):
     dparams = tree_multimap(lambda x, y: x - y, p, params)
-    f_params_x, proj = jvp(lambda param: f(param, x), (params,), (dparams,))
+    f_params_x, proj = jvp(lambda param: f(param, x, *args, **kwargs),
+                           (params,), (dparams,))
     return f_params_x + proj
   return f_lin
 
@@ -112,9 +113,10 @@ def taylor_expand(f, params, degree):
     df = taylorize_r(f_jvp, params, dparams, degree, current_degree+1)
     return f(params) + df / (current_degree + 1)
 
-  def f_tayl(p, x):
+  def f_tayl(p, x, *args, **kwargs):
     dparams = tree_multimap(lambda x, y: x - y, p, params)
-    return taylorize_r(lambda param: f(param, x), params, dparams, degree, 0)
+    return taylorize_r(lambda param: f(param, x, *args, **kwargs),
+                       params, dparams, degree, 0)
 
   return f_tayl
 
@@ -162,7 +164,7 @@ def empirical_implicit_ntk_fn(f):
     A function ntk_fn that computes the empirical ntk.
   """
 
-  def ntk_fn(x1, x2, params, keys=None):
+  def ntk_fn(x1, x2, params, keys=None, *args, **kwargs):
     """Computes the empirical ntk.
 
     Args:
@@ -191,8 +193,8 @@ def empirical_implicit_ntk_fn(f):
     fx_dummy = np.ones(fx2_struct.shape, fx2_struct.dtype)
     def delta_vjp_jvp(delta):
       def delta_vjp(delta):
-        return vjp(lambda p: f(p, x2, rng=key2), params)[1](delta)
-      return jvp(lambda p: f(p, x1, rng=key1), (params,), delta_vjp(delta))[1]
+        return vjp(lambda p: f(p, x2, rng=key2, *args, **kwargs), params)[1](delta)
+      return jvp(lambda p: f(p, x1, rng=key1, *args, **kwargs), (params,), delta_vjp(delta))[1]
 
     ntk = jacobian(delta_vjp_jvp)(fx_dummy)
     ndim = len(fx2_struct.shape)
@@ -226,7 +228,7 @@ def empirical_direct_ntk_fn(f):
 
     return tree_reduce(operator.add, tree_multimap(contract, j1, j2))
 
-  def ntk_fn(x1, x2, params, keys=None):
+  def ntk_fn(x1, x2, params, keys=None, *args, **kwargs):
     """Computes the empirical ntk.
 
     Args:
@@ -248,13 +250,13 @@ def empirical_direct_ntk_fn(f):
     key1, key2 = _read_keys(keys)
     f1 = partial(f, rng=key1)
     jac_fn1 = jacobian(f1)
-    j1 = jac_fn1(params, x1)
+    j1 = jac_fn1(params, x1, *args, **kwargs)
     if x2 is None:
       j2 = j1
     else:
       f2 = partial(f, rng=key2)
       jac_fn2 = jacobian(f2)
-      j2 = jac_fn2(params, x2)
+      j2 = jac_fn2(params, x2, *args, **kwargs)
 
     ntk = sum_and_contract(j1, j2)
     # TODO: If we care, this will not work if the output is not of
@@ -289,7 +291,7 @@ def empirical_nngp_fn(f):
   Returns:
      A function to draw a single sample the NNGP of a given network `f`.
   """
-  def nngp_fn(x1, x2, params, keys=None):
+  def nngp_fn(x1, x2, params, keys=None, *args, **kwargs):
     """Sample a single NNGP of a given network `f` on given inputs and `params`.
 
     This method assumes that slices of the random network outputs along the last
@@ -318,11 +320,11 @@ def empirical_nngp_fn(f):
       `[batch_size_1] + output_shape[:-1] + [batch_size_2] + output_shape[:-1]`.
     """
     key1, key2 = _read_keys(keys)
-    out1 = f(params, x1, rng=key1)
+    out1 = f(params, x1, rng=key1, *args, **kwargs)
     if x2 is None:
       out2 = out1
     else:
-      out2 = f(params, x2, rng=key2)
+      out2 = f(params, x2, rng=key2, *args, **kwargs)
 
     out2 = np.expand_dims(out2, -1)
     nngp_12 = np.dot(out1, out2) / out1.shape[-1]
@@ -340,7 +342,7 @@ def empirical_kernel_fn(f):
   }
 
   @utils.get_namedtuple('EmpiricalKernel')
-  def kernel_fn(x1, x2, params, get=None, keys=None):
+  def kernel_fn(x1, x2, params, get=None, keys=None, *args, **kwargs):
     """Returns a draw from the requested empirical kernels.
 
     Args:
@@ -363,6 +365,7 @@ def empirical_kernel_fn(f):
     """
     if get is None:
       get = ('nngp', 'ntk')
-    return {g: kernel_fns[g](x1, x2, params, keys) for g in get}
+    return {g: kernel_fns[g](x1, x2, params, keys, *args, **kwargs)
+            for g in get}
 
   return kernel_fn

@@ -38,12 +38,12 @@ def _sample_once_kernel_fn(kernel_fn,
   @partial(batch.batch, batch_size=batch_size,
            device_count=device_count,
            store_on_device=store_on_device)
-  def kernel_fn_sample_once(x1, x2, key, get):
+  def kernel_fn_sample_once(x1, x2, key, get, *args, **kwargs):
     init_key, dropout_key1, dropout_key2 = random.split(key, 3)
     keys = np.where(utils.x1_is_x2(x1, x2), dropout_key1,
                     (dropout_key1, dropout_key2))
     _, params = init_fn(init_key, x1.shape)
-    return kernel_fn(x1, x2, params, get, keys=keys)
+    return kernel_fn(x1, x2, params, get, keys=keys, *args, **kwargs)
   return kernel_fn_sample_once
 
 
@@ -52,14 +52,14 @@ def _sample_many_kernel_fn(kernel_fn_sample_once, key, n_samples,
   def normalize(sample, n):
     return tree_map(lambda sample: sample / n, sample)
 
-  def get_samples(x1, x2, get):
+  def get_samples(x1, x2, get, *args, **kwargs):
     if x2 is not None:
       assert x1.shape[1:] == x2.shape[1:]
 
     _key = key
     for n in range(1, max(n_samples) + 1):
       _key, split = random.split(_key)
-      one_sample = kernel_fn_sample_once(x1, x2, split, get)
+      one_sample = kernel_fn_sample_once(x1, x2, split, get, *args, **kwargs)
       if n == 1:
         ker_sampled = one_sample
       else:
@@ -68,14 +68,14 @@ def _sample_many_kernel_fn(kernel_fn_sample_once, key, n_samples,
 
   if get_generator:
     @utils.get_namedtuple('MonteCarloKernel')
-    def get_sampled_kernel(x1, x2, get=None):
-      for n, sample in get_samples(x1, x2, get):
+    def get_sampled_kernel(x1, x2, get=None, *args, **kwargs):
+      for n, sample in get_samples(x1, x2, get, *args, **kwargs):
         if n in n_samples:
           yield normalize(sample, n)
   else:
     @utils.get_namedtuple('MonteCarloKernel')
-    def get_sampled_kernel(x1, x2, get=None):
-      for n, sample in get_samples(x1, x2, get):
+    def get_sampled_kernel(x1, x2, get=None, *args, **kwargs):
+      for n, sample in get_samples(x1, x2, get, *args, **kwargs):
         pass
       return normalize(sample, n)
 

@@ -471,7 +471,9 @@ def gp_inference(kernel_fn,
                  x_test,
                  get,
                  diag_reg=0.,
-                 compute_cov=False):
+                 compute_cov=False,
+                 *args,
+                 **kwargs):
   """Compute the mean and variance of the `posterior` of NNGP and NTK.
 
   Note that this method is equivalent to `gradient_descent_mse_gp` at infinite
@@ -501,7 +503,8 @@ def gp_inference(kernel_fn,
   """
   if get is None:
     get = ('nngp', 'ntk')
-  kdd, ktd, ktt = _get_matrices(kernel_fn, x_train, x_test, get, compute_cov)
+  kdd, ktd, ktt = _get_matrices(kernel_fn, x_train, x_test, get, compute_cov,
+                                *args, **kwargs)
   gp_inference_mat = (_gp_inference_mat_jit_cpu if _is_on_cpu(kdd) else
                       _gp_inference_mat_jit)
   return gp_inference_mat(kdd, ktd, ktt, y_train, get, diag_reg)
@@ -558,12 +561,13 @@ _gp_inference_mat_jit_cpu = jit(_gp_inference_mat, static_argnums=(4,),
                                 backend='cpu')
 
 
-def _get_matrices(kernel_fn, x_train, x_test, get, compute_cov):
+def _get_matrices(kernel_fn, x_train, x_test, get, compute_cov, *args,
+                  **kwargs):
   get = _get_dependency(get, compute_cov)
-  kdd = kernel_fn(x_train, None, get)
-  ktd = kernel_fn(x_test, x_train, get)
+  kdd = kernel_fn(x_train, None, get, *args, **kwargs)
+  ktd = kernel_fn(x_test, x_train, get, *args, **kwargs)
   if compute_cov:
-    ktt = kernel_fn(x_test, x_test, 'nngp')
+    ktt = kernel_fn(x_test, x_test, 'nngp', *args, **kwargs)
   else:
     ktt = None
   return kdd, ktd, ktt
