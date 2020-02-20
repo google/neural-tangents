@@ -13,12 +13,10 @@
 # limitations under the License.
 """The `Kernel` class containing NTK and NNGP `np.ndarray`s as fields."""
 
-
 import collections
-
 import enum
-import jax.numpy as np
 from neural_tangents.utils import utils
+import jax.numpy as np
 
 
 class Marginalisation(enum.IntEnum):
@@ -66,7 +64,8 @@ class Marginalisation(enum.IntEnum):
 class Kernel(
     collections.namedtuple('Kernel', [
         'var1', 'nngp', 'var2', 'ntk', 'is_gaussian', 'is_reversed',
-        'marginal', 'cross', 'shape1', 'shape2', 'x1_is_x2', 'is_input'
+        'marginal', 'cross', 'shape1', 'shape2', 'x1_is_x2', 'is_input',
+        'mask1', 'mask2'
     ])):
   """A tuple containing information about the analytic NTK and NNGP of a model.
 
@@ -110,10 +109,18 @@ class Kernel(
     x1_is_x2: a boolean specifying whether `x1` and `x2` are the same.
     is_input: a boolean specifying whether the current layer is the input
         layer and it is used to avoid applying dropout to the input layer.
+    mask1: An optional boolean `np.ndarray` with a shape broadcastable to
+      `shape1` (and the same number of dimensions). `True` stands for the
+      input being masked at that position, while `False` means the input is
+      visible. For example, if `shape1 == (5, 32, 32, 3)` (a batch of 5 NHWC
+      CIFAR10 images), a `mask1` of shape `(5, 1, 32, 1)` means different
+      images can have different blocked columns (`H` and `C` dimensions are
+      always either both blocked or unblocked). `None` means no masking.
+    mask2: same as `mask1`, but for the second batch of inputs.
   """
 
-  def __new__(cls, var1, nngp, var2, ntk, is_gaussian, is_reversed,
-              marginal, cross, shape1, shape2, x1_is_x2, is_input):
+  def __new__(cls, var1, nngp, var2, ntk, is_gaussian, is_reversed, marginal,
+              cross, shape1, shape2, x1_is_x2, is_input, mask1, mask2):
     """Returns a `Kernel`.
 
     Args:
@@ -159,6 +166,14 @@ class Kernel(
       x1_is_x2: a boolean specifying whether `x1` and `x2` are the same.
       is_input: a boolean specifying whether the current layer is the input
         layer and it is used to avoid applying dropout to the input layer.
+      mask1: An optional boolean `np.ndarray` with a shape broadcastable to
+        `shape1` (and the same number of dimensions). `True` stands for the
+        input being masked at that position, while `False` means the input is
+        visible. For example, if `shape1 == (5, 32, 32, 3)` (a batch of 5 NHWC
+        CIFAR10 images), a `mask1` of shape `(5, 1, 32, 1)` means different
+        images can have different blocked columns (`H` and `C` dimensions are
+        always either both blocked or unblocked). `None` means no masking.
+      mask2: same as `mask1`, but for the second batch of inputs.
     Returns:
       A `Kernel`.
     """
@@ -167,8 +182,8 @@ class Kernel(
     if isinstance(cross, Marginalisation):
       cross = int(cross)
     return super(Kernel, cls).__new__(
-        cls, var1, nngp, var2, ntk, is_gaussian,
-        is_reversed, marginal, cross, shape1, shape2, x1_is_x2, is_input)
+        cls, var1, nngp, var2, ntk, is_gaussian, is_reversed, marginal, cross,
+        shape1, shape2, x1_is_x2, is_input, mask1, mask2)
 
   def _replace(self, **kwargs):
     """`namedtuple._replace` with casting `Marginalisation` to `int`s."""

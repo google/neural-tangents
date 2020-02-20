@@ -17,6 +17,7 @@ from functools import partial
 import random as prandom
 import itertools
 import logging
+from jax.api import jit
 from jax import ops
 from jax import test_util as jtu
 from jax.config import config as jax_config
@@ -58,7 +59,6 @@ PADDINGS = [
 
 STRIDES = [
     (1, 1),
-    (1, 2),
     (2, 1),
 ]
 
@@ -1211,6 +1211,277 @@ class ConvNDTest(jtu.JaxTestCase):
 
     exact = kernel_fn(X0_1, X0_2, get=get)
     empirical = kernel_fn_mc(X0_1, X0_2, get=get)
+    empirical = empirical.reshape(exact.shape)
+    test_utils.assert_close_matrices(self, empirical, exact, tol)
+
+
+class MaskingTest(jtu.JaxTestCase):
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+            ' [{}_get={}_axis={}_mask={}_concat={}]'.format(
+                'same_inputs' if same_inputs else 'different_inputs',
+                get,
+                mask_axis,
+                mask_constant,
+                concat
+            ),
+          'same_inputs':
+            same_inputs,
+          'get':
+            get,
+          'mask_axis':
+            mask_axis,
+          'mask_constant':
+            mask_constant,
+          'concat':
+            concat
+                          }
+                          for same_inputs in [False, True]
+                          for get in ['ntk', 'nngp']
+                          for concat in [None, 0, 1]
+                          for mask_axis in [(0,), (1,)]
+                          for mask_constant in [10.]))
+  def test_mask_fc(self, same_inputs, get, mask_axis, mask_constant, concat):
+    width = 2048
+    n_samples = 512
+    tol = 0.01
+    key = random.PRNGKey(1)
+
+    X0_1 = random.normal(key, (8, 4, 3, 7))
+    if mask_constant is not None:
+      mask_shape = [1 if i in mask_axis else s
+                    for i, s in enumerate(X0_1.shape)]
+      mask = random.bernoulli(key, shape=mask_shape)
+      X0_1 = np.where(mask, mask_constant, X0_1)
+
+    if same_inputs:
+      X0_2 = None
+    else:
+      X0_2 = random.normal(key, (6, 4, 3, 7))
+      if mask_constant is not None:
+        mask_shape = [1 if i in mask_axis else s
+                      for i, s in enumerate(X0_2.shape)]
+        mask = random.bernoulli(key, shape=mask_shape)
+        X0_2 = np.where(mask, mask_constant, X0_2)
+
+    nn = stax.serial(
+        stax.Flatten(),
+        stax.Dense(width, 2., 0.5),
+        stax.FanOut(3),
+        stax.parallel(
+            stax.serial(
+                stax.Erf(),
+                stax.Dense(width, 1.5, 0.1),
+            ),
+            stax.serial(
+                stax.Abs(),
+                stax.Dense(width if concat != 1 else 512, 1.5, 0.1),
+            ),
+            stax.serial(
+                stax.ABRelu(-0.2, 0.4),
+                stax.Dense(width if concat != 1 else 1024, 3, 0.5),
+            )
+        ),
+        (stax.FanInSum() if concat is None else stax.FanInConcat(concat)),
+        stax.Dense(width, 2., 0.01),
+        stax.Relu()
+    )
+
+    if get == 'nngp':
+      init_fn, apply_fn, kernel_fn = stax.serial(nn, stax.Dense(width, 2., 0.5))
+    elif get == 'ntk':
+      init_fn, apply_fn, kernel_fn = stax.serial(nn, stax.Dense(1, 2., 0.5))
+    else:
+      raise ValueError(get)
+
+    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, key, n_samples,
+        device_count=0 if concat in (0, -2) else -1)
+
+    kernel_fn = jit(kernel_fn, static_argnums=(2, 3, 4))
+    exact = kernel_fn(X0_1, X0_2, get, 'auto', mask_constant)
+    empirical = kernel_fn_mc(X0_1, X0_2, get=get, mask_constant=mask_constant)
+    empirical = empirical.reshape(exact.shape)
+    test_utils.assert_close_matrices(self, empirical, exact, tol)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+            ' [{}_get={}_axis={}_mask={}_concat={}_{}_p={}_attn={}_n={}]'.format(
+                'same_inputs' if same_inputs else 'different_inputs',
+                get,
+                mask_axis,
+                mask_constant,
+                concat,
+                proj,
+                p,
+                use_attn,
+                n
+            ),
+          'same_inputs': same_inputs,
+          'get': get,
+          'mask_axis': mask_axis,
+          'mask_constant': mask_constant,
+          'concat': concat,
+          'proj': proj,
+          'p': p,
+          'use_attn': use_attn,
+          'n': n
+                          }
+                          for proj in ['flatten', 'avg', 'sum']
+                          for use_attn in [False, True]
+                          for same_inputs in [False, True]
+                          for get in ['nngp']
+                          for n in [0, 1, 2, 3, 4]
+                          for concat in [None] + list(range(n + 1))
+                          for mask_constant in [None, 10.]
+                          for p in ([0.5] if mask_constant is None
+                                    else [0.1, 0.5, 0.9])
+                          for mask_axis in [(-1,)]
+                          ))
+  def test_mask_conv(self, same_inputs, get, mask_axis, mask_constant, concat,
+                     proj, p, use_attn, n):
+    if xla_bridge.get_backend().platform == 'cpu':
+      raise jtu.SkipTest('Skipping CNN tests on CPU for speed.')
+    elif xla_bridge.get_backend().platform == 'gpu' and n > 3:
+      raise jtu.SkipTest('>=4D-CNN is not supported on GPUs.')
+    elif concat == n and not use_attn and proj == 'avg':
+      # TODO: implement.
+      raise jtu.SkipTest('Average pooling for different per-channel masks is '
+                         'not implemented.')
+
+    width = 256
+    n_samples = 512
+    tol = 0.1
+    key = random.PRNGKey(1)
+
+    spatial_shape = (30, 7, 10)[:n]
+    filter_shape = (9, 2, 3)[:n]
+    strides = (2, 3, 1)[:n]
+    spatial_spec = 'HWD'[:n]
+    dimension_numbers = ('N' + spatial_spec + 'C',
+                         'OI' + spatial_spec,
+                         'N' + spatial_spec + 'C')
+
+    X0_1 = random.normal(key, (4,) + spatial_shape + (3,))
+    if mask_constant is not None:
+      mask_shape = [1 if i in mask_axis else s
+                    for i, s in enumerate(X0_1.shape)]
+      mask = random.bernoulli(key, p=p, shape=mask_shape)
+      X0_1 = np.where(mask, mask_constant, X0_1)
+      X0_1 = np.sort(X0_1, 1)
+
+    if same_inputs:
+      X0_2 = None
+    else:
+      X0_2 = random.normal(key, (2,) + spatial_shape + (3,))
+      if mask_constant is not None:
+        mask_shape = [1 if i in mask_axis else s
+                      for i, s in enumerate(X0_2.shape)]
+        mask = random.bernoulli(key, p=p, shape=mask_shape)
+        X0_2 = np.where(mask, mask_constant, X0_2)
+        X0_2 = np.sort(X0_2, 1)
+
+    def get_attn():
+      return stax.GlobalSelfAttention(
+        n_chan_out=width,
+        n_chan_key=width,
+        n_chan_val=int(np.round(float(width) / int(np.sqrt(width)))),
+        n_heads=int(np.sqrt(width)),
+      ) if use_attn else stax.Identity()
+
+    nn = stax.serial(
+        stax.FanOut(3),
+        stax.parallel(
+            stax.serial(
+                stax.GeneralConv(
+                    dimension_numbers=dimension_numbers,
+                    out_chan=width,
+                    strides=strides,
+                    filter_shape=filter_shape,
+                    padding='SAME',
+                    W_std=1.1,
+                    b_std=0.1),
+                stax.LayerNorm(axis=(-1, 1)),
+                stax.Abs(),
+                stax.GeneralConv(
+                    dimension_numbers=dimension_numbers,
+                    out_chan=width,
+                    strides=strides,
+                    filter_shape=filter_shape,
+                    padding='VALID',
+                    W_std=2.,
+                    b_std=0.1),
+            ),
+            stax.serial(
+                stax.GeneralConv(
+                    dimension_numbers=dimension_numbers,
+                    out_chan=width,
+                    strides=strides,
+                    filter_shape=filter_shape,
+                    padding='SAME',
+                    W_std=0.1,
+                    b_std=0.3),
+                stax.Relu(),
+                stax.Dropout(0.7),
+                stax.GeneralConv(
+                    dimension_numbers=dimension_numbers,
+                    out_chan=width,
+                    strides=strides,
+                    filter_shape=filter_shape,
+                    padding='VALID',
+                    W_std=1.5,
+                    b_std=1.),
+            ),
+            stax.serial(
+                get_attn(),
+                stax.GeneralConv(
+                    dimension_numbers=dimension_numbers,
+                    out_chan=width,
+                    strides=strides,
+                    filter_shape=filter_shape,
+                    padding='SAME',
+                    W_std=1.,
+                    b_std=0.1),
+                stax.Erf(),
+                stax.Dropout(0.2),
+                stax.GeneralConv(
+                    dimension_numbers=dimension_numbers,
+                    out_chan=width,
+                    strides=strides,
+                    filter_shape=filter_shape,
+                    padding='VALID',
+                    W_std=1.,
+                    b_std=0.1),
+            )
+        ),
+        (stax.FanInSum() if concat is None else stax.FanInConcat(concat)),
+
+        get_attn(),
+        {
+            'avg': stax.GlobalAvgPool(),
+            'sum': stax.GlobalSumPool(),
+            'flatten': stax.Flatten(),
+         }[proj],
+    )
+
+    if get == 'nngp':
+      init_fn, apply_fn, kernel_fn = stax.serial(nn, stax.Dense(width, 1., 0.))
+    elif get == 'ntk':
+      init_fn, apply_fn, kernel_fn = stax.serial(nn, stax.Dense(1, 1., 0.))
+    else:
+      raise ValueError(get)
+
+    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, key, n_samples,
+        device_count=0 if concat in (0, -n) else -1
+    )
+
+    kernel_fn = jit(kernel_fn, static_argnums=(2, 3, 4))
+    exact = kernel_fn(X0_1, X0_2, get, 'auto', mask_constant)
+    empirical = kernel_fn_mc(X0_1, X0_2, get=get, mask_constant=mask_constant)
     empirical = empirical.reshape(exact.shape)
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 

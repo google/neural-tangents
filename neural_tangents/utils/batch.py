@@ -83,19 +83,36 @@ def _flatten_kernel(k, x2_is_none, store_on_device):
     for key, value in k_dict.items():
       if key == 'var1':
         k_dict[key] = fl(value, 1)
+
       elif key == 'var2':
         if x2_is_none:
           k_dict[key] = None
         else:
           k_dict[key] = fl(value, 0)
+
+      elif key == 'mask1':
+        if value is None:
+          k_dict[key] = None
+        else:
+          k_dict[key] = fl(value, 1)
+
+      elif key == 'mask2':
+        if value is None or x2_is_none:
+          k_dict[key] = None
+        else:
+          k_dict[key] = fl(value, 0)
+
       elif key == 'x1_is_x2':
         k_dict[key] = value[(0,) * value.ndim]
+
       elif key in ('is_reversed', 'is_gaussian', 'is_input'):
         # NOTE(schsam): Currently we have to make these values concrete so that
         # batched analytic kernels compose.
         k_dict[key] = bool(value[(0,) * value.ndim])
+
       elif key in ('marginal', 'cross'):
         k_dict[key] = int(value[(0,) * value.ndim])
+
       elif key == 'shape1':
         if any([x.ndim > 2 for x in value]):
           raise ValueError((
@@ -104,6 +121,7 @@ def _flatten_kernel(k, x2_is_none, store_on_device):
         k_dict[key] = tuple(int(x[(0,) * x.ndim]) if i > 0 else
                             int(np.sum(x[:, 0])) if x.ndim == 2 else
                             int(np.sum(x)) for i, x in enumerate(value))
+
       elif key == 'shape2':
         if any([x.ndim > 2 for x in value]):
           raise ValueError((
@@ -112,8 +130,10 @@ def _flatten_kernel(k, x2_is_none, store_on_device):
         k_dict[key] = tuple(int(x[(0,) * x.ndim]) if i > 0 else
                             int(np.sum(x[0])) if x.ndim == 2 else
                             int(x[0]) for i, x in enumerate(value))
+
       else:
         k_dict[key] = fl(value, None)
+
     return k._replace(**k_dict)
 
   if isinstance(k, np.ndarray):
@@ -143,13 +163,20 @@ def _slice_kernel(kernel, n1_slice, n2_slice):
   assert isinstance(kernel, Kernel)
   var1 = kernel.var1[n1_slice]
   var2 = kernel.var1[n2_slice] if kernel.var2 is None else kernel.var2[n2_slice]
+
+  mask1 = None if kernel.mask1 is None else kernel.mask1[n1_slice]
+  mask2 = None if kernel.mask2 is None else kernel.mask2[n2_slice]
+
   return kernel._replace(
       var1=var1,
       nngp=kernel.nngp[n1_slice, n2_slice],
       var2=var2,
       ntk=kernel.ntk[n1_slice, n2_slice],
       shape1=(var1.shape[0],) + kernel.shape1[1:],
-      shape2=(var2.shape[0],) + kernel.shape2[1:])
+      shape2=(var2.shape[0],) + kernel.shape2[1:],
+      mask1=mask1,
+      mask2=mask2
+  )
 
 
 def _serial(kernel_fn, batch_size, store_on_device=True):
@@ -340,6 +367,14 @@ def _parallel(kernel_fn, device_count=-1):
     if var2 is None:
       var2 = kernel_dict['var1']
     kernel_dict['var2'] = np.broadcast_to(var2, (_device_count,) + var2.shape)
+
+    mask2 = kernel.mask2
+    if mask2 is None and kernel.mask1 is not None:
+      mask2 = kernel.mask1
+    if mask2 is not None:
+      kernel_dict['mask2'] = np.broadcast_to(mask2, (_device_count,) +
+                                             mask2.shape)
+
     kernel_dict['x1_is_x2'] = np.broadcast_to(
         kernel_dict['x1_is_x2'],
         (_device_count,) + kernel_dict['x1_is_x2'].shape)

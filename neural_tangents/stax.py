@@ -85,10 +85,11 @@ from jax.tree_util import tree_map, tree_flatten, tree_unflatten
 from neural_tangents.utils import utils
 
 
-_CONV_QAB_DIMENSION_NUMBERS = ('NCHW', 'HWIO', 'NCHW')
+_CONV_QAB_DIMENSION_NUMBERS = ('NCHW', 'OIHW', 'NCHW')
 _INPUT_REQ = 'covariances_req'
 _DEFAULT_INPUT_REQ = frozendict.frozendict({'marginal': M.OVER_ALL,
                                             'cross': M.OVER_ALL})
+_NEG_INF = -1e20  # softmax raises an error if all entries are -np.inf
 
 
 class Padding(enum.Enum):
@@ -169,18 +170,35 @@ def _zip_flat(x, y):
   return tuple(c for xy in zip(x, y) for c in xy)
 
 
+def _interleave_ones(x, start_axis, x_first):
+  x_axes = x.shape[start_axis:]
+  ones = (1,) * (x.ndim - start_axis)
+  shape = x.shape[:start_axis]
+  if x_first:
+    shape += _zip_flat(x_axes, ones)
+  else:
+    shape += _zip_flat(ones, x_axes)
+  return x.reshape(shape)
+
+
+def _outer_prod(x, y, start_axis, prod_op):
+  x = _interleave_ones(x, start_axis, True)
+  y = _interleave_ones(y, start_axis, False)
+  return prod_op(x, y)
+
+
 def _zip_axes(mat, start_axis=0, unzip=False):
   """Zip (interleave) axes starting from `start_axis`.
 
   Changes the shape as follows:
-    If `unzip == False`:
-    [..., X, X, ..., Y, Y, ..., Z, Z, ...] -> [..., X, Y, Z, ..., X, Y, Z, ...]
     If `unzip == True`:
+    [..., X, X, ..., Y, Y, ..., Z, Z, ...] -> [..., X, Y, Z, ..., X, Y, Z, ...]
+    If `unzip == False`:
     [..., X, Y, Z, ..., X, Y, Z, ...] -> [..., X, X, ..., Y, Y, ..., Z, Z, ...]
 
   Args:
     mat: `np.ndarray` with an even number of dimensions following `start_axis`.
-    start_axis: `int`, number of axis from which to zin (interleave).
+    start_axis: `int`, number of axis from which to zip (interleave).
     unzip: `bool`, set to `True` to do the opposite.
 
   Returns:
@@ -199,6 +217,39 @@ def _zip_axes(mat, start_axis=0, unzip=False):
   else:
     mat = np.moveaxis(mat, last_axes, odd_axes)
   return mat
+
+
+def _size_at(x, axis):
+  return functools.reduce(op.mul, (x.shape[i] for i in axis), 1)
+
+
+def _parse_axes(spec, x):
+  if isinstance(x, np.ndarray):
+    ndim = x.ndim
+  elif isinstance(x, tuple):
+    ndim = len(x)
+  else:
+    raise TypeError(x, type(x))
+
+  if spec is None:
+    batch_axis, channel_axis = 0, ndim - 1
+  else:
+    batch_axis, channel_axis = spec.index('N'), spec.index('C')
+
+  spatial_axes = tuple(a for a in range(ndim)
+                       if a not in (batch_axis, channel_axis))
+  return batch_axis, channel_axis, spatial_axes
+
+
+def _canonicalize_axis(axis, x):
+  axis = (axis,) if isinstance(axis, int) else tuple(axis)
+  if isinstance(x, np.ndarray):
+    ndim = x.ndim
+  elif isinstance(x, tuple):
+    ndim = len(x)
+  else:
+    raise TypeError(x, type(x))
+  return list(set(np.arange(ndim)[list(axis)]))
 
 
 def _variance_over_all_over_pixels(x, batch_axis, channel_axis):
@@ -342,7 +393,8 @@ def _inputs_to_kernel(x1,
                       cross,
                       compute_ntk,
                       spec=None,
-                      eps=1e-12):
+                      eps=1e-12,
+                      mask_constant=None):
   """Transforms (batches of) inputs to a `Kernel`.
 
   This is a private method. Docstring and example are for internal reference.
@@ -415,10 +467,7 @@ def _inputs_to_kernel(x1,
                      'Use `NO` instead to compute all covariances.')
 
   # Batch axis first, channel / feature axis last by default.
-  if spec:
-    batch_axis, channel_axis = spec.index('N'), spec.index('C')
-  else:
-    batch_axis, channel_axis = 0, x1.ndim - 1
+  batch_axis, channel_axis, _ = _parse_axes(spec, x1)
 
   if batch_axis != 0:
     # TODO: add support or clear error for batching.
@@ -436,6 +485,10 @@ def _inputs_to_kernel(x1,
 
     # Update batch and channel axes if inputs are flattened to `NC`.
     batch_axis, channel_axis = 0, 1
+
+  # Generate masks and zero-out masked values if needed.
+  x1, mask1 = _get_masked_inputs_and_mask(x1, mask_constant)
+  x2, mask2 = _get_masked_inputs_and_mask(x2, mask_constant)
 
   # TODO: Think more about dtype automatic vs manual dtype promotion.
   x1 = x1.astype(np.float64)
@@ -464,12 +517,14 @@ def _inputs_to_kernel(x1,
 
   nngp = _get_covariance(x1, x2, cross, batch_axis, channel_axis)
   ntk = 0. if compute_ntk else None
+
   is_reversed = False
   is_gaussian = False
   is_input = True
 
   return Kernel(var1, nngp, var2, ntk, is_gaussian, is_reversed,
-                marginal, cross, x1.shape, x2.shape, x1_is_x2, is_input)
+                marginal, cross, x1.shape, x2.shape, x1_is_x2, is_input,
+                mask1, mask2)
 
 
 def _propagate_shape(init_fn, shape):
@@ -531,7 +586,8 @@ def _preprocess_kernel_fn(init_fn, kernel_fn):
   def new_kernel_fn(x1_or_kernel,
                     x2=None,
                     get=None,
-                    marginalization='auto'):
+                    marginalization='auto',
+                    mask_constant=None):
     """Returns the `Kernel` resulting from applying `ker_fun` to given inputs.
 
     Args:
@@ -547,22 +603,37 @@ def _preprocess_kernel_fn(init_fn, kernel_fn):
         dimensions are most appropriate to marginalize over. If "none" then no
         marginalization is performed. If a dict then the user can manually
         specify the marginalization for the self- and cross- correlations.
+      mask_constant: TODO(romann).
     Returns:
       If `get` is a string, returns the requested `np.ndarray`. If `get` is a
       tuple, returns an `AnalyticKernel` namedtuple containing only the
       requested information. If `get` is None then a Kernel object is returned
       containing all the data.
     """
-
     if (isinstance(x1_or_kernel, Kernel) or
         (isinstance(x1_or_kernel, list) and
          all(isinstance(k, Kernel) for k in x1_or_kernel))):
+
+      if mask_constant is not None:
+        raise ValueError('`mask_constant` parameters only apply to '
+                         'array inputs, and would have no effect on a '
+                         '`Kernel`.')
+
       _check_marginalization(kernel_fn, x1_or_kernel)
       return _apply_kernel(init_fn, kernel_fn, x1_or_kernel)
-    return outer_kernel_fn(x1_or_kernel, x2, get, marginalization)
+
+    return outer_kernel_fn(x1_or_kernel,
+                           x2,
+                           get,
+                           marginalization,
+                           mask_constant)
 
   @utils.get_namedtuple('AnalyticKernel')
-  def outer_kernel_fn(x1, x2, get, marginalization):
+  def outer_kernel_fn(x1, x2, get, marginalization, mask_constant):
+    if isinstance(x1, tuple) or isinstance(x2, tuple):
+      raise NotImplementedError('Only `mask_constant` masking mode is supported'
+                                ' for `kernel_fn` currently')
+
     if not isinstance(x1, np.ndarray):
       raise TypeError('Inputs to a kernel propagation function should be '
                       'a `Kernel`, '
@@ -590,7 +661,11 @@ def _preprocess_kernel_fn(init_fn, kernel_fn):
              'covariance respectively. Found {}.'.format(marginalization)))
 
     compute_ntk = (get is None) or ('ntk' in get)
-    kernel = _inputs_to_kernel(x1, x2, compute_ntk=compute_ntk, **input_req)
+
+    kernel = _inputs_to_kernel(x1, x2,
+                               compute_ntk=compute_ntk,
+                               mask_constant=mask_constant,
+                               **input_req)
     return _apply_kernel(init_fn, kernel_fn, kernel)
 
   if hasattr(kernel_fn, _INPUT_REQ):
@@ -629,7 +704,13 @@ def _layer(layer):
 
 
 def _elementwise(fn, **fn_kwargs):
-  init_fn, apply_fn = ostax.elementwise(fn, **fn_kwargs)
+  init_fn, apply_fn_old = ostax.elementwise(fn, **fn_kwargs)
+
+  def apply_fn(params, inputs, mask_constant=None, **kwargs):
+    inputs, mask = _get_masked_inputs_and_mask(inputs, mask_constant)
+    outputs = apply_fn_old(params, inputs, **kwargs)
+    return _drop_mask(outputs, mask)
+
   kernel_fn = lambda kernels: _transform_kernels(kernels, fn, **fn_kwargs)
   return init_fn, apply_fn, kernel_fn
 
@@ -761,13 +842,6 @@ def _get_normalising_prod(var1, var2, marginal, axis=()):
     prod22 = sqnorms2**2.0 if not same_input else prod11
 
   elif marginal in (M.OVER_POINTS, M.NO):
-    def outer_prod_full(sqnorms1, sqnorms2):
-      sqnorms1 = sqnorms1.reshape(_zip_flat(sqnorms1.shape,
-                                            (1,) * sqnorms1.ndim))
-      sqnorms2 = sqnorms2.reshape(_zip_flat((1,) * sqnorms1.ndim,
-                                            sqnorms2.shape))
-      return sqnorms1 * sqnorms2
-
     sqnorms1 = _get_dimensionwise_marg_var(var1, marginal)
     sqnorms1 = np.mean(sqnorms1, axis=axis, keepdims=True)
     if same_input:
@@ -776,23 +850,16 @@ def _get_normalising_prod(var1, var2, marginal, axis=()):
       sqnorms2 = _get_dimensionwise_marg_var(var2, marginal)
       sqnorms2 = np.mean(sqnorms2, axis=axis, keepdims=True)
 
-    prod12 = outer_prod_full(sqnorms1, sqnorms2)
+    prod12 = _outer_prod(sqnorms1, sqnorms2, 0, op.mul)
 
     if marginal == M.OVER_POINTS:
-      def outer_prod_pix(sqnorms1, sqnorms2):
-        sqnorms1 = sqnorms1.reshape(
-            sqnorms1.shape[:1] + _zip_flat(sqnorms1.shape[1:],
-                                           (1,) * (sqnorms1.ndim - 1)))
-        sqnorms2 = sqnorms2.reshape(
-            sqnorms2.shape[:1] + _zip_flat((1,) * (sqnorms2.ndim - 1),
-                                           sqnorms2.shape[1:]))
-        return sqnorms1 * sqnorms2
-
-      prod11 = outer_prod_pix(sqnorms1, sqnorms1)
-      prod22 = outer_prod_pix(sqnorms2, sqnorms2) if not same_input else prod11
+      prod11 = _outer_prod(sqnorms1, sqnorms1, 1, op.mul)
+      prod22 = (_outer_prod(sqnorms2, sqnorms2, 1, op.mul)
+                if not same_input else prod11)
     else:
-      prod11 = outer_prod_full(sqnorms1, sqnorms1)
-      prod22 = outer_prod_full(sqnorms2, sqnorms2) if not same_input else prod11
+      prod11 = _outer_prod(sqnorms1, sqnorms1, 0, op.mul)
+      prod22 = (_outer_prod(sqnorms2, sqnorms2, 0, op.mul)
+                if not same_input else prod11)
 
   else:
     raise NotImplementedError(
@@ -980,18 +1047,18 @@ def Dense(out_dim,
   # parameterization from "ntk" to "standard"
 
   parameterization = parameterization.lower()
-  channel_axis = spec.index('C') if spec is not None else -1
 
   def ntk_init_fn(rng, input_shape):
-    _channel_axis = channel_axis % len(input_shape)
-    output_shape = (input_shape[:_channel_axis] + (out_dim,)
-                    + input_shape[_channel_axis + 1:])
+    _, channel_axis, _ = _parse_axes(spec, input_shape)
+    output_shape = (input_shape[:channel_axis] + (out_dim,)
+                    + input_shape[channel_axis + 1:])
     k1, k2 = random.split(rng)
-    W = W_init(k1, (input_shape[_channel_axis], out_dim))
+    W = W_init(k1, (input_shape[channel_axis], out_dim))
     b = b_init(k2, (out_dim,))
     return output_shape, (W, b)
 
   def standard_init_fn(rng, input_shape):
+    _, channel_axis, _ = _parse_axes(spec, input_shape)
     output_shape, (W, b) = ntk_init_fn(rng, input_shape)
     return output_shape, (W * W_std / np.sqrt(input_shape[channel_axis]),
                           b * b_std)
@@ -1003,7 +1070,15 @@ def Dense(out_dim,
   else:
     raise ValueError('Parameterization not supported: %s' % parameterization)
 
-  def apply_fn(params, inputs, **kwargs):
+  def apply_fn(params, inputs, mask_constant=None, **kwargs):
+    inputs, mask = _get_masked_inputs_and_mask(inputs, mask_constant)
+    _, channel_axis, _ = _parse_axes(spec, inputs)
+
+    # Collapse channel dimension the mask, since an FC layer is applied at each
+    # non-channel location.
+    if mask is not None:
+      mask = np.all(mask, axis=channel_axis, keepdims=True)
+
     W, b = params
 
     prod = np.moveaxis(np.tensordot(W, inputs, (0, channel_axis)),
@@ -1011,11 +1086,16 @@ def Dense(out_dim,
 
     if parameterization == 'ntk':
       norm = W_std / np.sqrt(inputs.shape[channel_axis])
-      res = norm * prod + b_std * b
-    elif parameterization == 'standard':
-      res = prod  + b
+      outputs = norm * prod + b_std * b
 
-    return res
+    elif parameterization == 'standard':
+      outputs = prod  + b
+
+    # TODO: for convenience with the empirical kernel evaluation, assuming no
+    #  mask is needed after an FC layer. This may be false when an FC layer is
+    #  applied to a structured input. Please use a 1x1[x1...] convolution as an
+    #  alternative.
+    return outputs  # _drop_mask(outputs, mask)
 
   def kernel_fn(kernels):
     """Compute the transformed kernels after a dense layer."""
@@ -1073,7 +1153,15 @@ def FanInSum():
 
   Based on `jax.experimental.stax.FanInSum`.
   """
-  init_fn, apply_fn = ostax.FanInSum
+  init_fn, apply_fn_old = ostax.FanInSum
+
+  def apply_fn(params, inputs, mask_constant=None, **kwargs):
+    inputs, masks = zip(*(_get_masked_inputs_and_mask(i, mask_constant)
+                          for i in inputs))
+    inputs_sum = apply_fn_old(params, inputs, **kwargs)
+    masks_sum = _add_masks(masks)
+    return _drop_mask(inputs_sum, masks_sum)
+
   kernel_fn = lambda kernels: _fan_in_kernel_fn(kernels, axis=None, spec=None)
   return init_fn, apply_fn, kernel_fn
 
@@ -1084,7 +1172,15 @@ def FanInConcat(axis=-1, spec=None):
 
   Based on `jax.experimental.stax.FanInConcat`.
   """
-  init_fn, apply_fn = ostax.FanInConcat(axis)
+  init_fn, apply_fn_old = ostax.FanInConcat(axis)
+
+  def apply_fn(params, inputs, mask_constant=None, **kwargs):
+    inputs, masks = zip(*(_get_masked_inputs_and_mask(i, mask_constant)
+                          for i in inputs))
+    outputs = apply_fn_old(params, inputs, **kwargs)
+    mask = _concat_masks(masks, inputs, axis % inputs[0].ndim)
+    return _drop_mask(outputs, mask)
+
   kernel_fn = lambda kernels: _fan_in_kernel_fn(kernels, axis=axis, spec=spec)
   return init_fn, apply_fn, kernel_fn
 
@@ -1119,8 +1215,7 @@ def _fan_in_kernel_fn(kernels, axis, spec):
         kernels[i] = kernels[i].reverse()
 
   axis = None if axis is None else range(len(shape1))[axis]
-  batch_axis = 0 if spec is None else spec.index('N')
-  channel_axis = (len(shape1) - 1) if spec is None else spec.index('C')
+  batch_axis, channel_axis, _ = _parse_axes(spec, shape1)
 
   # Check shapes.
   if axis is None:
@@ -1139,12 +1234,12 @@ def _fan_in_kernel_fn(kernels, axis, spec):
   # Check if inputs are independent Gaussians.
   if axis is None or axis != channel_axis:
     is_gaussian = all(k.is_gaussian for k in kernels)
-    if not is_gaussian:
+    if not is_gaussian and n_kernels > 1:
       raise NotImplementedError('`FanInSum` or `FanInConcat` layer along the '
                                 'non-channel axis is only implemented for the '
-                                'case if all input layers guaranteed to be mean'
-                                '-zero Gaussian, i.e. having all `is_gaussian '
-                                'set to `True`.')
+                                'case if all input layers are guaranteed to be '
+                                'mean-zero Gaussian, i.e. having all '
+                                '`is_gaussian` set to `True`.')
   else:
     # TODO: allow to apply nonlinearity after channelwise concatenation.
     is_gaussian = False
@@ -1157,9 +1252,13 @@ def _fan_in_kernel_fn(kernels, axis, spec):
     warnings.warn('Concatenation along the batch axis (%d) gives inconsistent'
                   ' covariances when batching - proceed with caution.' % axis)
 
+  # Concatenate masks.
+  mask1 = _fan_in_masks([k.mask1 for k in kernels], None, axis)
+  mask2 = _fan_in_masks([k.mask2 for k in kernels], None, axis)
+
   spatial_axes = tuple(i for i in range(len(shape1))
                   if i not in (channel_axis, batch_axis))
-  # Change spatial axis according to the kernel `is_reversed`.
+  # Change spatial axis according to `is_reversed`.
   if axis in spatial_axes and is_reversed:
     axis = spatial_axes[::-1][spatial_axes.index(axis)]
 
@@ -1184,7 +1283,7 @@ def _fan_in_kernel_fn(kernels, axis, spec):
 
   return Kernel(*(
       kers + (is_gaussian, is_reversed, marginal, cross, None, None,
-              kernels[0].x1_is_x2, kernels[0].is_input)))
+              kernels[0].x1_is_x2, kernels[0].is_input, mask1, mask2)))
 
 
 def _concat_kernels(mats, axis, marginalisation, batch_ndim, widths):
@@ -1527,8 +1626,11 @@ def GeneralConv(dimension_numbers,
   else:
     raise ValueError('Parameterization not supported: %s' % parameterization)
 
-  def apply_fn(params, inputs, **kwargs):
+  def apply_fn(params, inputs, mask_constant=None, **kwargs):
     W, b = params
+
+    inputs, mask = _get_masked_inputs_and_mask(inputs, mask_constant)
+    mask = _conv_mask(mask, filter_shape, strides, padding, dimension_numbers)
 
     if parameterization == 'ntk':
       norm = W_std / np.sqrt(input_total_dim(inputs.shape))
@@ -1539,6 +1641,10 @@ def GeneralConv(dimension_numbers,
 
     apply_padding = padding
     if padding == Padding.CIRCULAR:
+      if mask is not None:
+        raise NotImplementedError('`CIRCULAR` padding is not implemented for '
+                                  'masked inputs')
+
       apply_padding = Padding.VALID
       spatial_axes = tuple(dimension_numbers[0].index(c)
                            for c in dimension_numbers[1]
@@ -1546,33 +1652,41 @@ def GeneralConv(dimension_numbers,
       inputs = _same_pad_for_filter_shape(inputs, filter_shape, strides,
                                           spatial_axes, 'wrap')
 
-    return norm * lax.conv_general_dilated(
+    outputs = norm * lax.conv_general_dilated(
         inputs,
         W,
         strides,
         apply_padding.name,
         dimension_numbers=dimension_numbers) + b_rescale * b
 
+    return _drop_mask(outputs, mask)
+
   def kernel_fn(kernels):
     """Compute the transformed kernels after a conv layer."""
-    var1, nngp, var2, ntk, is_reversed, marginal, cross = (
+    var1, nngp, var2, ntk, is_reversed, marginal, cross, mask1, mask2 = (
         kernels.var1, kernels.nngp, kernels.var2, kernels.ntk,
-        kernels.is_reversed, kernels.marginal, kernels.cross)
+        kernels.is_reversed, kernels.marginal, kernels.cross, kernels.mask1,
+        kernels.mask2
+    )
 
     input_spec = tuple(c for c in dimension_numbers[0] if c not in ('N', 'C'))
     conv_spec = tuple(c for c in dimension_numbers[1] if c not in ('I', 'O'))
-    input_to_filter_permutation = tuple(conv_spec.index(c) for c in input_spec)
+    input_to_filter_permutation = tuple(input_spec.index(c) for c in conv_spec)
 
     filter_shape_kernel = tuple(filter_shape[p] for p in
                                 input_to_filter_permutation)
     strides_kernel = tuple(strides[p] for p in
                            input_to_filter_permutation)
 
+    mask1 = _conv_mask(mask1, filter_shape_kernel, strides_kernel, padding,
+                       dimension_numbers)
+    mask2 = _conv_mask(mask2, filter_shape_kernel, strides_kernel, padding,
+                       dimension_numbers)
+
     if cross == M.OVER_PIXELS:
       def conv_unscaled(x, batch_ndim):
-        x = _conv_kernel_over_pixels(
-            x, filter_shape_kernel, strides_kernel, padding, batch_ndim)
-        return x
+        return _conv_kernel_over_pixels(x, filter_shape_kernel, strides_kernel,
+                                        padding, batch_ndim)
 
     elif cross in [M.OVER_POINTS, M.NO]:
       if is_reversed:
@@ -1582,9 +1696,8 @@ def GeneralConv(dimension_numbers,
       is_reversed = not is_reversed
 
       def conv_unscaled(x, batch_ndim):
-        x = _conv_kernel(
-            x, filter_shape_kernel, strides_kernel, padding, batch_ndim)
-        return x
+        return _conv_kernel(x, filter_shape_kernel, strides_kernel, padding,
+                            batch_ndim)
 
     else:
       raise NotImplementedError(
@@ -1610,10 +1723,14 @@ def GeneralConv(dimension_numbers,
             W_std**2 * conv_unscaled(ntk, 2))
       nngp = _affine(nngp_unscaled, W_std, b_std)
 
+    var1, nngp, var2, ntk = _mask_kernels(var1, nngp, var2, ntk, cross,
+                                          marginal, is_reversed, mask1, mask2,
+                                          dimension_numbers[0])
+
     return kernels._replace(
         var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=True,
         is_reversed=is_reversed, marginal=marginal, cross=cross,
-        is_input=False)
+        is_input=False, mask1=mask1, mask2=mask2)
 
   setattr(kernel_fn, _INPUT_REQ, {'marginal': M.OVER_PIXELS,
                                   'cross': M.OVER_PIXELS,
@@ -1716,7 +1833,6 @@ def _pool_kernel(mat,
 
   return nngp_out
 
-
 @_layer
 def _Pool(pool_type,
           window_shape,
@@ -1757,10 +1873,7 @@ def _Pool(pool_type,
     _, apply_fn_0 = pool_fn(window_shape, strides, Padding.VALID.name, spec)
 
     def apply_fn(params, inputs, **kwargs):
-      non_spatial_axes = ((spec.index('N'), spec.index('C')) if spec
-                          else (0, inputs.ndim - 1))
-      spatial_axes = tuple(i for i in range(inputs.ndim)
-                           if i not in non_spatial_axes)
+      _, _, spatial_axes = _parse_axes(spec, inputs)
       inputs = _same_pad_for_filter_shape(inputs, window_shape, strides,
                                           spatial_axes, 'wrap')
       res = apply_fn_0(params, inputs, **kwargs)
@@ -1768,8 +1881,8 @@ def _Pool(pool_type,
 
   elif normalize_edges or pool_type == Pooling.SUM:
     init_fn, apply_fn = pool_fn(window_shape, strides, padding.name, spec)
-  else:
 
+  else:
     def rescaler(dims, strides, padding):
       del dims, strides, padding  # Unused.
       return lambda outputs, inputs, spec: outputs / np.prod(window_shape)
@@ -1777,13 +1890,35 @@ def _Pool(pool_type,
     pool_fn = ostax._pooling_layer(lax.add, 0., rescaler)
     init_fn, apply_fn = pool_fn(window_shape, strides, padding.name, spec)
 
+  def apply_fn_mask(params, inputs, mask_constant=None, **kwargs):
+    inputs, mask = _get_masked_inputs_and_mask(inputs, mask_constant)
+
+    if padding == Padding.CIRCULAR and mask is not None:
+      raise NotImplementedError('`CIRCULAR` padding is not implemented for '
+                                  'masked inputs')
+
+    outputs = apply_fn(params, inputs, **kwargs)
+    mask = _pool_mask(mask, window_shape, strides, padding, spec)
+    return _drop_mask(outputs, mask)
 
   def kernel_fn(kernels):
     """Kernel transformation."""
-    var1, nngp, var2, ntk, is_gaussian, is_reversed, marginal, cross = (
+    (var1, nngp, var2, ntk, is_gaussian, is_reversed, marginal, cross, mask1,
+     mask2) = (
         kernels.var1, kernels.nngp, kernels.var2, kernels.ntk,
         kernels.is_gaussian, kernels.is_reversed, kernels.marginal,
-        kernels.cross)
+        kernels.cross, kernels.mask1, kernels.mask2)
+
+    _, channel_axis, _ = _parse_axes(spec, kernels.shape1)
+    if (mask1 is not None and
+        mask1.shape[channel_axis] > 1 and
+        pool_type == Pooling.AVG):
+      # TODO: implement.
+      raise NotImplementedError('Average pooling over different per-channel '
+                                'masks is not implemented.')
+
+    mask1 = _pool_mask(mask1, window_shape, strides, padding, spec)
+    mask2 = _pool_mask(mask2, window_shape, strides, padding, spec)
 
     window_shape_kernel = window_shape[::(-1 if is_reversed else 1)]
     strides_kernel = strides[::(-1 if is_reversed else 1)]
@@ -1797,14 +1932,20 @@ def _Pool(pool_type,
     var2 = _pool_kernel(var2, pool_type, window_shape_kernel, strides_kernel,
                         padding, normalize_edges, 1)
 
+    var1, nngp, var2, ntk = _mask_kernels(var1, nngp, var2, ntk, cross,
+                                          marginal, is_reversed, mask1, mask2,
+                                          spec)
+
     return kernels._replace(
         var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=is_gaussian,
-        is_reversed=is_reversed, marginal=marginal, cross=cross)
+        is_reversed=is_reversed, marginal=marginal, cross=cross, mask1=mask1,
+        mask2=mask2
+    )
 
   setattr(kernel_fn, _INPUT_REQ, {'marginal': M.OVER_POINTS,
                                   'cross': M.NO,
                                   'spec': spec})
-  return init_fn, apply_fn, kernel_fn
+  return init_fn, apply_fn_mask, kernel_fn
 
 
 def AvgPool(window_shape,
@@ -1874,45 +2015,82 @@ def _GlobalPool(pool_type, spec):
   elif pool_type == Pooling.SUM:
     pool_fn = np.sum
   else:
-    raise ValueError('Invalid pooling type {}'.format(pool_type))
+    raise ValueError(f'Invalid pooling type {pool_type}')
 
   def init_fn(rng, input_shape):
-    if spec is None:
-      non_spatial_axes = 0, len(input_shape) - 1
-    else:
-      non_spatial_axes = spec.index('N'), spec.index('C')
-
-    output_shape = tuple(input_shape[i] for i in non_spatial_axes)
+    batch_axis, channel_axis, spatial_axes = _parse_axes(spec, input_shape)
+    output_shape = tuple(input_shape[i] for i in sorted((batch_axis,
+                                                         channel_axis)))
     return output_shape, ()
 
-  def apply_fn(params, inputs, **kwargs):
-    if spec is None:
-      non_spatial_axes = 0, inputs.ndim - 1
-    else:
-      non_spatial_axes = spec.index('N'), spec.index('C')
+  def apply_fn(params, inputs, mask_constant=None, **kwargs):
+    inputs, mask = _get_masked_inputs_and_mask(inputs, mask_constant)
+    _, _, spatial_axes = _parse_axes(spec, inputs)
 
-    spatial_axes = tuple(i for i in range(inputs.ndim)
-                         if i not in non_spatial_axes)
-    out = pool_fn(inputs, axis=spatial_axes)
-    return out
+    if mask is None or pool_type == Pooling.SUM:
+      outputs = pool_fn(inputs, axis=spatial_axes)
+    elif pool_type == Pooling.AVG:
+      total_size = _size_at(inputs, spatial_axes)
+      size = total_size - np.count_nonzero(mask, axis=spatial_axes)
+      outputs = np.sum(inputs, spatial_axes) / np.maximum(size, 1)
+    else:
+      raise NotImplementedError(
+          f'Unpexpected {pool_type} and {mask}, please file a bug at '
+          f'https://github.com/google/neural-tangents/issues/new.')
+
+    # Collapse spatial dimensions of the mask, since they are all averaged into
+    # a single per-channel entry.
+    mask = np.all(mask, axis=spatial_axes) if mask is not None else None
+    return _drop_mask(outputs, mask)
 
   def kernel_fn(kernels):
-    var1, nngp, var2, ntk = (kernels.var1, kernels.nngp, kernels.var2,
-                             kernels.ntk)
+    (var1, nngp, var2, ntk, marginal, cross, mask1, mask2, is_reversed,
+     is_gaussian, shape1) = (
+        kernels.var1, kernels.nngp, kernels.var2, kernels.ntk,
+        kernels.marginal, kernels.cross,
+        kernels.mask1, kernels.mask2, kernels.is_reversed, kernels.is_gaussian,
+        kernels.shape1
+    )
 
-    def _pool(ker_mat, batch_ndim):
-      spatial_axes = tuple(range(batch_ndim, ker_mat.ndim))
-      return pool_fn(ker_mat, axis=spatial_axes)
+    _, channel_axis, _ = _parse_axes(spec, shape1)
+    if (mask1 is not None and
+        mask1.shape[channel_axis] > 1 and
+        pool_type == Pooling.AVG):
+      # TODO: implement.
+      raise NotImplementedError('Average pooling over different per-channel '
+                                'masks is not implemented.')
 
-    nngp = _pool(nngp, 2)
-    ntk = _pool(ntk, 2) if utils.is_array(ntk) else ntk
-    var1 = _pool(var1, 1)
-    if var2 is not None:
-      var2 = _pool(var2, 1)
+    def _pool(ker_mat, mask1, mask2, marginal, batch_ndim):
+      if not utils.is_array(ker_mat):
+        return ker_mat
 
-    return kernels._replace(var1=var1, nngp=nngp, var2=var2, ntk=ntk,
-                            is_reversed=False, marginal=M.OVER_ALL,
-                            cross=M.OVER_ALL)
+      spatial_axes = tuple(range(ker_mat.ndim)[batch_ndim:])
+      if mask1 is None or pool_type == Pooling.SUM:
+        return pool_fn(ker_mat, axis=spatial_axes)
+      elif pool_type == Pooling.AVG:
+        total_size = _size_at(ker_mat, spatial_axes)
+        mask_prod = _get_mask_prod(mask1, mask2, batch_ndim, spec, marginal,
+                                   is_reversed)
+        size = total_size - np.count_nonzero(mask_prod, spatial_axes)
+        ker = np.sum(ker_mat, spatial_axes) / np.maximum(size, 1)
+        return ker
+      else:
+        raise ValueError(f'Unrecognized pool_type {pool_type}.')
+
+    nngp = _pool(nngp, mask1, mask2, cross, 2)
+    ntk = _pool(ntk, mask1, mask2, cross, 2)
+    var1 = _pool(var1, mask1, None, marginal, 1)
+    var2 = _pool(var2, mask2, None, marginal, 1)
+
+    _, _, spatial_axes = _parse_axes(spec, shape1)
+    mask1 = np.all(mask1, spatial_axes) if mask1 is not None else None
+    mask2 = np.all(mask2, spatial_axes) if mask2 is not None else None
+
+    return kernels._replace(
+        var1=var1, nngp=nngp, var2=var2, ntk=ntk,
+        is_reversed=False, marginal=M.OVER_ALL, cross=M.OVER_ALL,
+        mask1=mask1, mask2=mask2
+    )
 
   setattr(kernel_fn, _INPUT_REQ, {'marginal': M.OVER_POINTS,
                                   'cross': M.NO,
@@ -1931,9 +2109,9 @@ def Flatten(spec=None):
       `'NHWC'` for `[batch_size, height, width, channels] or `'NCHW'` for
       `[batch_size, channels, height, width]`.
   """
-  batch_axis = spec.index('N') if spec else 0
 
   def get_output_shape(input_shape):
+    batch_axis, _, _ = _parse_axes(spec, input_shape)
     return (
         input_shape[batch_axis],
         functools.reduce(op.mul,
@@ -1944,10 +2122,17 @@ def Flatten(spec=None):
     output_shape = get_output_shape(input_shape)
     return output_shape, ()
 
-  def apply_fn(params, inputs, **kwargs):
+  def apply_fn(params, inputs, mask_constant=None, **kwargs):
+    batch_axis, _, _ = _parse_axes(spec, inputs)
+    inputs, mask = _get_masked_inputs_and_mask(inputs, mask_constant)
     output_shape = get_output_shape(inputs.shape)
-    inputs = np.moveaxis(inputs, batch_axis, 0)
-    return np.reshape(inputs, output_shape)
+    outputs = np.moveaxis(inputs, batch_axis, 0).reshape(output_shape)
+
+    if mask is not None:
+      mask = np.broadcast_to(mask, inputs.shape)
+      mask = np.moveaxis(mask, batch_axis, 0).reshape(output_shape)
+
+    return _drop_mask(outputs, mask)
 
   def kernel_fn(kernels):
     """Compute kernels."""
@@ -2089,10 +2274,9 @@ def GlobalSelfAttention(n_chan_out,
   OV_gain = W_out_std * W_value_std
   QK_gain = W_query_std * W_key_std
   QK_prod_scaling = float(n_chan_key if fixed else n_chan_key**0.5)
-  batch_axis = spec.index('N') if spec else 0
 
   def init_fn(rng, input_shape):
-    channel_axis = spec.index('C') if spec else len(input_shape) - 1
+    _, channel_axis, _ = _parse_axes(spec, input_shape)
     n_chan_in = input_shape[channel_axis]
     output_shape = (input_shape[:channel_axis] + (n_chan_out,) +
                     input_shape[channel_axis + 1:])
@@ -2113,13 +2297,15 @@ def GlobalSelfAttention(n_chan_out,
 
     return output_shape, (query_matrices, key_matrices, val_matrices, W_out, b)
 
-  def apply_fn(params, inputs, **kwargs):
+  def apply_fn(params, inputs, mask_constant=None, **kwargs):
     query_matrices, key_matrices, val_matrices, W_out, b = params
+    inputs, mask = _get_masked_inputs_and_mask(inputs, mask_constant)
+    batch_axis, channel_axis, spatial_axes = _parse_axes(spec, inputs)
+
     n = inputs.shape[batch_axis]
-    channel_axis = spec.index('C') if spec else inputs.ndim - 1
+
     n_chan_in = inputs.shape[channel_axis]
-    spatial_shape = tuple(s for i, s in enumerate(inputs.shape)
-                          if i not in (batch_axis, channel_axis))
+    spatial_shape = tuple(inputs.shape[i] for i in spatial_axes)
 
     inputs = np.moveaxis(inputs, (batch_axis, channel_axis), (0, -1))
     inputs = inputs.reshape((n, -1, n_chan_in))
@@ -2137,29 +2323,48 @@ def GlobalSelfAttention(n_chan_out,
 
     G_mat  = np.matmul(queries, np.moveaxis(keys, -1, -2))
     G_mat /= QK_prod_scaling
+
+    if mask is not None:
+      mask = np.all(mask, channel_axis, keepdims=True)
+      mask_flat = np.moveaxis(mask, (batch_axis, channel_axis), (0, -1))
+      mask_flat = mask_flat.reshape((1, mask.shape[0], 1, -1))
+      G_mat = np.where(mask_flat, _NEG_INF, G_mat)
+
     G_mat = ostax.softmax(G_mat, axis=-1)
 
     heads = np.matmul(G_mat, values)
     heads = np.moveaxis(heads, 0, -1)
     heads = np.reshape(heads, heads.shape[:-2] + (-1,))
 
-    ret = np.matmul(heads, W_out_std * W_out / np.sqrt(n_chan_val * n_heads))
-    ret = np.reshape(ret, (n,) + spatial_shape + (n_chan_out,)) + b_std * b
-    ret = np.moveaxis(ret, (0, -1), (batch_axis, channel_axis))
-    return ret
+    outputs = np.matmul(heads, W_out_std * W_out / np.sqrt(n_chan_val * n_heads))
+    outputs = np.reshape(outputs, (n,) + spatial_shape + (n_chan_out,)) + b_std * b
+    outputs = np.moveaxis(outputs, (0, -1), (batch_axis, channel_axis))
+    return _drop_mask(outputs, mask)
 
   def kernel_fn(kernels):
-    var1, nngp, var2, ntk, is_reversed, marginal, cross = (
-        kernels.var1, kernels.nngp, kernels.var2, kernels.ntk,
-        kernels.is_reversed, kernels.marginal, kernels.cross)
+    var1, nngp, var2, ntk, cross, marginal, mask1, mask2, is_reversed = (
+        kernels.var1, kernels.nngp, kernels.var2, kernels.ntk, kernels.cross,
+        kernels.marginal, kernels.mask1, kernels.mask2, kernels.is_reversed)
+
+    batch_axis, channel_axis, _ = _parse_axes(spec, kernels.shape1)
 
     if not fixed:
       raise NotImplementedError("No known closed form expression.")
 
-    def _get_G_softmax(mat):
+    def _get_G_softmax(mat, mask):
       if marginal == M.NO:
         mat = np.moveaxis(np.diagonal(mat, axis1=0, axis2=1), -1, 0)
       axes = tuple(range(mat.ndim))
+
+      if mask is not None:
+        mask = np.moveaxis(mask, (batch_axis, channel_axis), (0, -1))
+        mask = np.all(mask, axis=channel_axis)
+        if is_reversed:
+          mask = np.moveaxis(mask, range(1, mask.ndim),
+                                   range(mask.ndim -1, 0, -1))
+        mask = _interleave_ones(mask, 1, False)
+        mat = np.where(mask, _NEG_INF, mat)
+
       return ostax.softmax(QK_gain * mat, axis=axes[2::2])
 
     def _transform_kernel(mat, G1, G2=None):
@@ -2190,8 +2395,8 @@ def GlobalSelfAttention(n_chan_out,
                       optimize=True)
       return _affine(res, OV_gain, b_std)
 
-    G1 = _get_G_softmax(var1)
-    G2 = _get_G_softmax(var2) if var2 is not None else G1
+    G1 = _get_G_softmax(var1, mask1)
+    G2 = _get_G_softmax(var2, mask2) if var2 is not None else G1
 
     var1 = _transform_kernel(var1, G1)
     var2 = _transform_kernel(var2, G2) if var2 is not None else var2
@@ -2199,9 +2404,16 @@ def GlobalSelfAttention(n_chan_out,
     ntk = (_transform_kernel(ntk, G1, G2) + 2 * (nngp - b_std**2)
            if ntk is not None else ntk)
 
-    return kernels._replace(
-        var1=var1, nngp=nngp, var2=var2, ntk=ntk, is_gaussian=True,
-        is_reversed=is_reversed, marginal=marginal, cross=cross)
+    var1, nngp, var2, ntk = _mask_kernels(var1, nngp, var2, ntk, cross,
+                                          marginal, is_reversed, mask1, mask2,
+                                          spec)
+    if mask1 is not None:
+      mask1 = np.all(mask1, channel_axis, keepdims=True)
+    if mask2 is not None:
+      mask2 = np.all(mask2, channel_axis, keepdims=True)
+
+    return kernels._replace(var1=var1, nngp=nngp, var2=var2, ntk=ntk,
+                            is_gaussian=True, mask1=mask1, mask2=mask2)
 
   setattr(kernel_fn, _INPUT_REQ, {'marginal': M.OVER_POINTS,
                                   'cross': M.NO,
@@ -2220,23 +2432,37 @@ def LayerNorm(axis=-1, eps=1e-12, spec=None):
     spec: an optional `string`, specifying the dimension order of the input,
       e.g. `NCHW` or `NHWC`.
   """
-  axis = (axis,) if isinstance(axis, int) else tuple(axis)
 
   def init_fn(rng, input_shape):
     return input_shape, ()
 
-  def apply_fn(params, inputs, **kwargs):
-    mean = np.mean(inputs, axis=axis, keepdims=True)
-    var = np.var(inputs, axis=axis, keepdims=True)
-    return (inputs - mean) / np.sqrt(eps + var)
+  def apply_fn(params, inputs, mask_constant=None, **kwargs):
+    inputs, mask = _get_masked_inputs_and_mask(inputs, mask_constant)
+    _axis = _canonicalize_axis(axis, inputs)
+
+    if mask is not None:
+      size = _size_at(inputs, _axis)
+      mask_size = np.count_nonzero(mask, _axis)
+      for i in sorted(a % inputs.ndim for a in _axis):
+        mask_size = np.expand_dims(mask_size, i)
+      size -= mask_size
+      mean = np.sum(inputs, axis=_axis, keepdims=True) / size
+      var = np.sum((inputs - mean)**2, axis=_axis, keepdims=True) / size
+
+    else:
+      mean = np.mean(inputs, axis=_axis, keepdims=True)
+      var = np.var(inputs, axis=_axis, keepdims=True)
+
+    outputs = (inputs - mean) / np.sqrt(eps + var)
+    return _drop_mask(outputs, mask)
 
   def kernel_fn(kernels):
     var1, nngp, var2, ntk, is_reversed, marginal, cross, shape1 = (
         kernels.var1, kernels.nngp, kernels.var2, kernels.ntk,
         kernels.is_reversed, kernels.marginal, kernels.cross, kernels.shape1)
 
-    channel_axis = spec.index('C') if spec else len(shape1) - 1
-    _axis = list(set(np.arange(len(shape1))[list(axis)]))
+    batch_axis, channel_axis, spatial_axes = _parse_axes(spec, shape1)
+    _axis = _canonicalize_axis(axis, shape1)
 
     if marginal != M.OVER_ALL or cross != M.OVER_ALL:
       if channel_axis not in _axis:
@@ -2244,15 +2470,12 @@ def LayerNorm(axis=-1, eps=1e-12, spec=None):
                          "convergence to an asymptotic kernel; "
                          "got axis=%s" % (channel_axis, _axis))
 
-      batch_axis = spec.index('N') if spec else 0
       if batch_axis in _axis:
         raise ValueError("Normalisation over batch (axis %d) not supported for "
                          "convergence to an asymptotic kernel; "
                          "got axis=%s" % (batch_axis, _axis))
 
       _axis.remove(channel_axis)
-      spatial_axes = tuple(i for i in range(len(shape1))
-                           if i not in (channel_axis, batch_axis))
       kernel_axis = tuple(1 +
                           spatial_axes[::(-1 if is_reversed else 1)].index(i)
                           for i in _axis)
@@ -2276,11 +2499,9 @@ def LayerNorm(axis=-1, eps=1e-12, spec=None):
     if var2 is not None:
       var2 /= np.sqrt(prod22)
 
-    return kernels._replace(
-        var1=var1, nngp=nngp, var2=var2, ntk=ntk,
-        is_reversed=is_reversed, marginal=marginal, cross=cross)
+    return kernels._replace(var1=var1, nngp=nngp, var2=var2, ntk=ntk)
 
-  if len(axis) > 1:
+  if isinstance(axis, tuple) and len(axis) > 1:
     setattr(kernel_fn, _INPUT_REQ, {'marginal': M.OVER_PIXELS,
                                     'cross': M.OVER_PIXELS,
                                     'spec': spec})
@@ -2301,15 +2522,20 @@ def Dropout(rate, mode='train'):
   if rate <= 0. or rate > 1.:
     raise ValueError('The `rate` must be > 0. and <= 1.')
 
-  init_fn, apply_fn = ostax.Dropout(rate, mode=mode)
+  init_fn, apply_fn_old = ostax.Dropout(rate, mode=mode)
+
+  def apply_fn(params, inputs, mask_constant=None, **kwargs):
+    inputs, mask = _get_masked_inputs_and_mask(inputs, mask_constant)
+    outputs = apply_fn_old(params, inputs, **kwargs)
+    return _drop_mask(outputs, mask)
+
   kernel_fn_test = lambda kernels: kernels
 
   def kernel_fn_train(kernels):
     """kernel_fn for `train` mode. """
-    var1, nngp, var2, ntk, marginal, cross, x1_is_x2, is_input = (
+    var1, nngp, var2, ntk, cross, x1_is_x2, is_input = (
         kernels.var1, kernels.nngp, kernels.var2, kernels.ntk,
-        kernels.marginal, kernels.cross, kernels.x1_is_x2,
-        kernels.is_input)
+        kernels.cross, kernels.x1_is_x2, kernels.is_input)
 
     if is_input:
       raise ValueError('Dropout cannot be applied to the input layer.')
@@ -2328,3 +2554,197 @@ def Dropout(rate, mode='train'):
   kernel_fn = kernel_fn_test if mode == 'test' else kernel_fn_train
 
   return init_fn, apply_fn, kernel_fn
+
+
+# MASKING
+
+
+def _get_masked_inputs_and_mask(x, mask_constant):
+  if x is None:
+    mask = None
+
+  elif isinstance(x, tuple):
+    x, mask = x
+
+  elif isinstance(x, np.ndarray):
+    if mask_constant is None:
+      mask = None
+    elif np.isnan(mask_constant):
+      mask = np.isnan(x)
+    else:
+      mask = x == mask_constant
+  else:
+    raise TypeError(x, type(x))
+
+  if mask is not None:
+    x = np.where(mask, np.zeros((), x.dtype), x)
+
+  return x, mask
+
+
+def _add_two_masks(mask1, mask2):
+  if mask1 is None:
+    return mask2
+
+  if mask2 is None:
+    return mask1
+
+  return mask1 & mask2
+
+
+def _add_masks(masks):
+  return functools.reduce(_add_two_masks, masks, None)
+
+
+def _map_tuples(fn, tuples):
+  return tuple(map(fn, zip(*(t for t in tuples))))
+
+
+def _concat_masks(masks, inputs, axis):
+  if all(m is None for m in masks):
+    return None
+
+  if inputs is not None:
+    masks = [m if m is None else np.broadcast_to(
+        m,
+        m.shape[:axis] + inputs[i].shape[axis: axis + 1] + m.shape[axis + 1:])
+             for i, m in enumerate(masks)]
+
+  max_shape = _map_tuples(max, (m.shape for m in masks if m is not None))
+
+  if inputs is not None:
+    max_shapes = [tuple(map(min, max_shape, i.shape)) for i in inputs]
+
+  masks = [
+      (np.broadcast_to(
+          m,
+          max_shape[:axis] + m.shape[axis: axis + 1] + max_shape[axis + 1:])
+       if m is not None
+       else np.zeros_like(max_shapes[i], dtype=np.bool_))
+      for i, m in enumerate(masks)
+  ]
+
+  return np.concatenate(masks, axis)
+
+
+def _fan_in_masks(masks, inputs, axis):
+  if axis is None:
+    return _add_masks(masks)
+
+  return _concat_masks(masks, inputs, axis)
+
+
+def _drop_mask(outputs, mask):
+  if mask is None:
+    return outputs
+
+  return outputs, mask
+
+
+def _pool_mask(mask, window_shape, strides, padding, spec):
+  if mask is None:
+    return mask
+
+  window_shape = list(window_shape)
+  strides = list(strides)
+  batch_axis, channel_axis, _ = _parse_axes(spec, mask)
+
+  for i in sorted((batch_axis, channel_axis)):
+    if i == batch_axis:
+      window_shape.insert(i, 1)
+      strides.insert(i, 1)
+    else:
+      window_shape.insert(i, mask.shape[i])
+      strides.insert(i, mask.shape[i])
+
+  # Get the output shape.
+  out_shape = lax.reduce_window_shape_tuple(
+      mask.shape,
+      window_shape,
+      strides,
+      padding.name
+  )
+
+  # If shapes match, return mask without change.
+  if out_shape == mask.shape:
+    return mask
+
+  # If not, stride through the mask.
+  else:
+    pads = lax.padtype_to_pads(mask.shape, window_shape, strides, padding.name)
+    slices = ()
+    for i in range(mask.ndim):
+      start = - pads[i][0] + (window_shape[i] - 1) // 2
+      end = start + 1 + (out_shape[i] - 1) * strides[i]
+      slices += (slice(start, end, strides[i]),)
+
+    mask = mask[slices]
+    if mask.shape != out_shape:
+      raise ValueError('This should not happen.')
+    return mask
+
+
+def _conv_mask(mask, filter_shape, strides, padding, dimension_numbers):
+  if mask is None:
+    return None
+
+  # Collapse channel dimension of masks, since an FC layer is applied at each
+  # spatial location.
+  mask = np.all(mask, axis=dimension_numbers[0].index('C'), keepdims=True)
+  return _pool_mask(mask, filter_shape, strides, padding,
+                    dimension_numbers[0])
+
+
+def _mask_kernel(mat, mask1, mask2, batch_ndim, spec, marginal, is_reversed):
+  if not utils.is_array(mat) or mask1 is None:
+    return mat
+
+  mask = _get_mask_prod(mask1, mask2, batch_ndim, spec, marginal, is_reversed)
+  mat = np.where(mask, np.zeros((), mat.dtype), mat)
+  return mat
+
+
+def _mask_kernels(var1, nngp, var2, ntk, cross, marginal, is_reversed, mask1,
+                  mask2, spec):
+  var1 = _mask_kernel(var1, mask1, None, 1, spec, marginal, is_reversed)
+  var2 = _mask_kernel(var2, mask2, None, 1, spec, marginal, is_reversed)
+  nngp = _mask_kernel(nngp, mask1, mask2, 2, spec, cross, is_reversed)
+  ntk = _mask_kernel(ntk, mask1, mask2, 2, spec, cross, is_reversed)
+  return var1, nngp, var2, ntk
+
+
+def _get_mask_prod(mask1, mask2, batch_ndim, spec, marginal, is_reversed):
+  if mask1 is None:
+    return False
+
+  batch_axis, channel_axis, _ = _parse_axes(spec, mask1)
+
+  def reshape(m):
+    if m is not None:
+      m = np.all(m, axis=channel_axis, keepdims=True)
+      m = np.squeeze(np.moveaxis(m, (batch_axis, channel_axis), (0, -1)), -1)
+      if is_reversed:
+        m = np.moveaxis(m, range(1, m.ndim), range(m.ndim - 1, 0, -1))
+    return m
+
+  mask1, mask2 = reshape(mask1), reshape(mask2)
+  if mask2 is None:
+    mask2 = mask1
+
+  if marginal in (M.OVER_POINTS, M.NO):
+    mask = _outer_prod(mask1, mask2, 2 - batch_ndim, op.or_)
+
+  elif marginal in (M.OVER_ALL, M.OVER_PIXELS):
+    if batch_ndim == 2:
+      if mask2 is None:
+        mask2 = mask1
+
+      mask1 = np.expand_dims(mask1, batch_ndim - 1)
+      mask2 = np.expand_dims(mask2, batch_ndim - 2)
+
+    mask = mask1 | mask2
+
+  else:
+    raise ValueError(f'Marginalisation {marginal} not recognized.')
+
+  return mask
