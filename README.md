@@ -355,7 +355,11 @@ a small dataset using a small learning rate.
 
 Neural Tangents has been used in the following papers:
 
-* [Taylorized Training: Towards Better Approximation of Neural Network Training at Finite Width](https://arxiv.org/abs/2002.04010) \
+* [Spectrum Dependent Learning Curves in Kernel Regression and Wide Neural Networks.
+](https://arxiv.org/abs/2002.02561) \
+Blake Bordelon, Abdulkadir Canatar, Cengiz Pehlevan
+
+* [Taylorized Training: Towards Better Approximation of Neural Network Training at Finite Width.](https://arxiv.org/abs/2002.04010) \
    Yu Bai, Ben Krause, Huan Wang, Caiming Xiong, Richard Socher
 
 * [On the Infinite Width Limit of Neural Networks with a Standard Parameterization.](https://arxiv.org/pdf/2001.07301.pdf) \
