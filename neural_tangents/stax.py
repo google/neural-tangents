@@ -1012,7 +1012,7 @@ def Dense(out_dim,
       if ntk is not None:
         ntk = nngp + W_std**2 * ntk
     elif parameterization == 'standard':
-      input_width = kernels.shape1[1]
+      input_width = kernels.shape1[channel_axis]
       if ntk is not None:
         ntk = input_width * nngp + 1. + W_std**2 * ntk
       var1, nngp, var2 = map(fc, (var1, nngp, var2))
