@@ -14,7 +14,6 @@
 """Functions to make predictions on the test set using NTK kernel."""
 
 
-
 import collections
 import functools
 
@@ -491,20 +490,33 @@ def gp_inference(kernel_fn,
     get: string, the mode of the Gaussian process, either "nngp" or "ntk", or a
       tuple, or None. If `None` then both `nngp` and `ntk` predictions are
       returned.
-    diag_reg: A float, representing the strength of the regularization.
+    diag_reg: A float or iterable of floats, representing the strength of the
+      regularization.
     compute_cov: A boolean. If `True` computing both `mean` and `variance` and
       only `mean` otherwise.
 
   Returns:
     Either a Gaussian(`mean`, `variance`) namedtuple or `mean` of the GP
-    posterior.
+    posterior or generator function returning Gaussian or `mean` corresponding
+    to diag_reg values.
   """
   if get is None:
     get = ('nngp', 'ntk')
   kdd, ktd, ktt = _get_matrices(kernel_fn, x_train, x_test, get, compute_cov)
   gp_inference_mat = (_gp_inference_mat_jit_cpu if _is_on_cpu(kdd) else
                       _gp_inference_mat_jit)
-  return gp_inference_mat(kdd, ktd, ktt, y_train, get, diag_reg)
+  try:
+    iterator = iter(diag_reg)
+  except TypeError:
+    # diag_reg is a number.
+    return gp_inference_mat(kdd, ktd, ktt, y_train, get, diag_reg)
+
+  def iter_func():
+    for diag_reg in iterator:
+      yield gp_inference_mat(kdd, ktd, ktt, y_train, get, diag_reg)
+  return iter_func()
+
+
 
 
 @get_namedtuple('Gaussians')
@@ -513,7 +525,7 @@ def _gp_inference_mat(kdd,
                       ktt,
                       y_train,
                       get,
-                      diag_reg=0.):
+                      diag_reg):
   """Compute the mean and variance of the `posterior` of NNGP and NTK.
 
   Args:
