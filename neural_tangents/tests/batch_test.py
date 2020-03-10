@@ -43,7 +43,7 @@ OUTPUT_LOGITS = [1, 2, 3]
 CONVOLUTION_CHANNELS = 4
 WIDTH = 1024
 RTOL = 1e-2
-test_utils.update_test_tolerance()
+test_utils.update_test_tolerance(f64_tol=5e-5)
 
 
 def _build_network(input_shape, network, out_logits, use_dropout):
