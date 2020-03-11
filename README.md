@@ -28,6 +28,7 @@ We happily welcome contributions!
 
 
 ## Contents
+* [Colab Notebooks](#colab-notebooks)
 * [Installation](#installation)
 * [5-Minute intro](#5-minute-intro)
 * [Package description](#package-description)
@@ -36,6 +37,15 @@ We happily welcome contributions!
 * [Papers](#papers)
 * [Citation](#citation)
 * [References](#references)
+
+## Colab Notebooks
+
+An easy way to get started with Neural Tangents is by playing around with the following interactive notebooks in Colaboratory. They demo the major features of Neural Tangents and show how it can be used in research.
+
+- [Neural Tangents Cookbook](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/neural_tangents_cookbook.ipynb)
+- [Weight Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/weight_space_linearization.ipynb)
+- [Function Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/function_space_linearization.ipynb)
+- [Neural Network Phase Diagram](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/phase_diagram.ipynb)
 
 ## Installation
 
@@ -77,15 +87,6 @@ Finally, you can run tests by calling:
 
 for f in neural-tangents/neural_tangents/tests/*.py; do python $f; done
 ```
-
-If you would prefer, you can get started without installing by checking out our
-colab examples:
-
-- [Neural Tangents Cookbook](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/neural_tangents_cookbook.ipynb)
-- [Weight Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/weight_space_linearization.ipynb)
-- [Function Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/function_space_linearization.ipynb)
-- [Neural Network Phase Diagram](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/phase_diagram.ipynb)
-
 
 ## 5-Minute intro
 
@@ -354,6 +355,9 @@ a small dataset using a small learning rate.
 ## Papers
 
 Neural Tangents has been used in the following papers:
+
+* [The large learning rate phase of deep learning: the catapult mechanism.](https://arxiv.org/abs/2003.02218) \
+Aitor Lewkowycz, Yasaman Bahri, Ethan Dyer, Jascha Sohl-Dickstein, Guy Gur-Ari
 
 * [Spectrum Dependent Learning Curves in Kernel Regression and Wide Neural Networks.
 ](https://arxiv.org/abs/2002.02561) \
