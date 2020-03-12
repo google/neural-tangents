@@ -389,7 +389,7 @@ to the list!
 
 ## Citation
 
-If you use the code in a publication, please cite out ICLR 2020 paper:
+If you use the code in a publication, please cite our ICLR 2020 paper:
 
 ```
 @inproceedings{neuraltangents2020,
