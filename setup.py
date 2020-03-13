@@ -45,9 +45,8 @@ setuptools.setup(
     long_description=long_description,
     long_description_content_type='text/markdown',
     description='Fast and Easy Infinite Neural Networks in Python',
-    python_requires='>=3.5',
+    python_requires='>=3.6',
     classifiers=[
-        'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
