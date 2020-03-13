@@ -383,18 +383,18 @@ def batch(kernel_fn, batch_size=0, device_count=-1, store_on_device=True):
   """Returns a function that computes a kernel in batches over all devices.
 
   Args:
-    kernel_fn: A function that computes a kernel between two datasets,
-        kernel_fn(x1, x2). Here x1 and x2 are `np.ndarray`s of floats of shape
-        [n1,] + input_shape and [n2,] + input_shape. The kernel function
-        should return a PyTree.
-    batch_size: Integer specifying the size of each batch that gets processed
+    :kernel_fn: A function that computes a kernel between two datasets,
+        `kernel_fn(x1, x2)`. Here `x1` and `x2` are `np.ndarray`s of floats of
+        shape `[n1,] + input_shape` and `[n2,] + input_shape`. The kernel
+        function should return a PyTree.
+    :batch_size: Integer specifying the size of each batch that gets processed
         per physical device. Because we parallelize the computation over columns
-        it should be the case that |x1| is divisible by
-        device_count * batch_size and |x2| is divisible by batch_size.
-    device_count: Integer specifying the number of physical devices to be mapped
-        over. If device_count = -1 all devices are used. If device_count = 0,
-        no device parallelism is used.
-    store_on_device: A boolean that species whether the computed kernel should
+        it should be the case that `|x1|` is divisible by
+        device_count * batch_size and `|x2|` is divisible by batch_size.
+    :device_count: Integer specifying the number of physical devices to be
+        mapped over. If device_count = -1 all devices are used. If
+        device_count = 0, no device parallelism is used.
+    :store_on_device: A boolean that species whether the computed kernel should
         be kept on device or brought back to CPU as it is computed. Defaults to
         True.
 

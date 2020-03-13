@@ -60,10 +60,10 @@ def linearize(f, params):
     >>> mse = np.mean((f(new_params, x) - f_lin(new_params, x)) ** 2)
 
   Args:
-    f: A function that we would like to linearize. It should have the signature
+    :f: A function that we would like to linearize. It should have the signature
        `f(params, *args, **kwargs)` where params is a PyTree and `f` should
        return an `np.ndarray`.
-    params: Initial parameters to the function that we would like to take the
+    :params: Initial parameters to the function that we would like to take the
             Taylor series about. This can be any structure that is compatible
             with the JAX tree operations.
 
@@ -89,18 +89,21 @@ def taylor_expand(f, params, degree):
     >>> mse = np.mean((f(new_params, x) - f_tayl(new_params, x)) ** 2)
 
   Args:
-    f: A function that we would like to Taylor expand. It should have the
-       signature `f(params, *args, **kwargs)` where `params` is a PyTree, and
-       `f` returns a `np.ndarray`.
-    params: Initial parameters to the function that we would like to take the
-            Taylor series about. This can be any structure that is compatible
-            with the JAX tree operations.
+    :f: A function that we would like to Taylor expand. It should have the
+     signature `f(params, *args, **kwargs)` where `params` is a PyTree, and
+     `f` returns a `np.ndarray`.
+
+    :params: Initial parameters to the function that we would like to take the
+      Taylor series about. This can be any structure that is compatible
+      with the JAX tree operations.
+
     degree: The degree of the Taylor expansion.
 
   Returns:
     A function `f_tayl(new_params, *args, **kwargs)` whose signature is the
     same as `f`. Here `f_tayl` implements the degree-order taylor series of `f`
     about `params`.
+
   """
 
   def taylorize_r(f, params, dparams, degree, current_degree):
@@ -143,10 +146,10 @@ def flatten_features(kernel):
 def empirical_implicit_ntk_fn(f):
   """Computes the ntk without batching for inputs x1 and x2.
 
-  The Neural Tangent Kernel is defined as J(X_1)^T J(X_2) where J is the
-  jacobian df/dparams. Computing the NTK directly involves directly
-  instantiating the jacobian which takes
-  O(dataset_size * output_dim * parameters) memory. It turns out it is
+  The Neural Tangent Kernel is defined as :math:`J(X_1)^T J(X_2)` where
+  :math:`J` is the jacobian :math:`df/dparams`. Computing the NTK directly
+  involves directly instantiating the jacobian which takes
+  `O(dataset_size * output_dim * parameters)` memory. It turns out it is
   substantially more efficient (especially as the number of parameters grows)
   to compute the NTK implicitly.
 
@@ -158,9 +161,9 @@ def empirical_implicit_ntk_fn(f):
   TODO: Write up a better description of the implicit method.
 
   Args:
-    f: The function whose NTK we are computing. f should have the signature
-       f(params, inputs) and should return an `np.ndarray` of outputs with shape
-       [|inputs|, output_dim].
+    :f: The function whose NTK we are computing. `f` should have the signature
+       `f(params, inputs)` and should return an `np.ndarray` of outputs with
+       shape `[|inputs|, output_dim]`.
 
   Returns:
     A function ntk_fn that computes the empirical ntk.
@@ -210,13 +213,13 @@ def empirical_implicit_ntk_fn(f):
 def empirical_direct_ntk_fn(f):
   """Computes the ntk without batching for inputs x1 and x2.
 
-  The Neural Tangent Kernel is defined as J(X_1)^T J(X_2) where J is the
-  jacobian df/dparams.
+  The Neural Tangent Kernel is defined as :math:`J(X_1)^T J(X_2)` where
+  :math:`J` is the jacobian :math:`df/dparams`.
 
   Args:
-    f: The function whose NTK we are computing. f should have the signature
-       f(params, inputs) and should return an `np.ndarray` of outputs with shape
-       [|inputs|, output_dim].
+    :f: The function whose NTK we are computing. `f` should have the signature
+     `f(params, inputs)` and should return an `np.ndarray` of outputs with shape
+     `[|inputs|, output_dim]`.
 
   Returns:
     A function `ntk_fn` that computes the empirical ntk.
@@ -286,7 +289,7 @@ def empirical_nngp_fn(f):
     covariance.
 
   Args:
-    f: a function computing the output of the neural network.
+    :f: a function computing the output of the neural network.
       From `jax.experimental.stax`: "takes params, inputs, and an rng key and
       applies the layer".
 
