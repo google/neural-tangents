@@ -79,22 +79,31 @@ def _flatten_kernel(k, x2_is_none, store_on_device):
         jit(_flatten_batch_dimensions, static_argnums=(1,), backend='cpu'))
   if hasattr(k, '_asdict'):
     k_dict = k._asdict()
+
+    if 'diagonal_batch' in k_dict:
+      diagonal_batch = k_dict['diagonal_batch']
+      diagonal_batch = bool(diagonal_batch[(0,) * diagonal_batch.ndim])
+      if not diagonal_batch:
+        raise NotImplementedError('Batchning not implemented for '
+                                  '`diagonal_batch == False`.')
+
     k = k._replace(**dict((key, 0.) for key in k_dict))
     for key, value in k_dict.items():
-      if key == 'var1':
+      if key == 'cov1':
         k_dict[key] = fl(value, 1)
-      elif key == 'var2':
+      elif key == 'cov2':
         if x2_is_none:
           k_dict[key] = None
         else:
           k_dict[key] = fl(value, 0)
       elif key == 'x1_is_x2':
         k_dict[key] = value[(0,) * value.ndim]
-      elif key in ('is_height_width', 'is_gaussian', 'is_input'):
+      elif key in ('is_reversed', 'is_gaussian', 'is_input',
+                   'diagonal_batch', 'diagonal_spatial'):
         # NOTE(schsam): Currently we have to make these values concrete so that
         # batched analytic kernels compose.
         k_dict[key] = bool(value[(0,) * value.ndim])
-      elif key in ('marginal', 'cross'):
+      elif key in ('batch_axis', 'channel_axis'):
         k_dict[key] = int(value[(0,) * value.ndim])
       elif key == 'shape1':
         if any([x.ndim > 2 for x in value]):
@@ -141,15 +150,15 @@ def _move_kernel_to_cpu(k):
 
 def _slice_kernel(kernel, n1_slice, n2_slice):
   assert isinstance(kernel, Kernel)
-  var1 = kernel.var1[n1_slice]
-  var2 = kernel.var1[n2_slice] if kernel.var2 is None else kernel.var2[n2_slice]
+  cov1 = kernel.cov1[n1_slice]
+  cov2 = kernel.cov1[n2_slice] if kernel.cov2 is None else kernel.cov2[n2_slice]
   return kernel._replace(
-      var1=var1,
+      cov1=cov1,
       nngp=kernel.nngp[n1_slice, n2_slice],
-      var2=var2,
+      cov2=cov2,
       ntk=kernel.ntk[n1_slice, n2_slice],
-      shape1=(var1.shape[0],) + kernel.shape1[1:],
-      shape2=(var2.shape[0],) + kernel.shape2[1:])
+      shape1=(cov1.shape[0],) + kernel.shape1[1:],
+      shape2=(cov2.shape[0],) + kernel.shape2[1:])
 
 
 def _serial(kernel_fn, batch_size, store_on_device=True):
@@ -242,11 +251,11 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
       in_kernel = _slice_kernel(kernel, n1_slice, n2_slice)
       return n1, kernel_fn(in_kernel, *args, **kwargs)
 
-    var2_is_none = kernel.var2 is None
+    cov2_is_none = kernel.cov2 is None
     _, kernel = _scan(row_fn, 0, n1s, store_on_device)
-    if var2_is_none:
-      kernel = kernel._replace(var2=None)
-    return flatten(kernel, var2_is_none)
+    if cov2_is_none:
+      kernel = kernel._replace(cov2=None)
+    return flatten(kernel, cov2_is_none)
 
   @utils.wraps(kernel_fn)
   def serial_fn(x1_or_kernel, x2=None, *args, **kwargs):
@@ -320,7 +329,7 @@ def _parallel(kernel_fn, device_count=-1):
     return _flatten_kernel(kernel, x2_is_none, True)
 
   def parallel_fn_kernel(kernel, *args, **kwargs):
-    n1 = kernel.var1.shape[0]
+    n1 = kernel.cov1.shape[0]
 
     _device_count = device_count
 
@@ -335,25 +344,25 @@ def _parallel(kernel_fn, device_count=-1):
 
     kernel_dict = kernel._asdict()
 
-    var2 = kernel_dict['var2']
-    var2_is_none = var2 is None
-    if var2 is None:
-      var2 = kernel_dict['var1']
-    kernel_dict['var2'] = np.broadcast_to(var2, (_device_count,) + var2.shape)
+    cov2 = kernel_dict['cov2']
+    cov2_is_none = cov2 is None
+    if cov2 is None:
+      cov2 = kernel_dict['cov1']
+    kernel_dict['cov2'] = np.broadcast_to(cov2, (_device_count,) + cov2.shape)
     kernel_dict['x1_is_x2'] = np.broadcast_to(
         kernel_dict['x1_is_x2'],
         (_device_count,) + kernel_dict['x1_is_x2'].shape)
 
     for k, v in kernel_dict.items():
-      if k in ('nngp', 'ntk', 'var1'):
+      if k in ('nngp', 'ntk', 'cov1'):
         kernel_dict[k] = \
             np.reshape(v, (_device_count, n1_per_device,) + v.shape[1:])
       if k in ('shape1',):
         kernel_dict[k] = (n1_per_device,) + v[1:]
     kernel = kernel_fn(Kernel(**kernel_dict), *args, **kwargs)
-    if var2_is_none:
-      kernel = kernel._replace(var2=None)
-    return _flatten_kernel(kernel, var2_is_none, True)
+    if cov2_is_none:
+      kernel = kernel._replace(cov2=None)
+    return _flatten_kernel(kernel, cov2_is_none, True)
 
   @utils.wraps(kernel_fn)
   def parallel_fn(x1_or_kernel, x2=None, *args, **kwargs):

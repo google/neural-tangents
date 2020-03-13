@@ -53,9 +53,6 @@ def _sample_many_kernel_fn(kernel_fn_sample_once, key, n_samples,
     return tree_map(lambda sample: sample / n, sample)
 
   def get_samples(x1, x2, get):
-    if x2 is not None:
-      assert x1.shape[1:] == x2.shape[1:]
-
     _key = key
     for n in range(1, max(n_samples) + 1):
       _key, split = random.split(_key)
