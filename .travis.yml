@@ -8,7 +8,7 @@ install:
   - pip install --upgrade pip
   - if [[ "$TRAVIS_PYTHON_VERSION" != 3.8 ]];
     then
-      pip install tensorflow "tensorflow-datasets>=2.0.0"
+      pip install tensorflow "tensorflow-datasets>=2.0.0";
     fi
   - pip install jaxlib jax --upgrade
   - git clone https://github.com/google/neural-tangents
