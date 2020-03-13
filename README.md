@@ -1,5 +1,7 @@
 # Neural Tangents [[arXiv](https://arxiv.org/abs/1912.02803)]
- Fast and Easy Infinite Neural Networks in Python
+[**Quickstart**](#colab-notebooks)
+| [**Install guide**](#installation)
+| [**Reference docs**](https://neural-tangents.readthedocs.io/en/latest/)
 
 [![Build Status](https://travis-ci.org/google/neural-tangents.svg?branch=master)](https://travis-ci.org/google/neural-tangents) [![PyPI](https://img.shields.io/pypi/v/neural-tangents)](https://pypi.org/project/neural-tangents/) [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/neural-tangents)](https://pypi.org/project/neural-tangents/) [![PyPI - License](https://img.shields.io/pypi/l/neural_tangents)](https://github.com/google/neural-tangents/blob/master/LICENSE)
 

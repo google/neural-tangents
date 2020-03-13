@@ -89,26 +89,32 @@ def monte_carlo_kernel_fn(init_fn,
   """Return a Monte Carlo sampler of NTK and NNGP kernels of a given function.
 
   Args:
-    :init_fn: a function initializing parameters of the neural network. From
+    :init_fn:
+      a function initializing parameters of the neural network. From
       `jax.experimental.stax`: "takes an rng key and an input shape and returns
       an `(output_shape, params)` pair".
-    :apply_fn: a function computing the output of the neural network.
+    :apply_fn:
+      a function computing the output of the neural network.
       From `jax.experimental.stax`: "takes params, inputs, and an rng key and
       applies the layer".
-    :key: RNG (`jax.random.PRNGKey`) for sampling random networks. Must have
+    :key:
+      RNG (`jax.random.PRNGKey`) for sampling random networks. Must have
       shape `(2,)`.
-    :n_samples: number of Monte Carlo samples. Can be either an integer or an
+    :n_samples:
+      number of Monte Carlo samples. Can be either an integer or an
       iterable of integers at which the resulting generator will yield
       estimates. Example: use `n_samples=[2**k for k in range(10)]` for the
       generator to yield estimates using 1, 2, 4, ..., 512 Monte Carlo samples.
     :batch_size: an integer making the kernel computed in batches of `x1` and
       `x2` of this size. `0` means computing the whole kernel. Must divide
       `x1.shape[0]` and `x2.shape[0]`.
-    :device_count: an integer making the kernel be computed in parallel across
+    :device_count:
+      an integer making the kernel be computed in parallel across
       this number of devices (e.g. GPUs or TPU cores). `-1` means use all
       available devices. `0` means compute on a single device sequentially. If
       not `0`, must divide `x1.shape[0]`.
-    :store_on_device: a boolean, indicating whether to store the resulting
+    :store_on_device:
+      a boolean, indicating whether to store the resulting
       kernel on the device (e.g. GPU or TPU), or in the CPU RAM, where larger
       kernels may fit.
 

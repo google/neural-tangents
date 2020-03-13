@@ -1,4 +1,4 @@
-Neural Tangents reference documentation
+Neural Tangents Reference
 ===========================================
 
 Neural Tangents is a set of tools for constructing and training infinitely wide
@@ -6,7 +6,7 @@ neural networks.
 
 .. toctree::
    :maxdepth: 2
-   :caption: Reference:
+   :caption: Topics:
 
    neural_tangents.stax
    neural_tangents.empirical
