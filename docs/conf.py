@@ -15,13 +15,11 @@
 import os
 import sys
 sys.path.insert(0, os.path.abspath('..'))
-sys.path.insert(0, os.path.abspath('../..'))
-
 
 # -- Project information -----------------------------------------------------
 
 project = u'Neural Tangents'
-copyright = u'2020 Google Inc.'
+copyright = u'2019, Google LLC.'
 author = u'The Neural Tangents Authors'
 
 # The short X.Y version
