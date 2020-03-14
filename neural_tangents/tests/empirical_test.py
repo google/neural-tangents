@@ -79,23 +79,38 @@ for o in OUTPUT_LOGITS:
 
 class EmpiricalTest(jtu.JaxTestCase):
 
+  # We use a three layer deep linear network for testing.
+  @classmethod
+  def f(cls, x, params, do_alter, do_shift_x=True):
+    w1, w2, b = params
+    if do_alter:
+      b *= 2.
+      w1 += 5.
+      w2 /= 0.9
+    if do_shift_x:
+      x = x * 2 + 1.
+    return 0.5 * np.dot(np.dot(x.T, w1), x) + np.dot(w2, x) + b
+
+  @classmethod
+  def f_lin_exact(cls, x0, x, params, do_alter, do_shift_x=True):
+    w1, w2, b = params
+    f0 = EmpiricalTest.f(x0, params, do_alter, do_shift_x)
+    if do_shift_x:
+      x0 = x0 * 2 + 1.
+      x = x * 2 + 1.
+    dx = x - x0
+    if do_alter:
+      b *= 2.
+      w1 += 5.
+      w2 /= 0.9
+    return f0 + np.dot(np.dot(x0.T, w1) + w2, dx)
+
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_{}'.format(shape),
           'shape': shape
       } for shape in TAYLOR_MATRIX_SHAPES))
   def testLinearization(self, shape):
-    # We use a three layer deep linear network for testing.
-    def f(x, params):
-      w1, w2, b = params
-      return 0.5 * np.dot(np.dot(x.T, w1), x) + np.dot(w2, x) + b
-
-    def f_lin_exact(x0, x, params):
-      w1, w2, b = params
-      f0 = f(x0, params)
-      dx = x - x0
-      return f0 + np.dot(np.dot(x0.T, w1) + w2, dx)
-
     key = random.PRNGKey(0)
     key, s1, s2, s3, = random.split(key, 4)
     w1 = random.normal(s1, shape)
@@ -107,12 +122,18 @@ class EmpiricalTest(jtu.JaxTestCase):
     key, split = random.split(key)
     x0 = random.normal(split, (shape[-1],))
 
-    f_lin = empirical.linearize(f, x0)
+    f_lin = empirical.linearize(EmpiricalTest.f, x0)
 
     for _ in range(TAYLOR_RANDOM_SAMPLES):
-      key, split = random.split(key)
-      x = random.normal(split, (shape[-1],))
-      self.assertAllClose(f_lin_exact(x0, x, params), f_lin(x, params), True)
+      for do_alter in [True, False]:
+        for do_shift_x in [True, False]:
+          key, split = random.split(key)
+          x = random.normal(split, (shape[-1],))
+          self.assertAllClose(EmpiricalTest.f_lin_exact(x0, x, params, do_alter,
+                                          do_shift_x=do_shift_x),
+                              f_lin(x, params, do_alter,
+                                    do_shift_x=do_shift_x),
+                              True)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -120,21 +141,19 @@ class EmpiricalTest(jtu.JaxTestCase):
           'shape': shape
       } for shape in TAYLOR_MATRIX_SHAPES))
   def testTaylorExpansion(self, shape):
-    # We use a three layer deep linear network for testing.
-    def f(x, params):
-      w1, w2, b = params
-      return 0.5 * np.dot(np.dot(x.T, w1), x) + np.dot(w2, x) + b
 
-    def f_lin_exact(x0, x, params):
+    def f_2_exact(x0, x, params, do_alter, do_shift_x=True):
       w1, w2, b = params
-      f0 = f(x0, params)
+      f_lin = EmpiricalTest.f_lin_exact(x0, x, params, do_alter, do_shift_x)
+      if do_shift_x:
+        x0 = x0 * 2 + 1.
+        x = x * 2 + 1.
+      if do_alter:
+        b *= 2.
+        w1 += 5.
+        w2 /= 0.9
       dx = x - x0
-      return f0 + np.dot(np.dot(x0.T, w1) + w2, dx)
-
-    def f_2_exact(x0, x, params):
-      w1, w2, b = params
-      dx = x - x0
-      return f_lin_exact(x0, x, params) + 0.5 * np.dot(np.dot(dx.T, w1), dx)
+      return f_lin + 0.5 * np.dot(np.dot(dx.T, w1), dx)
 
     key = random.PRNGKey(0)
     key, s1, s2, s3, = random.split(key, 4)
@@ -147,14 +166,22 @@ class EmpiricalTest(jtu.JaxTestCase):
     key, split = random.split(key)
     x0 = random.normal(split, (shape[-1],))
 
-    f_lin = empirical.taylor_expand(f, x0, 1)
-    f_2 = empirical.taylor_expand(f, x0, 2)
+    f_lin = empirical.taylor_expand(EmpiricalTest.f, x0, 1)
+    f_2 = empirical.taylor_expand(EmpiricalTest.f, x0, 2)
 
     for _ in range(TAYLOR_RANDOM_SAMPLES):
-      key, split = random.split(key)
-      x = random.normal(split, (shape[-1],))
-      self.assertAllClose(f_lin_exact(x0, x, params), f_lin(x, params), True)
-      self.assertAllClose(f_2_exact(x0, x, params), f_2(x, params), True)
+      for do_alter in [True, False]:
+        for do_shift_x in [True, False]:
+          key, split = random.split(key)
+          x = random.normal(split, (shape[-1],))
+          self.assertAllClose(EmpiricalTest.f_lin_exact(x0, x, params, do_alter,
+                                          do_shift_x=do_shift_x),
+                              f_lin(x, params, do_alter, do_shift_x=do_shift_x),
+                              True)
+          self.assertAllClose(f_2_exact(x0, x, params, do_alter,
+                                        do_shift_x=do_shift_x),
+                              f_2(x, params, do_alter, do_shift_x=do_shift_x),
+                              True)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({

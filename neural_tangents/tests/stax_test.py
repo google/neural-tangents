@@ -13,6 +13,7 @@
 # limitations under the License.
 """Tests for stax.py."""
 
+import string
 from functools import partial
 import random as prandom
 import itertools
@@ -36,13 +37,15 @@ MODELS = [
     'conv'
 ]
 
-INPUT_SHAPE = (2, 7, 6, 3)
+BATCH_SIZE = 2
+
+INPUT_SHAPE = (BATCH_SIZE, 7, 6, 3)
 
 WIDTHS = [2**11]
 
 N_SAMPLES = 100
 
-RTOL = 0.02
+RTOL = 0.022
 
 FILTER_SHAPES = [
     (1, 1),
@@ -58,7 +61,6 @@ PADDINGS = [
 
 STRIDES = [
     (1, 1),
-    (1, 2),
     (2, 1),
 ]
 
@@ -78,6 +80,9 @@ LAYER_NORM = [
     'C',
     'HC',
     'CHW',
+    'NC',
+    'NWC',
+    'NCHW'
 ]
 
 POOL_TYPES = [
@@ -97,8 +102,9 @@ def _get_inputs(key, is_conv, same_inputs, input_shape, fn=np.cos):
   key, split = random.split(key)
   shape = input_shape if is_conv else (input_shape[0], np.prod(input_shape[1:]))
   x1 = fn(random.normal(key, shape))
+  batch_axis = shape.index(BATCH_SIZE)
+  shape = shape[:batch_axis] + (2 * BATCH_SIZE,) + shape[batch_axis + 1:]
   x2 = None if same_inputs else 2 * fn(random.normal(split, shape))
-
   return x1, x2
 
 
@@ -116,7 +122,7 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
     strides = tuple(strides[default_filter_spec.index(c)]
                     for c in filter_spec if c in default_filter_spec)
 
-    # Select a activation order.
+    # Select the activation order.
     default_spec = 'NHWC'
     if xla_bridge.get_backend().platform == 'tpu':
       # Keep batch dimension leading for TPU for batching to work.
@@ -128,18 +134,19 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
     spec = prandom.choice(specs)
     input_shape = tuple(INPUT_SHAPE[default_spec.index(c)] for c in spec)
 
-    if layer_norm:
-      layer_norm = tuple(spec.index(c) for c in layer_norm)
-
   else:
-    # Only `NC` dimension order is supported by empirical kernel.
+    # TODO: only `NC` dimension order is supported by empirical kernel.
     spec = 'NC'
     filter_spec = None
     input_shape = INPUT_SHAPE
-    if layer_norm:
-      layer_norm = prandom.choice([(1,), (-1,)])
 
   dimension_numbers = (spec, filter_spec, spec)
+  spec = dimension_numbers[2]
+  batch_axis, channel_axis = spec.index('N'), spec.index('C')
+
+  if layer_norm:
+    layer_norm = tuple(spec.index(c) for c in layer_norm)
+
   logging.warning(f'DIMENSION NUMBERS: {dimension_numbers}')
 
   fc = partial(
@@ -157,8 +164,6 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
   )
   affine = conv(width) if is_conv else fc(width)
 
-  spec = dimension_numbers[-1]
-
   rate = np.onp.random.uniform(0.5, 0.9)
   dropout = stax.Dropout(rate, mode='train')
 
@@ -175,13 +180,16 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
     pool_or_identity = pool_fn((2, 3),
                                None,
                                'SAME' if padding == 'SAME' else 'CIRCULAR',
-                               spec=spec)
+                               batch_axis=batch_axis,
+                               channel_axis=channel_axis)
   else:
     pool_or_identity = stax.Identity()
   dropout_or_identity = dropout if use_dropout else stax.Identity()
   layer_norm_or_identity = (stax.Identity() if layer_norm is None
-                            else stax.LayerNorm(axis=layer_norm, spec=spec))
-  res_unit = stax.serial(pool_or_identity, phi, dropout_or_identity, affine)
+                            else stax.LayerNorm(axis=layer_norm,
+                                                batch_axis=batch_axis,
+                                                channel_axis=channel_axis))
+  res_unit = stax.serial(dropout_or_identity, affine, pool_or_identity)
   if is_res:
     block = stax.serial(
         affine,
@@ -189,17 +197,19 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
         stax.parallel(stax.Identity(),
                       res_unit),
         stax.FanInSum(),
-        layer_norm_or_identity)
+        layer_norm_or_identity,
+        phi)
   else:
     block = stax.serial(
         affine,
         res_unit,
-        layer_norm_or_identity)
+        layer_norm_or_identity,
+        phi)
 
   if proj_into_2d == 'FLAT':
-    proj_layer = stax.Flatten(spec=spec)
+    proj_layer = stax.Flatten(batch_axis, 0)
   elif proj_into_2d == 'POOL':
-    proj_layer = global_pool_fn(spec=spec)
+    proj_layer = global_pool_fn(batch_axis, channel_axis)
   elif proj_into_2d.startswith('ATTN'):
     n_heads = int(np.sqrt(width))
     n_chan_val = int(np.round(float(width) / n_heads))
@@ -216,12 +226,15 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
             W_query_std=W_std,
             W_out_std=1.0,
             b_std=b_std,
-            spec=spec), stax.Flatten(spec=spec))
+            batch_axis=batch_axis,
+            channel_axis=channel_axis),
+        stax.Flatten(batch_axis, 0))
   else:
     raise ValueError(proj_into_2d)
   readout = stax.serial(proj_layer, fc(1 if is_ntk else width))
 
-  return stax.serial(block, readout), input_shape
+  device_count = -1 if spec.index('N') == 0 else 0
+  return stax.serial(block, readout), input_shape, device_count
 
 
 def _get_net_pool(width, is_ntk, pool_type, padding,
@@ -247,12 +260,14 @@ def _get_net_pool(width, is_ntk, pool_type, padding,
   elif pool_type == 'SUM':
     pool_fn = stax.SumPool
     global_pool_fn = stax.GlobalSumPool
+  else:
+    raise ValueError(pool_type)
 
   pool = pool_fn(filter_shape, strides, padding)
 
   return stax.serial(
       conv(width), phi, pool, conv(width), phi, global_pool_fn(),
-      fc(1 if is_ntk else width)), INPUT_SHAPE
+      fc(1 if is_ntk else width)), INPUT_SHAPE, -1
 
 
 class StaxTest(jtu.JaxTestCase):
@@ -424,7 +439,7 @@ class StaxTest(jtu.JaxTestCase):
     if is_conv:
       if xla_bridge.get_backend().platform == 'cpu':
         raise jtu.SkipTest('Not running CNN models on CPU to save time.')
-    elif proj_into_2d != PROJECTIONS[0] or layer_norm != LAYER_NORM[0]:
+    elif proj_into_2d != PROJECTIONS[0] or layer_norm not in ('C', 'NC'):
       raise jtu.SkipTest('FC models do not have these parameters.')
 
     W_std, b_std = 2.**0.5, 0.5**0.5
@@ -524,20 +539,20 @@ class StaxTest(jtu.JaxTestCase):
     ker_norm = kernel_fn_norm(X1, X2)
 
     self.assertAllClose(np.ones_like(ker_norm.nngp), ker_norm.nngp, True)
-    self.assertAllClose(np.ones_like(ker_norm.var1), ker_norm.var1, True)
-    self.assertAllClose(np.ones_like(ker_norm.var2), ker_norm.var2, True)
+    self.assertAllClose(np.ones_like(ker_norm.cov1), ker_norm.cov1, True)
+    self.assertAllClose(np.ones_like(ker_norm.cov2), ker_norm.cov2, True)
 
     self.assertEqual(ker_norm.nngp.shape, ker.nngp.shape)
-    self.assertEqual(ker_norm.var1.shape, ker.var1.shape)
-    self.assertEqual(ker_norm.var2.shape, ker.var2.shape)
+    self.assertEqual(ker_norm.cov1.shape, ker.cov1.shape)
+    self.assertEqual(ker_norm.cov2.shape, ker.cov2.shape)
 
     ker_unnorm = np.outer(out_unnorm, out_unnorm).reshape((2, 3, 2, 3))
     ker_unnorm = np.transpose(ker_unnorm, axes=(0, 2, 1, 3))
     nngp = np.broadcast_to(
         ker_unnorm.reshape((1, 1) + ker_unnorm.shape), ker.nngp.shape)
-    var1 = np.broadcast_to(np.expand_dims(ker_unnorm, 0), ker.var1.shape)
-    var2 = np.broadcast_to(np.expand_dims(ker_unnorm, 0), ker.var2.shape)
-    self.assertAllClose((nngp, var1, var2), (ker.nngp, ker.var1, ker.var2),
+    cov1 = np.broadcast_to(np.expand_dims(ker_unnorm, 0), ker.cov1.shape)
+    cov2 = np.broadcast_to(np.expand_dims(ker_unnorm, 0), ker.cov2.shape)
+    self.assertAllClose((nngp, cov1, cov2), (ker.nngp, ker.cov1, ker.cov2),
                         True)
 
   @jtu.parameterized.named_parameters(
@@ -572,8 +587,8 @@ class StaxTest(jtu.JaxTestCase):
       } for model in MODELS for width in WIDTHS
                           for same_inputs in [True, False]
                           for phi, phi_name in ACTIVATIONS.items()
-                          for padding in PADDINGS for strides in STRIDES
-                          for filter_shape in FILTER_SHAPES
+                          for padding in ['SAME'] for strides in STRIDES
+                          for filter_shape in [(2, 1)]
                           for is_ntk in [True, False]
                           for use_pooling in [True, False]
                           for proj_into_2d in ['FLAT', 'POOL']))
@@ -611,64 +626,6 @@ class StaxTest(jtu.JaxTestCase):
                    pool_type, layer_norm, parameterization, use_dropout)
     self._check_agreement_with_empirical(net, same_inputs, is_conv, use_dropout,
                                          is_ntk, proj_into_2d)
-
-  def _check_agreement_with_empirical(self, net, same_inputs, is_conv,
-                                      use_dropout, is_ntk, proj_into_2d):
-
-    (init_fn, apply_fn, kernel_fn), input_shape = net
-
-
-    num_samples = N_SAMPLES * 5 if use_dropout else N_SAMPLES
-    key = random.PRNGKey(1)
-    x1, x2 = _get_inputs(key, is_conv, same_inputs, input_shape)
-
-    x1_out_shape, params = init_fn(key, x1.shape)
-    if same_inputs:
-      assert (x2 is None)
-    if x2 is None:
-      x2_out_shape = x1_out_shape
-    else:
-      x2_out_shape, params = init_fn(key, x2.shape)
-    del (params)
-
-    def _get_empirical(n_samples, get):
-      kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
-          init_fn, apply_fn, key, n_samples)
-      if same_inputs:
-        assert (x2 is None)
-      return kernel_fn_empirical(x1, x2, get)
-
-    if proj_into_2d == 'ATTN_PARAM':
-      # no analytic kernel available, just test forward/backward pass
-      _get_empirical(1, 'ntk' if is_ntk else 'nngp')
-    else:
-      if is_ntk:
-        exact, shape1, shape2 = kernel_fn(x1, x2, ('ntk', 'shape1', 'shape2'))
-        empirical = np.reshape(_get_empirical(num_samples, 'ntk'), exact.shape)
-      else:
-        exact, shape1, shape2 = kernel_fn(x1, x2, ('nngp', 'shape1', 'shape2'))
-        empirical = _get_empirical(num_samples, 'nngp')
-      test_utils.assert_close_matrices(self, exact, empirical, RTOL)
-      self.assertEqual(shape1, x1_out_shape)
-      self.assertEqual(shape2, x2_out_shape)
-
-  def test_composition_dense(self):
-    rng = random.PRNGKey(0)
-    x1 = random.normal(rng, (10, 10))
-    x2 = random.normal(rng, (10, 10))
-
-    Block = stax.serial(stax.Dense(256), stax.Relu())
-
-    _, _, ker_fn = Block
-    _, _, composed_ker_fn = stax.serial(Block, Block)
-
-    ker_out = ker_fn(ker_fn(x1))
-    composed_ker_out = composed_ker_fn(x1)
-    self.assertAllClose(ker_out, composed_ker_out, True)
-
-    ker_out = ker_fn(ker_fn(x1, x2))
-    composed_ker_out = composed_ker_fn(x1, x2)
-    self.assertAllClose(ker_out, composed_ker_out, True)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -715,39 +672,98 @@ class StaxTest(jtu.JaxTestCase):
     self.assertAllClose(exact[sparse_count:, sparse_count:],
                         mc[sparse_count:, sparse_count:], True)
 
+  def test_composition_dense(self):
+    rng = random.PRNGKey(0)
+    x1 = random.normal(rng, (10, 10))
+    x2 = random.normal(rng, (10, 10))
+
+    Block = stax.serial(stax.Dense(256), stax.Relu())
+
+    _, _, ker_fn = Block
+    _, _, composed_ker_fn = stax.serial(Block, Block)
+
+    ker_out = ker_fn(ker_fn(x1))
+    composed_ker_out = composed_ker_fn(x1)
+    self.assertAllClose(ker_out, composed_ker_out, True)
+
+    ker_out = ker_fn(ker_fn(x1, x2))
+    composed_ker_out = composed_ker_fn(x1, x2)
+    self.assertAllClose(ker_out, composed_ker_out, True)
+
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
-          'testcase_name': '_avg_pool={}'.format(avg_pool),
-          'avg_pool': avg_pool
-      } for avg_pool in [True, False]))
-  def test_composition_conv(self, avg_pool):
+          'testcase_name': '_avg_pool={}_same_inputs={}'.format(avg_pool,
+                                                                same_inputs),
+          'avg_pool': avg_pool,
+          'same_inputs': same_inputs
+      } for avg_pool in [True, False]
+        for same_inputs in [True, False]))
+  def test_composition_conv(self, avg_pool, same_inputs):
     rng = random.PRNGKey(0)
     x1 = random.normal(rng, (5, 10, 10, 3))
-    x2 = random.normal(rng, (5, 10, 10, 3))
+    x2 = None if same_inputs else random.normal(rng, (5, 10, 10, 3))
 
     Block = stax.serial(stax.Conv(256, (3, 3)), stax.Relu())
     if avg_pool:
       Readout = stax.serial(stax.GlobalAvgPool(), stax.Dense(10))
-      marginalization = 'none'
     else:
       Readout = stax.serial(stax.Flatten(), stax.Dense(10))
-      marginalization = 'auto'
 
     block_ker_fn, readout_ker_fn = Block[2], Readout[2]
     _, _, composed_ker_fn = stax.serial(Block, Readout)
 
-    ker_out = readout_ker_fn(block_ker_fn(x1, marginalization=marginalization))
-    composed_ker_out = composed_ker_fn(x1)
-    self.assertAllClose(ker_out, composed_ker_out, True)
+    composed_ker_out = composed_ker_fn(x1, x2)
+    ker_out_no_marg = readout_ker_fn(block_ker_fn(x1, x2,
+                                                  diagonal_spatial=False))
+    ker_out_default = readout_ker_fn(block_ker_fn(x1, x2))
+    self.assertAllClose(composed_ker_out, ker_out_no_marg, True)
+    self.assertAllClose(composed_ker_out, ker_out_default, True)
 
     if avg_pool:
       with self.assertRaises(ValueError):
-        ker_out = readout_ker_fn(block_ker_fn(x1))
+        ker_out = readout_ker_fn(block_ker_fn(x1, x2, diagonal_spatial=True))
+    else:
+      ker_out_marg = readout_ker_fn(block_ker_fn(x1, x2,
+                                                 diagonal_spatial=True))
+      self.assertAllClose(composed_ker_out, ker_out_marg, True)
 
-    ker_out = readout_ker_fn(
-        block_ker_fn(x1, x2, marginalization=marginalization))
-    composed_ker_out = composed_ker_fn(x1, x2)
-    self.assertAllClose(ker_out, composed_ker_out, True)
+  def _check_agreement_with_empirical(self, net, same_inputs, is_conv,
+                                      use_dropout, is_ntk, proj_into_2d):
+    (init_fn, apply_fn, kernel_fn), input_shape, device_count = net
+
+    num_samples = N_SAMPLES * 5 if use_dropout else N_SAMPLES
+    key = random.PRNGKey(1)
+    x1, x2 = _get_inputs(key, is_conv, same_inputs, input_shape)
+
+    x1_out_shape, params = init_fn(key, x1.shape)
+    if same_inputs:
+      assert (x2 is None)
+    if x2 is None:
+      x2_out_shape = x1_out_shape
+    else:
+      x2_out_shape, params = init_fn(key, x2.shape)
+    del (params)
+
+    def _get_empirical(n_samples, get):
+      kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
+          init_fn, apply_fn, key, n_samples, device_count=device_count)
+      if same_inputs:
+        assert (x2 is None)
+      return kernel_fn_empirical(x1, x2, get)
+
+    if proj_into_2d == 'ATTN_PARAM':
+      # no analytic kernel available, just test forward/backward pass
+      _get_empirical(1, 'ntk' if is_ntk else 'nngp')
+    else:
+      if is_ntk:
+        exact, shape1, shape2 = kernel_fn(x1, x2, ('ntk', 'shape1', 'shape2'))
+        empirical = np.reshape(_get_empirical(num_samples, 'ntk'), exact.shape)
+      else:
+        exact, shape1, shape2 = kernel_fn(x1, x2, ('nngp', 'shape1', 'shape2'))
+        empirical = _get_empirical(num_samples, 'nngp')
+      test_utils.assert_close_matrices(self, exact, empirical, RTOL)
+      self.assertEqual(shape1, x1_out_shape)
+      self.assertEqual(shape2, x2_out_shape)
 
 
 @jtu.parameterized.parameters([
@@ -860,23 +876,80 @@ class ABReluTest(jtu.JaxTestCase):
 ])
 class FlattenTest(jtu.JaxTestCase):
 
-  def test_flatten_first(self, same_inputs):
+  def test_flatten(self, same_inputs):
     key = random.PRNGKey(1)
-    X0_1 = random.normal(key, (5, 4, 3, 2))
-    X0_2 = None if same_inputs else random.normal(key, (3, 4, 3, 2))
+    X0_1 = random.normal(key, (8, 4, 3, 2))
+    X0_2 = None if same_inputs else random.normal(key, (4, 4, 3, 2))
 
     X0_1_flat = np.reshape(X0_1, (X0_1.shape[0], -1))
     X0_2_flat = None if same_inputs else np.reshape(X0_2, (X0_2.shape[0], -1))
 
-    _, _, fc_flat = stax.serial(stax.Dense(10, 2., 0.5),
-                                stax.Erf())
-    _, _, fc = stax.serial(stax.Flatten(),
-                           stax.Dense(10, 2., 0.5),
-                           stax.Erf())
+    init_fc, apply_fc, kernel_fc = stax.serial(stax.Dense(1024, 2., 0.5),
+                                               stax.Relu(),
+                                               stax.Dense(1024, 2., 0.5))
+    init_top, apply_top, kernel_top = stax.serial(stax.Dense(1024, 2., 0.5),
+                                                  stax.Relu(),
+                                                  stax.Dense(1024, 2., 0.5),
+                                                  stax.Flatten())
+    init_mid, apply_mid, kernel_mid = stax.serial(stax.Dense(1024, 2., 0.5),
+                                                  stax.Relu(),
+                                                  stax.Flatten(),
+                                                  stax.Dense(1024, 2., 0.5))
+    init_bot, apply_bot, kernel_bot = stax.serial(stax.Flatten(),
+                                                  stax.Dense(1024, 2., 0.5),
+                                                  stax.Relu(),
+                                                  stax.Dense(1024, 2., 0.5))
 
-    K_flat = fc_flat(X0_1_flat, X0_2_flat)
-    K = fc(X0_1, X0_2)
-    self.assertAllClose(K_flat, K, True)
+    kernel_fc_mc = monte_carlo.monte_carlo_kernel_fn(init_fc, apply_fc, key,
+                                                     200)
+    kernel_bot_mc = monte_carlo.monte_carlo_kernel_fn(init_bot, apply_bot, key,
+                                                      200)
+    kernel_mid_mc = monte_carlo.monte_carlo_kernel_fn(init_mid, apply_mid, key,
+                                                      200)
+    kernel_top_mc = monte_carlo.monte_carlo_kernel_fn(init_top, apply_top, key,
+                                                      200)
+
+    K = kernel_fc(X0_1_flat, X0_2_flat)
+
+    K_bot = kernel_bot(X0_1, X0_2)
+    K_bot_flat = kernel_bot(X0_1_flat, X0_2_flat)
+    self.assertAllClose(K_bot, K, True)
+    self.assertAllClose(K_bot_flat, K, True)
+
+    def assert_close(a, b):
+      self.assertAllClose(a, b, True, atol=0.05, rtol=0.02)
+
+    K_fc_mc = kernel_fc_mc(X0_1_flat, X0_2_flat, get='nngp')
+    K_bot_mc = kernel_bot_mc(X0_1, X0_2, get='nngp')
+    K_bot_flat_mc = kernel_bot_mc(X0_1_flat, X0_2_flat, get='nngp')
+
+    assert_close(K_fc_mc, K.nngp)
+    assert_close(K_bot_mc, K_bot.nngp)
+    assert_close(K_bot_flat_mc, K_bot_flat.nngp)
+
+    K_mid = kernel_mid(X0_1, X0_2)
+    K_mid_flat = kernel_mid(X0_1_flat, X0_2_flat)
+
+    K_mid_mc = kernel_mid_mc(X0_1, X0_2, get='nngp')
+    K_mid_flat_mc = kernel_mid_mc(X0_1_flat, X0_2_flat, get='nngp')
+
+    assert_close(K_mid_mc, K_mid.nngp)
+    assert_close(K_mid_flat, K)
+    assert_close(K_mid_flat_mc, K_mid_flat.nngp)
+
+    K_top = kernel_top(X0_1, X0_2)._replace(is_gaussian=True,
+                                            shape1=K_mid.shape1,
+                                            shape2=K_mid.shape2)
+    K_top_flat = kernel_top(X0_1_flat, X0_2_flat)._replace(is_gaussian=True)
+
+    K_top_mc = kernel_top_mc(X0_1, X0_2, get='nngp')
+    K_top_flat_mc = kernel_top_mc(X0_1_flat, X0_2_flat, get='nngp')
+
+    assert_close(K_top_flat, K)
+    assert_close(K_top_mc, K_top.nngp)
+    assert_close(K_top_flat_mc, K_top_flat.nngp)
+
+    assert_close(K_top, K_mid)
 
 
 class FanInTest(jtu.JaxTestCase):
@@ -1090,6 +1163,282 @@ class FanInTest(jtu.JaxTestCase):
     empirical = kernel_fn_mc(X0_1, X0_2, get=get)
     empirical = empirical.reshape(exact.shape)
     test_utils.assert_close_matrices(self, empirical, exact, tol)
+
+
+class ConvNDTest(jtu.JaxTestCase):
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              ' [{}_n={}_{}_{}_{}_{}_{}_{}]'.format(
+                  'same_inputs' if same_inputs else 'different_inputs', n, get,
+                  proj,
+                  'attn' if use_attn else '',
+                  'channels_first' if channels_first else 'channels_last',
+                  'dropout' if use_dropout else '',
+                  'layernorm' if use_layernorm else ''
+              ),
+          'same_inputs':
+              same_inputs,
+          'n':
+              n,
+          'get':
+              get,
+          'proj':
+              proj,
+          'use_attn':
+              use_attn,
+          'channels_first':
+              channels_first,
+          'use_dropout':
+              use_dropout,
+          'use_layernorm':
+              use_layernorm
+      } for same_inputs in [False, True] for n in [0, 1, 2, 3, 4, 5, 6]
+                          for get in ['nngp', 'ntk']
+                          for proj in ['flatten', 'pool']
+                          for use_attn in [True, False]
+                          for channels_first in [True, False]
+                          for use_dropout in [True, False]
+                          for use_layernorm in [True, False]))
+  def test_conv_nd(self, same_inputs, n, get, proj, use_attn, channels_first,
+                   use_dropout, use_layernorm):
+    platform = xla_bridge.get_backend().platform
+    if platform == 'cpu':
+      raise jtu.SkipTest('Skipping CPU CNN tests for speed.')
+    elif platform == 'gpu' and n not in (0, 1, 2, 3):
+      raise jtu.SkipTest('>=4D CNN does not work on GPU.')
+    elif platform == 'tpu' and use_dropout and same_inputs:
+      raise jtu.SkipTest('Batched empirical kernel with dropout not supported.')
+
+    width = 1024
+    n_samples = 512
+    tol = 0.03 if platform == 'tpu' else 0.015
+    key = random.PRNGKey(1)
+
+    n_max = 5
+    spatial_shape = (2, 3, 5, 4, 3)[:n] + (1,) * (n - n_max)
+    filter_shape = (1, 2, 3, 1, 1)[:n] + (1,) * (n - n_max)
+    strides = (1, 1, 2, 1, 2)[:n] + (1,) * (n - n_max)
+    spatial_spec = ''.join(c for c in string.ascii_uppercase
+                           if c not in ('N', 'C', 'I', 'O'))[:n]
+    filter_spec = spatial_spec + 'IO'
+
+    if channels_first:
+      channel_axis = 1
+      dimension_numbers = ('NC' + spatial_spec, filter_spec,
+                           'NC' + spatial_spec)
+      X0_1 = random.normal(key, (2, 3) + spatial_shape)
+      X0_2 = None if same_inputs else random.normal(key, (4, 3) + spatial_shape)
+    else:
+      channel_axis = -1
+      dimension_numbers = ('N' + spatial_spec + 'C', filter_spec,
+                           'N' + spatial_spec + 'C')
+      X0_1 = random.normal(key, (2,) + spatial_shape + (3,))
+      X0_2 = None if same_inputs else random.normal(key,
+                                                    (4,) + spatial_shape + (3,))
+
+    layernorm_axes = (dimension_numbers[2].index('C'),)
+    if 'H' in dimension_numbers[2]:
+      layernorm_axes += (dimension_numbers[2].index('H'),)
+
+    if proj == 'pool':
+      proj = stax.GlobalAvgPool(channel_axis=channel_axis)
+    elif proj == 'flatten':
+      proj = stax.Flatten()
+    else:
+      raise ValueError(proj)
+
+    if use_attn:
+      n_heads = int(np.sqrt(width))
+      n_chan_val = int(np.round(float(width) / n_heads))
+      proj = stax.serial(stax.GlobalSelfAttention(
+          n_chan_out=width,
+          n_chan_key=width,
+          n_chan_val=n_chan_val,
+          n_heads=n_heads,
+          fixed=True,
+          W_key_std=2.,
+          W_value_std=1.,
+          W_query_std=1.,
+          W_out_std=1.0,
+          b_std=0.01,
+          channel_axis=channel_axis), proj)
+
+    nn = stax.serial(
+        stax.GeneralConv(dimension_numbers, width, filter_shape, None, 'SAME'),
+        (stax.LayerNorm(layernorm_axes,
+                        channel_axis=channel_axis)
+         if use_layernorm else stax.Identity()),
+        stax.Relu(),
+        (stax.Dropout(0.8) if use_dropout else stax.Identity()),
+        stax.GeneralConv(dimension_numbers, width, filter_shape, strides,
+                         'CIRCULAR'),
+        stax.Abs(),
+        proj
+    )
+
+    if get == 'nngp':
+      init_fn, apply_fn, kernel_fn = stax.serial(nn, stax.Dense(width, 2., 0.5))
+    elif get == 'ntk':
+      init_fn, apply_fn, kernel_fn = stax.serial(nn, stax.Dense(1, 2., 0.5))
+    else:
+      raise ValueError(get)
+
+    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, key, n_samples)
+
+    exact = kernel_fn(X0_1, X0_2, get=get)
+    empirical = kernel_fn_mc(X0_1, X0_2, get=get)
+    empirical = empirical.reshape(exact.shape)
+    test_utils.assert_close_matrices(self, empirical, exact, tol)
+
+
+class MarginalizeBatchTest(jtu.JaxTestCase):
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list(
+          {
+              'testcase_name':
+                  ' [{}_{}]'.format(
+                      'same_inputs' if same_inputs else 'different_inputs',
+                      readout[0].__name__),
+              'same_inputs':
+                  same_inputs,
+              'readout':
+                  readout
+          } for same_inputs in [False, True]
+            for readout in [stax.Flatten(),
+                            stax.GlobalAvgPool(),
+                            stax.Identity()]))
+  def test_diagonal_batch(self, same_inputs, readout):
+    key = random.PRNGKey(1)
+    x1 = random.normal(key, (2, 5, 6, 3))
+    x2 = None if same_inputs else random.normal(key, (3, 5, 6, 3))
+
+    if readout[0].__name__ == 'Identity':
+      layers = [stax.Flatten()]
+      filter_shape = ()
+    else:
+      layers = []
+      filter_shape = (2, 3)
+
+    layers += [stax.Conv(1, filter_shape, padding='SAME'),
+               stax.Relu(),
+               stax.Conv(1, filter_shape, padding='SAME'),
+               stax.Erf(),
+               readout]
+
+    _, _, kernel_fn = stax.serial(*layers)
+
+    K = kernel_fn(x1, x2)
+    K_full = kernel_fn(x1, x2, diagonal_batch=False)
+
+    if same_inputs:
+      self.assertAllClose(K_full.cov1, K.nngp, True)
+      self.assertAllClose(K_full.cov2, K.cov2, True)
+    else:
+      self.assertAllClose(K_full.cov1, kernel_fn(x1, None).nngp, True)
+      self.assertAllClose(K_full.cov2, kernel_fn(x2, None).nngp, True)
+
+    K_full = K_full._replace(cov1=K.cov1, cov2=K.cov2,
+                             diagonal_batch=K.diagonal_batch)
+    self.assertAllClose(K_full, K, True)
+
+
+@jtu.parameterized.parameters([
+    {
+        'same_inputs': True
+    },
+    {
+        'same_inputs': False
+    },
+])
+class InputReqTest(jtu.JaxTestCase):
+
+  def test_input_req(self, same_inputs):
+    platform = xla_bridge.get_backend().platform
+    if platform == 'cpu':
+      raise jtu.SkipTest('Skipping CPU CNN tests for speed.')
+
+    key = random.PRNGKey(1)
+    x1 = random.normal(key, (2, 7, 8, 4, 3))
+    x2 = None if same_inputs else random.normal(key, (4, 7, 8, 4, 3))
+
+    _, _, wrong_conv_fn = stax.serial(
+        stax.GeneralConv(dimension_numbers=('NDHWC', 'HDWIO', 'NCDWH'),
+                         out_chan=1, filter_shape=(1, 2, 3)),
+        stax.Relu(),
+        stax.GeneralConv(dimension_numbers=('NHDWC', 'HWDIO', 'NCWHD'),
+                         out_chan=1, filter_shape=(1, 2, 3))
+    )
+    with self.assertRaises(ValueError):
+      wrong_conv_fn(x1, x2)
+
+    init_fn, apply_fn, correct_conv_fn = stax.serial(
+        stax.GeneralConv(dimension_numbers=('NHWDC', 'DHWIO', 'NCWDH'),
+                         out_chan=2048, filter_shape=(1, 2, 3)),
+        stax.Relu(),
+        stax.GeneralConv(dimension_numbers=('NCHDW', 'WHDIO', 'NCDWH'),
+                         out_chan=2048, filter_shape=(1, 2, 3)),
+        stax.Flatten(),
+        stax.Dense(2048)
+    )
+
+    correct_conv_fn_mc = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn,
+                                                           key, 400)
+    K = correct_conv_fn(x1, x2, get=('nngp'))
+    K_mc = correct_conv_fn_mc(x1, x2, get=('nngp'))
+    self.assertAllClose(K, K_mc.reshape(K.shape), True, atol=0.01, rtol=0.05)
+
+    _, _, wrong_conv_fn = stax.serial(
+        stax.GeneralConv(dimension_numbers=('NDHWC', 'HDWIO', 'NCDWH'),
+                         out_chan=1, filter_shape=(1, 2, 3)),
+        stax.GlobalAvgPool(channel_axis=2)
+    )
+    with self.assertRaises(ValueError):
+      wrong_conv_fn(x1, x2)
+
+    init_fn, apply_fn, correct_conv_fn = stax.serial(
+        stax.GeneralConv(dimension_numbers=('NHDWC', 'DHWIO', 'NDWCH'),
+                         out_chan=1024, filter_shape=(1, 2, 3)),
+        stax.Relu(),
+        stax.AvgPool((2, 1, 3), batch_axis=0, channel_axis=-2),
+        stax.GeneralConv(dimension_numbers=('NDHCW', 'IHWDO', 'NDCHW'),
+                         out_chan=1024, filter_shape=(1, 2, 3)),
+        stax.Relu(),
+        stax.GlobalAvgPool(channel_axis=2),
+        stax.Dense(1024)
+    )
+
+    correct_conv_fn_mc = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn,
+                                                           key, 300)
+    K = correct_conv_fn(x1, x2, get=('nngp'))
+    K_mc = correct_conv_fn_mc(x1, x2, get=('nngp'))
+    self.assertAllClose(K, K_mc.reshape(K.shape), True, atol=0.01, rtol=0.05)
+
+    _, _, wrong_conv_fn = stax.serial(
+        stax.Flatten(),
+        stax.Dense(1),
+        stax.Erf(),
+        stax.GeneralConv(dimension_numbers=('CN', 'IO', 'NC'),
+                         out_chan=1, filter_shape=(1, 2)),
+    )
+    with self.assertRaises(ValueError):
+      wrong_conv_fn(x1, x2)
+
+    init_fn, apply_fn, correct_conv_fn = stax.serial(
+        stax.Flatten(),
+        stax.Conv(out_chan=1024, filter_shape=()),
+        stax.Relu(),
+        stax.Dense(1)
+    )
+
+    correct_conv_fn_mc = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn,
+                                                           key, 200)
+    K = correct_conv_fn(x1, x2, get=('ntk'))
+    K_mc = correct_conv_fn_mc(x1, x2, get=('ntk'))
+    self.assertAllClose(K, K_mc.reshape(K.shape), True, atol=0.01, rtol=0.05)
 
 
 if __name__ == '__main__':

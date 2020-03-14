@@ -1,5 +1,7 @@
 # Neural Tangents [[arXiv](https://arxiv.org/abs/1912.02803)]
- Fast and Easy Infinite Neural Networks in Python
+[**Quickstart**](#colab-notebooks)
+| [**Install guide**](#installation)
+| [**Reference docs**](https://neural-tangents.readthedocs.io/en/latest/)
 
 [![Build Status](https://travis-ci.org/google/neural-tangents.svg?branch=master)](https://travis-ci.org/google/neural-tangents) [![PyPI](https://img.shields.io/pypi/v/neural-tangents)](https://pypi.org/project/neural-tangents/) [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/neural-tangents)](https://pypi.org/project/neural-tangents/) [![PyPI - License](https://img.shields.io/pypi/l/neural_tangents)](https://github.com/google/neural-tangents/blob/master/LICENSE)
 
@@ -28,6 +30,7 @@ We happily welcome contributions!
 
 
 ## Contents
+* [Colab Notebooks](#colab-notebooks)
 * [Installation](#installation)
 * [5-Minute intro](#5-minute-intro)
 * [Package description](#package-description)
@@ -36,6 +39,15 @@ We happily welcome contributions!
 * [Papers](#papers)
 * [Citation](#citation)
 * [References](#references)
+
+## Colab Notebooks
+
+An easy way to get started with Neural Tangents is by playing around with the following interactive notebooks in Colaboratory. They demo the major features of Neural Tangents and show how it can be used in research.
+
+- [Neural Tangents Cookbook](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/neural_tangents_cookbook.ipynb)
+- [Weight Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/weight_space_linearization.ipynb)
+- [Function Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/function_space_linearization.ipynb)
+- [Neural Network Phase Diagram](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/phase_diagram.ipynb)
 
 ## Installation
 
@@ -77,15 +89,6 @@ Finally, you can run tests by calling:
 
 for f in neural-tangents/neural_tangents/tests/*.py; do python $f; done
 ```
-
-If you would prefer, you can get started without installing by checking out our
-colab examples:
-
-- [Neural Tangents Cookbook](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/neural_tangents_cookbook.ipynb)
-- [Weight Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/weight_space_linearization.ipynb)
-- [Function Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/function_space_linearization.ipynb)
-- [Neural Network Phase Diagram](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/phase_diagram.ipynb)
-
 
 ## 5-Minute intro
 
@@ -248,7 +251,7 @@ We remark the following differences between our library and the JAX one.
 
 * All `nt.stax` layers are instantiated with a function call, i.e. `nt.stax.Relu()` vs `jax.experimental.stax.Relu`.
 * All layers with trainable parameters use the _NTK parameterization_ by default (see [[10]](#10-neural-tangent-kernel-convergence-and-generalization-in-neural-networks-neurips-2018-arthur-jacot-franck-gabriel-clément-hongler), Remark 1). However, Dense and Conv layers also support the _standard parameterization_ via a `parameterization` keyword argument (see [[15]](#15-on-the-infinite-width-limit-of-neural-networks-with-a-standard-parameterization-arxiv-2020-jascha-sohl-dickstein-roman-novak-samuel-s-schoenholz-jaehoon-lee)).
-* `nt.stax` and `jax.experimental.stax` may have different layers and options available (for example `nt.stax` layers support `CIRCULAR` padding, but only `NHWC` data format).
+* `nt.stax` and `jax.experimental.stax` may have different layers and options available (for example `nt.stax` layers support `CIRCULAR` padding, have `LayerNorm`, but no `BatchNorm`.).
 
 ## Training dynamics of wide but finite networks
 
@@ -355,6 +358,9 @@ a small dataset using a small learning rate.
 
 Neural Tangents has been used in the following papers:
 
+* [The large learning rate phase of deep learning: the catapult mechanism.](https://arxiv.org/abs/2003.02218) \
+Aitor Lewkowycz, Yasaman Bahri, Ethan Dyer, Jascha Sohl-Dickstein, Guy Gur-Ari
+
 * [Spectrum Dependent Learning Curves in Kernel Regression and Wide Neural Networks.
 ](https://arxiv.org/abs/2002.02561) \
 Blake Bordelon, Abdulkadir Canatar, Cengiz Pehlevan
@@ -385,7 +391,7 @@ to the list!
 
 ## Citation
 
-If you use the code in a publication, please cite out ICLR 2020 paper:
+If you use the code in a publication, please cite our ICLR 2020 paper:
 
 ```
 @inproceedings{neuraltangents2020,

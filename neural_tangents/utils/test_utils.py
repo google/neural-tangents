@@ -26,9 +26,9 @@ def _jit_vmap(f):
   return jit(vmap(f))
 
 
-def update_test_tolerance():
-  jtu._default_tolerance[np.onp.dtype(np.onp.float32)] = 5e-3
-  jtu._default_tolerance[np.onp.dtype(np.onp.float64)] = 1e-5
+def update_test_tolerance(f32_tol=5e-3, f64_tol=1e-5):
+  jtu._default_tolerance[np.onp.dtype(np.onp.float32)] = f32_tol
+  jtu._default_tolerance[np.onp.dtype(np.onp.float64)] = f64_tol
   def default_tolerance():
     if jtu.device_under_test() != 'tpu':
       return jtu._default_tolerance

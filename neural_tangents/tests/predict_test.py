@@ -593,6 +593,22 @@ class PredictTest(jtu.JaxTestCase):
     x_test = np.cos(random.normal(split, test_shape))
     _, _, kernel_fn = _build_network(train_shape[1:], network, out_logits)
 
+    diag_regs = [0, 1e-6, 1e-4]
+    out_iter = predict.gp_inference(
+        kernel_fn,
+        x_train,
+        y_train,
+        x_test, ('ntk', 'nngp'),
+        diag_reg=diag_regs,
+        compute_cov=True)
+    iter_count = 0
+    for out in out_iter:
+      assert (len(out) == 2 and isinstance(out[0], predict.Gaussian) and
+              isinstance(out[1], predict.Gaussian))
+      iter_count += 1
+
+    self.assertEqual(iter_count, len(diag_regs))
+
     out = predict.gp_inference(
         kernel_fn,
         x_train,

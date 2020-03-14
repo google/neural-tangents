@@ -43,7 +43,7 @@ OUTPUT_LOGITS = [1, 2, 3]
 CONVOLUTION_CHANNELS = 4
 WIDTH = 1024
 RTOL = 1e-2
-test_utils.update_test_tolerance()
+test_utils.update_test_tolerance(f64_tol=5e-5)
 
 
 def _build_network(input_shape, network, out_logits, use_dropout):
@@ -313,13 +313,12 @@ class BatchTest(jtu.JaxTestCase):
     block_ker_fn = batching_fn(block_ker_fn)
     readout_ker_fn = batching_fn(readout_ker_fn)
 
-    ker_out = readout_ker_fn(block_ker_fn(x_self, marginalization='none'))
+    ker_out = readout_ker_fn(block_ker_fn(x_self))
     composed_ker_out = composed_ker_fn(x_self)
     if batching_fn == batch._parallel:
       composed_ker_out = composed_ker_out._replace(x1_is_x2=ker_out.x1_is_x2)
     self.assertAllClose(ker_out, composed_ker_out, True)
-    ker_out = readout_ker_fn(
-        block_ker_fn(x_self, x_other, marginalization='none'))
+    ker_out = readout_ker_fn(block_ker_fn(x_self, x_other))
     composed_ker_out = composed_ker_fn(x_self, x_other)
     if batching_fn == batch._parallel:
       composed_ker_out = composed_ker_out._replace(x1_is_x2=ker_out.x1_is_x2)
