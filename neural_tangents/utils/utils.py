@@ -52,16 +52,19 @@ def named_tuple_factory(name, get):
     return named_tuple_factory(name, get)
 
 
+def _generator_map(fn, value_or_gen):
+  if isinstance(value_or_gen, types.GeneratorType):
+    return (_generator_map(fn, v) for v in value_or_gen)
+  if isinstance(value_or_gen, list):
+    return [_generator_map(fn, v) for v in value_or_gen]
+  return fn(value_or_gen)
+
+
 def _output_to_dict(output):
   if isinstance(output, dict):
     return output
-
   if hasattr(output, '_asdict'):
     return output._asdict()
-
-  if isinstance(output, types.GeneratorType):
-    return (_output_to_dict(out) for out in output)
-
   raise ValueError(type(output))
 
 
@@ -112,19 +115,14 @@ def get_namedtuple(name):
           fn_out = ReturnType(*fn_out.values())
         return fn_out
 
-      fn_out = _output_to_dict(fn_out)
+      fn_out = _generator_map(_output_to_dict, fn_out)
 
       if get_is_not_tuple:
-        if isinstance(fn_out, types.GeneratorType):
-          return (output[get[0]] for output in fn_out)
-        else:
-          return fn_out[get[0]]
+        return _generator_map(lambda o: o[get[0]], fn_out)
 
       ReturnType = named_tuple_factory(name, get)
-      if isinstance(fn_out, types.GeneratorType):
-        return (ReturnType(*tuple(output[g] for g in get)) for output in fn_out)
-      else:
-        return ReturnType(*tuple(fn_out[g] for g in get))
+      return _generator_map(lambda o: ReturnType(*(o[g] for g in get)),
+                            fn_out)
 
     return getter_fn
 
