@@ -497,18 +497,19 @@ def gp_inference(kernel_fn,
   """
   if get is None:
     get = ('nngp', 'ntk')
-  kdd, ktd, ktt = _get_matrices(kernel_fn, x_train, x_test, get, compute_cov)
+  kdd, ktd, nngp_tt = _get_matrices(kernel_fn, x_train, x_test, get,
+                                    compute_cov)
   gp_inference_mat = (_gp_inference_mat_jit_cpu if _is_on_cpu(kdd) else
                       _gp_inference_mat_jit)
   try:
     iterator = iter(diag_reg)
   except TypeError:
     # diag_reg is a number.
-    return gp_inference_mat(kdd, ktd, ktt, y_train, get, diag_reg)
+    return gp_inference_mat(kdd, ktd, nngp_tt, y_train, get, diag_reg)
 
   def iter_func():
     for diag_reg in iterator:
-      yield gp_inference_mat(kdd, ktd, ktt, y_train, get, diag_reg)
+      yield gp_inference_mat(kdd, ktd, nngp_tt, y_train, get, diag_reg)
   return iter_func()
 
 
@@ -517,7 +518,7 @@ def gp_inference(kernel_fn,
 @get_namedtuple('Gaussians')
 def _gp_inference_mat(kdd,
                       ktd,
-                      ktt,
+                      nngp_tt,
                       y_train,
                       get,
                       diag_reg):
@@ -526,7 +527,7 @@ def _gp_inference_mat(kdd,
   Args:
     :kdd: A train-train `Kernel` namedtuple.
     :ktd: A test-train `Kernel` namedtuple.
-    :ktt: A test-test `Kernel` namedtuple.
+    :nngp_tt: A test-test `nngp` kernel.
     :y_train: A `np.ndarray`, representing the train targets.
     :get: string, the mode of the Gaussian process, either "nngp" or "ntk", or a
       tuple, or `None`. If `None` then both `nngp` and `ntk` predictions are
@@ -543,17 +544,17 @@ def _gp_inference_mat(kdd,
   if 'nngp' in get:
     op = _inv_operator(kdd.nngp, diag_reg)
     pred_mean = _mean_prediction(op, ktd.nngp, y_train)
-    if ktt is not None:
-      pred_cov = _nngp_cov(op, ktd.nngp, ktt)
+    if nngp_tt is not None:
+      pred_cov = _nngp_cov(op, ktd.nngp, nngp_tt)
     out['nngp'] = (
-        Gaussian(pred_mean, pred_cov) if ktt is not None else pred_mean)
+        Gaussian(pred_mean, pred_cov) if nngp_tt is not None else pred_mean)
 
   if 'ntk' in get:
     op = _inv_operator(kdd.ntk, diag_reg)
     pred_mean = _mean_prediction(op, ktd.ntk, y_train)
-    if ktt is not None:
-      pred_cov = _ntk_cov(op, ktd.ntk, kdd.nngp, ktd.nngp, ktt)
-    out['ntk'] = Gaussian(pred_mean, pred_cov) if ktt is not None else pred_mean
+    if nngp_tt is not None:
+      pred_cov = _ntk_cov(op, ktd.ntk, kdd.nngp, ktd.nngp, nngp_tt)
+    out['ntk'] = Gaussian(pred_mean, pred_cov) if nngp_tt is not None else pred_mean
 
   return out
 
@@ -570,10 +571,10 @@ def _get_matrices(kernel_fn, x_train, x_test, get, compute_cov):
   kdd = kernel_fn(x_train, None, get)
   ktd = kernel_fn(x_test, x_train, get)
   if compute_cov:
-    ktt = kernel_fn(x_test, x_test, 'nngp')
+    nngp_tt = kernel_fn(x_test, x_test, 'nngp')
   else:
-    ktt = None
-  return kdd, ktd, ktt
+    nngp_tt = None
+  return kdd, ktd, nngp_tt
 
 
 # TODO(schsam): Refactor this method to make use of @getter.
@@ -626,7 +627,8 @@ def gradient_descent_mse_gp(kernel_fn,
 
   eigenspace = {}
 
-  kdd, ktd, ktt = _get_matrices(kernel_fn, x_train, x_test, get, compute_cov)
+  kdd, ktd, nngp_tt = _get_matrices(kernel_fn, x_train, x_test, get,
+                                    compute_cov)
   gp_inference_mat = (_gp_inference_mat_jit_cpu if _is_on_cpu(kdd) else
                       _gp_inference_mat_jit)
 
@@ -634,7 +636,7 @@ def gradient_descent_mse_gp(kernel_fn,
   def predict(t=None):
     """`t=None` is equivalent to infinite time and calls `gp_inference`."""
     if t is None:
-      return gp_inference_mat(kdd, ktd, ktt, y_train, get, diag_reg)
+      return gp_inference_mat(kdd, ktd, nngp_tt, y_train, get, diag_reg)
 
     if not eigenspace:
       for g in get:
@@ -650,7 +652,7 @@ def gradient_descent_mse_gp(kernel_fn,
       pred_mean = _mean_prediction_einsum(evecs, op_evals, ktd.nngp, y_train)
       if compute_cov:
         op_evals_x2 = -op_fn(evals, 2 * t)
-        pred_cov = ktt - np.einsum(
+        pred_cov = nngp_tt - np.einsum(
             'mj,ji,i,ki,lk->ml',
             ktd.nngp,
             evecs,
@@ -680,7 +682,7 @@ def gradient_descent_mse_gp(kernel_fn,
             ktd.nngp,
             optimize=True)
         term_2 += np.transpose(term_2)
-        pred_cov += (-term_2 + ktt)
+        pred_cov += (-term_2 + nngp_tt)
 
       out['ntk'] = Gaussian(pred_mean, pred_cov) if compute_cov else pred_mean
 
