@@ -270,7 +270,7 @@ def _get_net_pool(width, is_ntk, pool_type, padding,
       fc(1 if is_ntk else width)), INPUT_SHAPE, -1
 
 
-class StaxTest(jtu.JaxTestCase):
+class StaxTest(test_utils.NeuralTangentsTestCase):
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -774,7 +774,7 @@ class StaxTest(jtu.JaxTestCase):
         'same_inputs': False
     },
 ])
-class ABReluTest(jtu.JaxTestCase):
+class ABReluTest(test_utils.NeuralTangentsTestCase):
 
   def test_ab_relu_relu(self, same_inputs):
     key = random.PRNGKey(1)
@@ -874,7 +874,7 @@ class ABReluTest(jtu.JaxTestCase):
         'same_inputs': False
     },
 ])
-class FlattenTest(jtu.JaxTestCase):
+class FlattenTest(test_utils.NeuralTangentsTestCase):
 
   def test_flatten(self, same_inputs):
     key = random.PRNGKey(1)
@@ -937,10 +937,10 @@ class FlattenTest(jtu.JaxTestCase):
     assert_close(K_mid_flat, K)
     assert_close(K_mid_flat_mc, K_mid_flat.nngp)
 
-    K_top = kernel_top(X0_1, X0_2)._replace(is_gaussian=True,
+    K_top = kernel_top(X0_1, X0_2).replace(is_gaussian=True,
                                             shape1=K_mid.shape1,
                                             shape2=K_mid.shape2)
-    K_top_flat = kernel_top(X0_1_flat, X0_2_flat)._replace(is_gaussian=True)
+    K_top_flat = kernel_top(X0_1_flat, X0_2_flat).replace(is_gaussian=True)
 
     K_top_mc = kernel_top_mc(X0_1, X0_2, get='nngp')
     K_top_flat_mc = kernel_top_mc(X0_1_flat, X0_2_flat, get='nngp')
@@ -952,7 +952,7 @@ class FlattenTest(jtu.JaxTestCase):
     assert_close(K_top, K_mid)
 
 
-class FanInTest(jtu.JaxTestCase):
+class FanInTest(test_utils.NeuralTangentsTestCase):
 
   @classmethod
   def _get_phi(cls, i):
@@ -1165,7 +1165,7 @@ class FanInTest(jtu.JaxTestCase):
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
 
-class ConvNDTest(jtu.JaxTestCase):
+class ConvNDTest(test_utils.NeuralTangentsTestCase):
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -1294,7 +1294,7 @@ class ConvNDTest(jtu.JaxTestCase):
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
 
-class MarginalizeBatchTest(jtu.JaxTestCase):
+class MarginalizeBatchTest(test_utils.NeuralTangentsTestCase):
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list(
@@ -1341,8 +1341,8 @@ class MarginalizeBatchTest(jtu.JaxTestCase):
       self.assertAllClose(K_full.cov1, kernel_fn(x1, None).nngp, True)
       self.assertAllClose(K_full.cov2, kernel_fn(x2, None).nngp, True)
 
-    K_full = K_full._replace(cov1=K.cov1, cov2=K.cov2,
-                             diagonal_batch=K.diagonal_batch)
+    K_full = K_full.replace(cov1=K.cov1, cov2=K.cov2,
+                            diagonal_batch=K.diagonal_batch)
     self.assertAllClose(K_full, K, True)
 
 
@@ -1354,7 +1354,7 @@ class MarginalizeBatchTest(jtu.JaxTestCase):
         'same_inputs': False
     },
 ])
-class InputReqTest(jtu.JaxTestCase):
+class InputReqTest(test_utils.NeuralTangentsTestCase):
 
   def test_input_req(self, same_inputs):
     platform = xla_bridge.get_backend().platform

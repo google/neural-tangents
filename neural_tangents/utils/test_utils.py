@@ -1,3 +1,5 @@
+# Lint as: python3
+
 # Copyright 2019 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,6 +22,8 @@ from jax.api import vmap
 from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.test_util as jtu
+from .kernel import Kernel
+import dataclasses
 
 
 def _jit_vmap(f):
@@ -82,3 +86,20 @@ def assert_close_matrices(self, expected, actual, rtol):
                                     actual))
   else:
     _log(relative_error, expected, actual, True)
+
+
+class NeuralTangentsTestCase(jtu.JaxTestCase):
+  def assertAllClose(self, x, y, check_dtypes, atol=None, rtol=None):
+    if isinstance(x, Kernel):
+      self.assertIsInstance(y, Kernel)
+      x_dict = dataclasses.asdict(x)
+      y_dict = dataclasses.asdict(y)
+      for field in dataclasses.fields(Kernel):
+        is_pytree_node = field.metadata.get('pytree_node', True)
+        if is_pytree_node:
+          super().assertAllClose(
+              x_dict[field.name], y_dict[field.name], check_dtypes, atol, rtol)
+        else:
+          self.assertEqual(x_dict[field.name], y_dict[field.name])
+    else:
+      return super().assertAllClose(x, y, check_dtypes, atol, rtol)

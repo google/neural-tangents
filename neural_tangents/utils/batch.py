@@ -1,3 +1,5 @@
+# Lint as: python3
+
 # Copyright 2019 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,7 +16,7 @@
 
 """Batch kernel calculations serially or in parallel."""
 
-
+import dataclasses
 from functools import partial
 import warnings
 from jax.api import device_get
@@ -73,92 +75,85 @@ def _flatten_batch_dimensions(k, discard_axis=None):
                        k.shape[2] * k.shape[3]) + k.shape[4:])
 
 
-def _flatten_kernel(k, x2_is_none, store_on_device):
-  """Flattens a kernel array or a `Kernel` along the batch dimension."""
+def _flatten_kernel_dict(k_dict, x2_is_none, store_on_device, is_parallel):
   fl = (_flatten_batch_dimensions if store_on_device else
-        jit(_flatten_batch_dimensions, static_argnums=(1,), backend='cpu'))
-  if hasattr(k, '_asdict'):
-    k_dict = k._asdict()
+      jit(_flatten_batch_dimensions, static_argnums=(1,), backend='cpu'))
 
-    if 'diagonal_batch' in k_dict:
-      diagonal_batch = k_dict['diagonal_batch']
-      diagonal_batch = bool(diagonal_batch[(0,) * diagonal_batch.ndim])
-      if not diagonal_batch:
-        raise NotImplementedError('Batchning not implemented for '
-                                  '`diagonal_batch == False`.')
+  if 'nngp' in k_dict:
+    # We only use `batch_size` to compute `shape1` and `shape2` for the batch.
+    # This only happens if k_dict came from a `Kernel` in which case it must
+    # have 'nngp'. I do think there is a failure case if the user called
+    # >>> batched_kernel_fn(x1, x2, get=('ntk', 'shape1'))
+    # but I don't think this will get hit ever (and certainly before we rework
+    # this code).
+    batch_size = {'1': k_dict['nngp'].shape[0], '2': k_dict['nngp'].shape[1]}
 
-    k = k._replace(**dict((key, 0.) for key in k_dict))
-    for key, value in k_dict.items():
-      if key == 'cov1':
-        k_dict[key] = fl(value, 1)
-      elif key == 'cov2':
-        if x2_is_none:
-          k_dict[key] = None
-        else:
-          k_dict[key] = fl(value, 0)
-      elif key == 'x1_is_x2':
-        k_dict[key] = value[(0,) * value.ndim]
-      elif key in ('is_reversed', 'is_gaussian', 'is_input',
-                   'diagonal_batch', 'diagonal_spatial'):
-        # NOTE(schsam): Currently we have to make these values concrete so that
-        # batched analytic kernels compose.
-        k_dict[key] = bool(value[(0,) * value.ndim])
-      elif key in ('batch_axis', 'channel_axis'):
-        k_dict[key] = int(value[(0,) * value.ndim])
-      elif key == 'shape1':
-        if any([x.ndim > 2 for x in value]):
-          raise ValueError((
-              'After batching, shape arrays expected to be either'
-              ' one- or two-dimensional.'))
-        k_dict[key] = tuple(int(x[(0,) * x.ndim]) if i > 0 else
-                            int(np.sum(x[:, 0])) if x.ndim == 2 else
-                            int(np.sum(x)) for i, x in enumerate(value))
-      elif key == 'shape2':
-        if any([x.ndim > 2 for x in value]):
-          raise ValueError((
-              'After batching, shape arrays expected to be either'
-              ' one- or two-dimensional.'))
-        k_dict[key] = tuple(int(x[(0,) * x.ndim]) if i > 0 else
-                            int(np.sum(x[0])) if x.ndim == 2 else
-                            int(x[0]) for i, x in enumerate(value))
+  if 'diagonal_batch' in k_dict and not k_dict['diagonal_batch']:
+    raise NotImplementedError('Batching not implemented for '
+                              '`diagonal_batch == False`.')
+
+  for key, value in k_dict.items():
+    if key == 'cov1':
+      k_dict[key] = fl(value, 1)
+    elif key == 'cov2':
+      if x2_is_none:
+        k_dict[key] = None
       else:
-        k_dict[key] = fl(value, None)
-    return k._replace(**k_dict)
+        k_dict[key] = fl(value, 0)
+    elif key == 'x1_is_x2':
+      k_dict[key] = value[(0,) * value.ndim]
+    elif key in ('shape1', 'shape2'):
+      if key == 'shape2' and is_parallel:
+        continue
+      batch_axis = k_dict['batch_axis']
+      shape = value
+      k_dict[key] = (shape[:batch_axis] +
+                     (shape[batch_axis] * batch_size[key[-1]],) +
+                     shape[batch_axis + 1:])
+    elif isinstance(k_dict[key], np.ndarray):
+      k_dict[key] = fl(value, None)
+    else:
+      pass
+  return k_dict
+
+
+def _flatten_kernel(k, x2_is_none, store_on_device, is_parallel):
+  """Flattens a kernel array or a `Kernel` along the batch dimension."""
+  if hasattr(k, '_asdict'):
+    return k._replace(**_flatten_kernel_dict(
+        k._asdict(), x2_is_none, store_on_device, is_parallel))
+
+  if isinstance(k, Kernel):
+    return Kernel(**_flatten_kernel_dict(
+        k.asdict(), x2_is_none, store_on_device, is_parallel))
 
   if isinstance(k, np.ndarray):
     return _flatten_batch_dimensions(k)
 
   raise TypeError(
-      'Expected kernel to be either a namedtuple or a `np.ndarray`, got %s.'
-      % type(k))
+      ('Expected kernel to be either a namedtuple, Kernel, or `np.ndarray`, '
+       'got %s.') % type(k))
 
 
-def _move_kernel_to_cpu(k):
-  """Moves data in a kernel from an accelerator to the CPU."""
-  if hasattr(k, '_asdict') and hasattr(k, '_replace'):
-    return k._replace(
-        **dict([(k, v) if not isinstance(v, np.ndarray) else
-                (k, device_get(v)) for k, v in k._asdict().items()]))
-  elif isinstance(k, np.ndarray):
-    return device_get(k)
-  else:
-    raise TypeError(
-        'Expected kernel to be either a namedtuple or a `np.ndarray`, got %s.'
-        % type(k)
-    )
+def _reshape_kernel_for_pmap(k, device_count, n1_per_device):
+  cov2 = k.cov2
+  if cov2 is None:
+    cov2 = k.cov1
+  cov2 = np.broadcast_to(cov2, (device_count,) + cov2.shape)
 
+  x1_is_x2 = np.broadcast_to(k.x1_is_x2, (device_count,) + k.x1_is_x2.shape)
 
-def _slice_kernel(kernel, n1_slice, n2_slice):
-  assert isinstance(kernel, Kernel)
-  cov1 = kernel.cov1[n1_slice]
-  cov2 = kernel.cov1[n2_slice] if kernel.cov2 is None else kernel.cov2[n2_slice]
-  return kernel._replace(
+  nngp, ntk, cov1 = [
+      np.reshape(x, (device_count, n1_per_device,) + x.shape[1:]) for x in
+      (k.nngp, k.ntk, k.cov1)]
+
+  return k.replace(
+      nngp=nngp,
+      ntk=ntk,
       cov1=cov1,
-      nngp=kernel.nngp[n1_slice, n2_slice],
       cov2=cov2,
-      ntk=kernel.ntk[n1_slice, n2_slice],
-      shape1=(cov1.shape[0],) + kernel.shape1[1:],
-      shape2=(cov2.shape[0],) + kernel.shape2[1:])
+      x1_is_x2=x1_is_x2,
+      shape1=(n1_per_device,) + k.shape1[1:])
 
 
 def _serial(kernel_fn, batch_size, store_on_device=True):
@@ -197,9 +192,11 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
     _kernel_fn = kernel_fn
     @utils.wraps(_kernel_fn)
     def kernel_fn(x1, x2=None, *args, **kwargs):
-      return _move_kernel_to_cpu(_kernel_fn(x1, x2, *args, **kwargs))
+      return device_get(_kernel_fn(x1, x2, *args, **kwargs))
 
-  flatten = partial(_flatten_kernel, store_on_device=store_on_device)
+  flatten = partial(_flatten_kernel,
+                    store_on_device=store_on_device,
+                    is_parallel=False)
 
   def serial_fn_x1(x1, x2=None, *args, **kwargs):
     # TODO(xlc): Make batch + dropout work reasonably well.
@@ -248,13 +245,13 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
       # probably have to change this to dynamic slicing.
       n1_slice = slice(n1, n1 + n1_batch_size)
       n2_slice = slice(n2, n2 + n2_batch_size)
-      in_kernel = _slice_kernel(kernel, n1_slice, n2_slice)
+      in_kernel = kernel.slice(n1_slice, n2_slice)
       return n1, kernel_fn(in_kernel, *args, **kwargs)
 
     cov2_is_none = kernel.cov2 is None
     _, kernel = _scan(row_fn, 0, n1s, store_on_device)
     if cov2_is_none:
-      kernel = kernel._replace(cov2=None)
+      kernel = kernel.replace(cov2=None)
     return flatten(kernel, cov2_is_none)
 
   @utils.wraps(kernel_fn)
@@ -326,7 +323,7 @@ def _parallel(kernel_fn, device_count=-1):
 
     x1 = np.reshape(x1, (_device_count, n1_per_device,) + input_shape)
     kernel = kernel_fn(x1, x2, *args, **kwargs)
-    return _flatten_kernel(kernel, x2_is_none, True)
+    return _flatten_kernel(kernel, x2_is_none, True, True)
 
   def parallel_fn_kernel(kernel, *args, **kwargs):
     n1 = kernel.cov1.shape[0]
@@ -342,27 +339,12 @@ def _parallel(kernel_fn, device_count=-1):
       _device_count = ragged
       n1_per_device = 1
 
-    kernel_dict = kernel._asdict()
-
-    cov2 = kernel_dict['cov2']
-    cov2_is_none = cov2 is None
-    if cov2 is None:
-      cov2 = kernel_dict['cov1']
-    kernel_dict['cov2'] = np.broadcast_to(cov2, (_device_count,) + cov2.shape)
-    kernel_dict['x1_is_x2'] = np.broadcast_to(
-        kernel_dict['x1_is_x2'],
-        (_device_count,) + kernel_dict['x1_is_x2'].shape)
-
-    for k, v in kernel_dict.items():
-      if k in ('nngp', 'ntk', 'cov1'):
-        kernel_dict[k] = \
-            np.reshape(v, (_device_count, n1_per_device,) + v.shape[1:])
-      if k in ('shape1',):
-        kernel_dict[k] = (n1_per_device,) + v[1:]
-    kernel = kernel_fn(Kernel(**kernel_dict), *args, **kwargs)
+    cov2_is_none = kernel.cov2 is None
+    kernel = _reshape_kernel_for_pmap(kernel, _device_count, n1_per_device)
+    kernel = kernel_fn(kernel, *args, **kwargs)
     if cov2_is_none:
-      kernel = kernel._replace(cov2=None)
-    return _flatten_kernel(kernel, cov2_is_none, True)
+      kernel = kernel.replace(cov2=None)
+    return _flatten_kernel(kernel, cov2_is_none, True, True)
 
   @utils.wraps(kernel_fn)
   def parallel_fn(x1_or_kernel, x2=None, *args, **kwargs):
@@ -500,20 +482,6 @@ def _get_jit_or_pmap_broadcast():
       args_np, args_np_idxs = [], []
       args_other = {}
 
-      is_input_kernel = isinstance(x_or_kernel, Kernel)
-      x_or_kernel_np = {}
-      x_or_kernel_other = {}
-
-      if is_input_kernel:
-        kernel_dict = x_or_kernel._asdict()
-        for k, v in kernel_dict.items():
-          if isinstance(v, np.ndarray):
-            x_or_kernel_np[k] = v
-          else:
-            x_or_kernel_other[k] = v
-      else:
-        x_or_kernel_np = x_or_kernel
-
       # TODO(romann): treat `np.ndarray`s in `kwargs` when JAX allows it.
       # https://github.com/google/jax/issues/912
       # Filter out `np.ndarray`s from other arguments.
@@ -527,29 +495,24 @@ def _get_jit_or_pmap_broadcast():
       # Check cache before jitting.
       _key = key + \
           tuple(args_other.items()) + \
-          tuple(kwargs.items()) + \
-          tuple(x_or_kernel_other.items())
+          tuple(kwargs.items())
       if _key in cache:
         _f = cache[_key]
       else:
         # Define a `np.ndarray`-only function as a closure over other arguments.
-        def _f(_x_or_kernel_np, *_args_np):
-          # Merge Kernel.
-          if is_input_kernel:
-            _x_or_kernel_np = {**_x_or_kernel_np, **x_or_kernel_other}
-            _x_or_kernel_np = Kernel(**_x_or_kernel_np)
+        def _f(_x_or_kernel, *_args_np):
           # Merge args.
           _args_np = {i: _arg_np for i, _arg_np in zip(args_np_idxs, _args_np)}
           _args = {**_args_np, **args_other}
           _args = tuple(v for k, v in sorted(_args.items()))
-          return f(_x_or_kernel_np, *_args, **kwargs)
+          return f(_x_or_kernel, *_args, **kwargs)
 
         _f = jit(_f) if device_count == 0 else pmap(_f)
         cache[_key] = _f
 
       # Broadcast `np.ndarray` arguments and apply the new function to them.
       args_np = tree_map(broadcast, args_np)
-      return _f(x_or_kernel_np, *args_np)
+      return _f(x_or_kernel, *args_np)
 
     return f_pmapped
 

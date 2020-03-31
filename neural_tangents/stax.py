@@ -1,3 +1,5 @@
+# Lint as: python3
+
 # Copyright 2019 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License');
@@ -67,20 +69,26 @@ import functools
 import operator as op
 import warnings
 import enum
+
+import frozendict
+
 from jax import lax
 from jax import linear_util as lu
 from jax import ops
+from jax import random
+
 from jax.abstract_arrays import ShapedArray
 from jax.api_util import flatten_fun
 import jax.experimental.stax as ostax
+import jax.interpreters.partial_eval as pe
 import jax.numpy as np
 from jax.scipy.special import erf
-from neural_tangents.utils.kernel import Kernel
-import frozendict
-from jax import random
-import jax.interpreters.partial_eval as pe
 from jax.tree_util import tree_map, tree_flatten, tree_unflatten
+
+from neural_tangents.utils.kernel import Kernel
 from neural_tangents.utils import utils
+
+from typing import Union, Tuple
 
 
 class Padding(enum.Enum):
@@ -333,12 +341,12 @@ def Dense(out_dim,
         ntk = input_width * nngp + 1. + W_std**2 * ntk
       cov1, nngp, cov2 = map(fc, (cov1, nngp, cov2))
 
-    return kernels._replace(cov1=cov1,
-                            nngp=nngp,
-                            cov2=cov2,
-                            ntk=ntk,
-                            is_gaussian=True,
-                            is_input=False)
+    return kernels.replace(cov1=cov1,
+                           nngp=nngp,
+                           cov2=cov2,
+                           ntk=ntk,
+                           is_gaussian=True,
+                           is_input=False)
 
   return init_fn, apply_fn, kernel_fn
 
@@ -486,7 +494,7 @@ def GeneralConv(dimension_numbers,
             W_std**2 * conv_unscaled(ntk, 2))
       nngp = _affine(nngp_unscaled, W_std, b_std)
 
-    res = kernels._replace(cov1=cov1,
+    res = kernels.replace(cov1=cov1,
                            nngp=nngp,
                            cov2=cov2,
                            ntk=ntk,
@@ -500,7 +508,7 @@ def GeneralConv(dimension_numbers,
     # TODO: make more efficient / lazy.
     out_spec = tuple(c for c in dimension_numbers[2] if c not in ('N', 'C'))
     in_to_out_permutation = tuple(out_spec.index(c) for c in input_spec)
-    res = res.permute_spatial(in_to_out_permutation)
+    res = _kernel_permute_spatial(res, in_to_out_permutation)
 
     return res
 
@@ -728,7 +736,7 @@ def _Pool(pool_type,
                         padding, normalize_edges,
                         1 if kernels.diagonal_batch else 2)
 
-    return kernels._replace(cov1=cov1,
+    return kernels.replace(cov1=cov1,
                             nngp=nngp,
                             cov2=cov2,
                             ntk=ntk)
@@ -820,7 +828,7 @@ def _GlobalPool(pool_type, batch_axis, channel_axis):
 
     ndim = len(kernels.shape1)
     batch_first = batch_axis % ndim < channel_axis % ndim
-    return kernels._replace(cov1=cov1,
+    return kernels.replace(cov1=cov1,
                             nngp=nngp,
                             cov2=cov2,
                             ntk=ntk,
@@ -897,7 +905,7 @@ def Flatten(batch_axis=0, batch_axis_out=0):
     nngp = trace(nngp, 2)
     ntk = trace(ntk, 2)
 
-    return kernels._replace(cov1=cov1,
+    return kernels.replace(cov1=cov1,
                             nngp=nngp,
                             cov2=cov2,
                             ntk=ntk,
@@ -1179,7 +1187,7 @@ def GlobalSelfAttention(n_chan_out,
     ntk = (_transform_kernel(ntk, G1, G2) + 2 * (nngp - b_std**2)
            if ntk is not None else ntk)
 
-    return kernels._replace(cov1=cov1,
+    return kernels.replace(cov1=cov1,
                             nngp=nngp,
                             cov2=cov2,
                             ntk=ntk,
@@ -1262,7 +1270,7 @@ def LayerNorm(axis=-1, eps=1e-12, batch_axis=0, channel_axis=-1):
     if cov2 is not None:
       cov2 /= np.sqrt(prod22)
 
-    return kernels._replace(cov1=cov1,
+    return kernels.replace(cov1=cov1,
                             nngp=nngp,
                             cov2=cov2,
                             ntk=ntk)
@@ -1310,7 +1318,7 @@ def Dropout(rate, mode='train'):
     ntk = _diag_mul(ntk, new_factor, False, kernels.diagonal_spatial)
 
     # TODO: under which condition could we leave `is_gaussian` unchanged?
-    return kernels._replace(cov1=cov1,
+    return kernels.replace(cov1=cov1,
                             nngp=nngp,
                             cov2=cov2,
                             ntk=ntk,
@@ -1611,18 +1619,18 @@ def _inputs_to_kernel(x1,
   x1_is_x2 = utils.x1_is_x2(x1, x2, eps=eps)
   is_input = False
 
-  return Kernel(cov1,
-                nngp,
-                cov2,
+  return Kernel(nngp,
                 ntk,
+                cov1,
+                cov2,
+                x1_is_x2,
                 is_gaussian,
                 is_reversed,
+                is_input,
                 diagonal_batch,
                 diagonal_spatial,
                 x1.shape,
                 x2.shape if x2 is not None else x1.shape,
-                x1_is_x2,
-                is_input,
                 batch_axis,
                 channel_axis)
 
@@ -1652,9 +1660,9 @@ def _set_shapes(init_fn, in_kernel, out_kernel):
                     f'`Kernel`s. Found {type(out_kernel)}.')
 
   if isinstance(out_kernel, Kernel):
-    return out_kernel._replace(shape1=shape1, shape2=shape2)
+    return out_kernel.replace(shape1=shape1, shape2=shape2)
   elif isinstance(out_kernel, list):
-    return [k._replace(shape1=s1, shape2=s2) for
+    return [k.replace(shape1=s1, shape2=s2) for
             k, s1, s2 in zip(out_kernel, shape1, shape2)]
   else:
     raise TypeError(f'Expected output kernel to be a `Kernel` or a list of '
@@ -1924,7 +1932,7 @@ def _transform_kernels_ab_relu(kernels, a, b, do_backprop, do_stabilize):
     if cov2 is not None:
       cov2 *= factor
 
-  return kernels._replace(cov1=cov1,
+  return kernels.replace(cov1=cov1,
                           nngp=nngp,
                           cov2=cov2,
                           ntk=ntk,
@@ -1963,7 +1971,7 @@ def _transform_kernels_erf(kernels, do_backprop):
     if cov2 is not None:
       cov2, _ = _get_erf_kernel(cov2, prod22, do_backprop)
 
-  return kernels._replace(cov1=cov1,
+  return kernels.replace(cov1=cov1,
                           nngp=nngp,
                           cov2=cov2,
                           ntk=ntk,
@@ -2117,17 +2125,17 @@ def _fan_in_kernel_fn(kernels, axis):
                          False, diagonal_spatial, widths)
   ntk = _concat_kernels([k.ntk for k in kernels], axis,
                         False, diagonal_spatial, widths)
-  kers = (cov1, nngp, cov2, ntk)
+  kers = (nngp, ntk, cov1, cov2)
 
   return Kernel(*(
-      kers + (is_gaussian,
+      kers + (kernels[0].x1_is_x2,
+              is_gaussian,
               is_reversed,
+              kernels[0].is_input,
               diagonal_batch,
               diagonal_spatial,
               None,
               None,
-              kernels[0].x1_is_x2,
-              kernels[0].is_input,
               batch_axis,
               channel_axis)))
 
@@ -2257,6 +2265,27 @@ def _pad_one_side(x, pads, axes, mode):
     pads[axes[i]] = axis_pads[i]
   x = np.pad(x, pads, mode)
   return x
+
+
+def _kernel_permute_spatial(
+    kernel: Kernel, permutation: Tuple[int, ...]) -> Kernel:
+  """Permute spatial dimensions of the `Kernel` according to `permutation`."""
+  def permute(mat: Union[None, float, np.ndarray], batch_ndim: int):
+    if utils.is_array(mat):
+      _permutation = tuple(batch_ndim + p for p in permutation)
+      if not kernel.diagonal_spatial:
+        _permutation = tuple(j for p in _permutation
+                             for j in (2 * p - batch_ndim,
+                                       2 * p - batch_ndim + 1))
+      _permutation = tuple(range(batch_ndim)) + _permutation
+      return np.transpose(mat, _permutation)
+    return mat
+
+  cov1 = permute(kernel.cov1, 1 if kernel.diagonal_batch else 2)
+  cov2 = permute(kernel.cov2, 1 if kernel.diagonal_batch else 2)
+  nngp = permute(kernel.nngp, 2)
+  ntk = permute(kernel.ntk, 2)
+  return kernel.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
 
 
 def _conv_kernel(mat, filter_shape, strides, padding, batch_ndim):

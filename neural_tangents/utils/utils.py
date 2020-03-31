@@ -1,3 +1,5 @@
+# Lint as: python3
+
 # Copyright 2019 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,6 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 """General-purpose internal utilities."""
 
 from collections import namedtuple
@@ -20,6 +23,7 @@ import operator as op
 import types
 from jax.lib import xla_bridge
 import jax.numpy as np
+from .kernel import Kernel
 
 
 def canonicalize_get(get):
@@ -56,6 +60,9 @@ def named_tuple_factory(name, get):
 def _output_to_dict(output):
   if isinstance(output, dict):
     return output
+
+  if isinstance(output, Kernel):
+    return output.asdict()
 
   if hasattr(output, '_asdict'):
     return output._asdict()

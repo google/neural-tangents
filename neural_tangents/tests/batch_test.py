@@ -114,18 +114,18 @@ def _test_kernel_against_batched(cls,
 
   if is_parallel_only and isinstance(g_b, Kernel):
     # In the parallel setting, `x1_is_x2` is not computed correctly when x1==x2.
-    g_b = g_b._replace(x1_is_x2=g.x1_is_x2)
+    g_b = g_b.replace(x1_is_x2=g.x1_is_x2)
 
   cls.assertAllClose(g, g_b, check_dtypes=True)
 
   g = kernel_fn(train, test)
   g_b = batched_kernel_fn(train, test)
   if is_parallel_only and isinstance(g_b, Kernel):
-    g_b = g_b._replace(x1_is_x2=g.x1_is_x2)
+    g_b = g_b.replace(x1_is_x2=g.x1_is_x2)
   cls.assertAllClose(g, g_b, check_dtypes=True)
 
 
-class BatchTest(jtu.JaxTestCase):
+class BatchTest(test_utils.NeuralTangentsTestCase):
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -292,13 +292,13 @@ class BatchTest(jtu.JaxTestCase):
     if batching_fn == batch._parallel:
       # In the parallel setting, `x1_is_x2` is not computed correctly
       # when x1==x2.
-      composed_ker_out = composed_ker_out._replace(x1_is_x2=ker_out.x1_is_x2)
+      composed_ker_out = composed_ker_out.replace(x1_is_x2=ker_out.x1_is_x2)
     self.assertAllClose(ker_out, composed_ker_out, True)
 
     ker_out = ker_fn(ker_fn(x_self, x_other))
     composed_ker_out = composed_ker_fn(x_self, x_other)
     if batching_fn == batch._parallel:
-      composed_ker_out = composed_ker_out._replace(x1_is_x2=ker_out.x1_is_x2)
+      composed_ker_out = composed_ker_out.replace(x1_is_x2=ker_out.x1_is_x2)
     self.assertAllClose(ker_out, composed_ker_out, True)
 
     # Check convolutional + pooling.
@@ -316,12 +316,12 @@ class BatchTest(jtu.JaxTestCase):
     ker_out = readout_ker_fn(block_ker_fn(x_self))
     composed_ker_out = composed_ker_fn(x_self)
     if batching_fn == batch._parallel:
-      composed_ker_out = composed_ker_out._replace(x1_is_x2=ker_out.x1_is_x2)
+      composed_ker_out = composed_ker_out.replace(x1_is_x2=ker_out.x1_is_x2)
     self.assertAllClose(ker_out, composed_ker_out, True)
     ker_out = readout_ker_fn(block_ker_fn(x_self, x_other))
     composed_ker_out = composed_ker_fn(x_self, x_other)
     if batching_fn == batch._parallel:
-      composed_ker_out = composed_ker_out._replace(x1_is_x2=ker_out.x1_is_x2)
+      composed_ker_out = composed_ker_out.replace(x1_is_x2=ker_out.x1_is_x2)
     self.assertAllClose(ker_out, composed_ker_out, True)
 
   @jtu.parameterized.named_parameters(

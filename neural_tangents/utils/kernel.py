@@ -1,3 +1,5 @@
+# Lint as: python3
+
 # Copyright 2019 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,45 +16,45 @@
 """The `Kernel` class containing NTK and NNGP `np.ndarray`s as fields."""
 
 
-import collections
 import jax.numpy as np
+from neural_tangents.utils import dataclasses
 from neural_tangents.utils import utils
+from typing import Tuple, Optional
 
 
-class Kernel(
-    collections.namedtuple('Kernel', [
-        'cov1', 'nngp', 'cov2', 'ntk', 'is_gaussian', 'is_reversed',
-        'diagonal_batch', 'diagonal_spatial', 'shape1', 'shape2',
-        'x1_is_x2', 'is_input', 'batch_axis', 'channel_axis'
-    ])):
-  """A tuple containing information about the analytic NTK and NNGP of a model.
+@dataclasses.dataclass
+class Kernel:
+  """Dataclass containing information about the NTK and NNGP of a model.
 
   Attributes:
-    cov1: covariance of the first batch of inputs. A `np.ndarray` with shape
-      `(batch_size_1, [batch_size_1,] height, [height,], width, [width,], ...)`
-      where the exact shape depends on `diagonal_batch` and `diagonal_spatial`.
-    nngp: covariance between the first and second batches (NNGP). A `np.ndarray`
-      of shape
+    :nngp: covariance between the first and second batches (NNGP). A
+      `np.ndarray` of shape
       `(batch_size_1, batch_size_2, height, [height,], width, [width,], ...))`,
       where the exact shape depends on `diagonal_spatial`.
-    cov2: optional covariance of the second batch of inputs. A `np.ndarray` with
-      shape
+    :ntk: the neural tangent kernel (NTK). `np.ndarray` of same shape as `nngp`.
+    :cov1: covariance of the first batch of inputs. A `np.ndarray` with shape
+      `(batch_size_1, [batch_size_1,] height, [height,], width, [width,], ...)`
+      where the exact shape depends on `diagonal_batch` and `diagonal_spatial`.
+    :cov2: optional covariance of the second batch of inputs. A `np.ndarray`
+      with shape
       `(batch_size_2, [batch_size_2,] height, [height,], width, [width,], ...)`
       where the exact shape depends on `diagonal_batch` and `diagonal_spatial`.
-    ntk: the neural tangent kernel (NTK). `np.ndarray` of same shape as `nngp`.
-    is_gaussian: a boolean, specifying whether the output features or channels
+    :x1_is_x2: a boolean specifying whether `x1` and `x2` are the same.
+    :is_gaussian: a boolean, specifying whether the output features or channels
       of the layer / NN function (returning this `Kernel` as the `kernel_fn`)
       are i.i.d. Gaussian with covariance `nngp`, conditioned on fixed inputs to
       the layer and i.i.d. Gaussian weights and biases of the layer. For
       example, passing an input through a CNN layer with i.i.d. Gaussian weights
       and biases produces i.i.d. Gaussian random variables along the channel
       dimension, while passing an input through a nonlinearity does not.
-    is_reversed: a boolean specifying whether the covariance matrices `nngp`,
+    :is_reversed: a boolean specifying whether the covariance matrices `nngp`,
       `cov1`, `cov2`, and `ntk` have the ordering of spatial dimensions
       reversed. Ignored unless `diagonal_spatial` is `False`. Used internally
       to avoid self-cancelling transpositions in a sequence of CNN layers that
       flip the order of kernel spatial dimensions.
-    diagonal_batch: a boolean specifying whether `cov1` and `cov2` store only
+    :is_input: a boolean specifying whether the current layer is the input
+      layer and it is used to avoid applying dropout to the input layer.
+    :diagonal_batch: a boolean specifying whether `cov1` and `cov2` store only
       the diagonal of the sample-sample covariance
       (`diagonal_batch == True`,
        `cov1.shape == (batch_size_1, ...)`),
@@ -60,7 +62,7 @@ class Kernel(
       (`diagonal_batch == False`,
        `cov1.shape == (batch_size_1, batch_size_1, ...)`).
       Defaults to `True` as no current layers require the full covariance.
-    diagonal_spatial: a boolean specifying whether all (`cov1`, `ntk`, etc.)
+    :diagonal_spatial: a boolean specifying whether all (`cov1`, `ntk`, etc.)
       covariance matrices store only the diagonals of the location-location
       covariances
       (`diagonal_spatial == True`,
@@ -72,98 +74,53 @@ class Kernel(
       Defaults to `False`, but is set to `True` if the output top-layer
       covariance depends only on the diagonals (e.g. when a CNN network has no
       pooling layers and `Flatten` on top).
-    shape1: a tuple specifying the shape of the random variable in the first
+    :shape1: a tuple specifying the shape of the random variable in the first
       batch of inputs. These have covariance `cov1` and covariance with the
       second batch of inputs given by `nngp`.
-    shape2: a tuple specifying the shape of the random variable in the second
+    :shape2: a tuple specifying the shape of the random variable in the second
       batch of inputs. These have covariance `cov2` and covariance with the
       first batch of inputs given by `nngp`.
-    x1_is_x2: a boolean specifying whether `x1` and `x2` are the same.
-    is_input: a boolean specifying whether the current layer is the input
-      layer and it is used to avoid applying dropout to the input layer.
-    batch_axis: integer, the batch axis of the activations.
-    channel_axis: integer, channel axis of the activations (taken to infinity).
+    :batch_axis: integer, the batch axis of the activations.
+    :channel_axis: integer, channel axis of the activations (taken to infinity).
   """
 
-  def __new__(cls, cov1, nngp, cov2, ntk, is_gaussian, is_reversed,
-              diagonal_batch, diagonal_spatial, shape1, shape2,
-              x1_is_x2, is_input, batch_axis, channel_axis):
-    """Returns a `Kernel`.
+  nngp: np.ndarray
+  ntk: Optional[np.ndarray]
 
-    Args:
-      cov1: covariance of the first batch of inputs. A `np.ndarray` with shape
-        `(batch_size_1, [batch_size_1,] height, [height,], width, [width,], ..)`
-        where exact shape depends on `diagonal_batch` and `diagonal_spatial`.
-      nngp: covariance between the first and second batches (NNGP). `np.ndarray`
-        of shape
-        `(batch_size_1, batch_size_2, height, [height,], width, [width,], ..))`,
-        where the exact shape depends on `diagonal_spatial`.
-      cov2: optional covariance of the second batch of inputs. `np.ndarray` with
-        shape
-        `(batch_size_2, [batch_size_2,] height, [height,], width, [width,], ..)`
-        where exact shape depends on `diagonal_batch` and `diagonal_spatial`.
-      ntk: neural tangent kernel (NTK). `np.ndarray` of same shape as `nngp`.
-      is_gaussian: a boolean, specifying whether the output features or channels
-        of the layer / NN function (returning this `Kernel` as the `kernel_fn`)
-        are i.i.d. Gaussian with covariance `nngp`, conditioned on fixed inputs
-        to the layer and i.i.d. Gaussian weights and biases of the layer. For
-        example, passing an input through a CNN layer with i.i.d. Gaussian
-        weights and biases produces i.i.d. Gaussian random variables along the
-        channel dimension, while passing input through a nonlinearity does not.
-      is_reversed: a boolean specifying whether the covariance matrices `nngp`,
-        `cov1`, `cov2`, and `ntk` have the ordering of spatial dimensions
-        reversed. Ignored unless `diagonal_spatial` is `False`. Used
-        internally to avoid self-cancelling transpositions in a sequence of CNN
-        layers that flip the order of kernel spatial dimensions.
-      diagonal_batch: a boolean specifying whether `cov1` and `cov2` store
-        only the diagonal of the sample-sample covariance
-        (`diagonal_batch == True`,
-         `cov1.shape == (batch_size_1, ...)`),
-        or the full covariance
-        (`diagonal_batch == False`,
-         `cov1.shape == (batch_size_1, batch_size_1, ...)`).
-        Defaults to `True` as no current layers require the full covariance.
-      diagonal_spatial: a boolean specifying if all (`cov1`, `ntk`, etc.)
-        covariance matrices store only the diagonals of the location-location
-        covariances
-        (`diagonal_spatial == True`,
-         `nngp.shape == (batch_size_1, batch_size_2, height, width, depth, ..)`)
-        or the full covariance
-        (`diagonal_spatial == False`,
-         `nngp.shape == (batch_size_1, batch_size_2, height, height,
-                         width, width, depth, depth, ...)`).
-        Defaults to `False`, but is set to `True` if the output top-layer
-        covariance depends only on the diagonals (e.g. when a CNN network has no
-        pooling layers and `Flatten` on top).
-      shape1: a tuple specifying the shape of the random variable in the first
-        batch of inputs. These have covariance `cov1` and covariance with the
-        second batch of inputs given by `nngp`.
-      shape2: a tuple specifying the shape of the random variable in the second
-        batch of inputs. These have covariance `cov2` and covariance with the
-        first batch of inputs given by `nngp`.
-      x1_is_x2: a boolean specifying whether `x1` and `x2` are the same.
-      is_input: a boolean specifying whether the current layer is the input
-        layer and it is used to avoid applying dropout to the input layer.
-      batch_axis: integer, the batch axis of the activations.
-      channel_axis: integer, channel axis of the activations
-        (taken to infinity).
-    Returns:
-      A `Kernel`.
-    """
-    return super(Kernel, cls).__new__(
-        cls, cov1, nngp, cov2, ntk, is_gaussian,
-        is_reversed, diagonal_batch, diagonal_spatial, shape1,
-        shape2, x1_is_x2, is_input, batch_axis, channel_axis)
+  cov1: np.ndarray
+  cov2: np.ndarray
+  x1_is_x2: np.ndarray
 
-  def reverse(self):
+  is_gaussian: bool = dataclasses.field(pytree_node=False)
+  is_reversed: bool = dataclasses.field(pytree_node=False)
+  is_input: bool = dataclasses.field(pytree_node=False)
+
+  diagonal_batch: bool = dataclasses.field(pytree_node=False)
+  diagonal_spatial: bool = dataclasses.field(pytree_node=False)
+
+  shape1: Tuple[int, ...] = dataclasses.field(pytree_node=False)
+  shape2: Tuple[int, ...] = dataclasses.field(pytree_node=False)
+
+  batch_axis: int = dataclasses.field(pytree_node=False)
+  channel_axis: int = dataclasses.field(pytree_node=False)
+
+  def slice(self, n1_slice: slice, n2_slice: slice) -> 'Kernel':
+    cov1 = self.cov1[n1_slice]
+    cov2 = self.cov1[n2_slice] if self.cov2 is None else self.cov2[n2_slice]
+    return self.replace(
+        cov1=cov1,
+        nngp=self.nngp[n1_slice, n2_slice],
+        cov2=cov2,
+        ntk=self.ntk[n1_slice, n2_slice],
+        shape1=(cov1.shape[0],) + self.shape1[1:],
+        shape2=(cov2.shape[0],) + self.shape2[1:])
+
+  def reverse(self) -> 'Kernel':
     """Reverse the order of spatial axes in the covariance matrices.
-
-    Args:
-      self: a `Kernel` object.
 
     Returns:
       A `Kernel` object with spatial axes order flipped in
-      all covariance matrices. For example, if `kernels.nngp` has shape
+      all covariance matrices. For example, if `kernel.nngp` has shape
       `(batch_size_1, batch_size_2, H, H, W, W, D, D, ...)`, then
       `reverse(kernels).nngp` has shape
       `(batch_size_1, batch_size_2, ..., D, D, W, W, H, H)`.
@@ -182,26 +139,9 @@ class Kernel(
         return np.moveaxis(mat, source_axes, target_axes)
       return mat
 
-    cov1, nngp, cov2, ntk = map(reverse,
-                                (self.cov1, self.nngp, self.cov2, self.ntk))
-    return self._replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk,
-                         is_reversed=not self.is_reversed)
-
-  def permute_spatial(self, permutation):
-    """Permute spatial dimensions of the `Kernel` according to `permutation`."""
-    def permute(mat, batch_ndim):
-      if utils.is_array(mat):
-        _permutation = tuple(batch_ndim + p for p in permutation)
-        if not self.diagonal_spatial:
-          _permutation = tuple(j for p in _permutation
-                               for j in (2 * p - batch_ndim,
-                                         2 * p - batch_ndim + 1))
-        _permutation = tuple(range(batch_ndim)) + _permutation
-        return np.transpose(mat, _permutation)
-      return mat
-
-    cov1 = permute(self.cov1, 1 if self.diagonal_batch else 2)
-    cov2 = permute(self.cov2, 1 if self.diagonal_batch else 2)
-    nngp = permute(self.nngp, 2)
-    ntk = permute(self.ntk, 2)
-    return self._replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
+    cov1, nngp, cov2, ntk = map(reverse, (self.cov1,
+                                          self.nngp,
+                                          self.cov2,
+                                          self.ntk))
+    return self.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk,
+                        is_reversed=not self.is_reversed)
