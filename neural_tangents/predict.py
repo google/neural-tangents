@@ -1,3 +1,5 @@
+# Lint as: python3
+
 # Copyright 2019 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -409,8 +411,6 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
       return np.concatenate((fx_train, qx_train), axis=0)
 
     def predict_fn(state, dt):
-      state = state
-
       solver = ode(dr_dt).set_integrator('dopri5')
       solver.set_initial_value(state, 0)
       solver.integrate(dt)
@@ -465,7 +465,8 @@ def gp_inference(kernel_fn,
                  x_test,
                  get,
                  diag_reg=0.,
-                 compute_cov=False):
+                 compute_cov=False,
+                 **kernel_fn_kwargs):
   """Compute the mean and variance of the `posterior` of NNGP and NTK.
 
   Note that this method is equivalent to `gradient_descent_mse_gp` at infinite
@@ -489,6 +490,7 @@ def gp_inference(kernel_fn,
       regularization.
     :compute_cov: A boolean. If `True` computing both `mean` and `variance` and
       only `mean` otherwise.
+    :**kernel_fn_kwargs: optional keyword arguments passed to `kernel_fn`.
 
   Returns:
     Either a Gaussian(`mean`, `variance`) namedtuple or `mean` of the GP
@@ -498,7 +500,7 @@ def gp_inference(kernel_fn,
   if get is None:
     get = ('nngp', 'ntk')
   kdd, ktd, nngp_tt = _get_matrices(kernel_fn, x_train, x_test, get,
-                                    compute_cov)
+                                    compute_cov, **kernel_fn_kwargs)
   gp_inference_mat = (_gp_inference_mat_jit_cpu if _is_on_cpu(kdd) else
                       _gp_inference_mat_jit)
   try:
@@ -511,8 +513,6 @@ def gp_inference(kernel_fn,
     for diag_reg in iterator:
       yield gp_inference_mat(kdd, ktd, nngp_tt, y_train, get, diag_reg)
   return iter_func()
-
-
 
 
 @get_namedtuple('Gaussians')
@@ -554,7 +554,8 @@ def _gp_inference_mat(kdd,
     pred_mean = _mean_prediction(op, ktd.ntk, y_train)
     if nngp_tt is not None:
       pred_cov = _ntk_cov(op, ktd.ntk, kdd.nngp, ktd.nngp, nngp_tt)
-    out['ntk'] = Gaussian(pred_mean, pred_cov) if nngp_tt is not None else pred_mean
+    out['ntk'] = (Gaussian(pred_mean, pred_cov) if nngp_tt is not None
+                  else pred_mean)
 
   return out
 
@@ -566,12 +567,13 @@ _gp_inference_mat_jit_cpu = jit(_gp_inference_mat, static_argnums=(4,),
                                 backend='cpu')
 
 
-def _get_matrices(kernel_fn, x_train, x_test, get, compute_cov):
+def _get_matrices(kernel_fn, x_train, x_test, get, compute_cov,
+                  **kernel_fn_kwargs):
   get = _get_dependency(get, compute_cov)
-  kdd = kernel_fn(x_train, None, get)
-  ktd = kernel_fn(x_test, x_train, get)
+  kdd = kernel_fn(x_train, None, get, **kernel_fn_kwargs)
+  ktd = kernel_fn(x_test, x_train, get, **kernel_fn_kwargs)
   if compute_cov:
-    nngp_tt = kernel_fn(x_test, x_test, 'nngp')
+    nngp_tt = kernel_fn(x_test, x_test, 'nngp', **kernel_fn_kwargs)
   else:
     nngp_tt = None
   return kdd, ktd, nngp_tt
@@ -584,7 +586,8 @@ def gradient_descent_mse_gp(kernel_fn,
                             x_test,
                             get,
                             diag_reg=0.0,
-                            compute_cov=False):
+                            compute_cov=False,
+                            **kernel_fn_kwargs):
   """Predicts the gaussian embedding induced by gradient descent with mse loss.
 
   This is equivalent to an infinite ensemble of networks after marginalizing
@@ -600,6 +603,7 @@ def gradient_descent_mse_gp(kernel_fn,
     :diag_reg: A float, representing the strength of the regularization.
     :compute_cov: A boolean. If `True` computing both `mean` and `variance` and
       only `mean` otherwise.
+    :**kernel_fn_kwargs: optional keyword arguments passed to `kernel_fn`.
 
   Returns:
     A function that predicts the gaussian parameters at t:
@@ -608,17 +612,23 @@ def gradient_descent_mse_gp(kernel_fn,
   """
   if get is None:
     get = ('nngp', 'ntk')
+
   if isinstance(get, str):
     # NOTE(schsam): This seems like an ugly solution that involves an extra
     # indirection. It might be nice to clean it up.
-    return lambda t: gradient_descent_mse_gp(
-        kernel_fn,
-        x_train,
-        y_train,
-        x_test,
-        diag_reg=diag_reg,
-        get=(get,),
-        compute_cov=compute_cov)(t)[0]
+    def _predict(t=None):
+      return gradient_descent_mse_gp(
+          kernel_fn,
+          x_train,
+          y_train,
+          x_test,
+          diag_reg=diag_reg,
+          get=(get,),
+          compute_cov=compute_cov,
+          **kernel_fn_kwargs
+      )(t)[0]
+
+    return _predict
 
   _, get = canonicalize_get(get)
 
@@ -628,7 +638,7 @@ def gradient_descent_mse_gp(kernel_fn,
   eigenspace = {}
 
   kdd, ktd, nngp_tt = _get_matrices(kernel_fn, x_train, x_test, get,
-                                    compute_cov)
+                                    compute_cov, **kernel_fn_kwargs)
   gp_inference_mat = (_gp_inference_mat_jit_cpu if _is_on_cpu(kdd) else
                       _gp_inference_mat_jit)
 
@@ -682,7 +692,7 @@ def gradient_descent_mse_gp(kernel_fn,
             ktd.nngp,
             optimize=True)
         term_2 += np.transpose(term_2)
-        pred_cov += (-term_2 + nngp_tt)
+        pred_cov += -term_2 + nngp_tt
 
       out['ntk'] = Gaussian(pred_mean, pred_cov) if compute_cov else pred_mean
 

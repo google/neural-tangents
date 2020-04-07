@@ -16,7 +16,6 @@
 
 """Batch kernel calculations serially or in parallel."""
 
-import dataclasses
 from functools import partial
 import warnings
 from jax.api import device_get
@@ -95,13 +94,28 @@ def _flatten_kernel_dict(k_dict, x2_is_none, store_on_device, is_parallel):
   for key, value in k_dict.items():
     if key == 'cov1':
       k_dict[key] = fl(value, 1)
+
     elif key == 'cov2':
       if x2_is_none:
         k_dict[key] = None
       else:
         k_dict[key] = fl(value, 0)
+
     elif key == 'x1_is_x2':
       k_dict[key] = value[(0,) * value.ndim]
+
+    elif key == 'mask1':
+      if value is None:
+        k_dict[key] = None
+      else:
+        k_dict[key] = fl(value, 1)
+
+    elif key == 'mask2':
+      if value is None or x2_is_none:
+        k_dict[key] = None
+      else:
+        k_dict[key] = fl(value, 0)
+
     elif key in ('shape1', 'shape2'):
       if key == 'shape2' and is_parallel:
         continue
@@ -141,6 +155,12 @@ def _reshape_kernel_for_pmap(k, device_count, n1_per_device):
     cov2 = k.cov1
   cov2 = np.broadcast_to(cov2, (device_count,) + cov2.shape)
 
+  mask2 = k.mask2
+  if mask2 is None and k.mask1 is not None:
+    mask2 = k.mask1
+  if mask2 is not None:
+    mask2 = np.broadcast_to(mask2, (device_count,) + mask2.shape)
+
   x1_is_x2 = np.broadcast_to(k.x1_is_x2, (device_count,) + k.x1_is_x2.shape)
 
   nngp, ntk, cov1 = [
@@ -153,7 +173,8 @@ def _reshape_kernel_for_pmap(k, device_count, n1_per_device):
       cov1=cov1,
       cov2=cov2,
       x1_is_x2=x1_is_x2,
-      shape1=(n1_per_device,) + k.shape1[1:])
+      shape1=(n1_per_device,) + k.shape1[1:],
+      mask2=mask2)
 
 
 def _serial(kernel_fn, batch_size, store_on_device=True):

@@ -25,21 +25,21 @@ with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
   long_description = f.read()
 
 
-INSTALL_REQUIRES = ['jax>=0.1.58', 'frozendict']
+INSTALL_REQUIRES = ['jax>=0.1.58', 'frozendict', 'dataclasses']
 
 setuptools.setup(
     name='neural-tangents',
-    version='0.1.8',
+    version='0.1.9',
     license='Apache 2.0',
     author='Google',
     author_email='neural-tangents-dev@google.com',
     install_requires=INSTALL_REQUIRES,
     url='https://github.com/google/neural-tangents',
-    download_url="https://pypi.org/project/neural-tangents/",
+    download_url='https://pypi.org/project/neural-tangents/',
     project_urls={
-        "Source Code": "https://github.com/google/neural-tangents",
-        "Documentation": "https://arxiv.org/abs/1912.02803",
-        "Bug Tracker": "https://github.com/google/neural-tangents/issues",
+        'Source Code': 'https://github.com/google/neural-tangents',
+        'Documentation': 'https://arxiv.org/abs/1912.02803',
+        'Bug Tracker': 'https://github.com/google/neural-tangents/issues',
     },
     packages=setuptools.find_packages(exclude=('presentation',)),
     long_description=long_description,

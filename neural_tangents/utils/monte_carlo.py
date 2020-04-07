@@ -37,15 +37,16 @@ def _sample_once_kernel_fn(kernel_fn,
                            batch_size=0,
                            device_count=-1,
                            store_on_device=True):
-  @partial(batch.batch, batch_size=batch_size,
+  @partial(batch.batch,
+           batch_size=batch_size,
            device_count=device_count,
            store_on_device=store_on_device)
-  def kernel_fn_sample_once(x1, x2, key, get):
+  def kernel_fn_sample_once(x1, x2, key, get, **apply_fn_kwargs):
     init_key, dropout_key1, dropout_key2 = random.split(key, 3)
     keys = np.where(utils.x1_is_x2(x1, x2), dropout_key1,
                     (dropout_key1, dropout_key2))
     _, params = init_fn(init_key, x1.shape)
-    return kernel_fn(x1, x2, params, get, keys=keys)
+    return kernel_fn(x1, x2, params, get, keys=keys, **apply_fn_kwargs)
   return kernel_fn_sample_once
 
 
@@ -54,11 +55,11 @@ def _sample_many_kernel_fn(kernel_fn_sample_once, key, n_samples,
   def normalize(sample, n):
     return tree_map(lambda sample: sample / n, sample)
 
-  def get_samples(x1, x2, get):
+  def get_samples(x1, x2, get, **apply_fn_kwargs):
     _key = key
     for n in range(1, max(n_samples) + 1):
       _key, split = random.split(_key)
-      one_sample = kernel_fn_sample_once(x1, x2, split, get)
+      one_sample = kernel_fn_sample_once(x1, x2, split, get, **apply_fn_kwargs)
       if n == 1:
         ker_sampled = one_sample
       else:
@@ -67,14 +68,14 @@ def _sample_many_kernel_fn(kernel_fn_sample_once, key, n_samples,
 
   if get_generator:
     @utils.get_namedtuple('MonteCarloKernel')
-    def get_sampled_kernel(x1, x2, get=None):
-      for n, sample in get_samples(x1, x2, get):
+    def get_sampled_kernel(x1, x2, get=None, **apply_fn_kwargs):
+      for n, sample in get_samples(x1, x2, get, **apply_fn_kwargs):
         if n in n_samples:
           yield normalize(sample, n)
   else:
     @utils.get_namedtuple('MonteCarloKernel')
-    def get_sampled_kernel(x1, x2, get=None):
-      for n, sample in get_samples(x1, x2, get):
+    def get_sampled_kernel(x1, x2, get=None, **apply_fn_kwargs):
+      for n, sample in get_samples(x1, x2, get, **apply_fn_kwargs):
         pass
       return normalize(sample, n)
 
@@ -155,7 +156,8 @@ def monte_carlo_kernel_fn(init_fn,
     >>> n_samples = [1, 10, 100, 1000]
     >>> kernel_fn_generator = nt.monte_carlo_kernel_fn(init_fn, apply_fn, key1,
     >>>                                                n_samples)
-    >>> kernel_samples = kernel_fn_generator(x_train, x_test, get=('nngp', 'ntk'))
+    >>> kernel_samples = kernel_fn_generator(x_train, x_test,
+    >>>                                      get=('nngp', 'ntk'))
     >>> for n, kernel in zip(n_samples, kernel_samples):
     >>>   print(n, kernel)
     >>>   # `kernel` is a tuple of NNGP and NTK MC estimate using `n` samples.
@@ -184,13 +186,13 @@ def _canonicalize_n_samples(n_samples):
     n_samples = set(n_samples)
 
     if not all(isinstance(n, int) for n in n_samples):
-      raise ValueError('`n_samples` must contain only integers, got %s.'
-                       % n_samples)
+      raise ValueError(f'`n_samples` must contain only integers, '
+                       f'got {n_samples}.')
 
     if any(n <= 0 for n in n_samples):
-      raise ValueError('`n_samples` must be positive, got %s.' % n_samples)
+      raise ValueError(f'`n_samples` must be positive, got {n_samples}.')
 
   else:
-    raise ValueError('`n_samples` must be either an integer of a set of '
-                     'integers, got %s.' % type(n_samples))
+    raise TypeError(f'`n_samples` must be either an integer of a set of '
+                    f'integers, got {type(n_samples)}.')
   return n_samples, get_generator

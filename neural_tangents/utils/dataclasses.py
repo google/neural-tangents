@@ -74,6 +74,10 @@ def dataclass(clz):
     return dataclasses.asdict(self)
   data_clz.asdict = asdict
 
+  def astuple(self):
+    return dataclasses.astuple(self)
+  data_clz.astuple = astuple
+
   def iterate_clz(x):
     meta = tuple(getattr(x, name) for name in meta_fields)
     data = tuple(getattr(x, name) for name in data_fields)

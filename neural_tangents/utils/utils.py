@@ -21,6 +21,10 @@ import functools
 import inspect
 import operator as op
 import types
+from typing import Optional, Union, List
+
+from . import dataclasses
+from jax import lax
 from jax.lib import xla_bridge
 import jax.numpy as np
 from .kernel import Kernel
@@ -73,13 +77,12 @@ def _output_to_dict(output):
   raise ValueError(type(output))
 
 
-def wraps(f,
-          assigned=functools.WRAPPER_ASSIGNMENTS,
-          updated=functools.WRAPPER_UPDATES):
+def wraps(f):
   def wrapper(g):
-    @functools.wraps(f, assigned, updated)
+    @functools.wraps(f)
     def h(*args, **kwargs):
       return g(*args, **kwargs)
+
     h.__signature__ = inspect.signature(f)
     return h
   return wrapper
@@ -268,3 +271,80 @@ def diagonal_between(x, start_axis=0, end_axis=-1):
   x = np.diagonal(x.reshape(shape_2d), axis1=start_axis, axis2=start_axis+1)
   x = np.moveaxis(x, -1, start_axis)
   return x.reshape(shape_result)
+
+
+def zip_flat(x, y):
+  return tuple(c for xy in zip(x, y) for c in xy)
+
+
+def interleave_ones(x, start_axis, end_axis, x_first):
+  x_axes = x.shape[start_axis:end_axis]
+  ones = (1,) * (end_axis - start_axis)
+  shape = x.shape[:start_axis]
+  if x_first:
+    shape += zip_flat(x_axes, ones)
+  else:
+    shape += zip_flat(ones, x_axes)
+  shape += x.shape[end_axis:]
+  return x.reshape(shape)
+
+
+def outer_prod(x, y, start_axis, end_axis, prod_op):
+  if y is None:
+    y = x
+  x = interleave_ones(x, start_axis, end_axis, True)
+  y = interleave_ones(y, start_axis, end_axis, False)
+  return prod_op(x, y)
+
+
+
+_array_or_list = Union[Optional[np.ndarray], List[Optional[np.ndarray]]]
+
+@dataclasses.dataclass
+class MaskedArray:
+  masked_value: _array_or_list
+  mask: _array_or_list
+
+
+def get_masked_array(x: _array_or_list,
+                     mask_constant: float = None) -> MaskedArray:
+  """Return `x` with entries equal to `mask_constant` zeroed-out, and the mask.
+
+  The mask returned is a boolean `np.ndarray` with masked indices having `True`.
+
+  Args:
+    x: `np.ndarray` to mask. If `x` is a `MaskedInput`, treat it as
+      `(masked_x, mask)` and pass it through.
+    mask_constant: an optional `float`, the value in inputs to be considered as
+      masked (e.g. padding in a batch of sentences). `None` means no masking.
+      Can also be `np.nan`, `np.inf` etc.
+
+  Returns:
+    A `MaskedArray` of `(masked_x, boolean_mask)`.
+  """
+  if isinstance(x, list):
+    fields = zip(*(get_masked_array(_x, mask_constant).astuple()
+                    for _x in x))
+    return MaskedArray(*(list(f) for f in fields))
+
+  if x is None:
+    mask = None
+
+  elif isinstance(x, MaskedArray):
+    x, mask = x.astuple()
+
+  elif isinstance(x, np.ndarray):
+    if mask_constant is None:
+      mask = None
+    else:
+      id_fn = lambda m: m
+      mask = lax.cond(np.isnan(mask_constant),
+                      np.isnan(x), id_fn,
+                      x == mask_constant, id_fn)
+  else:
+    raise TypeError(x, type(x))
+
+  if mask is not None:
+    x = np.where(mask, np.zeros((), x.dtype), x)
+
+  return MaskedArray(x, mask)
