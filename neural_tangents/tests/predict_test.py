@@ -15,7 +15,7 @@
 
 
 import math
-
+import unittest
 from jax import test_util as jtu
 from jax.api import device_get
 from jax.api import grad
@@ -31,6 +31,7 @@ from neural_tangents import stax
 from neural_tangents.utils import batch
 from neural_tangents.utils import empirical
 from neural_tangents.utils import test_utils
+
 
 config.parse_flags_with_absl()
 
@@ -938,7 +939,7 @@ class PredictTest(jtu.JaxTestCase):
                                  out_logits):
     if xla_bridge.get_backend().platform == 'gpu' and config.read(
         'jax_enable_x64'):
-      raise jtu.SkipTest('Not running GPU x64 to save time.')
+      raise unittest.SkipTest('Not running GPU x64 to save time.')
     training_steps = 5000
     learning_rate = 1.0
     ensemble_size = 50

@@ -35,36 +35,19 @@ def get_dataset(name, n_train=None, n_test=None, permute_train=False,
                 do_flatten_and_normalize=True):
   """Download, parse and process a dataset to unit scale and one-hot labels."""
   ds_builder = tfds.builder(name)
-  use_s3_api = ds_builder.version.implements(tfds.core.Experiment.S3)
 
-  if use_s3_api:
-    ds_train, ds_test = tfds.as_numpy(
-        tfds.load(
-            name + ':3.*.*',
-            split=['train' + ('[:%d]' % n_train if n_train is not None else ''),
-                   'test' + ('[:%d]' % n_test if n_test is not None else '')],
-            batch_size=-1,
-            as_dataset_kwargs={'shuffle_files': False}))
-  else:
-    ds_train, ds_test = tfds.as_numpy(
-        tfds.load(
-            name,
-            split=["train", "test"],
-            batch_size=-1,
-            as_dataset_kwargs={"shuffle_files": False}))
+  ds_train, ds_test = tfds.as_numpy(
+      tfds.load(
+          name + ':3.*.*',
+          split=['train' + ('[:%d]' % n_train if n_train is not None else ''),
+                 'test' + ('[:%d]' % n_test if n_test is not None else '')],
+          batch_size=-1,
+          as_dataset_kwargs={'shuffle_files': False}))
 
   train_images, train_labels, test_images, test_labels = (ds_train['image'],
                                                           ds_train['label'],
                                                           ds_test['image'],
                                                           ds_test['label'])
-
-  if not use_s3_api:
-    if n_train is not None:
-      train_images = train_images[:n_train]
-      train_labels = train_labels[:n_train]
-    if n_test is not None:
-      test_images = test_images[:n_test]
-      test_labels = test_labels[:n_test]
 
   if do_flatten_and_normalize:
     train_images = _partial_flatten_and_normalize(train_images)
