@@ -30,6 +30,7 @@ import jax.random as random
 from neural_tangents import stax
 from neural_tangents.utils import monte_carlo
 from neural_tangents.utils import test_utils
+import unittest
 
 
 jax_config.parse_flags_with_absl()
@@ -323,17 +324,17 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
     if is_conv:
       if xla_bridge.get_backend().platform == 'cpu':
-        raise jtu.SkipTest('Not running CNN models on CPU to save time.')
+        raise unittest.SkipTest('Not running CNN models on CPU to save time.')
 
       if (is_res and is_conv and ((strides is not None and strides != (1, 1)) or
                                   (padding == 'VALID' and filter_shape !=
                                    (1, 1)))):
-        raise jtu.SkipTest('Different paths in a residual models need to return'
+        raise unittest.SkipTest('Different paths in a residual models need to return'
                            ' outputs of the same shape.')
     elif (filter_shape != FILTER_SHAPES[0] or padding != PADDINGS[0] or
           strides != STRIDES[0] or proj_into_2d != PROJECTIONS[0] or
           use_pooling):
-      raise jtu.SkipTest('FC models do not have these parameters.')
+      raise unittest.SkipTest('FC models do not have these parameters.')
 
     pool_type = 'AVG'
     W_std, b_std = 2.**0.5, 0.5**0.5
@@ -392,9 +393,9 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
     if is_conv:
       if xla_bridge.get_backend().platform == 'cpu':
-        raise jtu.SkipTest('Not running CNN models on CPU to save time.')
+        raise unittest.SkipTest('Not running CNN models on CPU to save time.')
     elif proj_into_2d != PROJECTIONS[0]:
-      raise jtu.SkipTest('FC models do not have these parameters.')
+      raise unittest.SkipTest('FC models do not have these parameters.')
 
     net = _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res,
                    padding, phi, strides, width, is_ntk, proj_into_2d,
@@ -441,9 +442,9 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
     if is_conv:
       if xla_bridge.get_backend().platform == 'cpu':
-        raise jtu.SkipTest('Not running CNN models on CPU to save time.')
+        raise unittest.SkipTest('Not running CNN models on CPU to save time.')
     elif proj_into_2d != PROJECTIONS[0] or layer_norm not in ('C', 'NC'):
-      raise jtu.SkipTest('FC models do not have these parameters.')
+      raise unittest.SkipTest('FC models do not have these parameters.')
 
     W_std, b_std = 2.**0.5, 0.5**0.5
     filter_shape = FILTER_SHAPES[0]
@@ -500,9 +501,9 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
 
     if xla_bridge.get_backend().platform == 'cpu':
-      raise jtu.SkipTest('Not running CNN models on CPU to save time.')
+      raise unittest.SkipTest('Not running CNN models on CPU to save time.')
     if pool_type == 'SUM' and normalize_edges:
-      raise jtu.SkipTest('normalize_edges not applicable to SumPool.')
+      raise unittest.SkipTest('normalize_edges not applicable to SumPool.')
 
     net = _get_net_pool(width, is_ntk, pool_type,
                         padding, filter_shape, strides, normalize_edges)
@@ -598,7 +599,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
   def test_dropout(self, model, width, same_inputs, is_ntk, padding, strides,
                    filter_shape, phi, use_pooling, proj_into_2d):
     if xla_bridge.get_backend().platform == 'tpu' and same_inputs:
-      raise jtu.SkipTest(
+      raise unittest.SkipTest(
           'Skip TPU test for `same_inputs`. Need to handle '
           'random keys carefully for dropout + empirical kernel.')
 
@@ -612,17 +613,17 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     parameterization = 'ntk'
     if is_conv:
       if xla_bridge.get_backend().platform == 'cpu':
-        raise jtu.SkipTest('Not running CNN models on CPU to save time.')
+        raise unittest.SkipTest('Not running CNN models on CPU to save time.')
 
       if (is_res and is_conv and ((strides is not None and strides != (1, 1)) or
                                   (padding == 'VALID' and filter_shape !=
                                    (1, 1)))):
-        raise jtu.SkipTest('Different paths in a residual models need to return'
+        raise unittest.SkipTest('Different paths in a residual models need to return'
                            ' outputs of the same shape.')
     elif (filter_shape != FILTER_SHAPES[0] or padding != PADDINGS[0] or
           strides != STRIDES[0] or proj_into_2d != PROJECTIONS[0] or
           use_pooling):
-      raise jtu.SkipTest('FC models do not have these parameters.')
+      raise unittest.SkipTest('FC models do not have these parameters.')
 
     net = _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res,
                    padding, phi, strides, width, is_ntk, proj_into_2d,
@@ -1001,11 +1002,11 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
                               'dense_after_branch_in']))
   def test_fan_in_fc(self, same_inputs, axis, n_branches, get, branch_in):
     if axis in (None, 0) and branch_in == 'dense_after_branch_in':
-      raise jtu.SkipTest('`FanInSum` and `FanInConcat(0)` '
+      raise unittest.SkipTest('`FanInSum` and `FanInConcat(0)` '
                          'require `is_gaussian`.')
 
     if axis == 1 and branch_in == 'dense_before_branch_in':
-      raise jtu.SkipTest('`FanInConcat` on feature axis requires a dense layer'
+      raise unittest.SkipTest('`FanInConcat` on feature axis requires a dense layer'
                          'after concatenation.')
 
     key = random.PRNGKey(1)
@@ -1099,14 +1100,14 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
                        branch_in,
                        readout):
     if xla_bridge.get_backend().platform == 'cpu':
-      raise jtu.SkipTest('Not running CNNs on CPU to save time.')
+      raise unittest.SkipTest('Not running CNNs on CPU to save time.')
 
     if axis in (None, 0, 1, 2) and branch_in == 'dense_after_branch_in':
-      raise jtu.SkipTest('`FanInSum` and `FanInConcat(0/1/2)` '
+      raise unittest.SkipTest('`FanInSum` and `FanInConcat(0/1/2)` '
                          'require `is_gaussian`.')
 
     if axis == 3 and branch_in == 'dense_before_branch_in':
-      raise jtu.SkipTest('`FanInConcat` on feature axis requires a dense layer '
+      raise unittest.SkipTest('`FanInConcat` on feature axis requires a dense layer '
                          'after concatenation.')
 
     key = random.PRNGKey(1)
@@ -1217,11 +1218,11 @@ class ConvNDTest(test_utils.NeuralTangentsTestCase):
                    use_dropout, use_layernorm):
     platform = xla_bridge.get_backend().platform
     if platform == 'cpu':
-      raise jtu.SkipTest('Skipping CPU CNN tests for speed.')
+      raise unittest.SkipTest('Skipping CPU CNN tests for speed.')
     elif platform == 'gpu' and n not in (0, 1, 2, 3):
-      raise jtu.SkipTest('>=4D CNN does not work on GPU.')
+      raise unittest.SkipTest('>=4D CNN does not work on GPU.')
     elif platform == 'tpu' and use_dropout and same_inputs:
-      raise jtu.SkipTest('Batched empirical kernel with dropout not supported.')
+      raise unittest.SkipTest('Batched empirical kernel with dropout not supported.')
 
     width = 1024
     n_samples = 512
@@ -1371,7 +1372,7 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
   def test_input_req(self, same_inputs):
     platform = xla_bridge.get_backend().platform
     if platform == 'cpu':
-      raise jtu.SkipTest('Skipping CPU CNN tests for speed.')
+      raise unittest.SkipTest('Skipping CPU CNN tests for speed.')
 
     key = random.PRNGKey(1)
     x1 = random.normal(key, (2, 7, 8, 4, 3))
@@ -1617,9 +1618,9 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
   def test_mask_conv(self, same_inputs, get, mask_axis, mask_constant, concat,
                      proj, p, use_attn, n):
     if xla_bridge.get_backend().platform == 'cpu':
-      raise jtu.SkipTest('Skipping CNN tests on CPU for speed.')
+      raise unittest.SkipTest('Skipping CNN tests on CPU for speed.')
     elif xla_bridge.get_backend().platform == 'gpu' and n > 3:
-      raise jtu.SkipTest('>=4D-CNN is not supported on GPUs.')
+      raise unittest.SkipTest('>=4D-CNN is not supported on GPUs.')
 
     width = 1024
     n_samples = 128
