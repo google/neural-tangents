@@ -134,18 +134,19 @@ def empirical_implicit_ntk_fn(f):
   """Computes the ntk without batching for inputs x1 and x2.
 
   The Neural Tangent Kernel is defined as :math:`J(X_1) J(X_2)^T` where
-  :math:`J` is the jacobian :math:`df/dparams`. Computing the NTK directly
-  involves directly instantiating the jacobian which takes
+  :math:`J` is the jacobian :math:`df / dparams^T`. Computing the NTK directly
+  involves instantiating the jacobian which takes
   `O(dataset_size * output_dim * parameters)` memory. It turns out it is
   substantially more efficient (especially as the number of parameters grows)
   to compute the NTK implicitly.
 
-  This involves using JAX's autograd to compute derivatives of linear functions
-  (which do not depend on the inputs). Thus, we find it more efficient to refer
-  to fx_dummy for the outputs of the network. fx_dummy has the same shape as
-  the output of the network on a single piece of input data.
-
-  TODO: Write up a better description of the implicit method.
+  The implicit kernel is derived by observing that:
+    :math:`Theta = J(X_1) J(X_2)^T = d[J(X_1) J(X_2)^T v] / d[v^T]`,
+  for a vector :math:`v`. This allows the computation of the NTK to be phrased
+  as: :math:`a(v) = J(X_2)^T v`, which is computed by a vector-Jacobian product;
+  :math:`b(v) = J(X_1) a(v)` which is computed by a Jacobian-vector product; and
+  :math:`Theta = d[b(v)] / d[v^T]` which is computed by taking the Jacobian of
+  :math:`b(v)`.
 
   Args:
     :f: The function whose NTK we are computing. `f` should have the signature
@@ -184,13 +185,17 @@ def empirical_implicit_ntk_fn(f):
     f1 = _get_f_params(f, x1, key1, **apply_fn_kwargs)
     f2 = _get_f_params(f, x2, key2, **apply_fn_kwargs)
 
-    fx2_struct = eval_shape(f2, params)
-    fx_dummy = np.ones(fx2_struct.shape, fx2_struct.dtype)
-
     def delta_vjp_jvp(delta):
       def delta_vjp(delta):
         return vjp(f2, params)[1](delta)
       return jvp(f1, (params,), delta_vjp(delta))[1]
+
+    # Since we are taking the Jacobian of a linear function (which does not
+    # depend on its coefficients), it is more efficient to substitute fx_dummy
+    # for the outputs of the network. fx_dummy has the same shape as the output
+    # of the network on a single piece of input data.
+    fx2_struct = eval_shape(f2, params)
+    fx_dummy = np.ones(fx2_struct.shape, fx2_struct.dtype)
 
     ntk = jacobian(delta_vjp_jvp)(fx_dummy)
     ndim = len(fx2_struct.shape)
