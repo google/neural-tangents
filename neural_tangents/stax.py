@@ -647,7 +647,7 @@ def _GeneralConv(dimension_numbers,
 
     if kernels.diagonal_spatial:
       def conv_unscaled(x, batch_ndim):
-        x = _conv_kernel_over_spatial(
+        x = _conv_kernel_diagonal_spatial(
             x, filter_shape_kernel, strides_kernel, padding, batch_ndim)
         return x
 
@@ -659,7 +659,7 @@ def _GeneralConv(dimension_numbers,
       is_reversed = not is_reversed
 
       def conv_unscaled(x, batch_ndim):
-        x = _conv_kernel(
+        x = _conv_kernel_diagonal_full(
             x, filter_shape_kernel, strides_kernel, padding, batch_ndim)
         return x
 
@@ -2522,7 +2522,11 @@ def _pad_one_side(x, pads, axes, mode):
   return x
 
 
-def _conv_kernel(mat, filter_shape, strides, padding, batch_ndim):
+def _conv_kernel_diagonal_full(mat,
+                               filter_shape,
+                               strides,
+                               padding,
+                               batch_ndim):
   """Compute covariance of the CNN outputs given inputs with covariance `mat`.
 
   Used when `kernel.diagonal_spatial == False`.
@@ -2589,7 +2593,11 @@ def _conv_kernel(mat, filter_shape, strides, padding, batch_ndim):
   return mat
 
 
-def _conv_kernel_over_spatial(mat, filter_shape, strides, padding, batch_ndim):
+def _conv_kernel_diagonal_spatial(mat,
+                                  filter_shape,
+                                  strides,
+                                  padding,
+                                  batch_ndim):
   """Compute covariance of the CNN outputs given inputs with covariance `mat`.
 
   Used when `kernel.diagonal_spatial == True`.
@@ -2615,20 +2623,17 @@ def _conv_kernel_over_spatial(mat, filter_shape, strides, padding, batch_ndim):
   if not utils.is_array(mat):
     return mat
 
-  spatial_axes = tuple(range(mat.ndim)[batch_ndim:])
-
   if padding == Padding.CIRCULAR:
+    spatial_axes = tuple(range(mat.ndim)[batch_ndim:])
     mat = _same_pad_for_filter_shape(mat, filter_shape, strides,
                                      spatial_axes, 'wrap')
     padding = Padding.VALID
 
-  ker = np.full((1, 1) + filter_shape, 1. / np.prod(filter_shape), mat.dtype)
-
-  batch_shape, spatial_shape = mat.shape[:batch_ndim], mat.shape[batch_ndim:]
-  mat = np.reshape(mat, (-1,) + spatial_shape)
-  mat = np.expand_dims(mat, 1)
-  mat = lax.conv_general_dilated(mat, ker, strides, padding.name)
-  mat = mat.reshape(batch_shape + mat.shape[2:])
+  filter_shape = (1,) * batch_ndim + filter_shape
+  filter_size = functools.reduce(op.mul, filter_shape, 1)
+  strides = (1,) * batch_ndim + strides
+  mat = lax._reduce_window_sum(mat, filter_shape, strides, padding.name)
+  mat /= filter_size
   return mat
 
 
