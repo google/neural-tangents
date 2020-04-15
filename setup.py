@@ -29,7 +29,7 @@ INSTALL_REQUIRES = ['jax>=0.1.58', 'frozendict', 'dataclasses']
 
 setuptools.setup(
     name='neural-tangents',
-    version='0.1.9',
+    version='0.2',
     license='Apache 2.0',
     author='Google',
     author_email='neural-tangents-dev@google.com',
