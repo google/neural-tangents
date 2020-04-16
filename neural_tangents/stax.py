@@ -659,7 +659,7 @@ def _GeneralConv(dimension_numbers,
       is_reversed = not is_reversed
 
       def conv_unscaled(x, batch_ndim):
-        x = _conv_kernel_diagonal_full(
+        x = _conv_kernel_full_spatial(
             x, filter_shape_kernel, strides_kernel, padding, batch_ndim)
         return x
 
@@ -2522,11 +2522,11 @@ def _pad_one_side(x, pads, axes, mode):
   return x
 
 
-def _conv_kernel_diagonal_full(mat,
-                               filter_shape,
-                               strides,
-                               padding,
-                               batch_ndim):
+def _conv_kernel_full_spatial(mat,
+                              filter_shape,
+                              strides,
+                              padding,
+                              batch_ndim):
   """Compute covariance of the CNN outputs given inputs with covariance `mat`.
 
   Used when `kernel.diagonal_spatial == False`.
@@ -2629,8 +2629,8 @@ def _conv_kernel_diagonal_spatial(mat,
                                      spatial_axes, 'wrap')
     padding = Padding.VALID
 
-  filter_shape = (1,) * batch_ndim + filter_shape
   filter_size = functools.reduce(op.mul, filter_shape, 1)
+  filter_shape = (1,) * batch_ndim + filter_shape
   strides = (1,) * batch_ndim + strides
   mat = lax._reduce_window_sum(mat, filter_shape, strides, padding.name)
   mat /= filter_size
@@ -2701,8 +2701,6 @@ def _pool_kernel(mat,
 
 
 def _diag_mul_full_spatial(x, factor, diagonal_batch):
-  diag = x
-
   if diagonal_batch:
     idx = (slice(None),)
     batch_ndim = 1
@@ -2718,22 +2716,20 @@ def _diag_mul_full_spatial(x, factor, diagonal_batch):
     size = x.shape[2 - batch_ndim + 2 * i]
     shape[i] = size
     idx += (np.arange(size).reshape(shape),) * 2
-    diag = np.diagonal(diag, axis1=2 - batch_ndim, axis2=3 - batch_ndim)
 
-  x = ops.index_update(x, idx, diag * factor)
+  x = ops.index_mul(x, idx, factor)
   return x
 
 
 def _diag_mul_diagonal_spatial(x, factor, diagonal_batch):
   if diagonal_batch:
-    x = factor * x
+    x *= factor
 
   else:
     if x.shape[0] != x.shape[1]:
       return x
     idx = np.diag_indices(x.shape[0]) + (Ellipsis,)
-    diag = np.moveaxis(np.diagonal(x), -1, 0)
-    x = ops.index_update(x, idx, diag * factor)
+    x = ops.index_mul(x, idx, factor)
 
   return x
 
