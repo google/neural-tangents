@@ -371,17 +371,22 @@ a small dataset using a small learning rate.
 ## Performance
 
 In the table below we measure time to compute a single NTK
-entry in a 21-layer CNN (`3x3` filters, no strides, `SAME` padding, `ReLU`)
-followed by `stax.GlobalAvgPool` on inputs of shape `3x32x32`. Precisely:
+entry in a 21-layer CNN (`3x3` filters, no strides, `SAME` padding, `ReLU`) on inputs of shape `3x32x32`. Precisely:
 
 ```python
 layers = []
 for _ in range(21):
   layers += [stax.Conv(1, (3, 3), (1, 1), 'SAME'), stax.Relu()]
-layers += [stax.GlobalAvgPool()]
-_, _, kernel_fn = stax.serial(*layers)
 ```
 
+
+### CNN with pooling
+
+Top layer is `stax.GlobalAvgPool()`:
+
+```
+_, _, kernel_fn = stax.serial(*(layers + [stax.GlobalAvgPool()]))
+```
 
 | Platform                    | Precision | Milliseconds / NTK entry | Max batch size (`NxN`) |
 |-----------------------------|-----------|--------------------------|------------------------|
@@ -395,8 +400,30 @@ _, _, kernel_fn = stax.serial(*layers)
 | NVIDIA V100                 | 64        |  6.2058                  |    18                  |
 
 
+### CNN without pooling
 
-Tested using version 0.2.1. All GPU results are per single accelerator.
+Top layer is `stax.FLatten()`:
+
+```
+_, _, kernel_fn = stax.serial(*(layers + [stax.FLatten()]))
+```
+
+| Platform                    | Precision | Milliseconds / NTK entry | Max batch size (`NxN`)            |
+|-----------------------------|-----------|--------------------------|-----------------------------------|
+| CPU, >56 cores, >700 Gb RAM | 32        |  0.12013                 |  2048 <= N < 4096 (fastest - 512) |
+| CPU, >56 cores, >700 Gb RAM | 64        |  0.3414                  |  2048 <= N < 4096 (fastest - 256) |
+| TPU v2                      | 32/16     |  0.0015722               |  512  <= N < 1024                 |
+| TPU v3                      | 32/16     |  0.0010647               |  512  <= N < 1024                 |
+| NVIDIA P100                 | 32        |  0.015171                |  512  <= N < 1024                 |
+| NVIDIA P100                 | 64        |  0.019894                |  512  <= N < 1024                 |
+| NVIDIA V100                 | 32        |  0.0046510               |  512  <= N < 1024                 |
+| NVIDIA V100                 | 64        |  0.010822                |  512  <= N < 1024                 |
+
+
+
+
+
+Tested using version `0.2.1`. All GPU results are per single accelerator.
 Note that runtime is proportional to the depth of your network.
 If your performance differs significantly,
 please [file a bug](https://github.com/google/neural-tangents/issues/new)!
