@@ -87,6 +87,8 @@ from jax.tree_util import tree_map, tree_flatten, tree_unflatten
 from neural_tangents.utils import utils
 from neural_tangents.utils.kernel import Kernel
 
+from jax.nn.initializers import ones, zeros
+import quadpy as qp
 
 class Padding(enum.Enum):
   CIRCULAR = 'CIRCULAR'
@@ -2946,3 +2948,278 @@ def _pool_mask(mask: np.ndarray,
                        f'please submit a bug to '
                        f'https://github.com/google/neural-tangents/issues/new.')
   return mask
+
+
+@layer
+def BatchNormRelu(axis, epsilon=0., center=True, scale=True,
+                  beta_init=zeros, gamma_init=ones):
+  """Layer construction function for a batch normalization layer.
+
+  See the papers below for the derivation.
+      https://arxiv.org/abs/1902.08129
+      https://arxiv.org/abs/1910.12478
+
+  The implementation here follows the reference implementation in
+      https://github.com/thegregyang/GP4A
+  """
+
+  iu = ops.index_update
+  ix = ops.index
+
+  assert epsilon < 1e-12
+
+  _beta_init = lambda rng, shape: beta_init(rng, shape) if center else ()
+  _gamma_init = lambda rng, shape: gamma_init(rng, shape) if scale else ()
+  axis = (axis,) if np.isscalar(axis) else axis
+
+  init_fn, bn_apply_fn = ostax.BatchNorm(
+      axis, epsilon, center, scale, beta_init, gamma_init)
+
+  def apply_fn(params, xs, **kwargs):
+    xs = bn_apply_fn(params, xs)
+    return _ab_relu(xs, 0, 1)
+
+  # NOTE: Currently assumes cov2 is None and computes single batch kernel
+  @_requires(diagonal_batch=False)
+  def kernel_fn(kernels):
+    # print(kernels.cov1)
+    # assert kernels.cov2 is None
+
+    # apply the below code to cov1 and cov2
+    # write new cross batch code for (nngp, cov1, cov2)
+
+    def Gmatrix(batch_size):
+      return np.eye(batch_size) - np.ones((batch_size, batch_size)) / batch_size
+
+    def singlebatchker(ker):
+      batch_size = ker.shape[0]      
+      G = Gmatrix(batch_size)
+      eigvals, eigvecs = np.linalg.eigh(G @ ker @ G)
+      logeigvals = np.log(eigvals[1:])
+      eigvecs = eigvecs[:, 1:]
+
+      # NOTE: Likely the same as _get_ab_relu_kernel.
+      def VReLU(cov, eps=1e-5):
+        indices = list(range(cov.shape[-1]))
+        d = np.sqrt(cov[..., indices, indices])
+        dd = d[..., np.newaxis] * d[..., np.newaxis, :]
+        c = dd ** (-1) * cov
+        c = np.where(c > 1 - eps, 1 - eps, c)
+        c = np.where(c < -1 + eps, -1 + eps, c)
+        c = (np.sqrt(1 - c ** 2) + (np.pi - np.arccos(c)) * c) / np.pi
+        return np.nan_to_num(0.5 * dd * c)
+
+      # NOTE: eps is a stability factor for the integral, not for batch norm.
+      def integrand(log_s, logmultifactor=0, eps=1e-10):
+        logUeigvals = np.logaddexp(0, np.log(2) + log_s[..., None]  + logeigvals)
+        loginteigvals = logeigvals - logUeigvals
+
+        loginteigvals -= 0.5 * np.sum(logUeigvals, axis=-1, keepdims=True)
+        loginteigvals += logmultifactor
+
+        inteigvals = np.exp(loginteigvals)
+
+        intvals = np.einsum(
+            'ij,...j,jk->...ik', eigvecs, inteigvals, eigvecs.T, optimize=True)
+        return VReLU(intvals)
+
+      # TODO(Greg): Compute the split point correctly.
+      intargmax = -np.log(batch_size - 1)
+      npos = 10  # TODO(Greg): Make these parameters, maybe?
+      nneg = 10
+      alpha = 1 / 8.
+
+      schemepos = qp.e1r.gauss_laguerre(npos)
+      schemeneg = qp.e1r.gauss_laguerre(nneg)
+
+      schemepospoints = schemepos.points
+      schemenegpoints = schemeneg.points
+      schemeposweights = schemepos.weights
+      schemenegweights = schemeneg.weights
+
+
+
+      integrandpos = lambda xs: np.moveaxis(
+          np.moveaxis(
+              alpha * integrand(intargmax + alpha * xs,
+                                logmultifactor=(
+                                    intargmax + (1 + alpha) * xs)[..., np.newaxis]),
+                      2, 0), 3, 1)
+
+      integrandneg = lambda xs: np.moveaxis(
+          np.exp(intargmax) * np.moveaxis(integrand(intargmax - xs), 2, 0), 3, 1)
+
+      new_nngp = batch_size * (
+          np.einsum('...i,i->...',
+                integrandpos(np.array([schemepospoints.T])),
+                schemeposweights)
+          +
+          np.einsum('...i,i->...',
+                integrandneg(np.array([schemenegpoints.T])),
+                schemenegweights)).squeeze(-1)
+      return new_nngp
+
+    def J1(c, eps=1e-10):
+      c = np.clip(c, -1+eps, 1-eps)
+      return (np.sqrt(1-c**2) + (np.pi - np.arccos(c)) * c) / np.pi
+
+    def VBNReLUCrossBatchIntegrand(Xi, Sigma1, Sigma2):
+      '''Computes the off diagonal block of the BN+ReLU kernel over 2 batches
+      Input:
+          Xi: covariance between batch1 and batch2
+          Sigma1: autocovariance of batch1
+          Sigma2: autocovariance of batch2
+      Output:
+          f: integrand function in the integral for computing cross batch VBNReLU 
+      '''
+      n1 = Sigma1.shape[0]
+      n2 = Sigma2.shape[0]
+      G1 = Gmatrix(n1)
+      G2 = Gmatrix(n2)
+      Delta1, A1 = np.linalg.eigh(G1 @ Sigma1 @ G1)
+      Delta2, A2 = np.linalg.eigh(G2 @ Sigma2 @ G2)
+      # kill first 0 eigenval
+      Delta1 = Delta1[1:]
+      Delta2 = Delta2[1:]
+      A1 = A1[:, 1:]
+      A2 = A2[:, 1:]
+      
+      Xidot = A1.T @ Xi @ A2
+      Omegadot = np.block([[np.diag(Delta1), Xidot], [Xidot.T, np.diag(Delta2)]])
+      Omegadotinv = np.linalg.inv(Omegadot)
+      
+      def f(s, t, multfactor=1):
+        # import pdb
+        # pdb.set_trace()
+        # Ddot.shape = (..., n1+n2-2, n1+n2-2)
+        Ddot = s[..., None, None] * np.eye(n1-1+n2-1)
+        # Ddot[..., np.arange(n1-1, n1+n2-2), np.arange(n1-1, n1+n2-2)] = t[..., None]
+        Ddot = iu(Ddot, ix[..., np.arange(n1-1, n1+n2-2), np.arange(n1-1, n1+n2-2)],
+                  t[..., None])
+        
+        ## Compute off-diagonal block of VReLU(Pi)
+        Pitilde = Omegadotinv + 2 * Ddot
+        Pitilde = np.linalg.inv(Pitilde)
+        Pi11diag = np.einsum('ij,...jk,ki->...i',
+                            A1,
+                            Pitilde[..., :n1-1, :n1-1],
+                            A1.T)
+        Pi22diag = np.einsum('ij,...jk,ki->...i',
+                            A2,
+                            Pitilde[..., n1-1:, n1-1:],
+                            A2.T)
+        Pi12 = np.einsum('ij,...jk,kl->...il',
+                        A1,
+                        Pitilde[..., :n1-1, n1-1:],
+                        A2.T)
+        C = J1(np.einsum('...i,...ij,...j->...ij',
+                        Pi11diag**-0.5,
+                        Pi12,
+                        Pi22diag**-0.5))
+        VReLUPi12 = 0.5 * np.einsum('...i,...ij,...j->...ij',
+                                Pi11diag**0.5,
+                                C,
+                                Pi22diag**0.5)
+        
+        
+        ## Compute determinant
+        ind = np.arange(n1+n2-2)
+        # Ddot <- matrix inverse of Ddot
+        # Ddot[..., ind, ind] = Ddot[..., ind, ind]**-1
+        Ddot = iu(Ddot, ix[..., ind, ind], Ddot[..., ind, ind]**-1)
+        logdet = np.linalg.slogdet(Ddot + 2 * Omegadot)[1]
+        return np.exp(
+                    (np.log(multfactor)
+                      + (-n1/2) * np.log(s)
+                      + (-n2/2) * np.log(t)
+                      - 1/2 * logdet)[..., None, None] + np.log(VReLUPi12))
+      return f
+
+    def VBNReLUCrossBatch(Xi, Sigma1, Sigma2, npos=10, nneg=5,
+                          alphapos1=1/3, alphaneg1=1,
+                        alphapos2=1/3, alphaneg2=1):
+      '''Compute VBNReLU for two batches.
+      
+      Inputs:
+          Xi: covariance between batch1 and batch2
+          Sigma1: autocovariance of batch1
+          Sigma2: autocovariance of batch2
+          npos: number of points for integrating the big s side of the VBNReLU integral
+              (effective for both dimensions of integration)
+          nneg: number of points for integrating the small s side of the VBNReLU integral
+              (effective for both dimensions of integration)
+          alphapos1: reparametrize the large s integral by s = exp(alpha r) in the 1st dimension
+          alphaneg1: reparametrize the small s integral by s = exp(alpha r) in the 1st dimension
+          alphapos2: reparametrize the large s integral by s = exp(alpha r) in the 2nd dimension
+          alphaneg2: reparametrize the small s integral by s = exp(alpha r) in the 2nd dimension
+              By tuning the `alpha` parameters, the integrand is closer to being well-approximated by 
+              low-degree Laguerre polynomials, which makes the quadrature more accurate in approximating the integral.
+      Outputs:
+          The (batch1, batch2) block of block matrix obtained by
+          applying VBNReLU^{\oplus 2} to the kernel of batch1 and batch2
+      '''
+      # import pdb
+      # pdb.set_trace()
+      # We will do the integration explicitly ourselves:
+      #     We obtain sample points and weights via `quadpy`'s Gauss Laguerre quadrature
+      #     and do the sum ourselves
+      schemepos = qp.e1r.gauss_laguerre(npos, alpha=0)
+      schemeneg = qp.e1r.gauss_laguerre(nneg, alpha=0)
+      dim1 = Sigma1.shape[0]
+      dim2 = Sigma2.shape[0]
+      intargmax = (-np.log(2*(dim1-1)), -np.log(2*(dim2-1)))
+      f = VBNReLUCrossBatchIntegrand(Xi, Sigma1, Sigma2)
+      # Get the points manually for each dimension
+      scheme1dpoints = np.concatenate([schemepos.points, -schemeneg.points])
+      # Get the weights manually for each dimension
+      scheme1dwts = np.concatenate([schemepos.weights, schemeneg.weights])
+      # Obtain the points for the whole 2d integration
+      scheme2dpoints = np.meshgrid(scheme1dpoints, scheme1dpoints)
+      # Obtain the weights for the whole 2d integration
+      scheme2dwts = scheme1dwts[:, None] * scheme1dwts[None, :]
+
+      def applyalpha(x, alphapos, alphaneg):
+          x = iu(x, ix[x > 0], x[x > 0] * alphapos)
+          x = iu(x, ix[x <= 0], x[x <= 0] * alphaneg)
+          # xx[xx > 0] *= alphapos
+          # xx[xx <= 0] *= alphaneg
+          return x
+
+      # def iu(x, mask, )
+      def alphafactor(x, y):
+          a = np.zeros_like(x)
+          a = iu(a, ix[(x > 0) & (y > 0)], alphapos1 * alphapos2)
+          a = iu(a, ix[(x > 0) & (y <= 0)], alphapos1 * alphaneg2)
+          a = iu(a, ix[(x <= 0) & (y > 0)], alphaneg1 * alphapos2)
+          a = iu(a, ix[(x <= 0) & (y <= 0)], alphaneg1 * alphaneg2)
+          return a
+          
+      integrand = lambda inp: \
+          f(np.exp(applyalpha(inp[0], alphapos1, alphaneg1) + intargmax[0]), 
+            np.exp(applyalpha(inp[1], alphapos2, alphaneg2) + intargmax[1]),
+            multfactor=alphafactor(inp[0], inp[1])
+                * np.pi**-1
+                * np.exp(applyalpha(inp[0], alphapos1, alphaneg1) + intargmax[0]
+                      + applyalpha(inp[1], alphapos2, alphaneg2) + intargmax[1]
+                      + np.abs(inp[0]) + np.abs(inp[1])
+                        )
+          )
+
+      return np.sqrt(dim1 * dim2) * np.einsum('ij...,ij->...',
+                integrand(scheme2dpoints),
+                scheme2dwts
+              )
+
+
+    cov1 = singlebatchker(kernels.cov1)
+    if kernels.cov2 is None:
+      return kernels.replace(cov1=cov1, nngp=cov1, cov2=None)
+    
+    cov2 = singlebatchker(kernels.cov2)
+    
+    # TODO compute cross batch
+    new_nngp = VBNReLUCrossBatch(kernels.nngp, kernels.cov1, kernels.cov2)
+
+    return kernels.replace(cov1=cov1, nngp=new_nngp, cov2=cov2)
+
+  return init_fn, apply_fn, kernel_fn

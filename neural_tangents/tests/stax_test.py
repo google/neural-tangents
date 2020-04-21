@@ -338,7 +338,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
 
     pool_type = 'AVG'
     W_std, b_std = 2.**0.5, 0.5**0.5
-    layer_norm = None
+    norm_axis = None
     parameterization = 'ntk'
     use_dropout = False
 
