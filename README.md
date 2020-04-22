@@ -53,6 +53,8 @@ An easy way to get started with Neural Tangents is by playing around with the fo
 - [Weight Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/weight_space_linearization.ipynb)
 - [Function Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/function_space_linearization.ipynb)
 - [Neural Network Phase Diagram](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/phase_diagram.ipynb)
+- [Performance Benchmark](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/myrtle_kernel_with_neural_tangents.ipynb)
+: Simple benchmark for Mytrle kernels used in [[16]](#16-neural-kernels-without-tangents-arxiv-2020-vaishaal-shankar-alex-fang-wenshuo-guo-sara-fridovich-keil-ludwig-schmidt-jonathan-ragan-kelley-benjamin-recht). Also see [Performance](#mytrle-network).
 
 ## Installation
 
@@ -402,10 +404,10 @@ _, _, kernel_fn = stax.serial(*(layers + [stax.GlobalAvgPool()]))
 
 ### CNN without pooling
 
-Top layer is `stax.FLatten()`:
+Top layer is `stax.Flatten()`:
 
 ```
-_, _, kernel_fn = stax.serial(*(layers + [stax.FLatten()]))
+_, _, kernel_fn = stax.serial(*(layers + [stax.Flatten()]))
 ```
 
 | Platform                    | Precision | Milliseconds / NTK entry | Max batch size (`NxN`)            |
@@ -428,6 +430,15 @@ Note that runtime is proportional to the depth of your network.
 If your performance differs significantly,
 please [file a bug](https://github.com/google/neural-tangents/issues/new)!
 
+
+
+### Mytrle network
+
+Colab notebook [Performance Benchmark](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/myrtle_kernel_with_neural_tangents.ipynb)
+demonstrates how one would construct and benchmark kernels. To demonstrate
+flexibility, we took architecture from [[16]](#16-neural-kernels-without-tangents-arxiv-2020-vaishaal-shankar-alex-fang-wenshuo-guo-sara-fridovich-keil-ludwig-schmidt-jonathan-ragan-kelley-benjamin-recht)
+as an example. With `NVIDIA V100` 64bit precision, `nt` took 316/330/508 GPU
+hrs on full 60k CIFAR-10 dataset for Mytrle-5/7/10 kernels.
 
 ## Papers
 
@@ -510,4 +521,6 @@ If you use the code in a publication, please cite our ICLR 2020 paper:
 
 ##### [14] [Wide Residual Networks.](https://arxiv.org/abs/1605.07146) *BMVC 2018.* Sergey Zagoruyko, Nikos Komodakis
 
-##### [15] [On the Infinite Width Limit of Neural Networks with a Standard Parameterization.](https://arxiv.org/pdf/2001.07301.pdf) *arXiv 2020.* Jascha Sohl-Dickstein, Roman Novak, Samuel S. Schoenholz, Jaehoon Lee
+##### [15] [On the Infinite Width Limit of Neural Networks with a Standard Parameterization.](https://arxiv.org/abs/2001.07301) *arXiv 2020.* Jascha Sohl-Dickstein, Roman Novak, Samuel S. Schoenholz, Jaehoon Lee
+
+##### [16] [Neural Kernels Without Tangents.](https://arxiv.org/abs/2003.02237) *arXiv 2020.* Vaishaal Shankar, Alex Fang, Wenshuo Guo, Sara Fridovich-Keil, Ludwig Schmidt, Jonathan Ragan-Kelley, Benjamin Recht
