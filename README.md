@@ -1,5 +1,6 @@
-# Neural Tangents [[arXiv](https://arxiv.org/abs/1912.02803)]
-[**Quickstart**](#colab-notebooks)
+# Neural Tangents [[ICLR: Tuesday Sessions 4 and 5](https://iclr.cc/virtual/poster_SklD9yrFPS.html)]
+[**Paper**](https://arxiv.org/abs/1912.02803)
+| [**Quickstart**](#colab-notebooks)
 | [**Install guide**](#installation)
 | [**Reference docs**](https://neural-tangents.readthedocs.io/en/latest/)
 
@@ -10,12 +11,12 @@
 
 **News:**
 
+* Check out our presentation and chat with us during **[ICLR live sessions Tuesday 4 and 5]
+(https://iclr.cc/virtual/poster_SklD9yrFPS.html)**!
+
 * Neural Tangents just got faster! >4X speedup in computing analytic
 kernels for CNN architectures with pooling, starting from version 0.2.1. See our
 [Performance](#performance).
-
-* We will be at [ICLR 2020](https://iclr.cc/), stay tuned for our live session
-time slots.
 
 ## Overview
 
@@ -76,26 +77,19 @@ git clone https://github.com/google/neural-tangents
 pip install -e neural-tangents
 ```
 
-You can now run the examples (using [`tensorflow_datasets`](https://github.com/tensorflow/datasets)) by calling:
+You can now run the examples (using [`tensorflow_datasets`](https://github.com/tensorflow/datasets))
+and tests by calling:
 
 ```
-# Note that Tensorflow does not work with Python 3.8
-# https://github.com/tensorflow/tensorflow/issues/33374
-pip install tensorflow "tensorflow-datasets>=2.0.0"
+pip install "tensorflow>=2.2.0rc3" "tensorflow-datasets>=3.0.0"
 
 python neural-tangents/examples/infinite_fcn.py
 python neural-tangents/examples/weight_space.py
 python neural-tangents/examples/function_space.py
-```
-
-Finally, you can run tests by calling:
-
-```
-# NOTE: a few tests will fail without
-# pip install tensorflow "tensorflow-datasets>=2.0.0"
 
 for f in neural-tangents/neural_tangents/tests/*.py; do python $f; done
 ```
+
 
 ## 5-Minute intro
 
@@ -444,30 +438,33 @@ hrs on full 60k CIFAR-10 dataset for Mytrle-5/7/10 kernels.
 
 Neural Tangents has been used in the following papers:
 
-* [The large learning rate phase of deep learning: the catapult mechanism.](https://arxiv.org/abs/2003.02218) \
+* [On the Neural Tangent Kernel of Deep Networks with Orthogonal Initialization](https://arxiv.org/abs/2004.05867) \
+Wei Huang, Weitao Du, Richard Yi Da Xu
+
+* [The large learning rate phase of deep learning: the catapult mechanism](https://arxiv.org/abs/2003.02218) \
 Aitor Lewkowycz, Yasaman Bahri, Ethan Dyer, Jascha Sohl-Dickstein, Guy Gur-Ari
 
-* [Spectrum Dependent Learning Curves in Kernel Regression and Wide Neural Networks.
+* [Spectrum Dependent Learning Curves in Kernel Regression and Wide Neural Networks
 ](https://arxiv.org/abs/2002.02561) \
 Blake Bordelon, Abdulkadir Canatar, Cengiz Pehlevan
 
-* [Taylorized Training: Towards Better Approximation of Neural Network Training at Finite Width.](https://arxiv.org/abs/2002.04010) \
+* [Taylorized Training: Towards Better Approximation of Neural Network Training at Finite Width](https://arxiv.org/abs/2002.04010) \
    Yu Bai, Ben Krause, Huan Wang, Caiming Xiong, Richard Socher
 
-* [On the Infinite Width Limit of Neural Networks with a Standard Parameterization.](https://arxiv.org/pdf/2001.07301.pdf) \
+* [On the Infinite Width Limit of Neural Networks with a Standard Parameterization](https://arxiv.org/pdf/2001.07301.pdf) \
 Jascha Sohl-Dickstein, Roman Novak, Samuel S. Schoenholz, Jaehoon Lee
 
-* [Disentangling Trainability and Generalization in Deep Learning.](https://arxiv.org/abs/1912.13053) \
+* [Disentangling Trainability and Generalization in Deep Learning](https://arxiv.org/abs/1912.13053) \
 Lechao Xiao, Jeffrey Pennington, Samuel S. Schoenholz
 
-* [Information in Infinite Ensembles of Infinitely-Wide Neural Networks.](https://arxiv.org/abs/1911.09189) \
+* [Information in Infinite Ensembles of Infinitely-Wide Neural Networks](https://arxiv.org/abs/1911.09189) \
 Ravid Shwartz-Ziv, Alexander A. Alemi
 
-* [Training Dynamics of Deep Networks using Stochastic Gradient Descent via Neural Tangent Kernel.](https://arxiv.org/abs/1905.13654) \
+* [Training Dynamics of Deep Networks using Stochastic Gradient Descent via Neural Tangent Kernel](https://arxiv.org/abs/1905.13654) \
 Soufiane Hayou, Arnaud Doucet, Judith Rousseau
 
 * [Wide Neural Networks of Any Depth Evolve as Linear Models Under Gradient
-Descent.](https://arxiv.org/abs/1902.06720) \
+Descent](https://arxiv.org/abs/1902.06720) \
 Jaehoon Lee*, Lechao Xiao*, Samuel S. Schoenholz, Yasaman Bahri, Roman Novak, Jascha
 Sohl-Dickstein, Jeffrey Pennington
 
