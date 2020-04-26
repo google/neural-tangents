@@ -11,8 +11,7 @@
 
 **News:**
 
-* Check out our presentation and chat with us during **[ICLR live sessions Tuesday 4 and 5]
-(https://iclr.cc/virtual/poster_SklD9yrFPS.html)**!
+* Check out our presentation and chat with us during **[ICLR live sessions Tuesday 4 and 5](https://iclr.cc/virtual/poster_SklD9yrFPS.html)**!
 
 * Neural Tangents just got faster! >4X speedup in computing analytic
 kernels for CNN architectures with pooling, starting from version 0.2.1. See our
