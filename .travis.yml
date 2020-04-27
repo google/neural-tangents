@@ -6,21 +6,8 @@ python:
   - "3.8"
 install:
   - pip install --upgrade pip
-  - if [[ "$TRAVIS_PYTHON_VERSION" != 3.8 ]];
-    then
-      pip install tensorflow "tensorflow-datasets>=2.0.0";
-    fi
-  - pip install jaxlib jax --upgrade
+  - pip install numpy jaxlib jax "tensorflow>=2.2.0rc3" tensorflow-datasets --upgrade
   - git clone https://github.com/google/neural-tangents
   - pip install -e neural-tangents
 script:
-  - if [[ "$TRAVIS_PYTHON_VERSION" != 3.8 ]];
-    then
-      for f in neural-tangents/neural_tangents/tests/*.py; do python $f; done
-    else
-      python neural-tangents/neural_tangents/tests/batch_test.py;
-      python neural-tangents/neural_tangents/tests/empirical_test.py;
-      python neural-tangents/neural_tangents/tests/monte_carlo_test.py;
-      python neural-tangents/neural_tangents/tests/predict_test.py;
-      python neural-tangents/neural_tangents/tests/stax_test.py;
-    fi
+  - for f in neural-tangents/neural_tangents/tests/*.py; do python $f; done

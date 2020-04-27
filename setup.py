@@ -17,7 +17,10 @@
 
 
 import os
+import sys
+
 import setuptools
+
 
 # https://packaging.python.org/guides/making-a-pypi-friendly-readme/
 this_directory = os.path.abspath(os.path.dirname(__file__))
@@ -25,11 +28,19 @@ with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
   long_description = f.read()
 
 
-INSTALL_REQUIRES = ['jax>=0.1.58', 'frozendict', 'dataclasses']
+INSTALL_REQUIRES = [
+    'jax>=0.1.62',
+    'frozendict>=1.2',
+]
+
+
+if sys.version_info < (3, 7):
+  INSTALL_REQUIRES += ['dataclasses>=0.7']
+
 
 setuptools.setup(
     name='neural-tangents',
-    version='0.2.1',
+    version='0.2.2',
     license='Apache 2.0',
     author='Google',
     author_email='neural-tangents-dev@google.com',
@@ -54,7 +65,13 @@ setuptools.setup(
         'Operating System :: MacOS',
         'Operating System :: POSIX :: Linux',
         'Topic :: Software Development',
+        'Topic :: Software Development :: Libraries',
+        'Topic :: Software Development :: Libraries :: Python Modules',
         'Topic :: Scientific/Engineering',
+        'Topic :: Scientific/Engineering :: Artificial Intelligence',
+        'Topic :: Scientific/Engineering :: Mathematics',
         'Intended Audience :: Science/Research',
         'Intended Audience :: Developers',
+        'Intended Audience :: Education',
+        'Development Status :: 4 - Beta',
     ])
