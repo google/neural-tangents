@@ -1,4 +1,5 @@
 # Neural Tangents [[ICLR: Tuesday Sessions 4 and 5](https://iclr.cc/virtual/poster_SklD9yrFPS.html)]
+# [Live Q&A now!](https://us02web.zoom.us/j/83007092770?pwd=aUtkUnpzQWVSWWdORDV2QVNFMGJHZz09)
 [**Paper**](https://arxiv.org/abs/1912.02803)
 | [**Quickstart**](#colab-notebooks)
 | [**Install guide**](#installation)
