@@ -1,3 +1,5 @@
+# Lint as: python3
+
 # Copyright 2019 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,16 +15,12 @@
 # limitations under the License.
 """Functions to make predictions on the test set using NTK kernel."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
 
 import collections
 import functools
 
 from jax.api import grad
 from jax.api import jit
-from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.scipy as sp
 
@@ -53,11 +51,11 @@ def gradient_descent_mse(g_dd, y_train, g_td=None, diag_reg=0.):
   [*] https://arxiv.org/abs/1806.07572
 
   Example:
-    ```python
+    >>> from neural_tangents import empirical_ntk_fn
     >>> from neural_tangents import predict
     >>>
     >>> train_time = 1e-7
-    >>> kernel_fn = empirical(f)
+    >>> kernel_fn = empirical_ntk_fn(f)
     >>> g_td = kernel_fn(x_test, x_train, params)
     >>>
     >>> predict_fn = predict.gradient_descent_mse(g_dd, y_train, g_td)
@@ -67,20 +65,19 @@ def gradient_descent_mse(g_dd, y_train, g_td=None, diag_reg=0.):
     >>>
     >>> fx_train_final, fx_test_final = predict_fn(
     >>>          fx_train_initial, fx_test_initial, train_time)
-    ```
 
   Args:
-    g_dd: A kernel on the training data. The kernel should be an `np.ndarray` of
-      shape [n_train * output_dim, n_train * output_dim] or [n_train, n_train].
-      In the latter case, the kernel is assumed to be block diagonal over the
-      logits.
-    y_train: A `np.ndarray` of shape [n_train, output_dim] of targets for the
+    :g_dd: A kernel on the training data. The kernel should be an `np.ndarray`
+      of shape [n_train * output_dim, n_train * output_dim] or
+      [n_train, n_train]. In the latter case, the kernel is assumed to be block
+      diagonal over the logits.
+    :y_train: A `np.ndarray` of shape [n_train, output_dim] of targets for the
       training data.
-    g_td: A Kernel relating training data with test data. The kernel should be
+    :g_td: A Kernel relating training data with test data. The kernel should be
       an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim] or
       [n_test, n_train]. Note; g_td should have been created in the convention
       kernel_fn(x_train, x_test, params).
-    diag_reg: A float, representing the strength of the regularization.
+    :diag_reg: A float, representing the strength of the regularization.
 
   Returns:
     A function that predicts outputs after t = learning_rate * steps of
@@ -168,12 +165,12 @@ def gradient_descent(g_dd, y_train, loss, g_td=None):
   [*] https://arxiv.org/abs/1902.06720
 
   Example:
-    ```python
+    >>> from neural_tangents import empirical_ntk_fn
     >>> from jax.experimental import stax
     >>> from neural_tangents import predict
     >>>
     >>> train_time = 1e-7
-    >>> kernel_fn = empirical(f)
+    >>> kernel_fn = empirical_ntk_fn(f)
     >>> g_td = kernel_fn(x_test, x_train, params)
     >>>
     >>> from jax.experimental import stax
@@ -186,19 +183,19 @@ def gradient_descent(g_dd, y_train, loss, g_td=None):
     >>>
     >>> fx_train_final, fx_test_final = predict_fn(
     >>>     fx_train_initial, fx_test_initial, train_time)
-    ```
+
   Args:
-    g_dd: A Kernel on the training data. The kernel should be an `np.ndarray` of
-      shape [n_train * output_dim, n_train * output_dim] or [n_train, n_train].
-      In the latter case it is assumed that the kernel is block diagonal over
-      the logits.
-    y_train: A `np.ndarray` of shape [n_train, output_dim] of labels for the
+    :g_dd: A Kernel on the training data. The kernel should be an `np.ndarray`
+      of shape [n_train * output_dim, n_train * output_dim] or
+      [n_train, n_train]. In the latter case it is assumed that the kernel is
+      block diagonal over the logits.
+    :y_train: A `np.ndarray` of shape [n_train, output_dim] of labels for the
       training data.
-    loss: A loss function whose signature is loss(fx, y_hat) where fx is an
+    :loss: A loss function whose signature is loss(fx, y_hat) where fx is an
       `np.ndarray` of function space output_dim of the network and y_hat are
       targets. Note: the loss function should treat the batch and output
         dimensions symmetrically.
-    g_td: A Kernel relating training data with test data. The kernel should be
+    :g_td: A Kernel relating training data with test data. The kernel should be
       an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim] or
       [n_test, n_train]. Note: g_td should have been created in the convention
         kernel_fn(x_test, x_train, params).
@@ -302,11 +299,13 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
   [*] https://arxiv.org/abs/1902.06720
 
   Example:
-    ```python
+    >>> from neural_tangents import empirical_ntk_fn
+    >>> from neural_tangents import predict
+    >>>
     >>> train_time = 1e-7
     >>> learning_rate = 1e-2
     >>>
-    >>> kernel_fn = empirical(f)
+    >>> kernel_fn = empirical_ntk_fn(f)
     >>> g_td = kernel_fn(x_test, x_train, params)
     >>>
     >>> from jax.experimental import stax
@@ -320,19 +319,18 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
     >>> lin_state = init_fn(fx_train_initial, fx_test_initial)
     >>> lin_state = predict_fn(lin_state, train_time)
     >>> fx_train_final, fx_test_final = get_fn(lin_state)
-    ```python
 
   Args:
-    g_dd: Kernel on the training data. The kernel should be an `np.ndarray` of
+    :g_dd: Kernel on the training data. The kernel should be an `np.ndarray` of
       shape [n_train * output_dim, n_train * output_dim].
-    y_train: A `np.ndarray` of shape [n_train, output_dim] of labels for the
+    :y_train: A `np.ndarray` of shape [n_train, output_dim] of labels for the
       training data.
-    loss: A loss function whose signature is loss(fx, y_hat) where fx an
+    :loss: A loss function whose signature is loss(fx, y_hat) where fx an
       `np.ndarray` of function space outputs of the network and y_hat are
       labels. Note: the loss function should treat the batch and output
         dimensions symmetrically.
-    learning_rate:  A float specifying the learning rate.
-    g_td: Kernel relating training data with test data. Should be an
+    :learning_rate:  A float specifying the learning rate.
+    :g_td: Kernel relating training data with test data. Should be an
       `np.ndarray` of shape [n_test * output_dim, n_train * output_dim]. Note:
         g_td should have been created in the convention g_td = kernel_fn(x_test,
         x_train, params).
@@ -413,8 +411,6 @@ def momentum(g_dd, y_train, loss, learning_rate, g_td=None, momentum=0.9):
       return np.concatenate((fx_train, qx_train), axis=0)
 
     def predict_fn(state, dt):
-      state = state
-
       solver = ode(dr_dt).set_integrator('dopri5')
       solver.set_initial_value(state, 0)
       solver.integrate(dt)
@@ -469,60 +465,74 @@ def gp_inference(kernel_fn,
                  x_test,
                  get,
                  diag_reg=0.,
-                 compute_cov=False):
+                 compute_cov=False,
+                 **kernel_fn_kwargs):
   """Compute the mean and variance of the `posterior` of NNGP and NTK.
 
   Note that this method is equivalent to `gradient_descent_mse_gp` at infinite
-  time. Example:
-  ```python
-  >>> predict = gradient_descent_mse_gp(kernel_fn, x_train, y_train, x_test,
-  >>>                                   get, diag_reg, compute_cov)
-  >>> predict(np.inf) == predict(None) == gp_inference(kernel_fn, x_train,
-  >>>     y_train, x_test, get, diag_reg, compute_cov)
-  ```
+  time.
+
+  Example:
+    >>> predict = gradient_descent_mse_gp(kernel_fn, x_train, y_train, x_test,
+    >>>                                   get, diag_reg, compute_cov)
+    >>> predict(np.inf) == predict(None) == gp_inference(kernel_fn, x_train,
+    >>>     y_train, x_test, get, diag_reg, compute_cov)
 
   Args:
-    kernel_fn: A kernel function that computes NNGP and NTK.
-    x_train: A `np.ndarray`, representing the training data.
-    y_train: A `np.ndarray`, representing the labels of the training data.
-    x_test: A `np.ndarray`, representing the test data.
-    get: string, the mode of the Gaussian process, either "nngp" or "ntk", or a
+    :kernel_fn: A kernel function that computes NNGP and NTK.
+    :x_train: A `np.ndarray`, representing the training data.
+    :y_train: A `np.ndarray`, representing the labels of the training data.
+    :x_test: A `np.ndarray`, representing the test data.
+    :get: string, the mode of the Gaussian process, either "nngp" or "ntk", or a
       tuple, or None. If `None` then both `nngp` and `ntk` predictions are
       returned.
-    diag_reg: A float, representing the strength of the regularization.
-    compute_cov: A boolean. If `True` computing both `mean` and `variance` and
+    :diag_reg: A float or iterable of floats, representing the strength of the
+      regularization.
+    :compute_cov: A boolean. If `True` computing both `mean` and `variance` and
       only `mean` otherwise.
+    :**kernel_fn_kwargs: optional keyword arguments passed to `kernel_fn`.
 
   Returns:
     Either a Gaussian(`mean`, `variance`) namedtuple or `mean` of the GP
-    posterior.
+    posterior or generator function returning Gaussian or `mean` corresponding
+    to diag_reg values.
   """
   if get is None:
     get = ('nngp', 'ntk')
-  kdd, ktd, ktt = _get_matrices(kernel_fn, x_train, x_test, get, compute_cov)
+  kdd, ktd, nngp_tt = _get_matrices(kernel_fn, x_train, x_test, get,
+                                    compute_cov, **kernel_fn_kwargs)
   gp_inference_mat = (_gp_inference_mat_jit_cpu if _is_on_cpu(kdd) else
                       _gp_inference_mat_jit)
-  return gp_inference_mat(kdd, ktd, ktt, y_train, get, diag_reg)
+  try:
+    iterator = iter(diag_reg)
+  except TypeError:
+    # diag_reg is a number.
+    return gp_inference_mat(kdd, ktd, nngp_tt, y_train, get, diag_reg)
+
+  def iter_func():
+    for diag_reg in iterator:
+      yield gp_inference_mat(kdd, ktd, nngp_tt, y_train, get, diag_reg)
+  return iter_func()
 
 
 @get_namedtuple('Gaussians')
 def _gp_inference_mat(kdd,
                       ktd,
-                      ktt,
+                      nngp_tt,
                       y_train,
                       get,
-                      diag_reg=0.):
+                      diag_reg):
   """Compute the mean and variance of the `posterior` of NNGP and NTK.
 
   Args:
-    kdd: A train-train `Kernel` namedtuple.
-    ktd: A test-train `Kernel` namedtuple.
-    ktt: A test-test `Kernel` namedtuple.
-    y_train: A `np.ndarray`, representing the train targets.
-    get: string, the mode of the Gaussian process, either "nngp" or "ntk", or a
+    :kdd: A train-train `Kernel` namedtuple.
+    :ktd: A test-train `Kernel` namedtuple.
+    :nngp_tt: A test-test `nngp` kernel.
+    :y_train: A `np.ndarray`, representing the train targets.
+    :get: string, the mode of the Gaussian process, either "nngp" or "ntk", or a
       tuple, or `None`. If `None` then both `nngp` and `ntk` predictions are
       returned.
-    diag_reg: A float, representing the strength of the regularization.
+    :diag_reg: A float, representing the strength of the regularization.
 
   Returns:
     Either a Gaussian(`mean`, `variance`) namedtuple or `mean` of the GP
@@ -534,17 +544,18 @@ def _gp_inference_mat(kdd,
   if 'nngp' in get:
     op = _inv_operator(kdd.nngp, diag_reg)
     pred_mean = _mean_prediction(op, ktd.nngp, y_train)
-    if ktt is not None:
-      pred_cov = _nngp_cov(op, ktd.nngp, ktt)
+    if nngp_tt is not None:
+      pred_cov = _nngp_cov(op, ktd.nngp, nngp_tt)
     out['nngp'] = (
-        Gaussian(pred_mean, pred_cov) if ktt is not None else pred_mean)
+        Gaussian(pred_mean, pred_cov) if nngp_tt is not None else pred_mean)
 
   if 'ntk' in get:
     op = _inv_operator(kdd.ntk, diag_reg)
     pred_mean = _mean_prediction(op, ktd.ntk, y_train)
-    if ktt is not None:
-      pred_cov = _ntk_cov(op, ktd.ntk, kdd.nngp, ktd.nngp, ktt)
-    out['ntk'] = Gaussian(pred_mean, pred_cov) if ktt is not None else pred_mean
+    if nngp_tt is not None:
+      pred_cov = _ntk_cov(op, ktd.ntk, kdd.nngp, ktd.nngp, nngp_tt)
+    out['ntk'] = (Gaussian(pred_mean, pred_cov) if nngp_tt is not None
+                  else pred_mean)
 
   return out
 
@@ -556,15 +567,16 @@ _gp_inference_mat_jit_cpu = jit(_gp_inference_mat, static_argnums=(4,),
                                 backend='cpu')
 
 
-def _get_matrices(kernel_fn, x_train, x_test, get, compute_cov):
+def _get_matrices(kernel_fn, x_train, x_test, get, compute_cov,
+                  **kernel_fn_kwargs):
   get = _get_dependency(get, compute_cov)
-  kdd = kernel_fn(x_train, None, get)
-  ktd = kernel_fn(x_test, x_train, get)
+  kdd = kernel_fn(x_train, None, get, **kernel_fn_kwargs)
+  ktd = kernel_fn(x_test, x_train, get, **kernel_fn_kwargs)
   if compute_cov:
-    ktt = kernel_fn(x_test, x_test, 'nngp')
+    nngp_tt = kernel_fn(x_test, x_test, 'nngp', **kernel_fn_kwargs)
   else:
-    ktt = None
-  return kdd, ktd, ktt
+    nngp_tt = None
+  return kdd, ktd, nngp_tt
 
 
 # TODO(schsam): Refactor this method to make use of @getter.
@@ -574,22 +586,24 @@ def gradient_descent_mse_gp(kernel_fn,
                             x_test,
                             get,
                             diag_reg=0.0,
-                            compute_cov=False):
+                            compute_cov=False,
+                            **kernel_fn_kwargs):
   """Predicts the gaussian embedding induced by gradient descent with mse loss.
 
   This is equivalent to an infinite ensemble of networks after marginalizing
   out the initialization.
 
   Args:
-    kernel_fn: A kernel function that computes NNGP and NTK.
-    x_train: A `np.ndarray`, representing the training data.
-    y_train: A `np.ndarray`, representing the labels of the training data.
-    x_test: A `np.ndarray`, representing the test data.
-    get: string, the mode of the Gaussian process, either "nngp" or "ntk", or
+    :kernel_fn: A kernel function that computes NNGP and NTK.
+    :x_train: A `np.ndarray`, representing the training data.
+    :y_train: A `np.ndarray`, representing the labels of the training data.
+    :x_test: A `np.ndarray`, representing the test data.
+    :get: string, the mode of the Gaussian process, either "nngp" or "ntk", or
       a tuple.
-    diag_reg: A float, representing the strength of the regularization.
-    compute_cov: A boolean. If `True` computing both `mean` and `variance` and
+    :diag_reg: A float, representing the strength of the regularization.
+    :compute_cov: A boolean. If `True` computing both `mean` and `variance` and
       only `mean` otherwise.
+    :**kernel_fn_kwargs: optional keyword arguments passed to `kernel_fn`.
 
   Returns:
     A function that predicts the gaussian parameters at t:
@@ -598,17 +612,23 @@ def gradient_descent_mse_gp(kernel_fn,
   """
   if get is None:
     get = ('nngp', 'ntk')
+
   if isinstance(get, str):
     # NOTE(schsam): This seems like an ugly solution that involves an extra
     # indirection. It might be nice to clean it up.
-    return lambda t: gradient_descent_mse_gp(
-        kernel_fn,
-        x_train,
-        y_train,
-        x_test,
-        diag_reg=diag_reg,
-        get=(get,),
-        compute_cov=compute_cov)(t)[0]
+    def _predict(t=None):
+      return gradient_descent_mse_gp(
+          kernel_fn,
+          x_train,
+          y_train,
+          x_test,
+          diag_reg=diag_reg,
+          get=(get,),
+          compute_cov=compute_cov,
+          **kernel_fn_kwargs
+      )(t)[0]
+
+    return _predict
 
   _, get = canonicalize_get(get)
 
@@ -617,7 +637,8 @@ def gradient_descent_mse_gp(kernel_fn,
 
   eigenspace = {}
 
-  kdd, ktd, ktt = _get_matrices(kernel_fn, x_train, x_test, get, compute_cov)
+  kdd, ktd, nngp_tt = _get_matrices(kernel_fn, x_train, x_test, get,
+                                    compute_cov, **kernel_fn_kwargs)
   gp_inference_mat = (_gp_inference_mat_jit_cpu if _is_on_cpu(kdd) else
                       _gp_inference_mat_jit)
 
@@ -625,13 +646,13 @@ def gradient_descent_mse_gp(kernel_fn,
   def predict(t=None):
     """`t=None` is equivalent to infinite time and calls `gp_inference`."""
     if t is None:
-      return gp_inference_mat(kdd, ktd, ktt, y_train, get, diag_reg)
+      return gp_inference_mat(kdd, ktd, nngp_tt, y_train, get, diag_reg)
 
     if not eigenspace:
       for g in get:
         k = kdd.nngp if g == 'nngp' else kdd.ntk
         k_dd_plus_reg = _add_diagonal_regularizer(k, diag_reg)
-        eigenspace[g] = _eigh(k_dd_plus_reg)
+        eigenspace[g] = np.linalg.eigh(k_dd_plus_reg)
 
     out = {}
 
@@ -641,7 +662,7 @@ def gradient_descent_mse_gp(kernel_fn,
       pred_mean = _mean_prediction_einsum(evecs, op_evals, ktd.nngp, y_train)
       if compute_cov:
         op_evals_x2 = -op_fn(evals, 2 * t)
-        pred_cov = ktt - np.einsum(
+        pred_cov = nngp_tt - np.einsum(
             'mj,ji,i,ki,lk->ml',
             ktd.nngp,
             evecs,
@@ -671,7 +692,7 @@ def gradient_descent_mse_gp(kernel_fn,
             ktd.nngp,
             optimize=True)
         term_2 += np.transpose(term_2)
-        pred_cov += (-term_2 + ktt)
+        pred_cov += -term_2 + nngp_tt
 
       out['ntk'] = Gaussian(pred_mean, pred_cov) if compute_cov else pred_mean
 
@@ -697,19 +718,6 @@ def _get_dependency(get, compute_cov):
   return get_dependency
 
 
-def _eigh(mat):
-  """Platform specific eigh."""
-  # TODO(schsam): Eventually, we may want to handle non-symmetric kernels for
-  # e.g. masking. Additionally, once JAX supports eigh on TPU, we probably want
-  # to switch to JAX's eigh.
-  if xla_bridge.get_backend().platform == 'tpu':
-    eigh = np.onp.linalg.eigh
-  else:
-    eigh = np.linalg.eigh
-    eigh = jit(eigh, backend='cpu') if _is_on_cpu(mat) else jit(eigh)
-  return eigh(mat)
-
-
 def _eigen_fns(mat, fns):
   """Build functions of a matrix in its eigenbasis.
 
@@ -723,7 +731,7 @@ def _eigen_fns(mat, fns):
       acting on vectors:
         transform(vec, dt) = fn(mat, dt) @ vec
   """
-  evals, evecs = _eigh(mat)
+  evals, evecs = np.linalg.eigh(mat)
 
   def transform(fn):
     """Generates a transform given a function on the eigenvalues."""
@@ -852,7 +860,7 @@ def _arr_is_on_cpu(x):
   # TODO(romann): revisit when https://github.com/google/jax/issues/1431 and
   # https://github.com/google/jax/issues/1432 are fixed.
   if hasattr(x, 'device_buffer'):
-    return 'CPU' in str(x.device_buffer.device())
+    return 'cpu' in str(x.device_buffer.device()).lower()
 
   if isinstance(x, np.ndarray):
     return True
@@ -883,11 +891,11 @@ def max_learning_rate(kdd, num_outputs=-1, eps=1e-12):
   '2 * batch_size * num_outputs * lambda_max(NTK)'.
 
   Args:
-    kdd: The analytic or empirical NTK of (train_x, train_x).
-    num_outputs: The number of outputs of the neural network. If `kdd` is the
+    :kdd: The analytic or empirical NTK of (train_x, train_x).
+    :num_outputs: The number of outputs of the neural network. If `kdd` is the
       analytic ntk, `num_outputs` must be provided. Otherwise `num_outputs=-1`
       and `num_outputs` is computed via the size of `kdd`.
-    eps: A float to avoid zero divisor.
+    :eps: A float to avoid zero divisor.
 
   Returns:
     The maximal feasible learning rate for infinite width NNs.
@@ -905,9 +913,10 @@ def max_learning_rate(kdd, num_outputs=-1, eps=1e-12):
   if kdd.shape[0] != kdd.shape[1]:
     raise ValueError('`kdd` must be a square matrix.')
   if _is_on_cpu(kdd):
-    max_eva = osp.linalg.eigh(kdd, eigvals_only=True,
-                              eigvals=(kdd.shape[0] - 1, kdd.shape[0] - 1))[-1]
+    max_eva = osp.linalg.eigvalsh(
+        kdd,
+        eigvals=(kdd.shape[0] - 1, kdd.shape[0] - 1))[-1]
   else:
-    max_eva = _eigh(kdd)[0][-1]
+    max_eva = np.linalg.eigvalsh(kdd)[-1]
   lr = 2 * factor / (max_eva + eps)
   return lr

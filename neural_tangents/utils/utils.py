@@ -1,3 +1,5 @@
+# Lint as: python3
+
 # Copyright 2019 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,60 +13,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 """General-purpose internal utilities."""
 
-from jax.api import jit
-from jax.api import vmap
-from jax.lib import xla_bridge
-import jax.test_util as jtu
-import jax.numpy as np
 from collections import namedtuple
-from functools import wraps
+import functools
 import inspect
+import operator as op
 import types
-import six
+from typing import Optional, Union, List
 
-
-def _jit_vmap(f):
-  return jit(vmap(f))
-
-
-def update_test_tolerance():
-  jtu._default_tolerance[np.onp.dtype(np.onp.float32)] = 5e-3
-  jtu._default_tolerance[np.onp.dtype(np.onp.float64)] = 1e-5
-  def default_tolerance():
-    if jtu.device_under_test() != 'tpu':
-      return jtu._default_tolerance
-    tol = jtu._default_tolerance.copy()
-    tol[np.onp.dtype(np.onp.float32)] = 5e-2
-    return tol
-  jtu.default_tolerance = default_tolerance
-
-
-def stub_out_pmap(batch, count):
-  # If we are using GPU or CPU stub out pmap with vmap to simulate multi-core.
-  if count > 0:
-
-    class xla_bridge_stub(object):
-
-      def device_count(self):
-        return count
-
-    platform = xla_bridge.get_backend().platform
-    if platform == 'gpu' or platform == 'cpu':
-      batch.pmap = _jit_vmap
-      batch.xla_bridge = xla_bridge_stub()
-
-
-def assert_close_matrices(self, expected, actual, rtol):
-  self.assertEqual(expected.shape, actual.shape)
-  relative_error = (
-      np.linalg.norm(actual - expected) /
-      np.maximum(np.linalg.norm(expected), 1e-12))
-  if relative_error > rtol or np.isnan(relative_error):
-    self.fail(self.failureException(float(relative_error), expected, actual))
-  else:
-    print('PASSED with %f relative error.' % relative_error)
+from . import dataclasses
+from jax import lax
+from jax.lib import xla_bridge
+import jax.numpy as np
+from .kernel import Kernel
 
 
 def canonicalize_get(get):
@@ -102,6 +65,9 @@ def _output_to_dict(output):
   if isinstance(output, dict):
     return output
 
+  if isinstance(output, Kernel):
+    return output.asdict()
+
   if hasattr(output, '_asdict'):
     return output._asdict()
 
@@ -111,10 +77,21 @@ def _output_to_dict(output):
   raise ValueError(type(output))
 
 
+def wraps(f):
+  def wrapper(g):
+    @functools.wraps(f)
+    def h(*args, **kwargs):
+      return g(*args, **kwargs)
+
+    h.__signature__ = inspect.signature(f)
+    return h
+  return wrapper
+
+
 def get_namedtuple(name):
   def getter_decorator(fn):
     try:
-      argspec = _argspec(fn)
+      argspec = inspect.getfullargspec(fn)
       get_index = argspec.args.index('get')
       defaults = argspec.defaults
     except:
@@ -165,9 +142,209 @@ def get_namedtuple(name):
   return getter_decorator
 
 
-def _argspec(func):
-  """Python 2 and 3 compatible argspec."""
-  if six.PY3:
-    return inspect.getfullargspec(func)
+def x1_is_x2(x1, x2=None, eps=1e-12):
+  if not isinstance(x1, np.ndarray):
+    raise TypeError('`x1` must be an ndarray. A {} is found.'.format(type(x1)))
+
+  if x2 is None:
+    return True
+
+  if x1 is x2:
+    return True
+
+  if x1.shape != x2.shape:
+    return False
+
+  if xla_bridge.get_backend().platform == 'tpu':
+    eps = 1e-4
+
+  return np.all(np.abs(x1 - x2) < eps)
+
+
+def is_array(x):
+  return (isinstance(x, np.ndarray) and
+          hasattr(x, 'shape') and
+          x.shape != () and
+          x.shape != [])
+
+
+def canonicalize_axis(axis, x):
+  if axis is None:
+    return None
+
+  axis = [axis] if isinstance(axis, int) else list(axis)
+  if hasattr(x, 'ndim'):
+    ndim = x.ndim
+  elif isinstance(x, tuple):
+    ndim = len(x)
   else:
-    return inspect.getargspec(func)
+    raise TypeError(x, type(x))
+  return tuple(set(np.arange(ndim)[axis]))
+
+
+def zip_axes(x, start_axis=0, end_axis=-1):
+  """Zip (interleave) axes starting from `start_axis`.
+
+  Changes the shape as follows:
+  `[..., X, Y, Z, ..., X, Y, Z, ...] -> [..., X, X, ..., Y, Y, ..., Z, Z, ...]`
+
+  Args:
+    x: `np.ndarray` with an even number of dimensions following `start_axis`.
+    start_axis: `int`, number of axis from which to zip (interleave).
+    end_axis: `int`, number of axis until which to zip (interleave).
+
+  Returns:
+    A `np.ndarray` with a new shape.
+  """
+  return _zip_axes(x, start_axis, end_axis, unzip=False)
+
+
+def unzip_axes(x, start_axis=0, end_axis=-1):
+  """Unzip (de-interleave) axes starting from `start_axis`.
+
+  Changes the shape as follows:
+  `[..., X, X, ..., Y, Y, ..., Z, Z, ...] -> [..., X, Y, Z, ..., X, Y, Z, ...]`
+
+  Args:
+    x: `np.ndarray` with an even number of dimensions following `start_axis`.
+    start_axis: `int`, number of axis from which to unzip (de-interleave).
+    end_axis: `int`, number of axis until which to unzip (de-interleave).
+
+  Returns:
+    A `np.ndarray` with a new shape.
+  """
+  return _zip_axes(x, start_axis, end_axis, unzip=True)
+
+
+def _zip_axes(x, start_axis=0, end_axis=-1, unzip=False):
+  """Zip/unzip (interleave/de-interleave) axes starting from `start_axis`.
+
+  Changes the shape as follows:
+    If `unzip == True`:
+    `[..., X, X, ..., Y, Y, ..., Z, Z, ...] -> [..., X, Y, Z, ..., X, Y, Z, ..]`
+    If `unzip == False`:
+    `[..., X, Y, Z, ..., X, Y, Z, ...] -> [..., X, X, ..., Y, Y, ..., Z, Z, ..]`
+
+  Args:
+    x: `np.ndarray` with an even number of dimensions following `start_axis`.
+    start_axis: `int`, number of axis from which to zip/unzip.
+    end_axis: `int`, number of axis until which to zip/unzip.
+    unzip: `bool`, set to `True` to unzip instead of zip.
+
+  Returns:
+    A `np.ndarray` with a new shape.
+  """
+  if end_axis == -1:
+    end_axis = x.ndim
+  half_ndim, ragged = divmod(end_axis - start_axis, 2)
+  if ragged:
+    raise ValueError(
+        f'Need even number of axes to zip, got {end_axis - start_axis}.')
+
+  odd_axes = range(start_axis + 1, end_axis, 2)
+  last_axes = range(end_axis - half_ndim, end_axis)
+
+  if unzip:
+    x = np.moveaxis(x, odd_axes, last_axes)
+  else:
+    x = np.moveaxis(x, last_axes, odd_axes)
+  return x
+
+
+def diagonal_between(x, start_axis=0, end_axis=-1):
+  """Returns the diagonal along all dimensions between start and end axes."""
+  if end_axis == -1:
+    end_axis = x.ndim
+  half_ndim, ragged = divmod(end_axis - start_axis, 2)
+  if ragged:
+    raise ValueError(
+        f'Need even number of axes to flatten, got {end_axis - start_axis}.')
+  if half_ndim == 0:
+    return x
+
+  side_shape = x.shape[start_axis:start_axis + half_ndim]
+  side_size = functools.reduce(op.mul, side_shape, 1)
+
+  shape_2d = x.shape[:start_axis] + (side_size, side_size) + x.shape[end_axis:]
+  shape_result = x.shape[:start_axis] + side_shape + x.shape[end_axis:]
+
+  x = np.diagonal(x.reshape(shape_2d), axis1=start_axis, axis2=start_axis+1)
+  x = np.moveaxis(x, -1, start_axis)
+  return x.reshape(shape_result)
+
+
+def zip_flat(x, y):
+  return tuple(c for xy in zip(x, y) for c in xy)
+
+
+def interleave_ones(x, start_axis, end_axis, x_first):
+  x_axes = x.shape[start_axis:end_axis]
+  ones = (1,) * (end_axis - start_axis)
+  shape = x.shape[:start_axis]
+  if x_first:
+    shape += zip_flat(x_axes, ones)
+  else:
+    shape += zip_flat(ones, x_axes)
+  shape += x.shape[end_axis:]
+  return x.reshape(shape)
+
+
+def outer_prod(x, y, start_axis, end_axis, prod_op):
+  if y is None:
+    y = x
+  x = interleave_ones(x, start_axis, end_axis, True)
+  y = interleave_ones(y, start_axis, end_axis, False)
+  return prod_op(x, y)
+
+
+
+_array_or_list = Union[Optional[np.ndarray], List[Optional[np.ndarray]]]
+
+@dataclasses.dataclass
+class MaskedArray:
+  masked_value: _array_or_list
+  mask: _array_or_list
+
+
+def get_masked_array(x: _array_or_list,
+                     mask_constant: float = None) -> MaskedArray:
+  """Return `x` with entries equal to `mask_constant` zeroed-out, and the mask.
+
+  The mask returned is a boolean `np.ndarray` with masked indices having `True`.
+
+  Args:
+    x: `np.ndarray` to mask. If `x` is a `MaskedInput`, treat it as
+      `(masked_x, mask)` and pass it through.
+    mask_constant: an optional `float`, the value in inputs to be considered as
+      masked (e.g. padding in a batch of sentences). `None` means no masking.
+      Can also be `np.nan`, `np.inf` etc.
+
+  Returns:
+    A `MaskedArray` of `(masked_x, boolean_mask)`.
+  """
+  if isinstance(x, list):
+    fields = zip(*(get_masked_array(_x, mask_constant).astuple()
+                    for _x in x))
+    return MaskedArray(*(list(f) for f in fields))
+
+  if x is None:
+    mask = None
+
+  elif isinstance(x, MaskedArray):
+    x, mask = x.astuple()
+
+  elif isinstance(x, np.ndarray):
+    if mask_constant is None:
+      mask = None
+    else:
+      id_fn = lambda m: m
+      mask = lax.cond(np.isnan(mask_constant),
+                      np.isnan(x), id_fn,
+                      x == mask_constant, id_fn)
+  else:
+    raise TypeError(x, type(x))
+
+  if mask is not None:
+    x = np.where(mask, np.zeros((), x.dtype), x)
+
+  return MaskedArray(x, mask)

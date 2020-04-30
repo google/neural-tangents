@@ -13,9 +13,7 @@
 # limitations under the License.
 """Tests for `utils/predict.py`."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
 import math
 
 from jax import test_util as jtu
@@ -32,7 +30,7 @@ from neural_tangents import predict
 from neural_tangents import stax
 from neural_tangents.utils import batch
 from neural_tangents.utils import empirical
-from neural_tangents.utils import utils
+from neural_tangents.utils import test_utils
 
 config.parse_flags_with_absl()
 
@@ -60,21 +58,22 @@ OUTPUT_LOGITS = [1, 2]
 
 CONVOLUTION_CHANNELS = 256
 
-utils.update_test_tolerance()
+test_utils.update_test_tolerance()
+
 
 
 def _build_network(input_shape, network, out_logits):
   if len(input_shape) == 1:
-    assert network == 'FLAT'
+    assert network == FLAT
     return stax.serial(
         stax.Dense(4096, W_std=1.2, b_std=0.05), stax.Erf(),
         stax.Dense(out_logits, W_std=1.2, b_std=0.05))
   elif len(input_shape) == 3:
-    if network == 'POOLING':
+    if network == POOLING:
       return stax.serial(
           stax.Conv(CONVOLUTION_CHANNELS, (3, 3), W_std=2.0, b_std=0.05),
           stax.GlobalAvgPool(), stax.Dense(out_logits, W_std=2.0, b_std=0.05))
-    elif network == 'FLAT':
+    elif network == FLAT:
       return stax.serial(
           stax.Conv(CONVOLUTION_CHANNELS, (3, 3), W_std=2.0, b_std=0.05),
           stax.Flatten(), stax.Dense(out_logits, W_std=2.0, b_std=0.05))
@@ -506,14 +505,14 @@ class PredictTest(jtu.JaxTestCase):
     key = random.PRNGKey(0)
 
     key, split = random.split(key)
-    x_train = np.cos(random.normal(split, train_shape))
+    x_train = random.normal(split, train_shape)
 
     key, split = random.split(key)
     y_train = np.array(
         random.bernoulli(split, shape=(train_shape[0], out_logits)), np.float32)
 
     key, split = random.split(key)
-    x_test = np.cos(random.normal(split, test_shape))
+    x_test = random.normal(split, test_shape)
     _, _, kernel_fn = _build_network(train_shape[1:], network, out_logits)
     mean_pred, cov_pred = predict.gp_inference(
         kernel_fn,
@@ -524,13 +523,8 @@ class PredictTest(jtu.JaxTestCase):
         diag_reg=0.,
         compute_cov=True)
 
-    if xla_bridge.get_backend().platform == 'tpu':
-      eigh = np.onp.linalg.eigh
-    else:
-      eigh = np.linalg.eigh
-
     self.assertEqual(cov_pred.shape[0], x_test.shape[0])
-    min_eigh = np.min(eigh(cov_pred)[0])
+    min_eigh = np.min(np.linalg.eigh(cov_pred)[0])
     self.assertGreater(min_eigh + 1e-10, 0.)
 
     def mc_sampling(count=10):
@@ -562,7 +556,7 @@ class PredictTest(jtu.JaxTestCase):
 
     atol = ATOL
     rtol = RTOL
-    mean_emp, cov_emp = mc_sampling(100)
+    mean_emp, cov_emp = mc_sampling(200)
 
     self.assertAllClose(mean_pred, mean_emp, True, rtol, atol)
     self.assertAllClose(cov_pred, cov_emp, True, rtol, atol)
@@ -598,6 +592,22 @@ class PredictTest(jtu.JaxTestCase):
     key, split = random.split(key)
     x_test = np.cos(random.normal(split, test_shape))
     _, _, kernel_fn = _build_network(train_shape[1:], network, out_logits)
+
+    diag_regs = [0, 1e-6, 1e-4]
+    out_iter = predict.gp_inference(
+        kernel_fn,
+        x_train,
+        y_train,
+        x_test, ('ntk', 'nngp'),
+        diag_reg=diag_regs,
+        compute_cov=True)
+    iter_count = 0
+    for out in out_iter:
+      assert (len(out) == 2 and isinstance(out[0], predict.Gaussian) and
+              isinstance(out[1], predict.Gaussian))
+      iter_count += 1
+
+    self.assertEqual(iter_count, len(diag_regs))
 
     out = predict.gp_inference(
         kernel_fn,
@@ -673,17 +683,17 @@ class PredictTest(jtu.JaxTestCase):
     key = random.PRNGKey(0)
 
     key, split = random.split(key)
-    x_train = np.cos(random.normal(split, train_shape))
+    x_train = random.normal(split, train_shape)
 
     key, split = random.split(key)
     y_train = np.array(
         random.bernoulli(split, shape=(train_shape[0], out_logits)), np.float32)
 
     key, split = random.split(key)
-    x_test = np.cos(random.normal(split, test_shape))
+    x_test = random.normal(split, test_shape)
     _, _, kernel_fn = _build_network(train_shape[1:], network, out_logits)
 
-    reg = 1e-7
+    reg = 0.
     prediction = predict.gradient_descent_mse_gp(
         kernel_fn,
         x_train,
@@ -875,17 +885,17 @@ class PredictTest(jtu.JaxTestCase):
     key = random.PRNGKey(0)
 
     key, split = random.split(key)
-    x_train = np.cos(random.normal(split, train_shape))
+    x_train = random.normal(split, train_shape)
 
     key, split = random.split(key)
     y_train = np.array(
         random.bernoulli(split, shape=(train_shape[0], out_logits)), np.float32)
 
     key, split = random.split(key)
-    x_test = np.cos(random.normal(split, test_shape))
+    x_test = random.normal(split, test_shape)
     _, _, ker_fun = _build_network(train_shape[1:], network, out_logits)
 
-    reg = 1e-7
+    reg = 1e-5
     ntk_predictions = predict.gradient_descent_mse_gp(
         ker_fun,
         x_train,
@@ -899,15 +909,10 @@ class PredictTest(jtu.JaxTestCase):
 
     ntk_cov_predictions = [ntk_predictions(t).covariance for t in ts]
 
-    if xla_bridge.get_backend().platform == 'tpu':
-      eigh = np.onp.linalg.eigh
-    else:
-      eigh = np.linalg.eigh
-
     check_symmetric = np.array(
         [np.max(np.abs(cov - cov.T)) for cov in ntk_cov_predictions])
-    check_pos_evals = np.min(
-        np.array([eigh(cov)[0] + 1e-10 for cov in ntk_cov_predictions]))
+    check_pos_evals = np.min(np.array(
+        [np.linalg.eigh(cov)[0] + 1e-10 for cov in ntk_cov_predictions]))
 
     self.assertAllClose(check_symmetric, np.zeros_like(check_symmetric), True)
     self.assertGreater(check_pos_evals, 0., True)

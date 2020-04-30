@@ -1,14 +1,17 @@
 # Neural Tangents [[arXiv](https://arxiv.org/abs/1912.02803)]
- Fast and Easy Infinite Neural Networks in Python
+[**Quickstart**](#colab-notebooks)
+| [**Install guide**](#installation)
+| [**Reference docs**](https://neural-tangents.readthedocs.io/en/latest/)
 
 [![Build Status](https://travis-ci.org/google/neural-tangents.svg?branch=master)](https://travis-ci.org/google/neural-tangents) [![PyPI](https://img.shields.io/pypi/v/neural-tangents)](https://pypi.org/project/neural-tangents/) [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/neural-tangents)](https://pypi.org/project/neural-tangents/) [![PyPI - License](https://img.shields.io/pypi/l/neural_tangents)](https://github.com/google/neural-tangents/blob/master/LICENSE)
 
 **News:**
 
-* [arXiv preprint is out](https://arxiv.org/abs/1912.02803)!
+* We will be at [ICLR 2020](https://iclr.cc/), come tell us about your experience with the library!
 
-* We'll be at the [NeurIPS 2019](https://nips.cc/) [Bayesian Deep Learning](http://bayesiandeeplearning.org/) and [Science meets Engineering of Deep Learning](https://sites.google.com/corp/view/sedl-neurips-2019/) workshops, and the [Symposium on
-Advances in Approximate Bayesian Inference](http://approximateinference.org/). Come tell us about your experience with the library!
+* [arXiv preprint is out](https://arxiv.org/abs/1912.02803).
+
+* NeurIPS 2019 [Symposium on Advances in Approximate Bayesian Inference slides (not recorded)](http://approximateinference.org/2019/schedule/Novak2019.pdf) and the [Bayesian Deep Learning workshop video (1:33)](https://slideslive.com/38921874/bayesian-deep-learning-1) are now available.
 
 ## Overview
 
@@ -27,6 +30,7 @@ We happily welcome contributions!
 
 
 ## Contents
+* [Colab Notebooks](#colab-notebooks)
 * [Installation](#installation)
 * [5-Minute intro](#5-minute-intro)
 * [Package description](#package-description)
@@ -36,16 +40,30 @@ We happily welcome contributions!
 * [Citation](#citation)
 * [References](#references)
 
+## Colab Notebooks
+
+An easy way to get started with Neural Tangents is by playing around with the following interactive notebooks in Colaboratory. They demo the major features of Neural Tangents and show how it can be used in research.
+
+- [Neural Tangents Cookbook](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/neural_tangents_cookbook.ipynb)
+- [Weight Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/weight_space_linearization.ipynb)
+- [Function Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/function_space_linearization.ipynb)
+- [Neural Network Phase Diagram](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/phase_diagram.ipynb)
+
 ## Installation
 
-To use GPU, first follow [JAX's](https://www.github.com/google/jax/)
- GPU installation instructions (not necessary for CPU-only usage).
+To use GPU, first follow [JAX's](https://www.github.com/google/jax/) GPU installation instructions. Otherwise, install JAX on CPU by running
 
-Then either run
+```
+pip install jaxlib jax --upgrade
+```
+
+Once JAX is installed install Neural Tangents by running
+
 ```
 pip install neural-tangents
 ```
-or, to build the bleeding-edge version from source,
+or, to use the bleeding-edge version from GitHub source,
+
 ```
 git clone https://github.com/google/neural-tangents
 pip install -e neural-tangents
@@ -54,7 +72,9 @@ pip install -e neural-tangents
 You can now run the examples (using [`tensorflow_datasets`](https://github.com/tensorflow/datasets)) by calling:
 
 ```
-pip install tensorflow tensorflow-datasets
+# Note that Tensorflow does not work with Python 3.8
+# https://github.com/tensorflow/tensorflow/issues/33374
+pip install tensorflow "tensorflow-datasets>=2.0.0"
 
 python neural-tangents/examples/infinite_fcn.py
 python neural-tangents/examples/weight_space.py
@@ -65,18 +85,10 @@ Finally, you can run tests by calling:
 
 ```
 # NOTE: a few tests will fail without
-# pip install tensorflow tensorflow-datasets
+# pip install tensorflow "tensorflow-datasets>=2.0.0"
 
 for f in neural-tangents/neural_tangents/tests/*.py; do python $f; done
 ```
-
-If you would prefer, you can get started without installing by checking out our
-colab examples:
-
-- [Neural Tangents Cookbook](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/neural_tangents_cookbook.ipynb)
-- [Weight Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/weight_space_linearization.ipynb)
-- [Function Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/function_space_linearization.ipynb)
-
 
 ## 5-Minute intro
 
@@ -119,7 +131,7 @@ x2 = random.normal(key2, (20, 100))
 
 kernel = kernel_fn(x1, x2, 'nngp')
 ```
-Note that `kernel_fn` can compute _two_ covariance matrices corresponding to the Neural Network Gaussian Process (NNGP) and Neural Tangent (NT) kernels respectively. The NNGP kernel corresponds to the _Bayesian_ infinite neural network [[1-5]](#1-deep-neural-networks-as-gaussian-processes-iclr-2018-jaehoon-lee-yasaman-bahri-roman-novak-samuel-s-schoenholz-jeffrey-pennington-jascha-sohl-dickstein). The NTK corresponds to the _(continuous) gradient descent trained_ infinite network [[10]](#5-neural-tangent-kernel-convergence-and-generalization-in-neural-networks-neurips-2018-arthur-jacot-franck-gabriel-clément-hongler). In the above example, we compute the NNGP kernel but we could compute the NTK or both:
+Note that `kernel_fn` can compute _two_ covariance matrices corresponding to the Neural Network Gaussian Process (NNGP) and Neural Tangent (NT) kernels respectively. The NNGP kernel corresponds to the _Bayesian_ infinite neural network [[1-5]](#5-deep-neural-networks-as-gaussian-processes-iclr-2018-jaehoon-lee-yasaman-bahri-roman-novak-samuel-s-schoenholz-jeffrey-pennington-jascha-sohl-dickstein). The NTK corresponds to the _(continuous) gradient descent trained_ infinite network [[10]](#10-neural-tangent-kernel-convergence-and-generalization-in-neural-networks-neurips-2018-arthur-jacot-franck-gabriel-clément-hongler). In the above example, we compute the NNGP kernel but we could compute the NTK or both:
 
 ```python
 # Get kernel of a single type
@@ -164,7 +176,7 @@ y_test_ntk = nt.predict.gp_inference(kernel_fn, x_train, y_train, x_test,
 
 ### Infinitely WideResnet
 
-We can define a more compex, (infinitely) Wide Residual Network [[14]](#8-wide-residual-networks-bmvc-2018-sergey-zagoruyko-nikos-komodakis) using the same `nt.stax` building blocks:
+We can define a more compex, (infinitely) Wide Residual Network [[14]](#14-wide-residual-networks-bmvc-2018-sergey-zagoruyko-nikos-komodakis) using the same `nt.stax` building blocks:
 
 ```python
 from neural_tangents import stax
@@ -223,10 +235,6 @@ The `neural_tangents` (`nt`) package contains the following modules and methods:
 
 ## Technical gotchas
 
-### GPU
-
-You must follow [JAX's](https://www.github.com/google/jax/) GPU installation instructions to enable GPU support.
-
 
 ### 64-bit precision
 To enable 64-bit precision, set the respective JAX flag _before_ importing `neural_tangents` (see the JAX [guide](https://colab.research.google.com/github/google/jax/blob/master/notebooks/Common_Gotchas_in_JAX.ipynb#scrollTo=YTktlwTTMgFl)), for example:
@@ -242,12 +250,8 @@ import neural_tangents as nt  # 64-bit precision enabled
 We remark the following differences between our library and the JAX one.
 
 * All `nt.stax` layers are instantiated with a function call, i.e. `nt.stax.Relu()` vs `jax.experimental.stax.Relu`.
-* All layers with trainable parameters use the _NTK parameterization_ by default (see [[10]](#5-neural-tangent-kernel-convergence-and-generalization-in-neural-networks-neurips-2018-arthur-jacot-franck-gabriel-clément-hongler), Remark 1). However, Dense and Conv layers also support the _standard parameterization_ via a `parameterization` keyword argument. <!-- TODO(jaschasd) add link to note deriving NTK for standard parameterization -->
-* `nt.stax` and `jax.experimental.stax` may have different layers and options available (for example `nt.stax` layers support `CIRCULAR` padding, but only `NHWC` data format).
-
-### Python 2
-We will be dropping python 2 support before 2020.
-
+* All layers with trainable parameters use the _NTK parameterization_ by default (see [[10]](#10-neural-tangent-kernel-convergence-and-generalization-in-neural-networks-neurips-2018-arthur-jacot-franck-gabriel-clément-hongler), Remark 1). However, Dense and Conv layers also support the _standard parameterization_ via a `parameterization` keyword argument (see [[15]](#15-on-the-infinite-width-limit-of-neural-networks-with-a-standard-parameterization-arxiv-2020-jascha-sohl-dickstein-roman-novak-samuel-s-schoenholz-jaehoon-lee)).
+* `nt.stax` and `jax.experimental.stax` may have different layers and options available (for example `nt.stax` layers support `CIRCULAR` padding, have `LayerNorm`, but no `BatchNorm`.).
 
 ## Training dynamics of wide but finite networks
 
@@ -255,7 +259,7 @@ The kernel of an infinite network `kernel_fn(x1, x2).ntk` combined with  `nt.pre
 
 ### Weight space
 
-Continuous gradient descent in an infinite network has been shown in [[11]](#6-wide-neural-networks-of-any-depth-evolve-as-linear-models-under-gradient-descent-neurips-2019-jaehoon-lee-lechao-xiao-samuel-s-schoenholz-yasaman-bahri-roman-novak-jascha-sohl-dickstein-jeffrey-pennington) to correspond to training a _linear_ (in trainable parameters) model, which makes linearized neural networks an important subject of study for understanding the behavior of parameters in wide models.
+Continuous gradient descent in an infinite network has been shown in [[11]](#11-wide-neural-networks-of-any-depth-evolve-as-linear-models-under-gradient-descent-neurips-2019-jaehoon-lee-lechao-xiao-samuel-s-schoenholz-yasaman-bahri-roman-novak-jascha-sohl-dickstein-jeffrey-pennington) to correspond to training a _linear_ (in trainable parameters) model, which makes linearized neural networks an important subject of study for understanding the behavior of parameters in wide models.
 
 For this, we provide two convenient methods:
 
@@ -294,7 +298,7 @@ logits = apply_fn_lin((W, b), x)  # (3, 2) np.ndarray
 
 ### Function space:
 
-Outputs of a linearized model evolve identically to those of an infinite one [[11]](#6-wide-neural-networks-of-any-depth-evolve-as-linear-models-under-gradient-descent-neurips-2019-jaehoon-lee-lechao-xiao-samuel-s-schoenholz-yasaman-bahri-roman-novak-jascha-sohl-dickstein-jeffrey-pennington) but with a different kernel - specifically, the Neural Tangent Kernel [[10]](#5-neural-tangent-kernel-convergence-and-generalization-in-neural-networks-neurips-2018-arthur-jacot-franck-gabriel-clément-hongler) evaluated on the specific `apply_fn` of the finite network given specific `params_0` that the network is initialized with. For this we provide the `nt.empirical_kernel_fn` function that accepts any `apply_fn` and returns a `kernel_fn(x1, x2, params)` that allows to compute the empirical NTK and NNGP kernels on specific `params`.
+Outputs of a linearized model evolve identically to those of an infinite one [[11]](#11-wide-neural-networks-of-any-depth-evolve-as-linear-models-under-gradient-descent-neurips-2019-jaehoon-lee-lechao-xiao-samuel-s-schoenholz-yasaman-bahri-roman-novak-jascha-sohl-dickstein-jeffrey-pennington) but with a different kernel - specifically, the Neural Tangent Kernel [[10]](#10-neural-tangent-kernel-convergence-and-generalization-in-neural-networks-neurips-2018-arthur-jacot-franck-gabriel-clément-hongler) evaluated on the specific `apply_fn` of the finite network given specific `params_0` that the network is initialized with. For this we provide the `nt.empirical_kernel_fn` function that accepts any `apply_fn` and returns a `kernel_fn(x1, x2, params)` that allows to compute the empirical NTK and NNGP kernels on specific `params`.
 
 #### Example:
 
@@ -352,15 +356,34 @@ a small dataset using a small learning rate.
 
 ## Papers
 
-Neural tangents has been used in the following papers:
+Neural Tangents has been used in the following papers:
+
+* [The large learning rate phase of deep learning: the catapult mechanism.](https://arxiv.org/abs/2003.02218) \
+Aitor Lewkowycz, Yasaman Bahri, Ethan Dyer, Jascha Sohl-Dickstein, Guy Gur-Ari
+
+* [Spectrum Dependent Learning Curves in Kernel Regression and Wide Neural Networks.
+](https://arxiv.org/abs/2002.02561) \
+Blake Bordelon, Abdulkadir Canatar, Cengiz Pehlevan
+
+* [Taylorized Training: Towards Better Approximation of Neural Network Training at Finite Width.](https://arxiv.org/abs/2002.04010) \
+   Yu Bai, Ben Krause, Huan Wang, Caiming Xiong, Richard Socher
+
+* [On the Infinite Width Limit of Neural Networks with a Standard Parameterization.](https://arxiv.org/pdf/2001.07301.pdf) \
+Jascha Sohl-Dickstein, Roman Novak, Samuel S. Schoenholz, Jaehoon Lee
+
+* [Disentangling Trainability and Generalization in Deep Learning.](https://arxiv.org/abs/1912.13053) \
+Lechao Xiao, Jeffrey Pennington, Samuel S. Schoenholz
+
+* [Information in Infinite Ensembles of Infinitely-Wide Neural Networks.](https://arxiv.org/abs/1911.09189) \
+Ravid Shwartz-Ziv, Alexander A. Alemi
+
+* [Training Dynamics of Deep Networks using Stochastic Gradient Descent via Neural Tangent Kernel.](https://arxiv.org/abs/1905.13654) \
+Soufiane Hayou, Arnaud Doucet, Judith Rousseau
 
 * [Wide Neural Networks of Any Depth Evolve as Linear Models Under Gradient
 Descent.](https://arxiv.org/abs/1902.06720) \
 Jaehoon Lee*, Lechao Xiao*, Samuel S. Schoenholz, Yasaman Bahri, Roman Novak, Jascha
 Sohl-Dickstein, Jeffrey Pennington
-
-* [Training Dynamics of Deep Networks using Stochastic Gradient Descent via Neural Tangent Kernel.](https://arxiv.org/abs/1905.13654) \
-Soufiane Hayou, Arnaud Doucet, Judith Rousseau
 
 Please let us know if you make use of the code in a publication and we'll add it
 to the list!
@@ -368,17 +391,15 @@ to the list!
 
 ## Citation
 
-If you use the code in a publication, please cite the repo using the .bib,
+If you use the code in a publication, please cite our ICLR 2020 paper:
 
 ```
-@misc{neuraltangents2019,
+@inproceedings{neuraltangents2020,
     title={Neural Tangents: Fast and Easy Infinite Neural Networks in Python},
     author={Roman Novak and Lechao Xiao and Jiri Hron and Jaehoon Lee and Alexander A. Alemi and Jascha Sohl-Dickstein and Samuel S. Schoenholz},
-    year={2019},
-    eprint={1912.02803},
-    archivePrefix={arXiv},
-    primaryClass={stat.ML},
-    howpublished={\url{https://github.com/google/neural-tangents}, \url{https://arxiv.org/abs/1912.02803}},
+    booktitle={International Conference on Learning Representations},
+    year={2020},
+    url={https://github.com/google/neural-tangents}
 }
 ```
 
@@ -415,3 +436,5 @@ If you use the code in a publication, please cite the repo using the .bib,
 ##### [14] [Wide Residual Networks.](https://arxiv.org/abs/1605.07146) *BMVC 2018.* Sergey Zagoruyko, Nikos Komodakis
 
 ##### [15] [Tensor Programs I: Wide Feedforward or Recurrent Neural Networks of Any Architecture are Gaussian Processes.](https://arxiv.org/abs/1910.12478) *NeurIPS 2019.* Greg Yang.
+
+##### [16] [On the Infinite Width Limit of Neural Networks with a Standard Parameterization.](https://arxiv.org/pdf/2001.07301.pdf) *arXiv 2020.* Jascha Sohl-Dickstein, Roman Novak, Samuel S. Schoenholz, Jaehoon Lee
