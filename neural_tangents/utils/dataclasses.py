@@ -25,6 +25,11 @@ import dataclasses
 import jax
 
 
+replace = dataclasses.replace
+asdict = dataclasses.asdict
+astuple = dataclasses.astuple
+
+
 def dataclass(clz):
   """Create a class which can be passed to functional transformations.
 
@@ -64,19 +69,6 @@ def dataclass(clz):
       data_fields.append(name)
     else:
       meta_fields.append(name)
-
-  def replace(self, **updates):
-    """Returns a new object replacing the specified fields with new values."""
-    return dataclasses.replace(self, **updates)
-  data_clz.replace = replace
-
-  def asdict(self):
-    return dataclasses.asdict(self)
-  data_clz.asdict = asdict
-
-  def astuple(self):
-    return dataclasses.astuple(self)
-  data_clz.astuple = astuple
 
   def iterate_clz(x):
     meta = tuple(getattr(x, name) for name in meta_fields)

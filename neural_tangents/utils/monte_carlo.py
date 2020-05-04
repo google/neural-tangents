@@ -17,7 +17,7 @@
 """Methods to compute Monte Carlo NNGP and NTK estimates.
 
 The library has a public method `monte_carlo_kernel_fn` that allow to compute
-  Monte Carlo estimates of NNGP and NTK kernels of arbitrary functions.
+Monte Carlo estimates of NNGP and NTK kernels of arbitrary functions.
 """
 
 from functools import partial
@@ -30,6 +30,8 @@ from jax.tree_util import tree_multimap
 from neural_tangents.utils import batch
 from neural_tangents.utils import empirical
 from neural_tangents.utils import utils
+from neural_tangents.utils.typing import \
+    PRNGKey, InitFn, ApplyFn, MonteCarloKernelFn
 
 
 def _sample_once_kernel_fn(kernel_fn,
@@ -57,10 +59,11 @@ def _sample_many_kernel_fn(kernel_fn_sample_once, key, n_samples,
 
   def get_samples(x1, x2, get, **apply_fn_kwargs):
     _key = key
+    ker_sampled = None
     for n in range(1, max(n_samples) + 1):
       _key, split = random.split(_key)
       one_sample = kernel_fn_sample_once(x1, x2, split, get, **apply_fn_kwargs)
-      if n == 1:
+      if ker_sampled is None:
         ker_sampled = one_sample
       else:
         ker_sampled = tree_multimap(operator.add, ker_sampled, one_sample)
@@ -82,41 +85,41 @@ def _sample_many_kernel_fn(kernel_fn_sample_once, key, n_samples,
   return get_sampled_kernel
 
 
-def monte_carlo_kernel_fn(init_fn,
-                          apply_fn,
-                          key,
-                          n_samples,
-                          batch_size=0,
-                          device_count=-1,
-                          store_on_device=True):
+def monte_carlo_kernel_fn(init_fn: InitFn,
+                          apply_fn: ApplyFn,
+                          key: PRNGKey,
+                          n_samples: int,
+                          batch_size: int = 0,
+                          device_count: int = -1,
+                          store_on_device: bool = True) -> MonteCarloKernelFn:
   """Return a Monte Carlo sampler of NTK and NNGP kernels of a given function.
 
   Args:
-    :init_fn:
+    init_fn:
       a function initializing parameters of the neural network. From
       `jax.experimental.stax`: "takes an rng key and an input shape and returns
       an `(output_shape, params)` pair".
-    :apply_fn:
+    apply_fn:
       a function computing the output of the neural network.
       From `jax.experimental.stax`: "takes params, inputs, and an rng key and
       applies the layer".
-    :key:
+    key:
       RNG (`jax.random.PRNGKey`) for sampling random networks. Must have
       shape `(2,)`.
-    :n_samples:
+    n_samples:
       number of Monte Carlo samples. Can be either an integer or an
       iterable of integers at which the resulting generator will yield
       estimates. Example: use `n_samples=[2**k for k in range(10)]` for the
       generator to yield estimates using 1, 2, 4, ..., 512 Monte Carlo samples.
-    :batch_size: an integer making the kernel computed in batches of `x1` and
+    batch_size: an integer making the kernel computed in batches of `x1` and
       `x2` of this size. `0` means computing the whole kernel. Must divide
       `x1.shape[0]` and `x2.shape[0]`.
-    :device_count:
+    device_count:
       an integer making the kernel be computed in parallel across
       this number of devices (e.g. GPUs or TPU cores). `-1` means use all
       available devices. `0` means compute on a single device sequentially. If
       not `0`, must divide `x1.shape[0]`.
-    :store_on_device:
+    store_on_device:
       a boolean, indicating whether to store the resulting
       kernel on the device (e.g. GPU or TPU), or in the CPU RAM, where larger
       kernels may fit.

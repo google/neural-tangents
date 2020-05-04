@@ -20,7 +20,7 @@ import operator as op
 import jax.numpy as np
 from neural_tangents.utils import dataclasses
 from neural_tangents.utils import utils
-from typing import Tuple, Optional, Union
+from typing import Dict, Tuple, Optional, Callable, Any, Union
 
 
 @dataclasses.dataclass
@@ -79,8 +79,10 @@ class Kernel:
       batch of inputs. These have covariance `cov1` and covariance with the
       second batch of inputs given by `nngp`.
     shape2: a tuple specifying the shape of the random variable in the second
-      batch of inputs. These have variance `cov2` and covariance with the first
-      batch of inputs given by `nngp`.
+      batch of inputs. These have covariance `cov2` and covariance with the
+      first batch of inputs given by `nngp`.
+    batch_axis: integer, the batch axis of the activations.
+    channel_axis: integer, channel axis of the activations (taken to infinity).
     mask1: An optional boolean `np.ndarray` with a shape broadcastable to
       `shape1` (and the same number of dimensions). `True` stands for the
       input being masked at that position, while `False` means the input is
@@ -95,7 +97,7 @@ class Kernel:
   ntk: Optional[np.ndarray]
 
   cov1: np.ndarray
-  cov2: np.ndarray
+  cov2: Optional[np.ndarray]
   x1_is_x2: np.ndarray
 
   is_gaussian: bool = dataclasses.field(pytree_node=False)
@@ -111,12 +113,22 @@ class Kernel:
   batch_axis: int = dataclasses.field(pytree_node=False)
   channel_axis: int = dataclasses.field(pytree_node=False)
 
-  mask1: Optional[np.ndarray]
-  mask2: Optional[np.ndarray]
+  mask1: Optional[np.ndarray] = None
+  mask2: Optional[np.ndarray] = None
+
+  def replace(self, **kwargs) -> 'Kernel':
+    return dataclasses.replace(self, **kwargs)
+
+  def asdict(self) -> Dict[str, Any]:
+    return dataclasses.asdict(self)
+
+  def astuple(self) -> Tuple[Any, ...]:
+    return dataclasses.astuple(self)
 
   def slice(self, n1_slice: slice, n2_slice: slice) -> 'Kernel':
     cov1 = self.cov1[n1_slice]
     cov2 = self.cov1[n2_slice] if self.cov2 is None else self.cov2[n2_slice]
+    ntk = self.ntk
 
     mask1 = None if self.mask1 is None else self.mask1[n1_slice]
     mask2 = None if self.mask2 is None else self.mask2[n2_slice]
@@ -125,7 +137,7 @@ class Kernel:
         cov1=cov1,
         nngp=self.nngp[n1_slice, n2_slice],
         cov2=cov2,
-        ntk=self.ntk[n1_slice, n2_slice],
+        ntk=ntk[n1_slice, n2_slice] if utils.is_array(ntk) else ntk,
         shape1=(cov1.shape[0],) + self.shape1[1:],
         shape2=(cov2.shape[0],) + self.shape2[1:],
         mask1=mask1,
@@ -159,7 +171,9 @@ class Kernel:
                                           self.nngp,
                                           self.cov2,
                                           self.ntk))
-    return self.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk,
+    return self.replace(cov1=cov1,
+                        nngp=nngp,
+                        cov2=cov2, ntk=ntk,
                         is_reversed=not self.is_reversed)
 
   def transpose(self, axes: Tuple[int, ...] = None) -> 'Kernel':
@@ -178,9 +192,9 @@ class Kernel:
       axes = tuple(range(len(self.shape1) - 2))
 
     def permute(mat: Union[None, float, np.ndarray],
-        batch_ndim: int) -> Union[None, float, np.ndarray]:
+                batch_ndim: int) -> Union[None, float, np.ndarray]:
       if utils.is_array(mat):
-        _axes = tuple(batch_ndim + a for a in axes)
+        _axes = tuple(batch_ndim + a for a in axes)  # type: ignore
         if not self.diagonal_spatial:
           _axes = tuple(j for a in _axes
                         for j in (2 * a - batch_ndim,
@@ -204,22 +218,23 @@ class Kernel:
     def mask_mat(mat, mask):
       if not utils.is_array(mat) or mask is None:
         return mat
-      return np.where(mask, np.zeros((), mat.dtype), mat)
+      return np.where(mask, np.zeros((), mat.dtype), mat)  # pytype: disable=attribute-error
 
     cov1 = mask_mat(self.cov1, mask11)
     cov2 = mask_mat(self.cov2, mask22)
     nngp = mask_mat(self.nngp, mask12)
     ntk = mask_mat(self.ntk, mask12)
 
-    return self.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk,
-                        mask1=mask1, mask2=mask2)
+    return self.replace(cov1=cov1,
+                        nngp=nngp,
+                        cov2=cov2,
+                        ntk=ntk,
+                        mask1=mask1,
+                        mask2=mask2)
 
-  def _get_mask_prods(self,
-                      mask1: Optional[np.ndarray],
-                      mask2: Optional[np.ndarray]
-  ) -> Tuple[Optional[np.ndarray],
-             Optional[np.ndarray],
-             Optional[np.ndarray]]:
+  def _get_mask_prods(
+    self, mask1: Optional[np.ndarray], mask2: Optional[np.ndarray]
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
     """Gets outer products of `mask1, mask1`, `mask1, mask2`, `mask2, mask2`."""
     def get_mask_prod(m1, m2, batch_ndim):
       if m1 is None and m2 is None:

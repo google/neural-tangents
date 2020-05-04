@@ -31,6 +31,8 @@ from jax.tree_util import tree_multimap
 from jax.tree_util import tree_reduce
 from neural_tangents.utils import flags as internal_flags
 from neural_tangents.utils import utils
+from neural_tangents.utils.typing import ApplyFn, EmpiricalKernelFn, PyTree
+from typing import Callable
 
 config.parse_flags_with_absl()  # NOTE(schsam): Is this safe?
 
@@ -38,7 +40,8 @@ config.parse_flags_with_absl()  # NOTE(schsam): Is this safe?
 FLAGS = flags.FLAGS
 
 
-def linearize(f, params):
+def linearize(f: Callable[..., np.ndarray],
+              params: PyTree) -> Callable[..., np.ndarray]:
   """Returns a function `f_lin`, the first order taylor approximation to `f`.
 
   Example:
@@ -47,13 +50,12 @@ def linearize(f, params):
     >>> mse = np.mean((f(new_params, x) - f_lin(new_params, x)) ** 2)
 
   Args:
-    :f: A function that we would like to linearize. It should have the signature
+    f: A function that we would like to linearize. It should have the signature
        `f(params, *args, **kwargs)` where params is a PyTree and `f` should
        return an `np.ndarray`.
-    :params: Initial parameters to the function that we would like to take the
-            Taylor series about. This can be any structure that is compatible
-            with the JAX tree operations.
-
+    params: Initial parameters to the function that we would like to take the
+       Taylor series about. This can be any structure that is compatible
+       with the JAX tree operations.
   Returns:
     A function `f_lin(new_params, *args, **kwargs)` whose signature is the same
     as f. Here `f_lin` implements the first-order taylor series of `f` about
@@ -67,7 +69,9 @@ def linearize(f, params):
   return f_lin
 
 
-def taylor_expand(f, params, degree):
+def taylor_expand(f: Callable[..., np.ndarray],
+                  params: PyTree,
+                  degree: int) -> Callable[..., np.ndarray]:
   """Returns a function `f_tayl`, Taylor approximation to `f` of order `degree`.
 
   Example:
@@ -76,14 +80,12 @@ def taylor_expand(f, params, degree):
     >>> mse = np.mean((f(new_params, x) - f_tayl(new_params, x)) ** 2)
 
   Args:
-    :f: A function that we would like to Taylor expand. It should have the
-     signature `f(params, *args, **kwargs)` where `params` is a PyTree, and
-     `f` returns a `np.ndarray`.
-
-    :params: Initial parameters to the function that we would like to take the
+    f: A function that we would like to Taylor expand. It should have the
+      signature `f(params, *args, **kwargs)` where `params` is a PyTree, and
+      `f` returns a `np.ndarray`.
+    params: Initial parameters to the function that we would like to take the
       Taylor series about. This can be any structure that is compatible
       with the JAX tree operations.
-
     degree: The degree of the Taylor expansion.
 
   Returns:
@@ -116,7 +118,7 @@ def taylor_expand(f, params, degree):
 # Empirical Kernel
 
 
-def flatten_features(kernel):
+def flatten_features(kernel: np.ndarray) -> np.ndarray:
   """Flatten an empirical kernel."""
   if kernel.ndim == 2:
     return kernel
@@ -130,7 +132,7 @@ def flatten_features(kernel):
   return np.reshape(kernel, (feature_size *  n1, feature_size * n2))
 
 
-def empirical_implicit_ntk_fn(f):
+def empirical_implicit_ntk_fn(f: ApplyFn) -> EmpiricalKernelFn:
   """Computes the ntk without batching for inputs x1 and x2.
 
   The Neural Tangent Kernel is defined as :math:`J(X_1) J(X_2)^T` where
@@ -149,10 +151,9 @@ def empirical_implicit_ntk_fn(f):
   :math:`b(v)`.
 
   Args:
-    :f: The function whose NTK we are computing. `f` should have the signature
-       `f(params, inputs)` and should return an `np.ndarray` of outputs with
-       shape `[|inputs|, output_dim]`.
-
+    f: The function whose NTK we are computing. `f` should have the signature
+      `f(params, inputs)` and should return an `np.ndarray` of outputs with
+      shape `[|inputs|, output_dim]`.
   Returns:
     A function ntk_fn that computes the empirical ntk.
   """
@@ -206,7 +207,7 @@ def empirical_implicit_ntk_fn(f):
   return ntk_fn
 
 
-def empirical_direct_ntk_fn(f):
+def empirical_direct_ntk_fn(f: ApplyFn) -> EmpiricalKernelFn:
   """Computes the ntk without batching for inputs x1 and x2.
 
   The Neural Tangent Kernel is defined as :math:`J(X_1) J(X_2)^T` where
@@ -274,7 +275,7 @@ empirical_ntk_fn = (empirical_implicit_ntk_fn
                     empirical_direct_ntk_fn)
 
 
-def empirical_nngp_fn(f):
+def empirical_nngp_fn(f: ApplyFn) -> EmpiricalKernelFn:
   """Returns a function to draw a single sample the NNGP of a given network `f`.
 
   This method assumes that slices of the random network outputs along the last
@@ -343,7 +344,7 @@ def empirical_nngp_fn(f):
   return nngp_fn
 
 
-def empirical_kernel_fn(f):
+def empirical_kernel_fn(f: ApplyFn) -> EmpiricalKernelFn:
   """Returns a function that computes single draws from NNGP and NT kernels."""
 
   kernel_fns = {

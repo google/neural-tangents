@@ -17,7 +17,7 @@
 """Describes flags used by neural tangents."""
 
 
-from absl import flags
+from absl import flags  # type: ignore
 
 
 flags.DEFINE_boolean(

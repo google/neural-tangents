@@ -68,7 +68,6 @@ import enum
 import functools
 import operator as op
 import string
-from typing import Tuple, List, Optional, Iterable, Callable, Union
 import warnings
 
 import frozendict
@@ -84,10 +83,18 @@ import jax.interpreters.partial_eval as pe
 from jax.lib import xla_bridge
 from jax.scipy.special import erf
 from jax.tree_util import tree_map, tree_flatten, tree_unflatten
-from neural_tangents.utils import utils
+
 from neural_tangents.utils.kernel import Kernel
+from neural_tangents.utils import utils
+
+from neural_tangents.utils.typing import (
+    InitFn, AnalyticKernelFn, LayerKernelFn,
+    InternalLayer, Layer, Kernels, Shapes)
 
 
+from typing import Union, Tuple, Callable, Iterable, Dict, List, Optional
+
+# Enums
 class Padding(enum.Enum):
   CIRCULAR = 'CIRCULAR'
   SAME = 'SAME'
@@ -99,40 +106,34 @@ class Pooling(enum.Enum):
   SUM = 'SUM'
 
 
-def _randn(stddev=1e-2):
-  """`jax.experimental.stax.randn` for implicitly-typed results."""
-  def init(rng, shape):
-    return stddev * random.normal(rng, shape)
-  return init
+# Decorators
 
 
-# DECORATORS
-
-
-def layer(layer_fns):
+def layer(layer_fn: Callable[..., InternalLayer]) -> Callable[..., Layer]:
   """A convenience decorator to be added to all public layers like `Relu` etc.
 
-  Makes the `kernel_fn` of the layer work with both input `np.ndarray`s (when
-  the layer is the first one applied to inputs), and with `Kernel` for
+  Makes the `kernel_fn` of the layer work with both input `np.ndarray`
+  (when the layer is the first one applied to inputs), and with `Kernel` for
   intermediary layers. Also adds optional arguments to the `kernel_fn` to
   allow specifying the computation and returned results with more flexibility.
 
   Args:
-    layer: A layer function returning a triple `(init_fn, apply_fn, kernel_fn)`.
+    layer_fn: Layer function returning triple `(init_fn, apply_fn, kernel_fn)`.
 
   Returns:
     A function with the same signature as `layer` with `kernel_fn` now
-    accepting `np.ndarray`s as inputs if needed, and accepts optional `get`,
+    accepting `np.ndarray` as inputs if needed, and accepts optional `get`,
     `diagonal_batch`, `diagonal_spatial` arguments.
   """
-  name = layer_fns.__name__
+  name = layer_fn.__name__
 
-  @utils.wraps(layer_fns)
+  @utils.wraps(layer_fn)
   def new_layer_fns(*args, **kwargs):
-    init_fn, apply_fn, kernel_fn = layer_fns(*args, **kwargs)
+    init_fn, apply_fn, kernel_fn = layer_fn(*args, **kwargs)
     kernel_fn = _preprocess_kernel_fn(init_fn, kernel_fn)
     init_fn.__name__ = apply_fn.__name__ = kernel_fn.__name__ = name
     return init_fn, apply_fn, kernel_fn
+
   return new_layer_fns
 
 
@@ -183,7 +184,6 @@ def _requires(**static_reqs):
     return new_kernel_fn
 
   return req
-
 
 def _supports_masking(remask_kernel: bool):
   """Returns a decorator that turns layers into layers supporting masking.
@@ -288,19 +288,18 @@ def _supports_masking(remask_kernel: bool):
 
 
 @layer
-def serial(*layers):
+def serial(*layers: Layer) -> InternalLayer:
   """Combinator for composing layers in serial.
 
   Based on `jax.experimental.stax.serial`.
 
   Args:
-    :layers: a sequence of layers, each an `(init_fn, apply_fn, kernel_fn)`
+    layers: a sequence of layers, each an `(init_fn, apply_fn, kernel_fn)`
       triple.
 
   Returns:
     A new layer, meaning an `(init_fn, apply_fn, kernel_fn)` triple,
     representing the serial composition of the given sequence of layers.
-
   """
   init_fns, apply_fns, kernel_fns = zip(*layers)
   init_fn, apply_fn = ostax.serial(*zip(init_fns, apply_fns))
@@ -315,14 +314,14 @@ def serial(*layers):
 
 
 @layer
-def parallel(*layers):
+def parallel(*layers: Iterable[Layer]) -> InternalLayer:
   """Combinator for composing layers in parallel.
 
   The layer resulting from this combinator is often used with the `FanOut` and
   `FanInSum`/`FanInConcat` layers. Based on `jax.experimental.stax.parallel`.
 
   Args:
-    :layers: a sequence of layers, each an `(init_fn, apply_fn, kernel_fn)`
+    *layers: a sequence of layers, each with a `(init_fn, apply_fn, kernel_fn)`
       triple.
 
   Returns:
@@ -330,7 +329,6 @@ def parallel(*layers):
     representing the parallel composition of the given sequence of layers. In
     particular, the returned layer takes a sequence of inputs and returns a
     sequence of outputs with the same length as the argument `layers`.
-
   """
   init_fns, apply_fns, kernel_fns = zip(*layers)
   init_fn_stax, apply_fn = ostax.parallel(*zip(init_fns, apply_fns))
@@ -347,24 +345,22 @@ def parallel(*layers):
 
 @layer
 @_supports_masking(remask_kernel=True)
-def Dense(out_dim,
-          W_std=1.,
-          b_std=0.,
-          W_init=_randn(1.0),
-          b_init=_randn(1.0),
-          parameterization='ntk',
-          batch_axis=0,
-          channel_axis=-1):
+def Dense(out_dim: int,
+          W_std: float = 1.,
+          b_std: float = 0.,
+          parameterization: str = 'ntk',
+          batch_axis: int = 0,
+          channel_axis: int = -1) -> InternalLayer:
   r"""Layer constructor function for a dense (fully-connected) layer.
 
-  Based on `jax.experimental.stax.Dense`. Has a similar API, apart from:
-
-  `W_init` and `b_init` only change the behavior of the finite width network,
-  and are not used by `kernel_fn`. In most cases, `W_std` and `b_std` should
-  be used instead.
+  Based on `jax.experimental.stax.Dense`.
 
   Args:
-    :parameterization: Either 'ntk' or 'standard'.
+    out_dim: The output feature / channel dimension. This is ignored in by the
+      `kernel_fn` in NTK parameterization.
+    W_std: Specifies the standard deviation of the weights.
+    b_std: Specifies the standard deviation of the biases.
+    parameterization: Either 'ntk' or 'standard'.
 
       Under ntk parameterization (https://arxiv.org/abs/1806.07572, page 3),
       weights and biases are initialized as :math:`W_{ij} \sim N(0,1)`,
@@ -378,14 +374,12 @@ def Dense(out_dim,
       equation is
       :math:`z_i = \sum_j W_ij x_j + b_i`.
 
-    :batch_axis: integer, batch axis. Defaults to `0`, the leading axis.
+    batch_axis: Specifies which axis is contains different elements of the
+      batch. Defaults to `0`, the leading axis.
 
-    :channel_axis: integer, channel axis. Defaults to `-1`, the trailing axis.
-      For `kernel_fn`, channel size is considered to be infinite.
-
-  Returns:
-    `(init_fn, apply_fn, kernel_fn)`.
-
+    channel_axis: Specifies which axis contains the features / channels.
+      Defaults to `-1`, the trailing axis. For `kernel_fn`, channel size is
+      considered to be infinite.
   """
   # TODO: after experimentation, evaluate whether to change default
   # parameterization from "ntk" to "standard"
@@ -397,8 +391,8 @@ def Dense(out_dim,
     output_shape = (input_shape[:_channel_axis] + (out_dim,)
                     + input_shape[_channel_axis + 1:])
     k1, k2 = random.split(rng)
-    W = W_init(k1, (input_shape[_channel_axis], out_dim))
-    b = b_init(k2, (out_dim,))
+    W = random.normal(k1, (input_shape[_channel_axis], out_dim))
+    b = random.normal(k2, (out_dim,))
     return output_shape, (W, b)
 
   def standard_init_fn(rng, input_shape):
@@ -462,27 +456,32 @@ def Dense(out_dim,
 
 @layer
 @_supports_masking(remask_kernel=True)
-def GeneralConv(dimension_numbers,
-                out_chan,
-                filter_shape,
-                strides=None,
-                padding=Padding.VALID.name,
-                W_std=1.0,
-                W_init=_randn(1.0),
-                b_std=0.0,
-                b_init=_randn(1.0),
-                parameterization='ntk'):
+def GeneralConv(dimension_numbers: Optional[Tuple[str, str, str]],
+                out_chan: int,
+                filter_shape: Tuple[int, ...],
+                strides: Tuple[int, ...] = None,
+                padding: str = Padding.VALID.name,
+                W_std: float = 1.0,
+                b_std: float = 0.0,
+                parameterization: str = 'ntk') -> InternalLayer:
   """Layer construction function for a general convolution layer.
 
-  Based on `jax.experimental.stax.GeneralConv`. Has a similar API apart from:
-
-  `W_init` and `b_init` only change the behavior of the finite width network,
-  and are not used by `kernel_fn`. In most cases, `W_std` and `b_std` should
-  be used instead.
+  Based on `jax.experimental.stax.GeneralConv`.
 
   Args:
-    padding: in addition to `VALID` and `SAME` padding, supports `CIRCULAR`,
-      not available in `jax.experimental.stax.GeneralConv`.
+    dimension_numbers: Specifies which axes should be convolved over. Should
+      match the specification in `jax.lax.dot_general_dilated`.
+    out_chan: The number of output channels / features of the
+      convolution. This is ignored in by the `kernel_fn` in NTK
+      parameterization.
+    filter_shape: The shape of the filter. The shape of the tuple should agree
+      with the number of spatial dimensions in `dimension_numbers`.
+    strides: The stride of the convolution. The shape of the tuple should agree
+      with the number of spatial dimensions in `dimension_nubmers`.
+    padding: Specifies padding for the convolution. Can be one of 'VALID',
+      'SAME', or 'CIRCULAR'. 'CIRCULAR' uses periodic convolutions.
+    W_std: The standard deviation of the weights.
+    b_std: The standard deviation of the biases.
     parameterization: Either "ntk" or "standard". These parameterizations are
       the direct analogues for convolution of the corresponding
       parameterizations for `Dense` layers.
@@ -493,37 +492,37 @@ def GeneralConv(dimension_numbers,
                       strides,
                       padding,
                       W_std,
-                      W_init,
                       b_std,
-                      b_init,
                       parameterization)
 
 
 @layer
 @_supports_masking(remask_kernel=True)
-def Conv(out_chan,
-         filter_shape,
-         strides=None,
-         padding=Padding.VALID.name,
-         W_std=1.0,
-         W_init=_randn(1.0),
-         b_std=0.0,
-         b_init=_randn(1.0),
-         parameterization='ntk'):
-  """Layer construction function for a convolution layer.
+def Conv(out_chan: int,
+         filter_shape: Tuple[int, ...],
+         strides: Optional[Tuple[int, ...]] = None,
+         padding: str = Padding.VALID.name,
+         W_std: float = 1.0,
+         b_std: float = 0.0,
+         parameterization: str = 'ntk') -> InternalLayer:
+  """Layer construction function for a general convolution layer.
 
-  Based on `jax.experimental.stax.Conv`. Has a similar API apart from:
-
-  Supports arbitrary number of spatial dimensions, with batch-first,
-  channels-last layout. For different dimension numbers, use `GeneralConv`.
-
-  `W_init` and `b_init` only change the behavior of the finite width network,
-  and are not used by `kernel_fn`. In most cases, `W_std` and `b_std` should
-  be used instead.
+  Based on `jax.experimental.stax.Conv`.
 
   Args:
-    padding: in addition to `VALID` and `SAME` padding, supports `CIRCULAR`,
-      not available in `jax.experimental.stax.GeneralConv`.
+    dimension_numbers: Specifies which axes should be convolved over. Should
+      match the specification in `jax.lax.dot_general_dilated`.
+    out_chan: The number of output channels / features of the
+      convolution. This is ignored in by the `kernel_fn` in NTK
+      parameterization.
+    filter_shape: The shape of the filter. The shape of the tuple should agree
+      with the number of spatial dimensions in `dimension_numbers`.
+    strides: The stride of the convolution. The shape of the tuple should agree
+      with the number of spatial dimensions in `dimension_nubmers`.
+    padding: Specifies padding for the convolution. Can be one of 'VALID',
+      'SAME', or 'CIRCULAR'. 'CIRCULAR' uses periodic convolutions.
+    W_std: The standard deviation of the weights.
+    b_std: The standard deviation of the biases.
     parameterization: Either "ntk" or "standard". These parameterizations are
       the direct analogues for convolution of the corresponding
       parameterizations for `Dense` layers.
@@ -534,33 +533,36 @@ def Conv(out_chan,
                       strides,
                       padding,
                       W_std,
-                      W_init,
                       b_std,
-                      b_init,
                       parameterization)
 
 
-def _GeneralConv(dimension_numbers,
-                 out_chan,
-                 filter_shape,
-                 strides=None,
-                 padding=Padding.VALID.name,
-                 W_std=1.0,
-                 W_init=_randn(1.0),
-                 b_std=0.0,
-                 b_init=_randn(1.0),
-                 parameterization='ntk'):
+def _GeneralConv(dimension_numbers: Optional[Tuple[str, str, str]],
+                 out_chan: int,
+                 filter_shape: Tuple[int, ...],
+                 strides: Optional[Tuple[int, ...]] = None,
+                 padding: str = Padding.VALID.name,
+                 W_std: float = 1.0,
+                 b_std: float = 0.0,
+                 parameterization: str = 'ntk') -> InternalLayer:
   """Layer construction function for a general convolution layer.
 
-  Based on `jax.experimental.stax.GeneralConv`. Has a similar API apart from:
-
-  `W_init` and `b_init` only change the behavior of the finite width network,
-    and are not used by `kernel_fn`. In most cases, `W_std` and `b_std` should
-    be used instead.
+  Based on `jax.experimental.stax.GeneralConv`.
 
   Args:
-    padding: in addition to `VALID` and `SAME` padding, supports `CIRCULAR`,
-      not available in `jax.experimental.stax.GeneralConv`.
+    dimension_numbers: Specifies which axes should be convolved over. Should
+      match the specification in `jax.lax.dot_general_dilated`.
+    out_chan: The number of output channels / features of the
+      convolution. This is ignored in by the `kernel_fn` in NTK
+      parameterization.
+    filter_shape: The shape of the filter. The shape of the tuple should agree
+      with the number of spatial dimensions in `dimension_numbers`.
+    strides: The stride of the convolution. The shape of the tuple should agree
+      with the number of spatial dimensions in `dimension_nubmers`.
+    padding: Specifies padding for the convolution. Can be one of 'VALID',
+      'SAME', or 'CIRCULAR'. 'CIRCULAR' uses periodic convolutions.
+    W_std: The standard deviation of the weights.
+    b_std: The standard deviation of the biases.
     parameterization: Either "ntk" or "standard". These parameterizations are
       the direct analogues for convolution of the corresponding
       parameterizations for `Dense` layers.
@@ -587,8 +589,13 @@ def _GeneralConv(dimension_numbers,
   def input_total_dim(input_shape):
     return input_shape[lhs_spec.index('C')] * np.prod(filter_shape)
 
-  ntk_init_fn, _ = ostax.GeneralConv(dimension_numbers, out_chan, filter_shape,
-                                     strides, init_padding.name, W_init, b_init)
+  ntk_init_fn, _ = ostax.GeneralConv(dimension_numbers,
+                                     out_chan,
+                                     filter_shape,
+                                     strides,
+                                     init_padding.name,
+                                     random.normal,
+                                     random.normal)
 
   def standard_init_fn(rng, input_shape):
     output_shape, (W, b) = ntk_init_fn(rng, input_shape)
@@ -715,10 +722,18 @@ def _GeneralConv(dimension_numbers,
 
 
 @layer
-def FanOut(num):
+def FanOut(num: int) -> InternalLayer:
   """Layer construction function for a fan-out layer.
 
-  Based on `jax.experimental.stax.FanOut`.
+  This layer takes an input and produces `num` copies that can be fed into
+  different branches of a neural network (for example with residual
+  sconnections).
+
+  Args:
+    num: The number of going edges to fan out into.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
   """
   init_fn, apply_fn = ostax.FanOut(num)
   kernel_fn = lambda kernels: [kernels] * num
@@ -727,10 +742,12 @@ def FanOut(num):
 
 @layer
 @_supports_masking(remask_kernel=False)
-def FanInSum():
+
+def FanInSum() -> InternalLayer:
   """Layer construction function for a fan-in sum layer.
 
-  Based on `jax.experimental.stax.FanInSum`.
+  This layer takes a number of inputs (e.g. produced by `FanOut`) and sums the
+  inputs to produce a single output.
   """
   init_fn, apply_fn = ostax.FanInSum
   kernel_fn = lambda kernels: _fan_in_kernel_fn(kernels, None)
@@ -743,10 +760,13 @@ def FanInSum():
 
 @layer
 @_supports_masking(remask_kernel=False)
-def FanInConcat(axis=-1):
+def FanInConcat(axis: int = -1) -> InternalLayer:
   """Layer construction function for a fan-in concatenation layer.
 
   Based on `jax.experimental.stax.FanInConcat`.
+
+  Args:
+    axis: Specifies the axis along which input tensors should be concatenated.
   """
   init_fn, apply_fn = ostax.FanInConcat(axis)
   kernel_fn = lambda kernels: _fan_in_kernel_fn(kernels, axis)
@@ -759,31 +779,31 @@ def FanInConcat(axis=-1):
 
 @layer
 @_supports_masking(remask_kernel=True)
-def AvgPool(window_shape,
-            strides=None,
-            padding=Padding.VALID.name,
-            normalize_edges=True,
-            batch_axis=0,
-            channel_axis=-1):
+def AvgPool(window_shape: Tuple[int, ...],
+            strides: Tuple[int, ...] = None,
+            padding: str = Padding.VALID.name,
+            normalize_edges: bool = True,
+            batch_axis: int = 0,
+            channel_axis: int = -1) -> InternalLayer:
   """Layer construction function for an average pooling layer.
 
-  Based on `jax.experimental.stax.AvgPool`. Has a similar API apart from:
+  Based on `jax.experimental.stax.AvgPool`.
 
   Args:
-    :padding: in addition to `VALID` and `SAME` padding, supports `CIRCULAR`,
-      not available in `jax.experimental.stax.AvgPool`.
-
-    :normalize_edges: `True` to normalize output by the effective receptive
+    window_shape: The number of pixels over which pooling is to be performed.
+    strides: The stride of the pooling window. `None` corresponds to a stride of
+      `(1, 1)`.
+    padding: Can be `VALID`, `SAME`, or `CIRCULAR` padding. Here `CIRCULAR`
+      uses periodic boundary conditions on the image.
+    normalize_edges: `True` to normalize output by the effective receptive
       field, `False` to normalize by the window size. Only has effect at the
       edges when `SAME` padding is used. Set to `True` to retain correspondence
       to `ostax.AvgPool`.
-    batch_ndim: integer, number of leading batch dimensions, 1 or 2.
-
-    :batch_axis: integer, batch axis. Defaults to `0`, the leading axis.
-
-    :channel_axis: integer, channel axis. Defaults to `-1`, the trailing axis.
-      For `kernel_fn`, channel size is considered to be infinite.
-
+    batch_axis: Specifies the batch dimension. Defaults to `0`, the leading
+      axis.
+    channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
+      the trailing axis. For `kernel_fn`, channel size is considered to be
+      infinite.
   """
   return _Pool(Pooling.AVG, window_shape, strides, padding, normalize_edges,
                batch_axis, channel_axis)
@@ -791,56 +811,59 @@ def AvgPool(window_shape,
 
 @layer
 @_supports_masking(remask_kernel=True)
-def SumPool(window_shape,
-            strides=None,
-            padding=Padding.VALID.name,
-            batch_axis=0,
-            channel_axis=-1):
+def SumPool(window_shape: Tuple[int, ...],
+            strides: Tuple[int, ...] = None,
+            padding: str = Padding.VALID.name,
+            batch_axis: int = 0,
+            channel_axis: int = -1) -> InternalLayer:
   """Layer construction function for a 2D sum pooling layer.
 
-  Based on `jax.experimental.stax.SumPool`. Has a similar API apart from:
+  Based on `jax.experimental.stax.SumPool`.
 
   Args:
-    :padding: in addition to `VALID` and `SAME` padding, supports `CIRCULAR`, not
-      available in `jax.experimental.stax.SumPool`.
-
-    :batch_axis: integer, batch axis. Defaults to `0`, the leading axis.
-
-    :channel_axis: integer, channel axis. Defaults to `-1`, the trailing axis.
-      For `kernel_fn`, channel size is considered to be infinite.
+    window_shape: The number of pixels over which pooling is to be performed.
+    strides: The stride of the pooling window. `None` corresponds to a stride of
+      `(1, ..., 1)`.
+    padding: Can be `VALID`, `SAME`, or `CIRCULAR` padding. Here `CIRCULAR`
+      uses periodic boundary conditions on the image.
+    batch_axis: Specifies the batch dimension. Defaults to `0`, the leading
+      axis.
+    channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
+      the trailing axis. For `kernel_fn`, channel size is considered to be
+      infinite.
   """
   return _Pool(Pooling.SUM, window_shape, strides, padding, False,
                batch_axis, channel_axis)
 
 
-def _Pool(pool_type,
-          window_shape,
-          strides,
-          padding,
-          normalize_edges,
-          batch_axis,
-          channel_axis):
+def _Pool(pool_type: Pooling,
+          window_shape: Tuple[int, ...],
+          strides: Union[None, Tuple[int, ...]],
+          padding: str,
+          normalize_edges: bool,
+          batch_axis: int,
+          channel_axis: int) -> InternalLayer:
   """Layer construction function for a 2D pooling layer.
 
   Based on `jax.experimental.stax.AvgPool` and `jax.experimental.stax.SumPool`.
-  Has a similar API apart from:
 
   Args:
-    :pool_type: specifies whether average or sum pooling should be performed.
+    pool_type: specifies whether average or sum pooling should be performed.
       (`Pooling.AVG` or `Pooling.SUM`)
-
-    :padding: in addition to `VALID` and `SAME` padding, supports `CIRCULAR`,
-      not available in `jax.experimental.stax.GeneralConv`.
-
-    :normalize_edges: `True` to normalize output by the effective receptive
+    window_shape: The number of pixels over which pooling is to be performed.
+    strides: The stride of the pooling window. `None` corresponds to a stride of
+      `(1, 1)`.
+    padding: Can be `VALID`, `SAME`, or `CIRCULAR` padding. Here `CIRCULAR`
+      uses periodic boundary conditions on the image.
+    normalize_edges: `True` to normalize output by the effective receptive
       field, `False` to normalize by the window size. Only has effect at the
       edges when `SAME` padding is used. Set to `True` to retain correspondence
       to `ostax.AvgPool`.
-
-    :batch_axis: integer, batch axis.
-
-    :channel_axis: integer, channel axis. For `kernel_fn`, channel size is
-      considered to be infinite.
+    batch_axis: Specifies the batch dimension. Defaults to `0`, the leading
+      axis.
+    channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
+      the trailing axis. For `kernel_fn`, channel size is considered to be
+      infinite.
   """
 
   strides = strides or (1,) * len(window_shape)
@@ -922,50 +945,55 @@ def _Pool(pool_type,
 
 @layer
 @_supports_masking(remask_kernel=False)
-def GlobalSumPool(batch_axis=0, channel_axis=-1):
+def GlobalSumPool(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
   """Layer construction function for a global sum pooling layer.
 
   Sums over and removes (`keepdims=False`) all spatial dimensions, preserving
-    the order of batch and channel axes.
+  the order of batch and channel axes.
 
   Args:
-    :batch_axis: integer, batch axis.
-
-    :channel_axis: integer, channel axis. For `kernel_fn`, channel size is
-      considered to be infinite.
+    batch_axis: Specifies the batch dimension. Defaults to `0`, the leading
+      axis.
+    channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
+      the trailing axis. For `kernel_fn`, channel size is considered to be
+      infinite.
   """
   return _GlobalPool(Pooling.SUM, batch_axis, channel_axis)
 
 
 @layer
 @_supports_masking(remask_kernel=False)
-def GlobalAvgPool(batch_axis=0, channel_axis=-1):
+def GlobalAvgPool(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
   """Layer construction function for a global average pooling layer.
 
   Averages over and removes (`keepdims=False`) all spatial dimensions,
   preserving the order of batch and channel axes.
 
   Args:
-    :batch_axis: integer, batch axis.
-
-    :channel_axis: integer, channel axis. For `kernel_fn`, channel size is
-      considered to be infinite.
+    batch_axis: Specifies the batch dimension. Defaults to `0`, the leading
+      axis.
+    channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
+      the trailing axis. For `kernel_fn`, channel size is considered to be
+      infinite.
   """
   return _GlobalPool(Pooling.AVG, batch_axis, channel_axis)
 
 
-def _GlobalPool(pool_type, batch_axis, channel_axis):
+def _GlobalPool(
+    pool_type: Pooling, batch_axis: int, channel_axis: int) -> InternalLayer:
   """Layer construction function for a global pooling layer.
 
   Pools over and removes (`keepdims=False`) all spatial dimensions, preserving
     the order of batch and channel axes.
 
   Args:
-    :pool_type: specifies whether average or sum pooling should be performed.
+    pool_type: specifies whether average or sum pooling should be performed.
       (`Pooling.AVG` or `Pooling.SUM`).
-    :batch_axis: integer, batch axis.
-    :channel_axis: integer, channel axis. For `kernel_fn`, channel size is
-      considered to be infinite.
+    batch_axis: Specifies the batch dimension. Defaults to `0`, the leading
+      axis.
+    channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
+      the trailing axis. For `kernel_fn`, channel size is considered to be
+      infinite.
   """
 
   if pool_type == Pooling.AVG:
@@ -1030,15 +1058,17 @@ def _GlobalPool(pool_type, batch_axis, channel_axis):
 
 @layer
 @_supports_masking(remask_kernel=False)
-def Flatten(batch_axis=0, batch_axis_out=0):
+def Flatten(batch_axis: int = 0, batch_axis_out: int = 0) -> InternalLayer:
   """Layer construction function for flattening all non-batch dimensions.
 
   Based on `jax.experimental.stax.Flatten`, but allows to specify batch axes.
 
   Args:
-    :batch_axis: integer, batch axis. Defaults to `0`, the leading axis.
-    :batch_axis_out: integer, batch axis of the output, `0` (leading) or `1`
-      (trailing).
+    batch_axis: Specifies the batch dimension. Defaults to `0`, the leading
+      axis.
+    channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
+      the trailing axis. For `kernel_fn`, channel size is considered to be
+      infinite.
   """
   if batch_axis_out in (0, -2):
     batch_axis_out = 0
@@ -1117,7 +1147,7 @@ def Flatten(batch_axis=0, batch_axis_out=0):
 
 @layer
 @_supports_masking(remask_kernel=False)
-def Identity():
+def Identity() -> InternalLayer:
   """Layer construction function for an identity layer.
 
   Based on `jax.experimental.stax.Identity`.
@@ -1129,7 +1159,7 @@ def Identity():
 
 @layer
 @_supports_masking(remask_kernel=True)
-def Erf(do_backprop=False):
+def Erf(do_backprop: bool = False) -> InternalLayer:
   return _elementwise(_erf,
                       'Erf',
                       do_backprop=do_backprop)
@@ -1137,7 +1167,8 @@ def Erf(do_backprop=False):
 
 @layer
 @_supports_masking(remask_kernel=True)
-def Relu(do_backprop=False, do_stabilize=False):
+def Relu(
+    do_backprop: bool = False, do_stabilize: bool = False) -> InternalLayer:
   return _elementwise(_ab_relu,
                       'ReLU',
                       a=0,
@@ -1148,7 +1179,10 @@ def Relu(do_backprop=False, do_stabilize=False):
 
 @layer
 @_supports_masking(remask_kernel=True)
-def ABRelu(a, b, do_backprop=False, do_stabilize=False):
+def ABRelu(a: float,
+           b: float,
+           do_backprop: bool=False,
+           do_stabilize: bool=False) -> InternalLayer:
   return _elementwise(_ab_relu,
                       f'ABReLU({a}, {b})',
                       a=a,
@@ -1159,7 +1193,10 @@ def ABRelu(a, b, do_backprop=False, do_stabilize=False):
 
 @layer
 @_supports_masking(remask_kernel=True)
-def LeakyRelu(alpha, do_backprop=False, do_stabilize=False):
+def LeakyRelu(
+    alpha: float,
+    do_backprop: bool = False,
+    do_stabilize: bool = False) -> InternalLayer:
   return _elementwise(_ab_relu,
                       f'LeakyReLU({alpha})',
                       a=alpha,
@@ -1170,7 +1207,7 @@ def LeakyRelu(alpha, do_backprop=False, do_stabilize=False):
 
 @layer
 @_supports_masking(remask_kernel=True)
-def Abs(do_backprop=False, do_stabilize=False):
+def Abs(do_backprop: bool = False, do_stabilize: bool = False) -> InternalLayer:
   return _elementwise(_ab_relu,
                       'Abs',
                       a=-1,
@@ -1181,102 +1218,75 @@ def Abs(do_backprop=False, do_stabilize=False):
 
 @layer
 @_supports_masking(remask_kernel=True)
-def GlobalSelfAttention(n_chan_out,
-                        n_chan_key,
-                        n_chan_val,
-                        n_heads,
-                        fixed=True,
-                        W_key_std=1.0,
-                        W_value_std=1.0,
-                        W_query_std=1.0,
-                        W_out_std=1.0,
-                        b_std=0.0,
-                        W_key_init=_randn(1.0),
-                        W_value_init=_randn(1.0),
-                        W_query_init=_randn(1.0),
-                        W_out_init=_randn(1.0),
-                        b_init=_randn(1.0),
-                        batch_axis=0,
-                        channel_axis=-1):
-  """Layer construction function for (global) scaled dot-product self-attention
-  with multiple attention heads.
+def GlobalSelfAttention(n_chan_out: int,
+                        n_chan_key: int,
+                        n_chan_val: int,
+                        n_heads: int,
+                        fixed: bool = True,
+                        W_key_std: float = 1.0,
+                        W_value_std: float = 1.0,
+                        W_query_std: float = 1.0,
+                        W_out_std: float = 1.0,
+                        b_std: float = 0.0,
+                        batch_axis: int = 0,
+                        channel_axis: int = -1) -> InternalLayer:
+  """Scaled dot-product self-attention with multiple attention heads.
 
   Two versions of attention are available (the version to be used is
   determined by the argument `fixed`):
 
-  1) Parametric: this is the standard scaled dot-product attention, i.e.,
-   the dot product between keys and queries is scaled by the squared root
-   of their dimension. The expression for `nngp`/`ntk` involves an integral
-   with no known closed form and thus call to `kernel_fn` results in an error.
-
-  2) Fixed: same as Parametric except for scaling the dot products
-   between keys and queries by their dimension instead of the square root
-   of the same quantity, and tying the key and query weight matrices.
-   This makes the `nngp`/`ntk` analytically tractable but for the price
-   that, unlike in the parametric case, the dot products of keys and queries
-   converge to a constant. Because this constant would be zero
-   if the key and query weights are independent, the variant where these
-   two weight matrices are tied was implemented resulting in non-constant
-   attention weights.
+  1. Parametric: this is the standard scaled dot-product attention, i.e.,
+  the dot product between keys and queries is scaled by the squared root
+  of their dimension. The expression for `nngp`/`ntk` involves an integral
+  with no known closed form and thus call to `kernel_fn` results in an error.
+  2. Fixed: same as Parametric except for scaling the dot products
+  between keys and queries by their dimension instead of the square root
+  of the same quantity, and tying the key and query weight matrices.
+  This makes the `nngp`/`ntk` analytically tractable but for the price
+  that, unlike in the parametric case, the dot products of keys and queries
+  converge to a constant. Because this constant would be zero
+  if the key and query weights are independent, the variant where these
+  two weight matrices are tied was implemented resulting in non-constant
+  attention weights.
 
   The final computation for single head is then
-  `f_h (x) + softmax(<scaling> Q(x) K(x)^T) V(x)`
+  :math:`f_h (x) + softmax(<scaling> Q(x) K(x)^T) V(x)`
   and the output of this layer is computed as
-  `f(x) = concat[f_1(x) , ... , f_<n_heads> (x)] W_out + b`
-  where the shape of of `b` is (n_chan_out,), i.e., single bias per channel
+  :math:`f(x) = concat[f_1(x) , ... , f_<n_{heads}> (x)] W_out + b`
+  where the shape of of `b` is `(n_chan_out,)`, i.e., single bias per channel
 
   The `kernel_fn` computes the limiting kernel of the outputs of this layer
   as the number of heads and the number of feature dimensions of keys/queries
   goes to infinity.
 
   Args:
-    :n_chan_out: number of feature dimensions of outputs
-
-    :n_chan_key: number of feature dimensions of keys/queries
-
-    :n_chan_val: number of feature dimensions of values
-
-    :n_heads: number of attention heads
-
-    :fixed: if `True`, the dot products between keys and queries are
+    n_chan_out: Number of feature dimensions of outputs.
+    n_chan_key: Number of feature dimensions of keys/queries.
+    n_chan_val: Number of feature dimensions of values.
+    n_heads: Number of attention heads
+    fixed: If `True`, the dot products between keys and queries are
       scaled by `1 / n_chan_key` and the key and query weight matrices are tied;
       if `False`, the dot products are scaled by `1 / sqrt(n_chan_key)` and
-      the key and query matrices are independent
-
-    :W_out_std: init standard deviation of the output weights values
-
-    :b_std: init standard deviation of the bias values
-
-    :W_value_std: init standard deviation of the key weights values
-
-    :W_key_std: init standard deviation of the key weights values
-
-    :W_query_std: init standard deviation of the query weights values; if
+      the key and query matrices are independent.
+    W_out_std: Initial standard deviation of the output weights values.
+    b_std: Initial standard deviation of the bias values.
+    W_value_std: init standard deviation of the key weights values.
+    W_key_std: init standard deviation of the key weights values.
+    W_query_std: init standard deviation of the query weights values; if
       `fixed` is `True` (and thus key and query weights are tied---see above)
       then keys are computed with `WK = WK_std * W / sqrt(n_chan_in)` and the
       queries are computed with `WQ = W_query_std * W / sqrt(n_chan_in)` weight
       matrices
-
-    :W_out_init: function used to sample the initial (unscaled) output weights
-
-    :b_init:  function used to sample the initial (unscaled) biases
-
-    :W_value_init: function used to sample the initial (unscaled) value weights
-
-    :W_key_init: function used to sample the initial (unscaled) key weights
-
-    :W_query_init: function used to sample the initial (unscaled) query weights
-      unless `fixed` is `True` in which case the argument is ignored (see above)
-
-    :batch_axis: integer, batch axis. Defaults to `0`, the leading axis.
-
-    :channel_axis: integer, channel axis. Defaults to `-1`, the trailing axis.
-      For `kernel_fn`, channel size is considered to be infinite.
-
+    batch_axis: Specifies the batch dimension. Defaults to `0`, the leading
+      axis.
+    channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
+      the trailing axis. For `kernel_fn`, channel size is considered to be
+      infinite.
   Raises:
     NotImplementedError: If `fixed` is `False`, call to `kernel_fn` will result
     in an error as there is no known analytic expression for the kernel.
   """
+
   OV_gain = W_out_std * W_value_std
   QK_gain = W_query_std * W_key_std
   QK_prod_scaling = float(n_chan_key if fixed else n_chan_key**0.5)
@@ -1288,18 +1298,19 @@ def GlobalSelfAttention(n_chan_out,
                     input_shape[_channel_axis + 1:])
 
     rng_Q, rng_K, rng_V, rng_O, rng_b = random.split(rng, 5)
-    key_matrices = W_key_init(rng_K, shape=(n_heads, n_chan_in, n_chan_key))
-    val_matrices = W_value_init(rng_V, shape=(n_heads, n_chan_in, n_chan_val))
-    W_out = W_out_init(rng_O, shape=(n_chan_val * n_heads, n_chan_out))
-    b = b_init(rng_b, shape=(n_chan_out,))
+
+    rand = random.normal
+    key_matrices = rand(rng_K, shape=(n_heads, n_chan_in, n_chan_key))
+    val_matrices = rand(rng_V, shape=(n_heads, n_chan_in, n_chan_val))
+    W_out = rand(rng_O, shape=(n_chan_val * n_heads, n_chan_out))
+    b = rand(rng_b, shape=(n_chan_out,))
 
     if fixed:
       query_matrices = None
-      warnings.warn('Fixed attention used -> `W_query_init` ignored, tying'
-                    ' the weights (see docstring for more details).')
+      warnings.warn('Fixed attention used -> query initialization ignored, '
+                    'tying the weights (see docstring for more details).')
     else:
-      query_matrices = W_query_init(rng_Q,
-                                    shape=(n_heads, n_chan_in, n_chan_key))
+      query_matrices = rand(rng_Q, shape=(n_heads, n_chan_in, n_chan_key))
 
     return output_shape, (query_matrices, key_matrices, val_matrices, W_out, b)
 
@@ -1424,19 +1435,22 @@ def GlobalSelfAttention(n_chan_out,
 
 @layer
 @_supports_masking(remask_kernel=False)
-def LayerNorm(axis=-1, eps=1e-12, batch_axis=0, channel_axis=-1):
+def LayerNorm(
+    axis: int = -1,
+    eps: float = 1e-12,
+    batch_axis: int = 0,
+    channel_axis: int = -1) -> InternalLayer:
   """Layer normalisation.
 
   Args:
-    :axis: integer or a tuple, specifies dimensions over which to normalize.
-
-    :eps: float, specifies (small) positive constant to be added to the variance
+    axis: Specifies dimensions over which to normalize.
+    eps: Specifies (small) positive constant to be added to the variance
       estimates in order to prevent division by zero.
-
-    :batch_axis: integer, batch axis. Defaults to `0`, the leading axis.
-
-    :channel_axis: integer, channel axis. Defaults to `-1`, the trailing axis.
-      For `kernel_fn`, channel size is considered to be infinite.
+    batch_axis: Specifies the batch dimension. Defaults to `0`, the leading
+      axis.
+    channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
+      the trailing axis. For `kernel_fn`, channel size is considered to be
+      infinite.
   """
   def init_fn(rng, input_shape):
     return input_shape, ()
@@ -1527,16 +1541,15 @@ def LayerNorm(axis=-1, eps=1e-12, batch_axis=0, channel_axis=-1):
 
 @layer
 @_supports_masking(remask_kernel=False)
-def Dropout(rate, mode='train'):
+def Dropout(rate: float, mode: str = 'train') -> InternalLayer:
   """Dropout layer.
 
-  Based on `jax.experimental.stax.Dropout`. Has a similar API.
+  Based on `jax.experimental.stax.Dropout`.
 
   Args:
-    :rate: A float specifying the keep `rate`, e.g. `rate=1` is equivalent to
+    rate: Specifies the keep `rate`, e.g. `rate=1` is equivalent to
       keeping all neurons.
-
-    :mode: either `train` or `test`.
+    mode: Either `train` or `test`.
   """
   if mode not in ('test', 'train'):
     raise ValueError('The `mode` must be either "test"  or "train".')
@@ -1593,7 +1606,7 @@ _DEFAULT_INPUT_REQ = frozendict.frozendict({'diagonal_batch': True,
                                             'mask_constant': None})
 
 
-def _get_input_req_attr(kernel_fns):
+def _get_input_req_attr(kernel_fns: List[LayerKernelFn]) -> Dict[str, bool]:
   """Gets requirements of the combined layer based on individual requirements.
 
   Specifically, gets the requirements to the inputs to a `serial` or `parallel`
@@ -1601,11 +1614,9 @@ def _get_input_req_attr(kernel_fns):
   to the most demanding among all layers.
 
   Args:
-    :req: a 'dict` with initial requirements.
-    :kernel_fns: list of 'kernel_fn`s fed to the `kernel_fns` (e.g. a list of
+    kernel_fns: list of 'kernel_fn`s fed to the `kernel_fns` (e.g. a list of
       convolutional layers and nonlinearities to be chained together with the
       `serial` combinator).
-
   Returns:
     A `dict` with combined requirements.
   """
@@ -1634,7 +1645,7 @@ def _double_tuple(x):
   return tuple(v for v in x for _ in range(2))
 
 
-def _size_at(x, axis):
+def _size_at(x: np.ndarray, axis: Iterable[int]):
   return functools.reduce(op.mul, (x.shape[i] for i in axis), 1)
 
 
@@ -1675,18 +1686,23 @@ def _cov_diagonal_batch(x, diagonal_spatial, batch_axis, channel_axis):
   return ret / x.shape[channel_axis]
 
 
-def _cov(x1, x2, diagonal_spatial, batch_axis, channel_axis):
+def _cov(
+    x1: np.ndarray,
+    x2: np.ndarray,
+    diagonal_spatial: bool,
+    batch_axis: int,
+    channel_axis: int) -> np.ndarray:
   """Computes uncentred covariance (nngp) between two batches of inputs.
 
   Args:
-    :x1: a (2+S)D (S >= 0) `np.ndarray` of shape
+    x1: a (2+S)D (S >= 0) `np.ndarray` of shape
       `(batch_size_1, <S spatial dimensions>, n_channels)`. `batch_size_1`,
       `n_channels` may be in different positions based on `batch_axis` and
       `channel_axis`.
-    :x2: an optional `np.ndarray` that has the same shape as `a` apart from
+    x2: an optional `np.ndarray` that has the same shape as `a` apart from
       possibly different batch (`batch_size_2`) dimension. `None` means
       `x2 == x1`.
-    :diagonal_spatial: a boolean specifying whether only the diagonals of the
+    diagonal_spatial: Specifies whether only the diagonals of the
       location-location covariances will be computed,
       (`diagonal_spatial == True`,
        `nngp.shape == (batch_size_1, batch_size_2, height, width, depth, ...)`),
@@ -1694,12 +1710,11 @@ def _cov(x1, x2, diagonal_spatial, batch_axis, channel_axis):
       (`diagonal_spatial == False`,
        `nngp.shape == (batch_size_1, batch_size_2, height, height,
                        width, width, depth, depth, ...)`).
-    :batch_axis: integer, specifying which axis is the batch axis.
-    :channel_axis: integer, specifying which axis is the channel / feature axis.
+    batch_axis: Specifies which axis is the batch axis.
+    channel_axis: Specifies which axis is the channel / feature axis.
       For `kernel_fn`, channel size is considered to be infinite.
-
   Returns:
-    an `np.ndarray` with uncentred batch covariance with shape
+    Matrix of uncentred batch covariances with shape
     `(batch_size_1, batch_size_2, <S spatial dimensions>)`
     if `diagonal_spatial` is `True`, or
     `(batch_size_1, batch_size_2, <2*S spatial dimensions>)`
@@ -1716,44 +1731,44 @@ def _cov(x1, x2, diagonal_spatial, batch_axis, channel_axis):
   return ret / x1.shape[channel_axis]
 
 
-def _inputs_to_kernel(x1,
-                      x2,
-                      diagonal_batch,
-                      diagonal_spatial,
-                      compute_ntk,
-                      batch_axis,
-                      channel_axis,
-                      mask_constant,
-                      eps=1e-12):
+def _inputs_to_kernel(x1: np.ndarray,
+                      x2: Optional[np.ndarray],
+                      diagonal_batch: bool,
+                      diagonal_spatial: bool,
+                      compute_ntk: bool,
+                      batch_axis: int,
+                      channel_axis: int,
+                      mask_constant: Optional[float],
+                      eps: float = 1e-12) -> Kernel:
   """Transforms (batches of) inputs to a `Kernel`.
 
   This is a private method. Docstring and example are for internal reference.
 
-   The kernel contains the empirical covariances between different inputs and
-     their entries (e.g. pixels, words, entries in a time series etc.) necessary
-     to compute the covariance of the Gaussian Process corresponding to an
-     infinite Bayesian or continuous gradient descent trained neural network.
+  The kernel contains the empirical covariances between different inputs and
+  their entries (e.g. pixels, words, entries in a time series etc.) necessary
+  to compute the covariance of the Gaussian Process corresponding to an
+  infinite Bayesian or continuous gradient descent trained neural network.
 
-   The smallest necessary number of covariance entries is tracked. For example,
-     all networks are assumed to have i.i.d. weights along the channel / feature
-     / logits dimensions, hence covariance between different entries along these
-     dimensions is known to be 0 and is not tracked.
+  The smallest necessary number of covariance entries is tracked. For example,
+  all networks are assumed to have i.i.d. weights along the channel / feature
+  / logits dimensions, hence covariance between different entries along these
+  dimensions is known to be 0 and is not tracked.
 
   Args:
-    :x1: an `(S+2)`-dimensional `np.ndarray` of shape
+    x1: an `(S+2)`-dimensional `np.ndarray` of shape
       `(batch_size_1, height, width, depth, ..., n_channels)` with `S` spatial
       dimensions (`S >= 0`). Dimensions may be in different order based on
       `batch_axis` and `channel_axis`.
-    :x2: an optional `np.ndarray` with the same shape as `x1` apart
+    x2: an optional `np.ndarray` with the same shape as `x1` apart
       from possibly different batch size. `None` means `x2 == x1`.
-    :diagonal_batch: a boolean specifying whether `cov1` and `cov2` store only
+    diagonal_batch: Specifies whether `cov1` and `cov2` store only
       the diagonal of the sample-sample covariance
       (`diagonal_batch == True`,
        `cov1.shape == (batch_size_1, ...)`),
       or the full covariance
       (`diagonal_batch == False`,
        `cov1.shape == (batch_size_1, batch_size_1, ...)`).
-    :diagonal_spatial: a boolean specifying whether all (`cov1`, `ntk`, etc.)
+    diagonal_spatial: Specifies whether all (`cov1`, `ntk`, etc.)
       input covariance matrcies should store only the diagonals of the
       location-location covariances
       (`diagonal_spatial == True`,
@@ -1762,12 +1777,12 @@ def _inputs_to_kernel(x1,
       (`diagonal_spatial == False`,
        `nngp.shape == (batch_size_1, batch_size_2, height, height,
                        width, width, depth, depth, ...)`).
-    :compute_ntk: a boolean, `True` to compute both NTK and NNGP kernels,
+    compute_ntk: `True` to compute both NTK and NNGP kernels,
       `False` to only compute NNGP.
-    :batch_axis: integer, batch axis.
-    :channel_axis: integer, channel axis.  For `kernel_fn`, channel size is
-      considered to be infinite.
-    :eps: a small number used to check whether x1 and x2 are the same up to
+    batch_axis: Specifies which axis is the batch axis.
+    channel_axis: Specifies which axis is the channel / feature axis.
+      For `kernel_fn`, channel size is considered to be infinite.
+    eps: a small number used to check whether x1 and x2 are the same up to
         `eps`.
     :mask_constant: an optional `float`, the value in inputs to be considered as
       masked (e.g. padding in a batch of sentences). `None` means no masking.
@@ -1775,34 +1790,28 @@ def _inputs_to_kernel(x1,
       errors and try to use an atypical for inputs value.
 
     Example:
-      ```python
-          >>> x = np.ones((10, 32, 16, 3))
-          >>> o = _inputs_to_kernel(x, None,
-          >>>                       diagonal_batch=True,
-          >>>                       diagonal_spatial=False,
-          >>>                       compute_ntk=True)
-          >>> o.cov1.shape, o.ntk.shape
-          (10, 32, 32, 16, 16), (10, 10, 32, 32, 16, 16)
-          >>> o = _inputs_to_kernel(x, None,
-          >>>                       diagonal_batch=True,
-          >>>                       diagonal_spatial=True,
-          >>>                       compute_ntk=True)
-          >>> o.cov1.shape, o.ntk.shape
-          (10, 32, 16), (10, 10, 32, 16)
-          >>> x1 = np.ones((10, 128))
-          >>> x2 = np.ones((20, 128))
-          >>> o = _inputs_to_kernel(x1, x2,
-          >>>                       diagonal_batch=True,
-          >>>                       diagonal_spatial=True,
-          >>>                       compute_ntk=False)
-          >>> o.cov1.shape, o.nngp.shape
-          (10,), (10, 20)
-          >>> o.ntk
-          None
-      ```
-
-  Returns:
-    a `Kernel` object.
+      >>> x = np.ones((10, 32, 16, 3))
+      >>> o = _inputs_to_kernel(x, None,
+      >>>                       diagonal_batch=True,
+      >>>                       diagonal_spatial=False,
+      >>>                       compute_ntk=True)
+      >>> o.cov1.shape, o.ntk.shape
+      (10, 32, 32, 16, 16), (10, 10, 32, 32, 16, 16)
+      >>> o = _inputs_to_kernel(x, None,
+      >>>                       diagonal_batch=True,
+      >>>                       diagonal_spatial=True,
+      >>>                       compute_ntk=True)
+      >>> o.cov1.shape, o.ntk.shape
+      (10, 32, 16), (10, 10, 32, 16)
+      >>> x1 = np.ones((10, 128))
+      >>> x2 = np.ones((20, 128))
+      >>> o = _inputs_to_kernel(x1, x2,
+      >>>                       diagonal_batch=True,
+      >>>                       diagonal_spatial=True,
+      >>>                       compute_ntk=False)
+      >>> o.cov1.shape, o.nngp.shape
+      (10,), (10, 20)
+      >>> o.ntk
   """
   batch_axis %= x1.ndim
 
@@ -1873,8 +1882,7 @@ def _inputs_to_kernel(x1,
                 mask1,
                 mask2)
 
-
-def _propagate_shape(init_fn, shape):
+def _propagate_shape(init_fn: InitFn, shape: Shapes) -> Shapes:
   """Statically, abstractly, evaluate the init_fn to get shape information."""
   akey = ShapedArray((2,), np.uint32)
   closed_init_fn = functools.partial(init_fn, input_shape=shape)
@@ -1886,7 +1894,9 @@ def _propagate_shape(init_fn, shape):
   return out_shape
 
 
-def _set_shapes(init_fn, in_kernel, out_kernel):
+def _set_shapes(init_fn: InitFn,
+                in_kernel: Kernels,
+                out_kernel: Kernels) -> Kernels:
   """Apply a kernel_fn to a Kernel propagating side information."""
   if isinstance(in_kernel, Kernel):
     shape1 = _propagate_shape(init_fn, in_kernel.shape1)
@@ -1933,18 +1943,18 @@ def _fuse_reqs(kernel_fn_reqs, default_reqs, **user_reqs):
   return frozendict.frozendict(kernel_fn_reqs)
 
 
-def _preprocess_kernel_fn(init_fn, kernel_fn):
+def _preprocess_kernel_fn(init_fn: InitFn,
+                          kernel_fn: LayerKernelFn) -> AnalyticKernelFn:
   """Returns a `kernel_fn` with additional arguments.
 
   Args:
-    :init_fn: layer parameters initialization function. Used for shape
+    init_fn: layer parameters initialization function. Used for shape
       inference.
-    :kernel_fn: the `Kernel` -> `Kernel` layer propagation function.
-
+    kernel_fn: the `Kernel` -> `Kernel` layer propagation function.
   Returns:
     A new `kernel_fn` that does the same computation but accepts additional
-      arguments to flexibly specify the required computation, and can be applied
-      to either a `Kernel' or a pair of `np.ndarrray`s.
+    arguments to flexibly specify the required computation, and can be applied
+    to either a `Kernel' or a pair of `np.ndarrray`s.
   """
   # Set empty requirements if none specified.
   if not hasattr(kernel_fn, _INPUT_REQ):
@@ -2080,14 +2090,20 @@ def _arcsin(x, do_backprop):
   return np.arcsin(x)
 
 
-def _get_diagonal(cov, diagonal_batch, diagonal_spatial):
+def _get_diagonal(
+    cov: Optional[np.ndarray],
+    diagonal_batch: bool,
+    diagonal_spatial: bool) -> Optional[np.ndarray]:
   """Extracts the diagonal of `cov` over all (sample, spatial) dimensions.
 
-    Adapts computation if `cov` already stores only the diagonal along some
-      dimensions based on `diagonal_batch` and `diagonal_spatial`.
+  Adapts computation if `cov` already stores only the diagonal along some
+  dimensions based on `diagonal_batch` and `diagonal_spatial`.
   """
+
   if not utils.is_array(cov):
     return cov
+  # Needed for type inference.
+  cov = np.asarray(cov)
 
   batch_ndim = 1 if diagonal_batch else 2
   start_axis = 2 - batch_ndim
@@ -2096,13 +2112,15 @@ def _get_diagonal(cov, diagonal_batch, diagonal_spatial):
   return utils.diagonal_between(cov, start_axis, end_axis)
 
 
-def _get_diagonal_prods(cov1,
-                        cov2,
-                        diagonal_batch,
-                        diagonal_spatial,
-                        axis=(),
-                        mask1=None,
-                        mask2=None):
+def _get_diagonal_prod(cov1: np.ndarray,
+                       cov2: Optional[np.ndarray],
+                       diagonal_batch: bool,
+                       diagonal_spatial: bool,
+                       axis: Tuple[int, ...] = (),
+                       mask1: Optional[np.array] = None,
+                       mask2: Optional[np.ndarray] = None
+                       ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+
   """Gets outer products of diagonals `cov1, cov1`, `cov1, cov2`, `cov2, cov2`.
 
   `prod11[x1, x2, h1, h2, ...]` =
@@ -2123,7 +2141,46 @@ def _get_diagonal_prods(cov1,
   cov1 = _mean_and_var(cov1, axis=axis, keepdims=True, mask=mask1)
   cov2 = _mean_and_var(cov2, axis=axis, keepdims=True, mask=mask2)
 
-  end_axis = 1 if diagonal_spatial else cov1.ndim
+  end_axis = 1 if diagonal_spatial else cov1.ndim  # pytype: disable=attribute-error
+  prod12 = utils.outer_prod(cov1, cov2, 0, end_axis, op.mul)
+
+  start_axis = 1 if diagonal_batch else 0
+  prod11 = utils.outer_prod(cov1, cov1, start_axis, end_axis, op.mul)
+  prod22 = (utils.outer_prod(cov2, cov2, start_axis, end_axis, op.mul)
+            if cov2 is not None else prod11)
+
+  return prod11, prod12, prod22
+
+
+def _get_diagonal_prods(cov1: np.ndarray,
+                        cov2: Optional[np.ndarray],
+                        diagonal_batch: bool,
+                        diagonal_spatial: bool,
+                        axis: Tuple[int, ...] = (),
+                        mask1: Optional[np.ndarray] = None,
+                        mask2: Optional[np.ndarray] = None
+                        ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+  """Gets outer products of diagonals `cov1, cov1`, `cov1, cov2`, `cov2, cov2`.
+
+  `prod11[x1, x2, h1, h2, ...]` =
+   cov1[x1, [x1,], h1, [h1,], ...] * cov1[x2, [x2,], h2, [h2,], ...]`,
+  `prod12[x1, x2, h1, h2, ...]` =
+   cov1[x1, [x1,], h1, [h1,], ...] * cov2[x2, [x2,], h2, [h2,], ...]`,
+  `prod22[x1, x2, h1, h2, ...]` =
+   cov2[x1, [x1,], h1, [h1,], ...] * cov2[x2, [x2,], h2, [h2,], ...]`.
+
+  Exact shapes of `cov1` and `cov2` are defined by `diagonal_batch` and
+    `diagonal_spatial`.
+  """
+  axis = utils.canonicalize_axis(axis, cov1)
+
+  cov1 = _get_diagonal(cov1, diagonal_batch, diagonal_spatial)
+  cov2 = _get_diagonal(cov2, diagonal_batch, diagonal_spatial)
+
+  cov1 = _mean_and_var(cov1, axis=axis, keepdims=True, mask=mask1)
+  cov2 = _mean_and_var(cov2, axis=axis, keepdims=True, mask=mask2)
+
+  end_axis = 1 if diagonal_spatial else cov1.ndim   # pytype: disable=attribute-error
   prod12 = utils.outer_prod(cov1, cov2, 0, end_axis, op.mul)
 
   start_axis = 1 if diagonal_batch else 0
@@ -2148,7 +2205,12 @@ def _get_ab_relu_kernel(ker_mat, prod, a, b, do_backprop, ntk=None):
   return ker_mat, ntk
 
 
-def _transform_kernels_ab_relu(kernels, a, b, do_backprop, do_stabilize):
+def _transform_kernels_ab_relu(
+    kernels: Kernel,
+    a: float = 1.0,
+    b: float = 0.0,
+    do_backprop: bool = True,
+    do_stabilize: bool = True) -> Kernel:
   """Compute new kernels after an `ABRelu` layer.
 
   See https://arxiv.org/pdf/1711.09090.pdf for the leaky ReLU derivation.
@@ -2201,7 +2263,7 @@ def _get_erf_kernel(ker_mat, prod, do_backprop, ntk=None):
   return ker_mat, ntk
 
 
-def _transform_kernels_erf(kernels, do_backprop):
+def _transform_kernels_erf(kernels: Kernel, do_backprop: bool) -> Kernel:
   """Compute new kernels after an `Erf` layer."""
   cov1, nngp, cov2, ntk = kernels.cov1, kernels.nngp, kernels.cov2, kernels.ntk
 
@@ -2230,7 +2292,8 @@ def _transform_kernels_erf(kernels, do_backprop):
                          is_gaussian=False)
 
 
-def _transform_kernels(kernels, fn, **fn_kwargs):
+def _transform_kernels(
+    kernels: Kernel, fn: Callable[[float], float], **fn_kwargs) -> Kernel:
   """Apply transformation to kernels.
 
   Args:
@@ -2251,7 +2314,9 @@ def _transform_kernels(kernels, fn, **fn_kwargs):
                             'implmented'.format(fn))
 
 
-def _affine(mat, W_std, b_std):
+def _affine(mat: Union[np.ndarray, float, None],
+            W_std: float,
+            b_std: float) -> Union[np.ndarray, float, None]:
   """Get covariances of affine outputs if inputs have covariances `nngp`.
 
   The output is assumed to be `xW + b`, where `x` is the input, `W` is a matrix
@@ -2395,21 +2460,26 @@ def _fan_in_kernel_fn(kernels, axis):
               None)))
 
 
-def _concat_kernels(mats, axis, diagonal_batch, diagonal_spatial, widths):
+def _concat_kernels(
+    mats: List[np.ndarray],
+    axis: int,
+    diagonal_batch: bool,
+    diagonal_spatial: bool,
+    widths: List[int]) -> np.ndarray:
   """Compute the covariance of concatenated activations with given covariances.
 
   Args:
-    mats: a list of `np.ndarrray` covariance tensors of the same shape.
-    axis: an `int` along which the covariances (not activations) are
+    mats: Covariance tensors of the same shape.
+    axis: Specifies the axis along which the covariances (not activations) are
       concatenated. `None` corresponds to sum, `-1` to averaging.
-    diagonal_batch: a boolean specifying whether `cov1` and `cov2` store only
+    diagonal_batch: Specifies whether `cov1` and `cov2` store only
       the diagonal of the sample-sample covariance
       (`diagonal_batch == True`,
        `cov1.shape == (batch_size_1, ...)`),
       or the full covariance
       (`diagonal_batch == False`,
        `cov1.shape == (batch_size_1, batch_size_1, ...)`).
-    diagonal_spatial: a boolean specifying whether only the diagonals of the
+    diagonal_spatial: Specifies whether only the diagonals of the
       location-location covariances will be computed,
       (`diagonal_spatial == True`,
        `nngp.shape == (batch_size_1, batch_size_2, height, width, depth, ...)`),
@@ -2418,7 +2488,6 @@ def _concat_kernels(mats, axis, diagonal_batch, diagonal_spatial, widths):
        `nngp.shape == (batch_size_1, batch_size_2, height, height,
                        width, width, depth, depth, ...)`).
     widths: list of integer channel widths of the finite model inputs.
-
   Returns:
     A new `np.ndarray` representing covariance between concatenated activations.
   """
@@ -2460,7 +2529,11 @@ def _concat_kernels(mats, axis, diagonal_batch, diagonal_spatial, widths):
   return mat
 
 
-def _same_pad_for_filter_shape(x, filter_shape, strides, axes, mode):
+def _same_pad_for_filter_shape(x: Union[np.ndarray, float, None],
+                               filter_shape: Tuple[int, ...],
+                               strides: Tuple[int, ...],
+                               axes: Tuple[int, ...],
+                               mode: str) -> Union[None, float, np.ndarray]:
   """Pad an array to imitate `SAME` padding with `VALID`.
 
   See `Returns` section for details. This method is usually needed to implement
@@ -2476,14 +2549,15 @@ def _same_pad_for_filter_shape(x, filter_shape, strides, axes, mode):
       convolution over (e.g. `(1, 2)` for an `NHWC` image).
     mode: a string, padding mode, for all options see
       https://docs.scipy.org/doc/numpy/reference/generated/numpy.pad.html.
-
   Returns:
     A `np.ndarray` of the same dimensionality as `x` padded to a potentially
-      larger shape such that a `VALID` convolution with `filter_shape` applied
-      to `x` over `axes` outputs an array of the same shape as `x`.
+    larger shape such that a `VALID` convolution with `filter_shape` applied
+    to `x` over `axes` outputs an array of the same shape as `x`.
   """
   if not utils.is_array(x):
     return x
+  # Needed for type inference.
+  x = np.asarray(x)
 
   axes_shape = tuple(np.size(x, axis) for axis in axes)
   axes_pads = lax.padtype_to_pads(axes_shape, filter_shape, strides,
@@ -2497,7 +2571,11 @@ def _same_pad_for_filter_shape(x, filter_shape, strides, axes, mode):
   return x
 
 
-def _pad_one_side(x, pads, axes, mode):
+def _pad_one_side(
+    x: np.ndarray,
+    pads: Tuple[int, ...],
+    axes: Tuple[int, ...],
+    mode: str) -> np.ndarray:
   """Pad an array on one side. See `Returns` section for details.
 
   Args:
@@ -2515,14 +2593,21 @@ def _pad_one_side(x, pads, axes, mode):
       `pads` are applied on the left (start), and negative on the right (end).
   """
   axis_pads = [(p, 0) if p >= 0 else (0, -p) for p in pads]
-  pads = [(0, 0),] * x.ndim
+  pads_list = [(0, 0),] * x.ndim
   for i in range(len(axes)):
-    pads[axes[i]] = axis_pads[i]
-  x = np.pad(x, pads, mode)
+    pads_list[axes[i]] = axis_pads[i]
+  x = np.pad(x, pads_list, mode)
   return x
 
+def asarray(x: Union[np.array, float, None]) -> np.array:
+  return x
 
-def _conv_kernel_full_spatial(mat, filter_shape, strides, padding, batch_ndim):
+def _conv_kernel_full_spatial(mat: Union[np.ndarray, float, None],
+                              filter_shape: Tuple[int, ...],
+                              strides: Tuple[int, ...],
+                              padding: Padding,
+                              batch_ndim: int
+                              ) -> Union[None, float, np.ndarray]:
   """Compute covariance of the CNN outputs given inputs with covariance `mat`.
 
   Used when `kernel.diagonal_spatial == False`.
@@ -2549,6 +2634,8 @@ def _conv_kernel_full_spatial(mat, filter_shape, strides, padding, batch_ndim):
   """
   if not utils.is_array(mat):
     return mat
+  # Needed for type inference.
+  mat = np.asarray(mat)
 
   if padding == Padding.CIRCULAR:
     spatial_axes = tuple(range(batch_ndim, mat.ndim))
@@ -2561,11 +2648,11 @@ def _conv_kernel_full_spatial(mat, filter_shape, strides, padding, batch_ndim):
     )
     padding = Padding.VALID
 
-  for i in range(mat.ndim - 1, batch_ndim, -2):
+  for i in range(mat.ndim - 1, batch_ndim, -2):  # pytype: disable=attribute-error
     spatial_i = (i - batch_ndim) // 2
     filter_i = filter_shape[spatial_i]
     stride_i = strides[spatial_i]
-    size_i = mat.shape[i]
+    size_i = mat.shape[i]  # pytype: disable=attribute-error
 
     mat = np.moveaxis(mat, (i - 1, i), (-2, -1))
     mat_preshape = mat.shape[:-2]
@@ -2623,11 +2710,12 @@ def _conv_kernel_full_spatial(mat, filter_shape, strides, padding, batch_ndim):
   return mat
 
 
-def _conv_kernel_diagonal_spatial(mat,
-                                  filter_shape,
-                                  strides,
-                                  padding,
-                                  batch_ndim):
+def _conv_kernel_diagonal_spatial(mat: Union[np.ndarray, float, None],
+                                  filter_shape: Tuple[int, ...],
+                                  strides: Tuple[int, ...],
+                                  padding: Padding,
+                                  batch_ndim: int
+                                  ) -> Union[None, float, np.ndarray]:
   """Compute covariance of the CNN outputs given inputs with covariance `mat`.
 
   Used when `kernel.diagonal_spatial == True`.
@@ -2652,6 +2740,8 @@ def _conv_kernel_diagonal_spatial(mat,
   """
   if not utils.is_array(mat):
     return mat
+  # Needed for type inference.
+  mat = np.asarray(mat)
 
   if padding == Padding.CIRCULAR:
     spatial_axes = tuple(range(mat.ndim)[batch_ndim:])
@@ -2667,13 +2757,60 @@ def _conv_kernel_diagonal_spatial(mat,
   return mat
 
 
-def _pool_kernel(mat,
-                 pool_type,
-                 window_shape,
-                 strides,
-                 padding,
-                 normalize_edges,
-                 batch_ndim):
+def _conv_kernel_over_spatial(mat: Union[np.ndarray, float, None],
+                              filter_shape: Tuple[int, ...],
+                              strides: Tuple[int, ...],
+                              padding: Padding,
+                              batch_ndim: int
+                              ) -> Union[np.ndarray, float, None]:
+  """Compute covariance of the CNN outputs given inputs with covariance `mat`.
+
+  Used when `kernel.diagonal_spatial == True`.
+
+  Args:
+    mat: an `(S+batch_ndim)`-dimensional `np.ndarray` containing
+      sample-sample-(same position) covariances of CNN inputs. Has `batch_ndim`
+      batch and `S` spatial dimensions with the shape of
+      `(batch_size_1, [batch_size_2,] height, width, depth, ...)`.
+    filter_shape: tuple of positive integers, the convolutional filters spatial
+      shape (e.g. `(3, 3)` for a 2D convolution).
+    strides: tuple of positive integers, the CNN strides (e.g. `(1, 1)` for a
+      2D convolution).
+    padding: a `Padding` enum, e.g. `Padding.CIRCULAR`.
+    batch_ndim: integer, number of leading batch dimensions, 1 or 2.
+
+  Returns:
+    an `(S+batch_ndim)`-dimensional `np.ndarray` containing
+    sample-sample-(same position) covariances of CNN outputs. Has `batch_ndim`
+    batch and `S` spatial dimensions with the shape of
+    `(batch_size_1, [batch_size_2,] new_height, new_width, new_depth, ...)`.
+  """
+  if not utils.is_array(mat):
+    return mat
+  # Needed for type inference.
+  mat = np.asarray(mat)
+
+  if padding == Padding.CIRCULAR:
+    spatial_axes = tuple(range(mat.ndim)[batch_ndim:])
+    mat = _same_pad_for_filter_shape(mat, filter_shape, strides,
+                                     spatial_axes, 'wrap')
+    padding = Padding.VALID
+
+  filter_size = functools.reduce(op.mul, filter_shape, 1)
+  filter_shape = (1,) * batch_ndim + filter_shape
+  strides = (1,) * batch_ndim + strides
+  mat = lax._reduce_window_sum(mat, filter_shape, strides, padding.name)
+  mat /= filter_size
+  return mat
+
+
+def _pool_kernel(mat: Union[np.ndarray, float, None],
+                 pool_type: Pooling,
+                 window_shape: Tuple[int, ...],
+                 strides: Tuple[int, ...],
+                 padding: Padding,
+                 normalize_edges: bool,
+                 batch_ndim: int) -> Union[np.ndarray, float, None]:
   """Get covariances of pooling outputs given inputs covariances `mat`.
 
   Args:
@@ -2702,6 +2839,8 @@ def _pool_kernel(mat,
   """
   if not utils.is_array(mat):
     return mat
+  # Needed for type inference.
+  mat = np.asarray(mat)
 
   if padding == Padding.CIRCULAR:
     spatial_axes = tuple(range(batch_ndim, mat.ndim))
@@ -2720,7 +2859,7 @@ def _pool_kernel(mat,
     if padding == Padding.SAME and normalize_edges:
       # `SAME` padding in `jax.experimental.stax.AvgPool` normalizes by actual
       # window size, which is smaller at the edges.
-      one = np.ones(mat.shape, mat.dtype)
+      one = np.ones(mat.shape, mat.dtype)  # pytype: disable=attribute-error
       window_sizes = lax.reduce_window(one, 0., lax.add, window_shape, strides,
                                        padding.name)
       nngp_out /= window_sizes
@@ -2781,7 +2920,7 @@ _NEG_INF = -1e20  # softmax raises an error if all entries are -np.inf
 
 
 def _check_is_implemented(mask: np.ndarray,
-                          padding: Padding,
+                          padding: Optional[Padding],
                           channel_axis: int) -> None:
   if padding == Padding.CIRCULAR:
     raise NotImplementedError(f'{padding} padding is not implemented for '
@@ -2797,17 +2936,19 @@ def _check_is_implemented(mask: np.ndarray,
 
 def _mean_and_var(
     x: Union[float, None, np.ndarray],
-    axis: int = None,
+    axis: Tuple[int, ...],
     dtype: np.dtype = None,
     out: None = None,
     ddof: int = 0,
     keepdims: bool = False,
     mask: np.ndarray = None,
     get_var: bool = False
-) -> Union[float, None, np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+    ) -> Union[float, None, np.ndarray, Tuple[np.ndarray, np.ndarray]]:
   """`np.mean` and `np.var` taking the `mask` information into account."""
   if not utils.is_array(x):
     return x
+  # Needed for type inference.
+  x = np.asarray(x)
 
   if mask is None:
     mean = np.mean(x, axis, dtype, out, keepdims)
@@ -2910,8 +3051,8 @@ def _concat_masks(masks: List[Optional[np.ndarray]],
 
 
 def _pool_mask(mask: np.ndarray,
-               window_shape: Tuple[int, ...],
-               strides: Tuple[int, ...],
+               window_shape: Union[List[int], Tuple[int, ...]],
+               strides: Union[List[int], Tuple[int, ...]],
                padding: Padding,
                batch_axis: int,
                channel_axis: int) -> np.ndarray:

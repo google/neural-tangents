@@ -21,7 +21,7 @@ import functools
 import inspect
 import operator as op
 import types
-from typing import Optional, Union, List
+from typing import Any, Optional, Union, List, Dict, Callable, Tuple
 
 from . import dataclasses
 from jax import lax
@@ -49,7 +49,7 @@ def canonicalize_get(get):
   return get_is_not_tuple, get
 
 
-_KERNEL_NAMED_TUPLE_CACHE = {}
+_KERNEL_NAMED_TUPLE_CACHE: Dict[Any, Any] = {}
 
 
 def named_tuple_factory(name, get):
@@ -161,7 +161,7 @@ def x1_is_x2(x1, x2=None, eps=1e-12):
   return np.all(np.abs(x1 - x2) < eps)
 
 
-def is_array(x):
+def is_array(x: Union[None, float, np.ndarray]) -> bool:
   return (isinstance(x, np.ndarray) and
           hasattr(x, 'shape') and
           x.shape != () and
@@ -297,13 +297,16 @@ def outer_prod(x, y, start_axis, end_axis, prod_op):
   return prod_op(x, y)
 
 
-
 _array_or_list = Union[Optional[np.ndarray], List[Optional[np.ndarray]]]
+
 
 @dataclasses.dataclass
 class MaskedArray:
   masked_value: _array_or_list
   mask: _array_or_list
+
+  def astuple(self) -> Tuple[Any, ...]:
+    return dataclasses.astuple(self)
 
 
 def get_masked_array(x: _array_or_list,
@@ -323,8 +326,7 @@ def get_masked_array(x: _array_or_list,
     A `MaskedArray` of `(masked_x, boolean_mask)`.
   """
   if isinstance(x, list):
-    fields = zip(*(get_masked_array(_x, mask_constant).astuple()
-                    for _x in x))
+    fields = zip(*(get_masked_array(_x, mask_constant).astuple() for _x in x))  # pytype: disable=attribute-error
     return MaskedArray(*(list(f) for f in fields))
 
   if x is None:
@@ -345,6 +347,6 @@ def get_masked_array(x: _array_or_list,
     raise TypeError(x, type(x))
 
   if mask is not None:
-    x = np.where(mask, np.zeros((), x.dtype), x)
+    x = np.where(mask, np.zeros((), x.dtype), x)  # type: ignore
 
-  return MaskedArray(x, mask)
+  return MaskedArray(x, mask)  # type: ignore
