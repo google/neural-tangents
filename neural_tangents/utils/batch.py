@@ -29,6 +29,7 @@ from jax.tree_util import tree_map
 from jax.tree_util import tree_multimap
 from neural_tangents.utils.kernel import Kernel
 from neural_tangents.utils import utils
+import numpy as onp
 
 
 def _scan(f, init, xs, store_on_device):
@@ -418,7 +419,7 @@ def batch(kernel_fn, batch_size=0, device_count=-1, store_on_device=True):
 
 def _get_n_batches_and_batch_sizes(n1, n2, batch_size, device_count):
   # TODO(romann): if dropout batching works for different batch sizes, relax.
-  max_serial_batch_size = np.onp.gcd(n1, n2) // device_count
+  max_serial_batch_size = onp.gcd(n1, n2) // device_count
 
   n2_batch_size = min(batch_size, max_serial_batch_size)
   if n2_batch_size != batch_size:

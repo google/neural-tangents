@@ -30,6 +30,7 @@ import jax.random as random
 from neural_tangents import stax
 from neural_tangents.utils import monte_carlo
 from neural_tangents.utils import test_utils
+import numpy as onp
 import unittest
 
 
@@ -168,7 +169,7 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
   )
   affine = conv(width) if is_conv else fc(width)
 
-  rate = np.onp.random.uniform(0.5, 0.9)
+  rate = onp.random.uniform(0.5, 0.9)
   dropout = stax.Dropout(rate, mode='train')
 
   if pool_type == 'AVG':
@@ -650,11 +651,11 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     samples = N_SAMPLES
 
     if xla_bridge.get_backend().platform == 'gpu':
-      jtu._default_tolerance[np.onp.dtype(np.onp.float64)] = 5e-4
+      jtu._default_tolerance[onp.dtype(onp.float64)] = 5e-4
       samples = 100 * N_SAMPLES
     else:
-      jtu._default_tolerance[np.onp.dtype(np.onp.float32)] = 5e-2
-      jtu._default_tolerance[np.onp.dtype(np.onp.float64)] = 5e-3
+      jtu._default_tolerance[onp.dtype(onp.float32)] = 5e-2
+      jtu._default_tolerance[onp.dtype(onp.float64)] = 5e-3
 
     # a batch of dense inputs
     x_dense = random.normal(key, (input_count, input_size))

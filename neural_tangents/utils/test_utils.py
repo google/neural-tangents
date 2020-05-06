@@ -22,6 +22,7 @@ from jax.api import vmap
 from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.test_util as jtu
+import numpy as onp
 from .kernel import Kernel
 import dataclasses
 
@@ -31,13 +32,13 @@ def _jit_vmap(f):
 
 
 def update_test_tolerance(f32_tol=5e-3, f64_tol=1e-5):
-  jtu._default_tolerance[np.onp.dtype(np.onp.float32)] = f32_tol
-  jtu._default_tolerance[np.onp.dtype(np.onp.float64)] = f64_tol
+  jtu._default_tolerance[onp.dtype(onp.float32)] = f32_tol
+  jtu._default_tolerance[onp.dtype(onp.float64)] = f64_tol
   def default_tolerance():
     if jtu.device_under_test() != 'tpu':
       return jtu._default_tolerance
     tol = jtu._default_tolerance.copy()
-    tol[np.onp.dtype(np.onp.float32)] = 5e-2
+    tol[onp.dtype(onp.float32)] = 5e-2
     return tol
   jtu.default_tolerance = default_tolerance
 
