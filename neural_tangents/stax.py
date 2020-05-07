@@ -3058,8 +3058,6 @@ def BatchNormRelu(axis, epsilon=0., center=True, scale=True,
       Omegadotinv = np.linalg.inv(Omegadot)
       
       def f(s, t, multfactor=1):
-        # import pdb
-        # pdb.set_trace()
         # Ddot.shape = (..., n1+n2-2, n1+n2-2)
         Ddot = s[..., None, None] * np.eye(n1-1+n2-1)
         # Ddot[..., np.arange(n1-1, n1+n2-2), np.arange(n1-1, n1+n2-2)] = t[..., None]
@@ -3127,8 +3125,6 @@ def BatchNormRelu(axis, epsilon=0., center=True, scale=True,
           The (batch1, batch2) block of block matrix obtained by
           applying VBNReLU^{\oplus 2} to the kernel of batch1 and batch2
       '''
-      # import pdb
-      # pdb.set_trace()
       # We will do the integration explicitly ourselves:
       #     We obtain sample points and weights via `quadpy`'s Gauss Laguerre quadrature
       #     and do the sum ourselves
