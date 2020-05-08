@@ -17,6 +17,7 @@
 """Utilities for testing."""
 
 import logging
+import dataclasses
 from jax.api import jit
 from jax.api import vmap
 from jax.lib import xla_bridge
@@ -24,7 +25,7 @@ import jax.numpy as np
 import jax.test_util as jtu
 import numpy as onp
 from .kernel import Kernel
-import dataclasses
+import numpy as onp
 
 
 def _jit_vmap(f):
