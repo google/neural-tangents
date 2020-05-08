@@ -1,4 +1,4 @@
-# Neural Tangents [[ICLR: Tuesday Sessions 4 and 5](https://iclr.cc/virtual/poster_SklD9yrFPS.html)]
+# Neural Tangents [[ICLR 2020](https://iclr.cc/virtual_2020/poster_SklD9yrFPS.html)]
 [**Paper**](https://arxiv.org/abs/1912.02803)
 | [**Quickstart**](#colab-notebooks)
 | [**Install guide**](#installation)
@@ -10,8 +10,6 @@
 [![PyPI - License](https://img.shields.io/pypi/l/neural_tangents)](https://github.com/google/neural-tangents/blob/master/LICENSE)
 
 **News:**
-
-* Check out our presentation and chat with us during **[ICLR live sessions Tuesday 4 and 5](https://iclr.cc/virtual/poster_SklD9yrFPS.html)**!
 
 * Neural Tangents just got faster! >4X speedup in computing analytic
 kernels for CNN architectures with pooling, starting from version 0.2.1. See our
