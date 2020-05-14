@@ -85,7 +85,8 @@ LAYER_NORM = [
     'CHW',
     'NC',
     'NWC',
-    'NCHW'
+    'NCHW',
+    'N'
 ]
 
 POOL_TYPES = [
@@ -101,13 +102,18 @@ PARAMETERIZATIONS = [
 test_utils.update_test_tolerance()
 
 
-def _get_inputs(key, is_conv, same_inputs, input_shape, fn=np.cos):
+def _get_inputs(key, is_conv, same_inputs, input_shape, new_batch_size=None, fn=np.cos):
   key, split = random.split(key)
   shape = input_shape if is_conv else (input_shape[0], np.prod(input_shape[1:]))
-  x1 = fn(random.normal(key, shape))
   batch_axis = shape.index(BATCH_SIZE)
-  shape = shape[:batch_axis] + (2 * BATCH_SIZE,) + shape[batch_axis + 1:]
-  x2 = None if same_inputs else 2 * fn(random.normal(split, shape))
+  if new_batch_size is None:
+    shape1 = shape
+    shape2 = shape[:batch_axis] + (2 * BATCH_SIZE,) + shape[batch_axis + 1:]
+  else:
+    shape1 = shape[:batch_axis] + (new_batch_size,) + shape[batch_axis + 1:]
+    shape2 = shape[:batch_axis] + (2 * new_batch_size,) + shape[batch_axis + 1:]
+  x1 = fn(random.normal(key, shape1))
+  x2 = None if same_inputs else 2 * fn(random.normal(split, shape2))
   return x1, x2
 
 
@@ -188,10 +194,16 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
   else:
     pool_or_identity = stax.Identity()
   dropout_or_identity = dropout if use_dropout else stax.Identity()
-  layer_norm_or_identity = (stax.Identity() if layer_norm is None
-                            else stax.LayerNorm(axis=layer_norm,
-                                                batch_axis=batch_axis,
-                                                channel_axis=channel_axis))
+  if layer_norm is None:
+    norm_phi = phi
+  elif layer_norm == (batch_axis,):
+    norm_phi = stax.BatchNormRelu(batch_axis)
+  else:
+    norm_phi = stax.serial(
+                stax.LayerNorm(axis=layer_norm,
+                    batch_axis=batch_axis,
+                    channel_axis=channel_axis),
+                phi)
   res_unit = stax.serial(dropout_or_identity, affine, pool_or_identity)
   if is_res:
     block = stax.serial(
@@ -200,14 +212,12 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
         stax.parallel(stax.Identity(),
                       res_unit),
         stax.FanInSum(),
-        layer_norm_or_identity,
-        phi)
+        norm_phi)
   else:
     block = stax.serial(
         affine,
         res_unit,
-        layer_norm_or_identity,
-        phi)
+        norm_phi)
 
   if proj_into_2d == 'FLAT':
     proj_layer = stax.Flatten(batch_axis, 0)
@@ -430,7 +440,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
         for is_ntk in [False, True]
         for proj_into_2d in PROJECTIONS[:2]
         for layer_norm in LAYER_NORM))
-  def test_layernorm(self,
+  def test_normalization(self,
                      model,
                      width,
                      same_inputs,
@@ -442,7 +452,9 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     if is_conv:
       if xla_bridge.get_backend().platform == 'cpu':
         raise jtu.SkipTest('Not running CNN models on CPU to save time.')
-    elif proj_into_2d != PROJECTIONS[0] or layer_norm not in ('C', 'NC'):
+      if layer_norm == 'N':
+        raise jtu.SkipTest('Skipping batchnorm test for convolutional networks.')
+    elif proj_into_2d != PROJECTIONS[0] or layer_norm not in ('C', 'NC', 'N'):
       raise jtu.SkipTest('FC models do not have these parameters.')
 
     W_std, b_std = 2.**0.5, 0.5**0.5
@@ -458,8 +470,17 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     net = _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res,
                    padding, phi, strides, width, is_ntk, proj_into_2d,
                    pool_type, layer_norm, parameterization, use_dropout)
-    self._check_agreement_with_empirical(net, same_inputs, is_conv, use_dropout,
-                                         is_ntk, proj_into_2d)
+    # # when testing batchnorm, use batch size 5 (instead of 2)
+    new_batch_size = None if layer_norm != 'N' else 5
+    if layer_norm != 'N' or not is_ntk:
+      self._check_agreement_with_empirical(net, same_inputs, is_conv, use_dropout,
+                                          is_ntk, proj_into_2d,
+                                          new_batch_size=new_batch_size)
+    else:
+      with self.assertRaises(ValueError):
+        self._check_agreement_with_empirical(net, same_inputs, is_conv, use_dropout,
+                                          is_ntk, proj_into_2d,
+                                          new_batch_size=new_batch_size)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -731,12 +752,15 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
       self.assertAllClose(composed_ker_out, ker_out_marg, True)
 
   def _check_agreement_with_empirical(self, net, same_inputs, is_conv,
-                                      use_dropout, is_ntk, proj_into_2d):
+                                      use_dropout, is_ntk, proj_into_2d,
+                                      new_batch_size=None):
     (init_fn, apply_fn, kernel_fn), input_shape, device_count = net
 
     num_samples = N_SAMPLES * 5 if use_dropout else N_SAMPLES
+    # num_samples *= 10 if new_batch_size is not None else 1
     key = random.PRNGKey(1)
-    x1, x2 = _get_inputs(key, is_conv, same_inputs, input_shape)
+    x1, x2 = _get_inputs(key, is_conv, same_inputs, input_shape,
+                         new_batch_size=new_batch_size)
 
     x1_out_shape, params = init_fn(key, x1.shape)
     if same_inputs:
@@ -1752,7 +1776,6 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
     empirical = kernel_fn_mc(x1, x2, get=get, mask_constant=mask_constant)
     empirical = empirical.reshape(exact.shape)
     test_utils.assert_close_matrices(self, empirical, exact, tol)
-
 
 if __name__ == '__main__':
   jtu.absltest.main()

@@ -2920,8 +2920,7 @@ def _pool_mask(mask: np.ndarray,
 
 
 @layer
-def BatchNormRelu(axis, epsilon=0., center=True, scale=True,
-                  beta_init=zeros, gamma_init=ones):
+def BatchNormRelu(axis):
   """Layer construction function for a batch normalization layer.
 
   See the papers below for the derivation.
@@ -2931,11 +2930,14 @@ def BatchNormRelu(axis, epsilon=0., center=True, scale=True,
   The implementation here follows the reference implementation in
       https://github.com/thegregyang/GP4A
   """
+  epsilon = 0
+  center=True
+  scale=True
+  beta_init=zeros
+  gamma_init=ones
 
   iu = ops.index_update
   ix = ops.index
-
-  assert epsilon < 1e-12
 
   _beta_init = lambda rng, shape: beta_init(rng, shape) if center else ()
   _gamma_init = lambda rng, shape: gamma_init(rng, shape) if scale else ()
@@ -2948,11 +2950,17 @@ def BatchNormRelu(axis, epsilon=0., center=True, scale=True,
     xs = bn_apply_fn(params, xs)
     return _ab_relu(xs, 0, 1)
 
-  # NOTE: Currently assumes cov2 is None and computes single batch kernel
   @_requires(diagonal_batch=False)
   def kernel_fn(kernels):
-    # print(kernels.cov1)
-    # assert kernels.cov2 is None
+    if not kernels.is_gaussian:
+      raise NotImplementedError('`BatchNormRelu` is only implemented for the '
+                                'case if the input layer is guaranteed to be mean'
+                                '-zero Gaussian, i.e. having `is_gaussian` '
+                                'set to `True`.')
+    if len(kernels.shape1) != 2:
+      raise NotImplementedError('`BatchNormRelu` only supports fully-connected layers.')
+    if kernels.ntk is not None:
+      raise NotImplementedError('NTK is currently not supported by `BatchNormRelu`.')
 
     # apply the below code to cov1 and cov2
     # write new cross batch code for (nngp, cov1, cov2)
@@ -3005,8 +3013,6 @@ def BatchNormRelu(axis, epsilon=0., center=True, scale=True,
       schemenegpoints = schemeneg.points
       schemeposweights = schemepos.weights
       schemenegweights = schemeneg.weights
-
-
 
       integrandpos = lambda xs: np.moveaxis(
           np.moveaxis(
@@ -3087,7 +3093,6 @@ def BatchNormRelu(axis, epsilon=0., center=True, scale=True,
                                 Pi11diag**0.5,
                                 C,
                                 Pi22diag**0.5)
-        
         
         ## Compute determinant
         ind = np.arange(n1+n2-2)
@@ -3178,13 +3183,13 @@ def BatchNormRelu(axis, epsilon=0., center=True, scale=True,
 
     cov1 = singlebatchker(kernels.cov1)
     if kernels.cov2 is None:
-      return kernels.replace(cov1=cov1, nngp=cov1, cov2=None)
+      return kernels.replace(cov1=cov1, nngp=cov1, cov2=None, is_gaussian=False)
     
     cov2 = singlebatchker(kernels.cov2)
     
     # TODO compute cross batch
     new_nngp = VBNReLUCrossBatch(kernels.nngp, kernels.cov1, kernels.cov2)
 
-    return kernels.replace(cov1=cov1, nngp=new_nngp, cov2=cov2)
+    return kernels.replace(cov1=cov1, nngp=new_nngp, cov2=cov2, is_gaussian=False)
 
   return init_fn, apply_fn, kernel_fn

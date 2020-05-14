@@ -30,7 +30,7 @@ INSTALL_REQUIRES = [
     'jax>=0.1.55',
     'frozendict',
     'dataclasses',
-    'quadpy'
+    'quadpy==0.13.2'
 ]
 
 
