@@ -100,8 +100,10 @@ class NeuralTangentsTestCase(jtu.JaxTestCase):
         is_pytree_node = field.metadata.get('pytree_node', True)
         if is_pytree_node:
           super().assertAllClose(
-              x_dict[field.name], y_dict[field.name], check_dtypes, atol, rtol)
+              x_dict[field.name], y_dict[field.name], check_dtypes=check_dtypes,
+              atol=atol, rtol=rtol)
         else:
           self.assertEqual(x_dict[field.name], y_dict[field.name])
     else:
-      return super().assertAllClose(x, y, check_dtypes, atol, rtol)
+      return super().assertAllClose(
+          x, y, check_dtypes=check_dtypes, atol=atol, rtol=rtol)

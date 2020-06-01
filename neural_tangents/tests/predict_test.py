@@ -270,9 +270,9 @@ class PredictTest(jtu.JaxTestCase):
                                             fx_initial_test)
     fx_pred_train_only = predictor_train(0.0, fx_initial_train)
 
-    self.assertAllClose(fx_initial_train, fx_pred_train, True)
-    self.assertAllClose(fx_initial_train, fx_pred_train_only, True)
-    self.assertAllClose(fx_initial_test, fx_pred_test, True)
+    self.assertAllClose(fx_initial_train, fx_pred_train, check_dtypes=True)
+    self.assertAllClose(fx_initial_train, fx_pred_train_only, check_dtypes=True)
+    self.assertAllClose(fx_initial_test, fx_pred_test, check_dtypes=True)
 
     for i in range(steps):
       params = get_params(opt_state)
@@ -293,12 +293,12 @@ class PredictTest(jtu.JaxTestCase):
     fx_error_train_only = (fx_pred_train_only - fx_pred_train) / fx_disp_train
     fx_error_test = (fx_test - fx_pred_test) / fx_disp_test
 
-    self.assertAllClose(fx_error_train, np.zeros_like(fx_error_train), True,
-                        rtol, atol)
+    self.assertAllClose(fx_error_train, np.zeros_like(fx_error_train),
+                        check_dtypes=True, atol=atol, rtol=rtol)
     self.assertAllClose(fx_error_train_only, np.zeros_like(fx_error_train_only),
-                        True, rtol, atol)
-    self.assertAllClose(fx_error_test, np.zeros_like(fx_error_test), True, rtol,
-                        atol)
+                        check_dtypes=True, atol=atol, rtol=rtol)
+    self.assertAllClose(fx_error_test, np.zeros_like(fx_error_test),
+                        check_dtypes=True, atol=atol, rtol=rtol)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -365,8 +365,8 @@ class PredictTest(jtu.JaxTestCase):
     fx_pred_train, fx_pred_test = predictor(0.0, fx_initial_train,
                                             fx_initial_test)
 
-    self.assertAllClose(fx_initial_train, fx_pred_train, True)
-    self.assertAllClose(fx_initial_test, fx_pred_test, True)
+    self.assertAllClose(fx_initial_train, fx_pred_train, check_dtypes=True)
+    self.assertAllClose(fx_initial_test, fx_pred_test, check_dtypes=True)
 
     for i in range(steps):
       params = get_params(opt_state)
@@ -385,10 +385,10 @@ class PredictTest(jtu.JaxTestCase):
     fx_error_train = (fx_train - fx_pred_train) / fx_disp_train
     fx_error_test = (fx_test - fx_pred_test) / fx_disp_test
 
-    self.assertAllClose(fx_error_train, np.zeros_like(fx_error_train), True,
-                        rtol, atol)
-    self.assertAllClose(fx_error_test, np.zeros_like(fx_error_test), True, rtol,
-                        atol)
+    self.assertAllClose(fx_error_train, np.zeros_like(fx_error_train),
+                        check_dtypes=True, atol=atol, rtol=rtol)
+    self.assertAllClose(fx_error_test, np.zeros_like(fx_error_test),
+                        check_dtypes=True, atol=atol, rtol=rtol)
 
   # TODO(schsam): Get this test passing with theoretical conv.
   @jtu.parameterized.named_parameters(
@@ -458,8 +458,8 @@ class PredictTest(jtu.JaxTestCase):
     lin_state = init(fx_initial_train, fx_initial_test)
     fx_pred_train, fx_pred_test = get(lin_state)
 
-    self.assertAllClose(fx_initial_train, fx_pred_train, True)
-    self.assertAllClose(fx_initial_test, fx_pred_test, True)
+    self.assertAllClose(fx_initial_train, fx_pred_train, check_dtypes=True)
+    self.assertAllClose(fx_initial_test, fx_pred_test, check_dtypes=True)
 
     for i in range(steps):
       params = get_params(opt_state)
@@ -478,10 +478,10 @@ class PredictTest(jtu.JaxTestCase):
     fx_error_train = (fx_train - fx_pred_train) / fx_disp_train
     fx_error_test = (fx_test - fx_pred_test) / fx_disp_test
 
-    self.assertAllClose(fx_error_train, np.zeros_like(fx_error_train), True,
-                        rtol, atol)
-    self.assertAllClose(fx_error_test, np.zeros_like(fx_error_test), True, rtol,
-                        atol)
+    self.assertAllClose(fx_error_train, np.zeros_like(fx_error_train),
+                        check_dtypes=True, atol=atol, rtol=rtol)
+    self.assertAllClose(fx_error_test, np.zeros_like(fx_error_test),
+                        check_dtypes=True, atol=atol, rtol=rtol)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -559,8 +559,10 @@ class PredictTest(jtu.JaxTestCase):
     rtol = RTOL
     mean_emp, cov_emp = mc_sampling(200)
 
-    self.assertAllClose(mean_pred, mean_emp, True, rtol, atol)
-    self.assertAllClose(cov_pred, cov_emp, True, rtol, atol)
+    self.assertAllClose(
+        mean_pred, mean_emp, check_dtypes=True, atol=atol, rtol=rtol)
+    self.assertAllClose(
+        cov_pred, cov_emp, check_dtypes=True, atol=atol, rtol=rtol)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -656,8 +658,8 @@ class PredictTest(jtu.JaxTestCase):
         x_test, ('nngp', 'ntk'),
         diag_reg=0.,
         compute_cov=True)
-    self.assertAllClose(out[0], out2[1], True)
-    self.assertAllClose(out[1], out2[0], True)
+    self.assertAllClose(out[0], out2[1], check_dtypes=True)
+    self.assertAllClose(out[1], out2[0], check_dtypes=True)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -709,8 +711,9 @@ class PredictTest(jtu.JaxTestCase):
     gp_inference = predict.gp_inference(kernel_fn, x_train, y_train, x_test,
                                         get, reg, True)
 
-    self.assertAllClose(finite_prediction_none, finite_prediction, True)
-    self.assertAllClose(finite_prediction_none, gp_inference, True)
+    self.assertAllClose(finite_prediction_none, finite_prediction,
+                        check_dtypes=True)
+    self.assertAllClose(finite_prediction_none, gp_inference, check_dtypes=True)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -757,10 +760,11 @@ class PredictTest(jtu.JaxTestCase):
 
     zero_prediction = prediction(0.0)
 
-    self.assertAllClose(zero_prediction.ntk, zero_prediction.nngp, True)
+    self.assertAllClose(zero_prediction.ntk, zero_prediction.nngp,
+                        check_dtypes=True)
     reference = (np.zeros(
         (test_shape[0], out_logits)), ker_fun(x_test, x_test, get='nngp'))
-    self.assertAllClose((reference,) * 2, zero_prediction, True)
+    self.assertAllClose((reference,) * 2, zero_prediction, check_dtypes=True)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -827,7 +831,8 @@ class PredictTest(jtu.JaxTestCase):
     ntk_nngp_predictions = [ntk_nngp_prediction(t).mean for t in ts]
 
     # Test if you use the nngp equations with the ntk, you get the same mean
-    self.assertAllClose(ntk_predictions, ntk_nngp_predictions, True)
+    self.assertAllClose(ntk_predictions, ntk_nngp_predictions,
+                        check_dtypes=True)
 
     # Next test that if you go through the NTK code path, but with only
     # the NNGP kernel, we recreate the NNGP dynamics.
@@ -863,7 +868,8 @@ class PredictTest(jtu.JaxTestCase):
 
     # Test if you use the ntk equations with the nngp, you get the same cov
     # Although, due to accumulation of numerical errors, only roughly.
-    self.assertAllClose(nngp_cov_predictions, nngp_ntk_cov_predictions, True)
+    self.assertAllClose(nngp_cov_predictions, nngp_ntk_cov_predictions,
+                        check_dtypes=True)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -915,7 +921,8 @@ class PredictTest(jtu.JaxTestCase):
     check_pos_evals = np.min(np.array(
         [np.linalg.eigh(cov)[0] + 1e-10 for cov in ntk_cov_predictions]))
 
-    self.assertAllClose(check_symmetric, np.zeros_like(check_symmetric), True)
+    self.assertAllClose(check_symmetric, np.zeros_like(check_symmetric),
+                        check_dtypes=True)
     self.assertGreater(check_pos_evals, 0., True)
 
   @jtu.parameterized.named_parameters(
@@ -994,8 +1001,10 @@ class PredictTest(jtu.JaxTestCase):
     ntk_predictions = predict.gp_inference(
         ker_fn, x_train, y_train, x_test, 'ntk', reg, compute_cov=True)
 
-    self.assertAllClose(mean_emp, ntk_predictions.mean, True, RTOL, ATOL)
-    self.assertAllClose(cov_emp, ntk_predictions.covariance, True, RTOL, ATOL)
+    self.assertAllClose(mean_emp, ntk_predictions.mean,
+                        check_dtypes=True, atol=ATOL, rtol=RTOL)
+    self.assertAllClose(cov_emp, ntk_predictions.covariance,
+                        check_dtypes=True, atol=ATOL, rtol=RTOL)
 
   def testPredictOnCPU(self):
     x_train = random.normal(random.PRNGKey(1), (10, 4, 5, 3))
@@ -1021,8 +1030,10 @@ class PredictTest(jtu.JaxTestCase):
             gp_inference = predict.gp_inference(kernel_fn_batched, x_train,
                                                 y_train, x_test, get, 0., True)
 
-            self.assertAllClose(predictor(None), predictor(np.inf), True)
-            self.assertAllClose(predictor(None), gp_inference, True)
+            self.assertAllClose(predictor(None), predictor(np.inf),
+                                check_dtypes=True)
+            self.assertAllClose(predictor(None), gp_inference,
+                                check_dtypes=True)
 
   def testIsOnCPU(self):
     for dtype in [np.float32, np.float64]:

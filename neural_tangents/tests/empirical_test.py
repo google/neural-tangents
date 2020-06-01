@@ -133,7 +133,7 @@ class EmpiricalTest(jtu.JaxTestCase):
                                           do_shift_x=do_shift_x),
                               f_lin(x, params, do_alter,
                                     do_shift_x=do_shift_x),
-                              True)
+                              check_dtypes=True)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -177,11 +177,11 @@ class EmpiricalTest(jtu.JaxTestCase):
           self.assertAllClose(EmpiricalTest.f_lin_exact(x0, x, params, do_alter,
                                           do_shift_x=do_shift_x),
                               f_lin(x, params, do_alter, do_shift_x=do_shift_x),
-                              True)
+                              check_dtypes=True)
           self.assertAllClose(f_2_exact(x0, x, params, do_alter,
                                         do_shift_x=do_shift_x),
                               f_2(x, params, do_alter, do_shift_x=do_shift_x),
-                              True)
+                              check_dtypes=True)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({

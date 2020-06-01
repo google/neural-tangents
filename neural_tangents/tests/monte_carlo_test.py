@@ -96,7 +96,7 @@ class MonteCarloTest(jtu.JaxTestCase):
 
     one_sample = sample_once_fn(x1, x2, key, get)
     one_sample_batch = sample_once_batch_fn(x1, x2, key, get)
-    self.assertAllClose(one_sample, one_sample_batch, True)
+    self.assertAllClose(one_sample, one_sample_batch, check_dtypes=True)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -125,7 +125,7 @@ class MonteCarloTest(jtu.JaxTestCase):
                                        device_count, store_on_device)
     one_sample = sample_once_fn(x1, x2, key, get)
     one_batch_sample = batch_sample_once_fn(x1, x2, key, get)
-    self.assertAllClose(one_sample, one_batch_sample, True)
+    self.assertAllClose(one_sample, one_batch_sample, check_dtypes=True)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -226,9 +226,9 @@ class MonteCarloTest(jtu.JaxTestCase):
                                                       store_on_device)
         sample_12 = sample_fn(x1, x2)
         sample_34 = sample_fn(x3, x4)
-        self.assertAllClose(s_12, sample_12, True)
-        self.assertAllClose(s_12, s_34, True)
-        self.assertAllClose(s_12, sample_34, True)
+        self.assertAllClose(s_12, sample_12, check_dtypes=True)
+        self.assertAllClose(s_12, s_34, check_dtypes=True)
+        self.assertAllClose(s_12, sample_34, check_dtypes=True)
         count += 1
 
       self.assertEqual(log_n_max, count)
@@ -247,9 +247,9 @@ class MonteCarloTest(jtu.JaxTestCase):
             device_count, store_on_device)
         sample_12 = sample_fn(x1, x2, get)
         sample_34 = sample_fn(x3, x4, get)
-        self.assertAllClose(s_12, sample_12, True)
-        self.assertAllClose(s_12, s_34, True)
-        self.assertAllClose(s_12, sample_34, True)
+        self.assertAllClose(s_12, sample_12, check_dtypes=True)
+        self.assertAllClose(s_12, s_34, check_dtypes=True)
+        self.assertAllClose(s_12, sample_34, check_dtypes=True)
         count += 1
 
       self.assertEqual(log_n_max, count)
@@ -262,8 +262,9 @@ class MonteCarloTest(jtu.JaxTestCase):
     elif get is None or 'ntk' in get:
       s_12 = s_12._replace(ntk=np.squeeze(s_12.ntk, (-1, -2)))
 
-    self.assertAllClose(ker_analytic_12, s_12, True, 2., 2.)
-    self.assertAllClose(ker_analytic_12, ker_analytic_34, True)
+    self.assertAllClose(
+        ker_analytic_12, s_12, check_dtypes=True, atol=2., rtol=2.)
+    self.assertAllClose(ker_analytic_12, ker_analytic_34, check_dtypes=True)
 
 
 if __name__ == '__main__':
