@@ -91,7 +91,8 @@ def assert_close_matrices(self, expected, actual, rtol):
 
 
 class NeuralTangentsTestCase(jtu.JaxTestCase):
-  def assertAllClose(self, x, y, check_dtypes, atol=None, rtol=None):
+  def assertAllClose(self, x, y, check_dtypes, atol=None, rtol=None,
+                     canonicalize_dtypes=True):
     if isinstance(x, Kernel):
       self.assertIsInstance(y, Kernel)
       x_dict = dataclasses.asdict(x)
@@ -101,9 +102,10 @@ class NeuralTangentsTestCase(jtu.JaxTestCase):
         if is_pytree_node:
           super().assertAllClose(
               x_dict[field.name], y_dict[field.name], check_dtypes=check_dtypes,
-              atol=atol, rtol=rtol)
+              atol=atol, rtol=rtol, canonicalize_dtypes=canonicalize_dtypes)
         else:
           self.assertEqual(x_dict[field.name], y_dict[field.name])
     else:
       return super().assertAllClose(
-          x, y, check_dtypes=check_dtypes, atol=atol, rtol=rtol)
+          x, y, check_dtypes=check_dtypes, atol=atol, rtol=rtol,
+          canonicalize_dtypes=canonicalize_dtypes)
