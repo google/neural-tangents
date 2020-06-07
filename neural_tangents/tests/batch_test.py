@@ -13,6 +13,7 @@
 # limitations under the License.
 """Tests for the Neural Tangents library."""
 
+from absl.testing import absltest
 
 from functools import partial
 from jax import test_util as jtu
@@ -428,4 +429,4 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
 
 
 if __name__ == '__main__':
-  jtu.absltest.main()
+  absltest.main()

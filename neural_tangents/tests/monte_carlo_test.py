@@ -15,7 +15,7 @@
 # limitations under the License.
 """Tests for `utils/monte_carlo.py`."""
 
-
+from absl.testing import absltest
 
 from jax import test_util as jtu
 from jax.config import config as jax_config
@@ -268,4 +268,4 @@ class MonteCarloTest(jtu.JaxTestCase):
 
 
 if __name__ == '__main__':
-  jtu.absltest.main()
+  absltest.main()

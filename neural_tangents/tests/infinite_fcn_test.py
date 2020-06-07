@@ -14,6 +14,7 @@
 
 """Tests for `examples/function_space.py`."""
 
+from absl.testing import absltest
 
 from jax import test_util as jtu
 from jax.config import config
@@ -30,4 +31,4 @@ class InfiniteFcnTest(jtu.JaxTestCase):
 
 
 if __name__ == '__main__':
-  jtu.absltest.main()
+  absltest.main()

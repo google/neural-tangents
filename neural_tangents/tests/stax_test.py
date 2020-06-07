@@ -20,6 +20,7 @@ from functools import partial
 import random as prandom
 import itertools
 import logging
+from absl.testing import absltest
 from jax.api import jit
 from jax import ops
 from jax import test_util as jtu
@@ -1757,4 +1758,4 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
 
 
 if __name__ == '__main__':
-  jtu.absltest.main()
+  absltest.main()

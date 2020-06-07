@@ -14,6 +14,8 @@
 
 """Tests for `utils/empirical.py`."""
 
+from absl.testing import absltest
+
 from functools import partial
 from jax import test_util as jtu
 from jax.api import jit
@@ -212,4 +214,4 @@ class EmpiricalTest(jtu.JaxTestCase):
     self.assertAllClose(g, g_direct, check_dtypes=False)
 
 if __name__ == '__main__':
-  jtu.absltest.main()
+  absltest.main()

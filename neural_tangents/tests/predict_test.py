@@ -16,6 +16,8 @@
 
 import math
 import unittest
+
+from absl.testing import absltest
 from jax import test_util as jtu
 from jax.api import device_get
 from jax.api import grad
@@ -1062,4 +1064,4 @@ class PredictTest(jtu.JaxTestCase):
 
 
 if __name__ == '__main__':
-  jtu.absltest.main()
+  absltest.main()
