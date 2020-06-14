@@ -33,6 +33,7 @@ from neural_tangents.utils import flags as internal_flags
 from neural_tangents.utils import utils
 from neural_tangents.utils.typing import ApplyFn, EmpiricalKernelFn, PyTree
 from typing import Callable
+import numpy as onp
 
 config.parse_flags_with_absl()  # NOTE(schsam): Is this safe?
 
@@ -125,7 +126,7 @@ def flatten_features(kernel: np.ndarray) -> np.ndarray:
   assert kernel.ndim % 2 == 0
   half_shape = (kernel.ndim - 1) // 2
   n1, n2 = kernel.shape[:2]
-  feature_size = int(np.prod(kernel.shape[2 + half_shape:]))
+  feature_size = int(onp.prod(kernel.shape[2 + half_shape:]))
   transposition = ((0,) + tuple(i + 2 for i in range(half_shape)) +
                    (1,) + tuple(i + 2 + half_shape for i in range(half_shape)))
   kernel = np.transpose(kernel, transposition)
@@ -223,7 +224,7 @@ def empirical_direct_ntk_fn(f: ApplyFn) -> EmpiricalKernelFn:
   """
   def sum_and_contract(j1, j2):
     def contract(x, y):
-      param_count = int(np.prod(x.shape[2:]))
+      param_count = int(onp.prod(x.shape[2:]))
       x = np.reshape(x, x.shape[:2] + (param_count,))
       y = np.reshape(y, y.shape[:2] + (param_count,))
       return np.dot(x, np.transpose(y, (0, 2, 1)))

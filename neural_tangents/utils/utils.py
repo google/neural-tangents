@@ -28,6 +28,7 @@ from jax import lax
 from jax.lib import xla_bridge
 import jax.numpy as np
 from .kernel import Kernel
+import numpy as onp
 
 
 def canonicalize_get(get):
@@ -179,7 +180,7 @@ def canonicalize_axis(axis, x):
     ndim = len(x)
   else:
     raise TypeError(x, type(x))
-  return tuple(set(np.arange(ndim)[axis]))
+  return tuple(set(onp.arange(ndim)[axis]))
 
 
 def zip_axes(x, start_axis=0, end_axis=-1):
