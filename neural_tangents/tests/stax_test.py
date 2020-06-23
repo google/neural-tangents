@@ -789,6 +789,52 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
         'same_inputs': False
     },
 ])
+class SinTest(test_utils.NeuralTangentsTestCase):
+
+  def test_sin(self, same_inputs):
+    key = random.PRNGKey(1)
+    for a, b, c in [(1., 1., 0.),
+                    (1., 1., np.pi/2),
+                    (1.5, 2., np.pi/4),
+                    (10., 25., 2.)]:
+      for get in ['nngp', 'ntk']:
+        output_dim = 1024 if get == 'nngp' else 1
+        key, split = random.split(key)
+        for model in ['fc', 'conv']:
+          with self.subTest(get=get, a=a, b=b, c=c, model=model):
+            if model == 'fc':
+              X0_1 = random.normal(key, (6, 7))
+              X0_2 = None if same_inputs else random.normal(split, (10, 7))
+              affine = stax.Dense(2048, 1., 0.)
+              readout = stax.Dense(output_dim)
+            else:
+              X0_1 = random.normal(key, (4, 8, 8, 3))
+              X0_2 = None if same_inputs else random.normal(split, (6, 8, 8, 3))
+              affine = stax.Conv(1024, (3, 2), W_std=1., b_std=0.1,
+                                 padding='SAME')
+              readout = stax.serial(stax.GlobalAvgPool(),
+                                    stax.Dense(output_dim))
+            init_fn, apply_sin, kernel_fn_sin = stax.serial(affine,
+                                                            stax.Sin(a=a,
+                                                                     b=b,
+                                                                     c=c),
+                                                            readout)
+            analytic_kernel = kernel_fn_sin(X0_1, X0_2, get)
+            mc_kernel_fn = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_sin,
+                                                             key, 200)
+            empirical_kernel = np.squeeze(mc_kernel_fn(X0_1, X0_2, get))
+            test_utils.assert_close_matrices(self, analytic_kernel,
+                                             empirical_kernel, RTOL)
+
+
+@jtu.parameterized.parameters([
+    {
+        'same_inputs': True
+    },
+    {
+        'same_inputs': False
+    },
+])
 class ABReluTest(test_utils.NeuralTangentsTestCase):
 
   def test_ab_relu_relu(self, same_inputs):

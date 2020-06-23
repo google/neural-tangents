@@ -1167,6 +1167,13 @@ def Erf(do_backprop: bool = False) -> InternalLayer:
 
 @layer
 @_supports_masking(remask_kernel=True)
+def Sin(a=1., b=1., c=0.) -> InternalLayer:
+  """Returns the function f(x) = a sin(bx + c)."""
+  return _elementwise(_sin, 'Sin', a=1., b=1., c=0.)
+
+
+@layer
+@_supports_masking(remask_kernel=True)
 def Relu(
     do_backprop: bool = False, do_stabilize: bool = False) -> InternalLayer:
   return _elementwise(_ab_relu,
@@ -1512,11 +1519,12 @@ def LayerNorm(
 
       return m
 
-    prod11, prod12, prod22 = _get_diagonal_prods(
+    prod11, prod12, prod22 = _get_diagonal_outer_prods(
         eps + cov1,
         cov2 if cov2 is None else eps + cov2,
         kernels.diagonal_batch,
         kernels.diagonal_spatial,
+        op.mul,
         axis=kernel_axis,
         mask1=prepare_mask(kernels.mask1),
         mask2=prepare_mask(kernels.mask2),
@@ -2059,6 +2067,10 @@ def _erf(x, **kwargs):
   return erf(x)
 
 
+def _sin(x, a, b, c, **kwargs):
+  return a * np.sin(b * x + c)
+
+
 def _arccos(x, do_backprop):
   if do_backprop:
     # https://github.com/google/jax/issues/654
@@ -2152,14 +2164,15 @@ def _get_diagonal_prod(cov1: np.ndarray,
   return prod11, prod12, prod22
 
 
-def _get_diagonal_prods(cov1: np.ndarray,
-                        cov2: Optional[np.ndarray],
-                        diagonal_batch: bool,
-                        diagonal_spatial: bool,
-                        axis: Tuple[int, ...] = (),
-                        mask1: Optional[np.ndarray] = None,
-                        mask2: Optional[np.ndarray] = None
-                        ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _get_diagonal_outer_prods(cov1: np.ndarray,
+                              cov2: Optional[np.ndarray],
+                              diagonal_batch: bool,
+                              diagonal_spatial: bool,
+                              operation: Callable[[float, float], float],
+                              axis: Tuple[int, ...] = (),
+                              mask1: Optional[np.ndarray] = None,
+                              mask2: Optional[np.ndarray] = None,
+                              ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
   """Gets outer products of diagonals `cov1, cov1`, `cov1, cov2`, `cov2, cov2`.
 
   `prod11[x1, x2, h1, h2, ...]` =
@@ -2181,11 +2194,11 @@ def _get_diagonal_prods(cov1: np.ndarray,
   cov2 = _mean_and_var(cov2, axis=axis, keepdims=True, mask=mask2)
 
   end_axis = 1 if diagonal_spatial else cov1.ndim   # pytype: disable=attribute-error
-  prod12 = utils.outer_prod(cov1, cov2, 0, end_axis, op.mul)
+  prod12 = utils.outer_prod(cov1, cov2, 0, end_axis, operation)
 
   start_axis = 1 if diagonal_batch else 0
-  prod11 = utils.outer_prod(cov1, cov1, start_axis, end_axis, op.mul)
-  prod22 = (utils.outer_prod(cov2, cov2, start_axis, end_axis, op.mul)
+  prod11 = utils.outer_prod(cov1, cov1, start_axis, end_axis, operation)
+  prod22 = (utils.outer_prod(cov2, cov2, start_axis, end_axis, operation)
             if cov2 is not None else prod11)
 
   return prod11, prod12, prod22
@@ -2224,10 +2237,11 @@ def _transform_kernels_ab_relu(
     if cov2 is not None:
       cov2 /= factor
 
-  prod11, prod12, prod22 = _get_diagonal_prods(cov1,
-                                               cov2,
-                                               kernels.diagonal_batch,
-                                               kernels.diagonal_spatial)
+  prod11, prod12, prod22 = _get_diagonal_outer_prods(cov1,
+                                                       cov2,
+                                                       kernels.diagonal_batch,
+                                                       kernels.diagonal_spatial,
+                                                       op.mul)
   nngp, ntk = _get_ab_relu_kernel(nngp, prod12, a, b, do_backprop, ntk=ntk)
   if do_stabilize:
     nngp *= factor
@@ -2270,10 +2284,11 @@ def _transform_kernels_erf(kernels: Kernel, do_backprop: bool) -> Kernel:
   _cov1_denom = 1 + 2 * cov1
   _cov2_denom = None if cov2 is None else 1 + 2 * cov2
 
-  prod11, prod12, prod22 = _get_diagonal_prods(_cov1_denom,
-                                               _cov2_denom,
-                                               kernels.diagonal_batch,
-                                               kernels.diagonal_spatial)
+  prod11, prod12, prod22 = _get_diagonal_outer_prods(_cov1_denom,
+                                                       _cov2_denom,
+                                                       kernels.diagonal_batch,
+                                                       kernels.diagonal_spatial,
+                                                       op.mul)
   nngp, ntk = _get_erf_kernel(nngp, prod12, do_backprop, ntk=ntk)
 
   if kernels.diagonal_batch and kernels.diagonal_spatial:
@@ -2284,6 +2299,45 @@ def _transform_kernels_erf(kernels: Kernel, do_backprop: bool) -> Kernel:
     cov1, _ = _get_erf_kernel(cov1, prod11, do_backprop)
     if cov2 is not None:
       cov2, _ = _get_erf_kernel(cov2, prod22, do_backprop)
+
+  return kernels.replace(cov1=cov1,
+                         nngp=nngp,
+                         cov2=cov2,
+                         ntk=ntk,
+                         is_gaussian=False)
+
+
+def _transform_kernels_sin(
+    kernels: Kernel,
+    a: float = 1.0,
+    b: float = 1.0,
+    c: float = 0.0) -> Kernel:
+  """Compute new kernels after an `Sin` layer."""
+  cov1, nngp, cov2, ntk = kernels.cov1, kernels.nngp, kernels.cov2, kernels.ntk
+
+  sum11, sum12, sum22 = _get_diagonal_outer_prods(cov1,
+                                                  cov2,
+                                                  kernels.diagonal_batch,
+                                                  kernels.diagonal_spatial,
+                                                  op.add)
+
+  def _get_sin_kernel(prod, cov, ntk):
+    s1 = a**2 * np.exp(b * (-0.5 * prod + cov)) / 2.
+    s2 = a**2 * np.exp(b * (-0.5 * prod - cov)) / 2. * np.cos(2*c)
+    nngp = s1 - s2
+    if ntk is not None:
+      ntk *= (s1 + s2) * b**2
+    return nngp, ntk
+  nngp, ntk = _get_sin_kernel(sum12, nngp, ntk)
+
+  if kernels.diagonal_batch and kernels.diagonal_spatial:
+    cov1 = -a**2 * np.expm1(-2. * b * sum11) / 2.
+    if cov2 is not None:
+      cov2 = -a**2 * np.expm1(-2. * b * sum22) / 2.
+  else:
+    cov1 = _get_sin_kernel(sum11, cov1, None)[0]
+    if cov2 is not None:
+      cov2 = _get_sin_kernel(sum22, cov2, None)[0]
 
   return kernels.replace(cov1=cov1,
                          nngp=nngp,
@@ -2309,6 +2363,8 @@ def _transform_kernels(
     return _transform_kernels_ab_relu(kernels, **fn_kwargs)
   if fn is _erf:
     return _transform_kernels_erf(kernels, **fn_kwargs)
+  if fn is _sin:
+    return _transform_kernels_sin(kernels, **fn_kwargs)
   # TODO: Monte Carlo approximation to the integral (suggested by schsam.)
   raise NotImplementedError('Analaytic kernel for activiation {} is not '
                             'implmented'.format(fn))
