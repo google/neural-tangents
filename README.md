@@ -78,7 +78,7 @@ You can now run the examples (using [`tensorflow_datasets`](https://github.com/t
 and tests by calling:
 
 ```
-pip install "tensorflow>=2.2.0rc3" "tensorflow-datasets>=3.0.0"
+pip install tensorflow tensorflow-datasets --upgrade
 
 python neural-tangents/examples/infinite_fcn.py
 python neural-tangents/examples/weight_space.py
@@ -161,14 +161,23 @@ import neural_tangents as nt
 x_train, x_test = x1, x2
 y_train = random.uniform(key1, shape=(10, 1))  # training targets
 
-y_test_nngp = nt.predict.gp_inference(kernel_fn, x_train, y_train, x_test,
-                                      get='nngp')
+predict_fn = nt.predict.gradient_descent_mse_ensemble(kernel_fn, x_train,
+                                                      y_train)
+
+y_test_nngp = predict_fn(x_test=x_test, get='nngp')
 # (20, 1) np.ndarray test predictions of an infinite Bayesian network
 
-y_test_ntk = nt.predict.gp_inference(kernel_fn, x_train, y_train, x_test,
-                                     get='ntk')
+y_test_ntk = predict_fn(x_test=x_test, get='nngp')
 # (20, 1) np.ndarray test predictions of an infinite continuous
 # gradient descent trained network at convergence (t = inf)
+
+# Get predictions as a namedtuple
+both = predict_fn(x_test=x_test, get=('nngp', 'ntk'))
+both.nngp == y_test_nngp  # True
+both.ntk == y_test_ntk  # True
+
+# Unpack the predictions namedtuple
+y_test_nngp, y_test_ntk = predict_fn(x_test=x_test, get=('nngp', 'ntk'))
 ```
 
 
@@ -212,19 +221,19 @@ init_fn, apply_fn, kernel_fn = WideResnet(block_size=4, k=1, num_classes=10)
 
 ## Package description
 
-The `neural_tangents` (`nt`) package contains the following modules and methods:
+The `neural_tangents` (`nt`) package contains the following modules and functions:
 
 * `stax` - primitives to construct neural networks like `Conv`, `Relu`, `serial`, `parallel` etc.
 
 * `predict` - predictions with infinite networks:
 
-  * `predict.gp_inference` - either fully Bayesian inference (`get='nngp'`) or inference with a network trained to full convergence (infinite time) on MSE loss using continuous gradient descent (`get='ntk'`).
+  * `predict.gradient_descent_mse` - inference with a single infinite width / linearized network trained on MSE loss with continuous gradient descent for an arbitrary finite or infinite (`t=None`) time. Computed in closed form.
 
-  * `predict.gradient_descent_mse` - inference with a network trained on MSE loss with continuous gradient descent for an arbitrary finite time.
+  * `predict.gradient_descent` - inference with a single infinite width / linearized network trained on arbitrary loss with continuous (momentum) gradient descent for an arbitrary finite time. Computed using an ODE solver.
 
-  * `predict.gradient_descent` - inference with a network trained on arbitrary loss with continuous gradient descent for an arbitrary finite time (using an ODE solver).
+  * `predict.gradient_descent_mse_ensemble` - inference with an infinite ensemble of infinite width networks, either fully Bayesian (`get='nngp'`) or inference with MSE loss using continuous gradient descent (`get='ntk'`). Finite-time Bayesian inference (e.g. `t=1., get='nngp'`) is interpreted as gradient descent on the top layer only (see [[11]](#11-wide-neural-networks-of-any-depth-evolve-as-linear-models-under-gradient-descent-neurips-2019-jaehoon-lee-lechao-xiao-samuel-s-schoenholz-yasaman-bahri-roman-novak-jascha-sohl-dickstein-jeffrey-pennington))), since it converges to exact Gaussian process inference with NNGP (`t=None, get='nngp'`). Computed in closed form.
 
-  * `predict.momentum` - inference with a network trained on arbitrary loss with continuous momentum gradient descent for an arbitrary finite time (using an ODE solver).
+  * `predict.gp_inference` - exact closed form Gaussian process inference using NNGP (`get='nngp'`), NTK (`get='ntk'`), or both (`get=('nngp', 'ntk')`). Equivalent to `predict.gradient_descent_mse_ensemble` with `t=None` (infinite training time), but has a slightly different API (accepting precomputed kernel matrix `k_train_train` instead of `kernel_fn` and `x_train`).
 
 * `monte_carlo_kernel_fn` - compute a Monte Carlo kernel estimate  of _any_ `(init_fn, apply_fn)`, not necessarily specified `nt.stax`, enabling the kernel computation of infinite networks without closed-form expressions.
 
@@ -268,7 +277,7 @@ The kernel of an infinite network `kernel_fn(x1, x2).ntk` combined with  `nt.pre
 
 Continuous gradient descent in an infinite network has been shown in [[11]](#11-wide-neural-networks-of-any-depth-evolve-as-linear-models-under-gradient-descent-neurips-2019-jaehoon-lee-lechao-xiao-samuel-s-schoenholz-yasaman-bahri-roman-novak-jascha-sohl-dickstein-jeffrey-pennington) to correspond to training a _linear_ (in trainable parameters) model, which makes linearized neural networks an important subject of study for understanding the behavior of parameters in wide models.
 
-For this, we provide two convenient methods:
+For this, we provide two convenient functions:
 
 * `nt.linearize`, and
 * `nt.taylor_expand`,
@@ -305,7 +314,7 @@ logits = apply_fn_lin((W, b), x)  # (3, 2) np.ndarray
 
 ### Function space:
 
-Outputs of a linearized model evolve identically to those of an infinite one [[11]](#11-wide-neural-networks-of-any-depth-evolve-as-linear-models-under-gradient-descent-neurips-2019-jaehoon-lee-lechao-xiao-samuel-s-schoenholz-yasaman-bahri-roman-novak-jascha-sohl-dickstein-jeffrey-pennington) but with a different kernel - specifically, the Neural Tangent Kernel [[10]](#10-neural-tangent-kernel-convergence-and-generalization-in-neural-networks-neurips-2018-arthur-jacot-franck-gabriel-clément-hongler) evaluated on the specific `apply_fn` of the finite network given specific `params_0` that the network is initialized with. For this we provide the `nt.empirical_kernel_fn` function that accepts any `apply_fn` and returns a `kernel_fn(x1, x2, params)` that allows to compute the empirical NTK and NNGP kernels on specific `params`.
+Outputs of a linearized model evolve identically to those of an infinite one [[11]](#11-wide-neural-networks-of-any-depth-evolve-as-linear-models-under-gradient-descent-neurips-2019-jaehoon-lee-lechao-xiao-samuel-s-schoenholz-yasaman-bahri-roman-novak-jascha-sohl-dickstein-jeffrey-pennington) but with a different kernel - specifically, the Neural Tangent Kernel [[10]](#10-neural-tangent-kernel-convergence-and-generalization-in-neural-networks-neurips-2018-arthur-jacot-franck-gabriel-clément-hongler) evaluated on the specific `apply_fn` of the finite network given specific `params_0` that the network is initialized with. For this we provide the `nt.empirical_kernel_fn` function that accepts any `apply_fn` and returns a `kernel_fn(x1, x2, params, get)` that allows to compute the empirical NTK and/or NNGP (based on `get`) kernels on specific `params`.
 
 #### Example:
 
@@ -330,13 +339,12 @@ y_train = random.uniform(key1, shape=(3, 2))
 kernel_fn = nt.empirical_kernel_fn(apply_fn)
 ntk_train_train = kernel_fn(x_train, x_train, params, 'ntk')
 ntk_test_train = kernel_fn(x_test, x_train, params, 'ntk')
-mse_predictor = nt.predict.gradient_descent_mse(
-    ntk_train_train, y_train, ntk_test_train)
+mse_predictor = nt.predict.gradient_descent_mse(ntk_train_train, y_train)
 
 t = 5.
 y_train_0 = apply_fn(params, x_train)
 y_test_0 = apply_fn(params, x_test)
-y_train_t, y_test_t = mse_predictor(t, y_train_0, y_test_0)
+y_train_t, y_test_t = mse_predictor(t, y_train_0, y_test_0, ntk_test_train)
 # (3, 2) and (4, 2) np.ndarray train and test outputs after `t` units of time
 # training with continuous gradient descent
 ```

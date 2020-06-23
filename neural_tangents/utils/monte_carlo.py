@@ -14,14 +14,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Methods to compute Monte Carlo NNGP and NTK estimates.
+"""Functions to compute Monte Carlo NNGP and NTK estimates.
 
-The library has a public method `monte_carlo_kernel_fn` that allow to compute
-Monte Carlo estimates of NNGP and NTK kernels of arbitrary functions.
+The library has a public function `monte_carlo_kernel_fn` that allow to compute
+Monte Carlo estimates of NNGP and NTK kernels of arbitrary functions. For more
+details on how individual samples are computed, refer to `utils/empirical.py`.
 """
+
 
 from functools import partial
 import operator
+from typing import Union, Tuple, Generator, Set, Iterable, Optional
 
 from jax import random
 import jax.numpy as np
@@ -30,20 +33,24 @@ from jax.tree_util import tree_multimap
 from neural_tangents.utils import batch
 from neural_tangents.utils import empirical
 from neural_tangents.utils import utils
-from neural_tangents.utils.typing import \
-    PRNGKey, InitFn, ApplyFn, MonteCarloKernelFn
+from neural_tangents.utils.typing import PRNGKey, InitFn, ApplyFn, MonteCarloKernelFn, Axes, Get, EmpiricalKernelFn, PyTree
 
 
-def _sample_once_kernel_fn(kernel_fn,
-                           init_fn,
-                           batch_size=0,
-                           device_count=-1,
-                           store_on_device=True):
+def _sample_once_kernel_fn(kernel_fn: EmpiricalKernelFn,
+                           init_fn: InitFn,
+                           batch_size: int = 0,
+                           device_count: int = -1,
+                           store_on_device: bool = True):
   @partial(batch.batch,
            batch_size=batch_size,
            device_count=device_count,
            store_on_device=store_on_device)
-  def kernel_fn_sample_once(x1, x2, key, get, **apply_fn_kwargs):
+  def kernel_fn_sample_once(
+      x1: np.ndarray,
+      x2: Optional[np.ndarray],
+      key: PRNGKey,
+      get: Get,
+      **apply_fn_kwargs):
     init_key, dropout_key1, dropout_key2 = random.split(key, 3)
     keys = np.where(utils.x1_is_x2(x1, x2), dropout_key1,
                     (dropout_key1, dropout_key2))
@@ -52,12 +59,19 @@ def _sample_once_kernel_fn(kernel_fn,
   return kernel_fn_sample_once
 
 
-def _sample_many_kernel_fn(kernel_fn_sample_once, key, n_samples,
-                           get_generator):
-  def normalize(sample, n):
+def _sample_many_kernel_fn(
+    kernel_fn_sample_once,
+    key: PRNGKey,
+    n_samples: Set[int],
+    get_generator: bool):
+  def normalize(sample: PyTree, n: int) -> PyTree:
     return tree_map(lambda sample: sample / n, sample)
 
-  def get_samples(x1, x2, get, **apply_fn_kwargs):
+  def get_samples(
+      x1: np.ndarray,
+      x2: Optional[np.ndarray],
+      get: Get,
+      **apply_fn_kwargs):
     _key = key
     ker_sampled = None
     for n in range(1, max(n_samples) + 1):
@@ -71,13 +85,23 @@ def _sample_many_kernel_fn(kernel_fn_sample_once, key, n_samples,
 
   if get_generator:
     @utils.get_namedtuple('MonteCarloKernel')
-    def get_sampled_kernel(x1, x2, get=None, **apply_fn_kwargs):
+    def get_sampled_kernel(
+        x1: np.ndarray,
+        x2: np.ndarray,
+        get: Get = None,
+        **apply_fn_kwargs
+    ) -> Generator[Union[np.ndarray, Tuple[np.ndarray, ...]], None, None]:
       for n, sample in get_samples(x1, x2, get, **apply_fn_kwargs):
         if n in n_samples:
           yield normalize(sample, n)
   else:
     @utils.get_namedtuple('MonteCarloKernel')
-    def get_sampled_kernel(x1, x2, get=None, **apply_fn_kwargs):
+    def get_sampled_kernel(
+        x1: np.ndarray,
+        x2: np.ndarray,
+        get: Get = None,
+        **apply_fn_kwargs
+    ) -> Union[np.ndarray, Tuple[np.ndarray, ...]]:
       for n, sample in get_samples(x1, x2, get, **apply_fn_kwargs):
         pass
       return normalize(sample, n)
@@ -85,13 +109,17 @@ def _sample_many_kernel_fn(kernel_fn_sample_once, key, n_samples,
   return get_sampled_kernel
 
 
-def monte_carlo_kernel_fn(init_fn: InitFn,
-                          apply_fn: ApplyFn,
-                          key: PRNGKey,
-                          n_samples: int,
-                          batch_size: int = 0,
-                          device_count: int = -1,
-                          store_on_device: bool = True) -> MonteCarloKernelFn:
+def monte_carlo_kernel_fn(
+    init_fn: InitFn,
+    apply_fn: ApplyFn,
+    key: PRNGKey,
+    n_samples: Union[int, Iterable[int]],
+    batch_size: int = 0,
+    device_count: int = -1,
+    store_on_device: bool = True,
+    trace_axes: Axes = (-1,),
+    diagonal_axes: Axes = ()
+    ) -> MonteCarloKernelFn:
   """Return a Monte Carlo sampler of NTK and NNGP kernels of a given function.
 
   Args:
@@ -123,6 +151,34 @@ def monte_carlo_kernel_fn(init_fn: InitFn,
       a boolean, indicating whether to store the resulting
       kernel on the device (e.g. GPU or TPU), or in the CPU RAM, where larger
       kernels may fit.
+    trace_axes:
+      output axes to trace the output kernel over, i.e. compute only the trace
+      of the covariance along the respective pair of axes (one pair for each
+      axis in `trace_axes`). This allows to save space and compute if you are
+      only interested in the respective trace, but also improve approximation
+      accuracy if you know that covariance along these pairs of axes converges
+      to a `constant * identity matrix` in the limit of interest (e.g.
+      infinite width or infinite `n_samples`). A common use case is the channel
+      / feature / logit axis, since activation slices along such axis are i.i.d.
+      and the respective covariance along the respective pair of axes indeed
+      converges to a constant-diagonal matrix in the infinite width or infinite
+      `n_samples` limit.
+      Also related to "contracting dimensions" in XLA terms.
+      (https://www.tensorflow.org/xla/operation_semantics#dotgeneral)
+    diagonal_axes:
+      output axes to diagonalize the output kernel over, i.e. compute only the
+      diagonal of the covariance along the respective pair of axes (one pair for
+      each axis in `diagonal_axes`). This allows to save space and compute, if
+      off-diagonal values along these axes are not needed, but also improve
+      approximation accuracy if their limiting value is known theoretically,
+      e.g. if they vanish in the limit of interest (e.g. infinite
+      width or infinite `n_samples`). If you further know that on-diagonal
+      values converge to the same constant in your limit of interest, you should
+      specify these axes in `trace_axes` instead, to save even more compute and
+      gain even more accuracy. A common use case is computing the variance
+      (instead of covariance) along certain axes.
+      Also related to "batch dimensions" in XLA terms.
+      (https://www.tensorflow.org/xla/operation_semantics#dotgeneral)
 
   Returns:
     If `n_samples` is an integer, returns a function of signature
@@ -141,7 +197,7 @@ def monte_carlo_kernel_fn(init_fn: InitFn,
     >>> y_train = random.uniform(key1, (20, 10))
     >>> x_test = random.normal(key2, (5, 32, 32, 3))
     >>>
-    >>> init_fn, apply_fn, kernel_fn = stax.serial(
+    >>> init_fn, apply_fn, _ = stax.serial(
     >>>     stax.Conv(128, (3, 3)),
     >>>     stax.Relu(),
     >>>     stax.Conv(256, (3, 3)),
@@ -165,7 +221,9 @@ def monte_carlo_kernel_fn(init_fn: InitFn,
     >>>   print(n, kernel)
     >>>   # `kernel` is a tuple of NNGP and NTK MC estimate using `n` samples.
   """
-  kernel_fn = empirical.empirical_kernel_fn(apply_fn)
+  kernel_fn = empirical.empirical_kernel_fn(apply_fn,
+                                            trace_axes=trace_axes,
+                                            diagonal_axes=diagonal_axes)
 
   kernel_fn_sample_once = _sample_once_kernel_fn(kernel_fn,
                                                  init_fn,
@@ -174,12 +232,15 @@ def monte_carlo_kernel_fn(init_fn: InitFn,
                                                  store_on_device)
 
   n_samples, get_generator = _canonicalize_n_samples(n_samples)
-  kernel_fn = _sample_many_kernel_fn(kernel_fn_sample_once, key, n_samples,
+  kernel_fn = _sample_many_kernel_fn(kernel_fn_sample_once,
+                                     key,
+                                     n_samples,
                                      get_generator)
   return kernel_fn
 
 
-def _canonicalize_n_samples(n_samples):
+def _canonicalize_n_samples(
+    n_samples: Union[int, Iterable[int]]) -> Tuple[Set[int], bool]:
   get_generator = True
   if isinstance(n_samples, int):
     get_generator = False

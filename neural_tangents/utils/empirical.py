@@ -14,31 +14,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Compute the empirical NTK and approximate functions via Taylor series."""
+"""Compute empirical NNGP and NTK; approximate functions via Taylor series.
 
-from functools import partial
+NNGP and NTK are comuted using `empirical_nngp_fn`, `empirical_ntk_fn` (or
+`empirical_direct_ntk_fn`), or `empirical_kernel_fn` (for both).
+
+WARNING: resulting kernel shape is *nearly* `zip(f(x1).shape, f(x2).shape)`
+subject to `trace_axes` and `diagonal_axes` parameters, which make certain
+assumptions about the outputs `f(x)` that may only be true in the infinite width
+/ infinite number of samples limit, or may not apply to your architecture. For
+most precise results in the context of linearized training dynamics of a
+specific finite-width network, set both `trace_axes=()` and `diagonal_axes=()`
+to obtain the kernel exactly of shape `zip(f(x1).shape, f(x2).shape)`. Please
+refer to individual functions' docstrings for details.
+"""
+
 import operator
-
-from absl import flags
-from jax import random
+from typing import Union, Callable, Optional, Tuple, Dict
 from jax.api import eval_shape
 from jax.api import jacobian
 from jax.api import jvp
 from jax.api import vjp
-from jax.config import config
 import jax.numpy as np
 from jax.tree_util import tree_multimap
 from jax.tree_util import tree_reduce
-from neural_tangents.utils import flags as internal_flags
 from neural_tangents.utils import utils
-from neural_tangents.utils.typing import ApplyFn, EmpiricalKernelFn, PyTree
-from typing import Callable
-import numpy as onp
-
-config.parse_flags_with_absl()  # NOTE(schsam): Is this safe?
-
-
-FLAGS = flags.FLAGS
+from neural_tangents.utils.typing import \
+  ApplyFn, EmpiricalKernelFn, PyTree, PRNGKey, Axes
 
 
 def linearize(f: Callable[..., np.ndarray],
@@ -51,12 +53,15 @@ def linearize(f: Callable[..., np.ndarray],
     >>> mse = np.mean((f(new_params, x) - f_lin(new_params, x)) ** 2)
 
   Args:
-    f: A function that we would like to linearize. It should have the signature
-       `f(params, *args, **kwargs)` where params is a PyTree and `f` should
-       return an `np.ndarray`.
-    params: Initial parameters to the function that we would like to take the
-       Taylor series about. This can be any structure that is compatible
-       with the JAX tree operations.
+    f:
+      A function that we would like to linearize. It should have the signature
+      `f(params, *args, **kwargs)` where params is a `PyTree` and `f` should
+      return an `np.ndarray`.
+    params:
+      Initial parameters to the function that we would like to take the
+      Taylor series about. This can be any structure that is compatible with the
+      JAX tree operations.
+
   Returns:
     A function `f_lin(new_params, *args, **kwargs)` whose signature is the same
     as f. Here `f_lin` implements the first-order taylor series of `f` about
@@ -81,21 +86,22 @@ def taylor_expand(f: Callable[..., np.ndarray],
     >>> mse = np.mean((f(new_params, x) - f_tayl(new_params, x)) ** 2)
 
   Args:
-    f: A function that we would like to Taylor expand. It should have the
-      signature `f(params, *args, **kwargs)` where `params` is a PyTree, and
+    f:
+      `A function that we would like to Taylor expand. It should have the
+      signature `f(params, *args, **kwargs)` where `params` is a `PyTree`, and
       `f` returns a `np.ndarray`.
-    params: Initial parameters to the function that we would like to take the
-      Taylor series about. This can be any structure that is compatible
-      with the JAX tree operations.
-    degree: The degree of the Taylor expansion.
+    params:
+      Initial parameters to the function that we would like to take the Taylor
+      series about. This can be any structure that is compatible with the JAX
+      tree operations.
+    degree:
+      The degree of the Taylor expansion.
 
   Returns:
     A function `f_tayl(new_params, *args, **kwargs)` whose signature is the
     same as `f`. Here `f_tayl` implements the degree-order taylor series of `f`
     about `params`.
-
   """
-
   def taylorize_r(f, params, dparams, degree, current_degree):
     """Recursive function to accumulate contributions to the Taylor series."""
     if current_degree == degree:
@@ -119,68 +125,99 @@ def taylor_expand(f: Callable[..., np.ndarray],
 # Empirical Kernel
 
 
-def flatten_features(kernel: np.ndarray) -> np.ndarray:
-  """Flatten an empirical kernel."""
-  if kernel.ndim == 2:
-    return kernel
-  assert kernel.ndim % 2 == 0
-  half_shape = (kernel.ndim - 1) // 2
-  n1, n2 = kernel.shape[:2]
-  feature_size = int(onp.prod(kernel.shape[2 + half_shape:]))
-  transposition = ((0,) + tuple(i + 2 for i in range(half_shape)) +
-                   (1,) + tuple(i + 2 + half_shape for i in range(half_shape)))
-  kernel = np.transpose(kernel, transposition)
-  return np.reshape(kernel, (feature_size *  n1, feature_size * n2))
-
-
-def empirical_implicit_ntk_fn(f: ApplyFn) -> EmpiricalKernelFn:
-  """Computes the ntk without batching for inputs x1 and x2.
+def empirical_implicit_ntk_fn(f: ApplyFn,
+                              trace_axes: Axes = (-1,),
+                              diagonal_axes: Axes = ()
+                              ) -> EmpiricalKernelFn:
+  r"""Returns a function to draw a single sample the NTK of a given network `f`.
 
   The Neural Tangent Kernel is defined as :math:`J(X_1) J(X_2)^T` where
-  :math:`J` is the jacobian :math:`df / dparams^T`. Computing the NTK directly
+  :math:`J` is the Jacobian :math:`df / dparams^T`. Computing the NTK directly
   involves instantiating the jacobian which takes
   `O(dataset_size * output_dim * parameters)` memory. It turns out it is
   substantially more efficient (especially as the number of parameters grows)
   to compute the NTK implicitly.
 
   The implicit kernel is derived by observing that:
-    :math:`Theta = J(X_1) J(X_2)^T = d[J(X_1) J(X_2)^T v] / d[v^T]`,
+  :math:`\Theta = J(X_1) J(X_2)^T = d[J(X_1) J(X_2)^T v] / d[v^T]`,
   for a vector :math:`v`. This allows the computation of the NTK to be phrased
   as: :math:`a(v) = J(X_2)^T v`, which is computed by a vector-Jacobian product;
   :math:`b(v) = J(X_1) a(v)` which is computed by a Jacobian-vector product; and
-  :math:`Theta = d[b(v)] / d[v^T]` which is computed by taking the Jacobian of
+  :math:`\Theta = d[b(v)] / d[v^T]` which is computed by taking the Jacobian of
   :math:`b(v)`.
 
   Args:
-    f: The function whose NTK we are computing. `f` should have the signature
-      `f(params, inputs)` and should return an `np.ndarray` of outputs with
-      shape `[|inputs|, output_dim]`.
-  Returns:
-    A function ntk_fn that computes the empirical ntk.
-  """
+    f:
+      the function whose NTK we are computing. `f` should have the signature
+      `f(params, inputs[, rng])` and should return `np.ndarray` of outputs.
+    trace_axes:
+      output axes to trace the output kernel over, i.e. compute only the trace
+      of the covariance along the respective pair of axes (one pair for each
+      axis in `trace_axes`). This allows to save space and compute if you are
+      only interested in the respective trace, but also improve approximation
+      accuracy if you know that covariance along these pairs of axes converges
+      to a `constant * identity matrix` in the limit of interest (e.g.
+      infinite width or infinite `n_samples`). A common use case is the channel
+      / feature / logit axis, since activation slices along such axis are i.i.d.
+      and the respective covariance along the respective pair of axes indeed
+      converges to a constant-diagonal matrix in the infinite width or infinite
+      `n_samples` limit.
+      Also related to "contracting dimensions" in XLA terms.
+      (https://www.tensorflow.org/xla/operation_semantics#dotgeneral)
+    diagonal_axes:
+      output axes to diagonalize the output kernel over, i.e. compute only the
+      diagonal of the covariance along the respective pair of axes (one pair for
+      each axis in `diagonal_axes`). This allows to save space and compute, if
+      off-diagonal values along these axes are not needed, but also improve
+      approximation accuracy if their limiting value is known theoretically,
+      e.g. if they vanish in the limit of interest (e.g. infinite
+      width or infinite `n_samples`). If you further know that on-diagonal
+      values converge to the same constant in your limit of interest, you should
+      specify these axes in `trace_axes` instead, to save even more compute and
+      gain even more accuracy. A common use case is computing the variance
+      (instead of covariance) along certain axes.
+      Also related to "batch dimensions" in XLA terms.
+      (https://www.tensorflow.org/xla/operation_semantics#dotgeneral)
 
-  def ntk_fn(x1, x2, params, keys=None, **apply_fn_kwargs):
-    """Computes the empirical ntk.
+  Returns:
+    A function `ntk_fn` that computes the empirical ntk.
+  """
+  def ntk_fn(x1: np.ndarray,
+             x2: Optional[np.ndarray],
+             params: PyTree,
+             keys: Union[PRNGKey,
+                         Tuple[PRNGKey, PRNGKey],
+                         np.ndarray] = None,
+             **apply_fn_kwargs) -> np.ndarray:
+    """Computes a single sample of the empirical NTK (implicit differentiation).
 
     Args:
-      x1: A first `np.ndarray` of inputs, of shape [n1, ...], over which we
-        would like to compute the NTK.
-      x2: A second `np.ndarray` of inputs, of shape [n2, ...], over which we
-        would like to compute the NTK.
-      params: A PyTree of parameters about which we would like to compute the
+      x1:
+        first batch of inputs.
+      x2:
+        second batch of inputs. `x2=None` means `x2=x1`. `f(x2)` must have a
+        matching shape with `f(x1)` on `trace_axes` and `diagonal_axes`.
+      params:
+        A `PyTree` of parameters about which we would like to compute the
         neural tangent kernel.
-      keys: None or a PRNG key or a tuple of PRNG keys or a (2, 2) array and
-        dtype uint32. If `key == None`, then the function `f` is deterministic
-        and requires no PRNG key; else if `keys` is a single PRNG key, then x1
-        and x2 must be the same and share the same PRNG key; else x1 and x2 use
-        two different PRNG keys.
-      **apply_fn_kwargs: keyword arguments passed to `apply_fn`.
+      keys:
+        `None` or a PRNG key or a tuple of PRNG keys or a (2, 2) array of
+        dtype `uint32`. If `key=None`, then the function `f` is deterministic
+        and requires no PRNG key; else if `keys` is a single PRNG key, then `x1`
+        and `x2` must be the same and share the same PRNG key; else `x1` and
+        `x2` use two different PRNG keys.
+      **apply_fn_kwargs:
+        keyword arguments passed to `apply_fn`.
 
     Returns:
-      A `np.ndarray` of shape [n1, n2] + output_shape + output_shape.
+      A single sample of the empirical NTK. The shape of the kernel is "almost"
+      `zip(f(x1).shape, f(x2).shape)` except for:
+      1) `trace_axes` are absent as they are contracted over.
+      2) `diagonal_axes` are present only once.
+      All other axes are present twice.
     """
     key1, key2 = _read_keys(keys)
-    # TODO: find a good way to check utils.x1_is_x2(x1, x2) == (key1==key2)
+    # TODO(xlc): find a good way to check utils.x1_is_x2(x1, x2) == (key1==key2)
     if x2 is None:
       x2 = x1
 
@@ -200,56 +237,101 @@ def empirical_implicit_ntk_fn(f: ApplyFn) -> EmpiricalKernelFn:
     fx_dummy = np.ones(fx2_struct.shape, fx2_struct.dtype)
 
     ntk = jacobian(delta_vjp_jvp)(fx_dummy)
-    ndim = len(fx2_struct.shape)
-    ordering = (0, ndim) + tuple(range(1, ndim)) + \
-       tuple(x + ndim for x in range(1, ndim))
-    return np.transpose(ntk, ordering)
+    return _index_and_contract(ntk, trace_axes, diagonal_axes)
 
   return ntk_fn
 
 
-def empirical_direct_ntk_fn(f: ApplyFn) -> EmpiricalKernelFn:
-  """Computes the ntk without batching for inputs x1 and x2.
+def empirical_direct_ntk_fn(f: ApplyFn,
+                            trace_axes: Axes = (-1,),
+                            diagonal_axes: Axes = ()
+                            ) -> EmpiricalKernelFn:
+  """Returns a function to draw a single sample the NTK of a given network `f`.
 
   The Neural Tangent Kernel is defined as :math:`J(X_1) J(X_2)^T` where
-  :math:`J` is the jacobian :math:`df/dparams`.
+  :math:`J` is the Jacobian :math:`df/dparams`. This function instatiates the
+  Jacobians directly and computes their outer product.
 
   Args:
-    :f: The function whose NTK we are computing. `f` should have the signature
-     `f(params, inputs)` and should return an `np.ndarray` of outputs with shape
-     `[|inputs|, output_dim]`.
+    f:
+      the function whose NTK we are computing. `f` should have the signature
+      `f(params, inputs[, rng])` and should return an `np.ndarray` outputs.
+    trace_axes:
+      output axes to trace the output kernel over, i.e. compute only the trace
+      of the covariance along the respective pair of axes (one pair for each
+      axis in `trace_axes`). This allows to save space and compute if you are
+      only interested in the respective trace, but also improve approximation
+      accuracy if you know that covariance along these pairs of axes converges
+      to a `constant * identity matrix` in the limit of interest (e.g.
+      infinite width or infinite `n_samples`). A common use case is the channel
+      / feature / logit axis, since activation slices along such axis are i.i.d.
+      and the respective covariance along the respective pair of axes indeed
+      converges to a constant-diagonal matrix in the infinite width or infinite
+      `n_samples` limit.
+      Also related to "contracting dimensions" in XLA terms.
+      (https://www.tensorflow.org/xla/operation_semantics#dotgeneral)
+    diagonal_axes:
+      output axes to diagonalize the output kernel over, i.e. compute only the
+      diagonal of the covariance along the respective pair of axes (one pair for
+      each axis in `diagonal_axes`). This allows to save space and compute, if
+      off-diagonal values along these axes are not needed, but also improve
+      approximation accuracy if their limiting value is known theoretically,
+      e.g. if they vanish in the limit of interest (e.g. infinite
+      width or infinite `n_samples`). If you further know that on-diagonal
+      values converge to the same constant in your limit of interest, you should
+      specify these axes in `trace_axes` instead, to save even more compute and
+      gain even more accuracy. A common use case is computing the variance
+      (instead of covariance) along certain axes.
+      Also related to "batch dimensions" in XLA terms.
+      (https://www.tensorflow.org/xla/operation_semantics#dotgeneral)
 
   Returns:
     A function `ntk_fn` that computes the empirical ntk.
   """
-  def sum_and_contract(j1, j2):
+  def sum_and_contract(j1, j2, output_ndim):
+    _diagonal_axes = utils.canonicalize_axis(diagonal_axes, output_ndim)
+    _trace_axes = utils.canonicalize_axis(trace_axes, output_ndim)
+
     def contract(x, y):
-      param_count = int(onp.prod(x.shape[2:]))
-      x = np.reshape(x, x.shape[:2] + (param_count,))
-      y = np.reshape(y, y.shape[:2] + (param_count,))
-      return np.dot(x, np.transpose(y, (0, 2, 1)))
+      param_axes = list(range(x.ndim))[output_ndim:]
+      contract_axes = _trace_axes + param_axes
+      return utils.dot_general(x, y, contract_axes, _diagonal_axes)
 
     return tree_reduce(operator.add, tree_multimap(contract, j1, j2))
 
-  def ntk_fn(x1, x2, params, keys=None, **apply_fn_kwargs):
-    """Computes the empirical ntk.
+  def ntk_fn(x1: np.ndarray,
+             x2: Optional[np.ndarray],
+             params: PyTree,
+             keys: Union[PRNGKey,
+                         Tuple[PRNGKey, PRNGKey],
+                         np.ndarray] = None,
+             **apply_fn_kwargs) -> np.ndarray:
+    """Computes a single sample of the empirical NTK (jacobian outer product).
 
     Args:
-      x1: A first `np.ndarray` of inputs, of shape [n1, ...], over which we
-        would like to compute the NTK.
-      x2: A second `np.ndarray` of inputs, of shape [n2, ...], over which we
-        would like to compute the NTK.
-      params: A PyTree of parameters about which we would like to compute the
+      x1:
+        first batch of inputs.
+      x2:
+        second batch of inputs. `x2=None` means `x2=x1`. `f(x2)` must have a
+        matching shape with `f(x1)` on `trace_axes` and `diagonal_axes`.
+      params:
+        A `PyTree` of parameters about which we would like to compute the
         neural tangent kernel.
-      keys: None or a PRNG key or a tuple of PRNG keys or a (2, 2) array and
-        dtype uint32. If `key == None`, then the function `f` is deterministic
-        and requires no PRNG key; else if `keys` is a single PRNG key, then x1
-        and x2 share the same PRNG key; else x1 and x2 use two different PRNG
-        keys.
-      **apply_fn_kwargs: keyword arguments passed to `apply_fn`.
+      keys:
+        `None` or a PRNG key or a tuple of PRNG keys or a (2, 2) array of
+        dtype `uint32`. If `key=None`, then the function `f` is deterministic
+        and requires no PRNG key; else if `keys` is a single PRNG key, then `x1`
+        and `x2` must be the same and share the same PRNG key; else `x1` and
+        `x2` use two different PRNG keys.
+      **apply_fn_kwargs:
+        keyword arguments passed to `apply_fn`.
 
     Returns:
-      A `np.ndarray` of shape [n1, n2] + output_shape + output_shape.
+      A single sample of the empirical NTK. The shape of the kernel is "almost"
+      `zip(f(x1).shape, f(x2).shape)` except for:
+      1) `trace_axes` are absent as they are contracted over.
+      2) `diagonal_axes` are present only once.
+      All other axes are present twice.
     """
     key1, key2 = _read_keys(keys)
 
@@ -263,67 +345,90 @@ def empirical_direct_ntk_fn(f: ApplyFn) -> EmpiricalKernelFn:
       jac_fn2 = jacobian(f2)
       j2 = jac_fn2(params)
 
-    ntk = sum_and_contract(j1, j2)
-    # TODO: If we care, this will not work if the output is not of
-    # shape [n, output_dim].
-    return np.transpose(ntk, (0, 2, 1, 3))
+    fx1 = eval_shape(f1, params)
+    ntk = sum_and_contract(j1, j2, fx1.ndim)
+    return ntk / utils.size_at(fx1, trace_axes)
 
   return ntk_fn
 
 
-empirical_ntk_fn = (empirical_implicit_ntk_fn
-                    if FLAGS.tangents_optimized else
-                    empirical_direct_ntk_fn)
+empirical_ntk_fn = empirical_implicit_ntk_fn
 
 
-def empirical_nngp_fn(f: ApplyFn) -> EmpiricalKernelFn:
+def empirical_nngp_fn(f: ApplyFn,
+                      trace_axes: Axes = (-1,),
+                      diagonal_axes: Axes = ()
+                      ) -> EmpiricalKernelFn:
   """Returns a function to draw a single sample the NNGP of a given network `f`.
 
-  This method assumes that slices of the random network outputs along the last
-  dimension are i.i.d. (which is true for e.g. classifiers with a dense
-  readout layer, or true for outputs of a CNN layer with the `NHWC` data
-  format. As a result it treats outputs along that dimension as independent
-  samples and only reports covariance along other dimensions.
-
-  Note that the `ntk_monte_carlo` makes no such assumption and returns the full
-  covariance.
-
   Args:
-    :f: a function computing the output of the neural network.
-      From `jax.experimental.stax`: "takes params, inputs, and an rng key and
-      applies the layer".
+    f:
+      the function whose NTK we are computing. `f` should have the signature
+      `f(params, inputs[, rng])` and should return an `np.ndarray` outputs.
+    trace_axes:
+      output axes to trace the output kernel over, i.e. compute only the trace
+      of the covariance along the respective pair of axes (one pair for each
+      axis in `trace_axes`). This allows to save space and compute if you are
+      only interested in the respective trace, but also improve approximation
+      accuracy if you know that covariance along these pairs of axes converges
+      to a `constant * identity matrix` in the limit of interest (e.g.
+      infinite width or infinite `n_samples`). A common use case is the channel
+      / feature / logit axis, since activation slices along such axis are i.i.d.
+      and the respective covariance along the respective pair of axes indeed
+      converges to a constant-diagonal matrix in the infinite width or infinite
+      `n_samples` limit.
+      Also related to "contracting dimensions" in XLA terms.
+      (https://www.tensorflow.org/xla/operation_semantics#dotgeneral)
+    diagonal_axes:
+      output axes to diagonalize the output kernel over, i.e. compute only the
+      diagonal of the covariance along the respective pair of axes (one pair for
+      each axis in `diagonal_axes`). This allows to save space and compute, if
+      off-diagonal values along these axes are not needed, but also improve
+      approximation accuracy if their limiting value is known theoretically,
+      e.g. if they vanish in the limit of interest (e.g. infinite
+      width or infinite `n_samples`). If you further know that on-diagonal
+      values converge to the same constant in your limit of interest, you should
+      specify these axes in `trace_axes` instead, to save even more compute and
+      gain even more accuracy. A common use case is computing the variance
+      (instead of covariance) along certain axes.
+      Also related to "batch dimensions" in XLA terms.
+      (https://www.tensorflow.org/xla/operation_semantics#dotgeneral)
 
   Returns:
      A function to draw a single sample the NNGP of a given network `f`.
   """
-  def nngp_fn(x1, x2, params, keys=None, **apply_fn_kwargs):
-    """Sample a single NNGP of a given network `f` on given inputs and `params`.
-
-    This method assumes that slices of the random network outputs along the last
-    dimension are i.i.d. (which is true for e.g. classifiers with a dense
-    readout layer, or true for outputs of a CNN layer with the `NHWC` data
-    format. As a result it treats outputs along that dimension as independent
-    samples and only reports covariance along other dimensions.
-
-    Note that the `ntk` method makes no such assumption and returns the full
-    covariance.
+  def nngp_fn(x1: np.ndarray,
+              x2: Optional[np.ndarray],
+              params: PyTree,
+              keys: Union[PRNGKey,
+                          Tuple[PRNGKey, PRNGKey],
+                          np.ndarray] = None,
+              **apply_fn_kwargs) -> np.ndarray:
+    """Computes a single sample of the empirical NNGP.
 
     Args:
-      x1: a `np.ndarray` of shape `[batch_size_1] + input_shape`.
-      x2: an optional `np.ndarray` with shape `[batch_size_2] + input_shape`.
-        `None` means `x2 == x1`.
-      params: A PyTree of parameters about which we would like to compute the
-        NNGP.
-      keys: None or a PRNG key or a tuple of PRNG keys or a (2, 2) array and
-        dtype uint32. If `key == None`, then the function `f` is deterministic
-        and requires no PRNG key; else if `keys` is a single PRNG key, then x1
-        and x2 share the same PRNG key; else x1 and x2 use two different PRNG
-        keys.
-      **apply_fn_kwargs: keyword arguments passed to `apply_fn`.
+      x1:
+        first batch of inputs.
+      x2:
+        second batch of inputs. `x2=None` means `x2=x1`. `f(x2)` must have a
+        matching shape with `f(x1)` on `trace_axes` and `diagonal_axes`.
+      params:
+        A `PyTree` of parameters about which we would like to compute the
+        neural tangent kernel.
+      keys: `None` or a PRNG key or a tuple of PRNG keys or a (2, 2) array of
+        dtype `uint32`. If `key=None`, then the function `f` is deterministic
+        and requires no PRNG key; else if `keys` is a single PRNG key, then `x1`
+        and `x2` must be the same and share the same PRNG key; else `x1` and
+        `x2` use two different PRNG keys.
+      **apply_fn_kwargs:
+        keyword arguments passed to `apply_fn`.
 
     Returns:
-      A Monte Carlo estimate of the NNGP, a `np.ndarray` of shape
-      `[batch_size_1] + output_shape[:-1] + [batch_size_2] + output_shape[:-1]`.
+      A single sample of the empirical NNGP. The shape of the kernel is "almost"
+      `zip(f(x1).shape, f(x2).shape)` except for:
+      1) `trace_axes` are absent as they are contracted over.
+      2) `diagonal_axes` are present only once.
+      All other axes are present twice.
     """
     key1, key2 = _read_keys(keys)
 
@@ -338,42 +443,101 @@ def empirical_nngp_fn(f: ApplyFn) -> EmpiricalKernelFn:
     else:
       out2 = output(x2, key2)
 
-    out2 = np.expand_dims(out2, -1)
-    nngp_12 = np.dot(out1, out2) / out1.shape[-1]
-    return np.squeeze(nngp_12, -1)
+    dot = utils.dot_general(out1, out2, trace_axes, diagonal_axes)
+    return dot / utils.size_at(out1, trace_axes)
 
   return nngp_fn
 
 
-def empirical_kernel_fn(f: ApplyFn) -> EmpiricalKernelFn:
-  """Returns a function that computes single draws from NNGP and NT kernels."""
+def empirical_kernel_fn(f: ApplyFn,
+                        trace_axes: Axes = (-1,),
+                        diagonal_axes: Axes = ()
+                        ) -> EmpiricalKernelFn:
+  """Returns a function that computes single draws from NNGP and NT kernels.
 
+  Args:
+    f:
+      the function whose NTK we are computing. `f` should have the signature
+      `f(params, inputs[, rng])` and should return an `np.ndarray` outputs.
+    trace_axes:
+      output axes to trace the output kernel over, i.e. compute only the trace
+      of the covariance along the respective pair of axes (one pair for each
+      axis in `trace_axes`). This allows to save space and compute if you are
+      only interested in the respective trace, but also improve approximation
+      accuracy if you know that covariance along these pairs of axes converges
+      to a `constant * identity matrix` in the limit of interest (e.g.
+      infinite width or infinite `n_samples`). A common use case is the channel
+      / feature / logit axis, since activation slices along such axis are i.i.d.
+      and the respective covariance along the respective pair of axes indeed
+      converges to a constant-diagonal matrix in the infinite width or infinite
+      `n_samples` limit.
+      Also related to "contracting dimensions" in XLA terms.
+      (https://www.tensorflow.org/xla/operation_semantics#dotgeneral)
+    diagonal_axes:
+      output axes to diagonalize the output kernel over, i.e. compute only the
+      diagonal of the covariance along the respective pair of axes (one pair for
+      each axis in `diagonal_axes`). This allows to save space and compute, if
+      off-diagonal values along these axes are not needed, but also improve
+      approximation accuracy if their limiting value is known theoretically,
+      e.g. if they vanish in the limit of interest (e.g. infinite
+      width or infinite `n_samples`). If you further know that on-diagonal
+      values converge to the same constant in your limit of interest, you should
+      specify these axes in `trace_axes` instead, to save even more compute and
+      gain even more accuracy. A common use case is computing the variance
+      (instead of covariance) along certain axes.
+      Also related to "batch dimensions" in XLA terms.
+      (https://www.tensorflow.org/xla/operation_semantics#dotgeneral)
+
+  Returns:
+    A function to draw a single sample the NNGP and NTK empirical kernels of a
+    given network `f`.
+  """
   kernel_fns = {
-      'nngp': empirical_nngp_fn(f),
-      'ntk': empirical_ntk_fn(f)
+      'nngp': empirical_nngp_fn(f, trace_axes, diagonal_axes),
+      'ntk': empirical_ntk_fn(f, trace_axes, diagonal_axes)
   }
 
   @utils.get_namedtuple('EmpiricalKernel')
-  def kernel_fn(x1, x2, params, get=None, keys=None, **apply_fn_kwargs):
-    """Returns a draw from the requested empirical kernels.
+  def kernel_fn(x1: np.ndarray,
+                x2: Optional[np.ndarray],
+                params: PyTree,
+                get: Union[None, str, Tuple[str, ...]],
+                keys: Union[PRNGKey,
+                            Tuple[PRNGKey, PRNGKey],
+                            np.ndarray] = None,
+                **apply_fn_kwargs) -> Dict[str, np.ndarray]:
+    """Computes a single sample of the empirical kernel of type `get`.
 
     Args:
-      x1: An ndarray of shape [n1,] + input_shape.
-      x2: An ndarray of shape [n2,] + input_shape.
-      params: A PyTree of parameters for the function `f`.
-      get: either None, a string, a tuple of strings specifying which data
-        should be returned by the kernel function. Can be "nngp" or "ntk". If
-        `None` then both "nngp" and "ntk" are returned.
-      keys: None or a PRNG key or a tuple of PRNG keys or a (2, 2) array and
-        dtype uint32. If `key == None`, then the function `f` is deterministic
-        and requires no PRNG key; else if `keys` is a single PRNG key, then x1
-        and x2 share the same PRNG key; else x1 and x2 use two different PRNG
-        keys.
-      **apply_fn_kwargs: keyword arguments passed to `apply_fn`.
+      x1:
+        first batch of inputs.
+      x2:
+        second batch of inputs. `x2=None` means `x2=x1`. `f(x2)` must have a
+        matching shape with `f(x1)` on `trace_axes` and `diagonal_axes`.
+      params:
+        A `PyTree` of parameters about which we would like to compute the
+        neural tangent kernel.
+      get:
+        type of the empirical kernel. `get=None` means `get=("nngp", "ntk")`.
+        Can be a string (`"nngp"`) or a tuple of strings (`("ntk", "nngp")`).
+      keys:
+        `None` or a PRNG key or a tuple of PRNG keys or a (2, 2) array of
+        dtype `uint32`. If `key=None`, then the function `f` is deterministic
+        and requires no PRNG key; else if `keys` is a single PRNG key, then `x1`
+        and `x2` must be the same and share the same PRNG key; else `x1` and
+        `x2` use two different PRNG keys.
+      **apply_fn_kwargs:
+        keyword arguments passed to `apply_fn`.
 
     Returns:
+      A single sample of the empirical kernel. The shape is "almost"
+      `zip(f(x1).shape, f(x2).shape)` except for:
+      1) `trace_axes` are absent as they are contracted over.
+      2) `diagonal_axes` are present only once.
+      All other axes are present twice.
+
       If `get` is a string, returns the requested `np.ndarray`. If `get` is a
-      tuple, returns an `EmpiricalKernel` namedtuple containing only the
+      tuple, returns an `EmpiricalKernel` namedtuple containing the
       requested information.
     """
     if get is None:
@@ -387,8 +551,18 @@ def empirical_kernel_fn(f: ApplyFn) -> EmpiricalKernelFn:
 # INTERNAL UTILITIES
 
 
-def _read_keys(keys):
-  if keys is None or (isinstance(keys, np.ndarray) and keys.shape == (2,)):
+def _get_f_params(f, x, rng, **apply_fn_kwargs):
+  def _f(p):
+    out = f(p, x, rng=rng, **apply_fn_kwargs)
+    # TODO(romann): normalize properly if output is masked.
+    out = utils.get_masked_array(out)
+    return out.masked_value
+  return _f
+
+
+def _read_keys(keys: Union[None, PRNGKey, Tuple[PRNGKey, PRNGKey]]
+              ) -> Tuple[Optional[PRNGKey], Optional[PRNGKey]]:
+  if keys is None or (hasattr(keys, 'shape') and keys.shape == (2,)):
     key1 = key2 = keys
   elif isinstance(keys, tuple):
     # assuming x1 and x2 using key1 and key2, resp.
@@ -397,15 +571,33 @@ def _read_keys(keys):
     key1, key2 = keys[0], keys[1]
   else:
     raise ValueError('`keys` must be one of the following: `None`, a PRNG '
-                     'key, a tuple of PRNG keys or a (2, 2) array and dtype '
-                     'unint32')
+                     'key, a tuple of PRNG keys or a `(2, 2)` array of dtype '
+                     '`unint32`.')
   return key1, key2
 
 
-def _get_f_params(f, x, rng, **apply_fn_kwargs):
-  def _f(p):
-    out = f(p, x, rng=rng, **apply_fn_kwargs)
-    # TODO(romann): normalize properly if output is masked.
-    out = utils.get_masked_array(out)
-    return out.masked_value
-  return _f
+def _index_and_contract(ntk: np.ndarray,
+                        trace_axes: Axes,
+                        diagonal_axes: Axes) -> np.ndarray:
+  if ntk.ndim % 2 == 1:
+    raise ValueError('Expected an even-dimensional kernel. Please file a bug at'
+                     'https://github.com/google/neural-tangents/issues/new')
+
+  output_ndim = ntk.ndim // 2
+  trace_axes = utils.canonicalize_axis(trace_axes, output_ndim)
+  diagonal_axes = utils.canonicalize_axis(diagonal_axes, output_ndim)
+  n_marg = len(diagonal_axes)
+  contract_size = utils.size_at(ntk.shape[:output_ndim], trace_axes)
+
+  shrink = 0
+  for c in reversed(trace_axes):
+    ntk = np.trace(ntk, axis1=c, axis2=output_ndim + c - shrink)
+    shrink += 1
+
+  for i, d in enumerate(diagonal_axes):
+    ntk = np.diagonal(ntk, axis1=d - i, axis2=output_ndim + d - shrink - 2 * i)
+
+  ntk = utils.zip_axes(ntk, 0, ntk.ndim - n_marg)
+  res_diagonal_axes = utils.get_res_batch_dims(trace_axes, diagonal_axes)
+  ntk = np.moveaxis(ntk, range(-n_marg, 0), res_diagonal_axes)
+  return ntk / contract_size

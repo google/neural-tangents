@@ -18,7 +18,7 @@
 
 from functools import partial
 import warnings
-from jax.api import device_get
+from jax.api import device_put, devices
 from jax.api import jit
 from jax.api import pmap
 from jax.interpreters.pxla import ShardedDeviceArray
@@ -32,7 +32,7 @@ from neural_tangents.utils import utils
 import numpy as onp
 
 
-def _scan(f, init, xs, store_on_device):
+def _scan(f, init, xs):
   """Implements an unrolled version of scan.
 
   Based on `jax.lax.scan` and has an identical API.
@@ -42,15 +42,13 @@ def _scan(f, init, xs, store_on_device):
   out for lax.scan when issue #1273 and related have been resolved.
   """
 
-  stack = np.stack if store_on_device else jit(np.stack, backend='cpu')
-
   carry = init
   ys = []
   for x in xs:
     carry, y = f(carry, x)
     ys += [y]
 
-  return carry, tree_multimap(lambda *y: stack(y), *ys)
+  return carry, tree_multimap(lambda *y: np.stack(y), *ys)
 
 
 def _flatten_batch_dimensions(k, discard_axis=None):
@@ -75,10 +73,7 @@ def _flatten_batch_dimensions(k, discard_axis=None):
                        k.shape[2] * k.shape[3]) + k.shape[4:])
 
 
-def _flatten_kernel_dict(k_dict, x2_is_none, store_on_device, is_parallel):
-  fl = (_flatten_batch_dimensions if store_on_device else
-      jit(_flatten_batch_dimensions, static_argnums=(1,), backend='cpu'))
-
+def _flatten_kernel_dict(k_dict, x2_is_none, is_parallel):
   if 'nngp' in k_dict:
     # We only use `batch_size` to compute `shape1` and `shape2` for the batch.
     # This only happens if k_dict came from a `Kernel` in which case it must
@@ -94,13 +89,13 @@ def _flatten_kernel_dict(k_dict, x2_is_none, store_on_device, is_parallel):
 
   for key, value in k_dict.items():
     if key == 'cov1':
-      k_dict[key] = fl(value, 1)
+      k_dict[key] = _flatten_batch_dimensions(value, 1)
 
     elif key == 'cov2':
       if x2_is_none:
         k_dict[key] = None
       else:
-        k_dict[key] = fl(value, 0)
+        k_dict[key] = _flatten_batch_dimensions(value, 0)
 
     elif key == 'x1_is_x2':
       k_dict[key] = value[(0,) * value.ndim]
@@ -109,13 +104,13 @@ def _flatten_kernel_dict(k_dict, x2_is_none, store_on_device, is_parallel):
       if value is None:
         k_dict[key] = None
       else:
-        k_dict[key] = fl(value, 1)
+        k_dict[key] = _flatten_batch_dimensions(value, 1)
 
     elif key == 'mask2':
       if value is None or x2_is_none:
         k_dict[key] = None
       else:
-        k_dict[key] = fl(value, 0)
+        k_dict[key] = -_flatten_batch_dimensions(value, 0)
 
     elif key in ('shape1', 'shape2'):
       if key == 'shape2' and is_parallel:
@@ -126,21 +121,20 @@ def _flatten_kernel_dict(k_dict, x2_is_none, store_on_device, is_parallel):
                      (shape[batch_axis] * batch_size[key[-1]],) +
                      shape[batch_axis + 1:])
     elif isinstance(k_dict[key], np.ndarray):
-      k_dict[key] = fl(value, None)
+      k_dict[key] = _flatten_batch_dimensions(value, None)
     else:
       pass
   return k_dict
 
 
-def _flatten_kernel(k, x2_is_none, store_on_device, is_parallel):
+def _flatten_kernel(k, x2_is_none, is_parallel):
   """Flattens a kernel array or a `Kernel` along the batch dimension."""
   if hasattr(k, '_asdict'):
-    return k._replace(**_flatten_kernel_dict(
-        k._asdict(), x2_is_none, store_on_device, is_parallel))
+    return k._replace(**_flatten_kernel_dict(k._asdict(), x2_is_none,
+                                             is_parallel))
 
   if isinstance(k, Kernel):
-    return Kernel(**_flatten_kernel_dict(
-        k.asdict(), x2_is_none, store_on_device, is_parallel))
+    return Kernel(**_flatten_kernel_dict(k.asdict(), x2_is_none, is_parallel))
 
   if isinstance(k, np.ndarray):
     return _flatten_batch_dimensions(k)
@@ -214,11 +208,9 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
     _kernel_fn = kernel_fn
     @utils.wraps(_kernel_fn)
     def kernel_fn(x1, x2=None, *args, **kwargs):
-      return device_get(_kernel_fn(x1, x2, *args, **kwargs))
+      return device_put(_kernel_fn(x1, x2, *args, **kwargs), devices('cpu')[0])
 
-  flatten = partial(_flatten_kernel,
-                    store_on_device=store_on_device,
-                    is_parallel=False)
+  flatten = partial(_flatten_kernel, is_parallel=False)
 
   def serial_fn_x1(x1, x2=None, *args, **kwargs):
     # TODO(xlc): Make batch + dropout work reasonably well.
@@ -241,12 +233,12 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
     x2s = np.reshape(x2, (n2_batches, n2_batch_size,) + input_shape)
 
     def row_fn(_, x1):
-      return _, _scan(col_fn, x1, x2s, store_on_device)[1]
+      return _, _scan(col_fn, x1, x2s)[1]
 
     def col_fn(x1, x2):
       return x1, kernel_fn(x1, x2, *args, **kwargs)
 
-    _, kernel = _scan(row_fn, 0, x1s, store_on_device)
+    _, kernel = _scan(row_fn, 0, x1s)
     return flatten(kernel, x2_is_none)
 
   def serial_fn_kernel(kernel, *args, **kwargs):
@@ -260,7 +252,7 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
     n2s = np.arange(0, n2, n2_batch_size)
 
     def row_fn(_, n1):
-      return _, _scan(col_fn, n1, n2s, store_on_device)[1]
+      return _, _scan(col_fn, n1, n2s)[1]
 
     def col_fn(n1, n2):
       # NOTE(schsam): If we end up wanting to enable jit-of-batch then we will
@@ -271,7 +263,7 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
       return n1, kernel_fn(in_kernel, *args, **kwargs)
 
     cov2_is_none = kernel.cov2 is None
-    _, kernel = _scan(row_fn, 0, n1s, store_on_device)
+    _, kernel = _scan(row_fn, 0, n1s)
     if cov2_is_none:
       kernel = kernel.replace(cov2=None)
     return flatten(kernel, cov2_is_none)
@@ -345,7 +337,7 @@ def _parallel(kernel_fn, device_count=-1):
 
     x1 = np.reshape(x1, (_device_count, n1_per_device,) + input_shape)
     kernel = kernel_fn(x1, x2, *args, **kwargs)
-    return _flatten_kernel(kernel, x2_is_none, True, True)
+    return _flatten_kernel(kernel, x2_is_none, True)
 
   def parallel_fn_kernel(kernel, *args, **kwargs):
     n1 = kernel.cov1.shape[0]
@@ -366,7 +358,7 @@ def _parallel(kernel_fn, device_count=-1):
     kernel = kernel_fn(kernel, *args, **kwargs)
     if cov2_is_none:
       kernel = kernel.replace(cov2=None)
-    return _flatten_kernel(kernel, cov2_is_none, True, True)
+    return _flatten_kernel(kernel, cov2_is_none, True)
 
   @utils.wraps(kernel_fn)
   def parallel_fn(x1_or_kernel, x2=None, *args, **kwargs):
@@ -387,18 +379,18 @@ def batch(kernel_fn, batch_size=0, device_count=-1, store_on_device=True):
   """Returns a function that computes a kernel in batches over all devices.
 
   Args:
-    :kernel_fn: A function that computes a kernel between two datasets,
+    kernel_fn: A function that computes a kernel between two datasets,
       `kernel_fn(x1, x2)`. Here `x1` and `x2` are `np.ndarray`s of floats of
       shape `[n1,] + input_shape` and `[n2,] + input_shape`. The kernel
       function should return a PyTree.
-    :batch_size: Integer specifying the size of each batch that gets processed
+    batch_size: Integer specifying the size of each batch that gets processed
       per physical device. Because we parallelize the computation over columns
       it should be the case that `|x1|` is divisible by
       device_count * batch_size and `|x2|` is divisible by batch_size.
-    :device_count: Integer specifying the number of physical devices to be
+    device_count: Integer specifying the number of physical devices to be
       mapped over. If device_count = -1 all devices are used. If
       device_count = 0, no device parallelism is used.
-    :store_on_device: A boolean that species whether the computed kernel should
+    store_on_device: A boolean that species whether the computed kernel should
       be kept on device or brought back to CPU as it is computed. Defaults to
       True.
 

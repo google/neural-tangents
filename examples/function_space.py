@@ -1,3 +1,5 @@
+# Lint as: python3
+
 # Copyright 2019 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -72,7 +74,7 @@ def main(unused_argv):
   ntk = nt.batch(nt.empirical_ntk_fn(apply_fn), batch_size=4, device_count=0)
   g_dd = ntk(x_train, None, params)
   g_td = ntk(x_test, x_train, params)
-  predictor = nt.predict.gradient_descent_mse(g_dd, y_train, g_td)
+  predictor = nt.predict.gradient_descent_mse(g_dd, y_train)
 
   # Get initial values of the network in function space.
   fx_train = apply_fn(params, x_train)
@@ -88,11 +90,13 @@ def main(unused_argv):
 
   # Get predictions from analytic computation.
   print('Computing analytic prediction.')
-  fx_train, fx_test = predictor(FLAGS.train_time, fx_train, fx_test)
+  fx_train, fx_test = predictor(FLAGS.train_time, fx_train, fx_test, g_td)
 
   # Print out summary data comparing the linear / nonlinear model.
-  util.print_summary('train', y_train, apply_fn(params, x_train), fx_train, loss)
-  util.print_summary('test', y_test, apply_fn(params, x_test), fx_test, loss)
+  util.print_summary('train', y_train, apply_fn(params, x_train), fx_train,
+                     loss)
+  util.print_summary('test', y_test, apply_fn(params, x_test), fx_test,
+                     loss)
 
 if __name__ == '__main__':
   app.run(main)

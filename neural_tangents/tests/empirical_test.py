@@ -1,3 +1,5 @@
+# Lint as: python3
+
 # Copyright 2019 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,9 +16,10 @@
 
 """Tests for `utils/empirical.py`."""
 
-from absl.testing import absltest
-
 from functools import partial
+import unittest
+
+from absl.testing import absltest
 from jax import test_util as jtu
 from jax.api import jit
 from jax.config import config as jax_config
@@ -25,6 +28,7 @@ import jax.random as random
 from neural_tangents import stax
 from neural_tangents.utils import empirical
 from neural_tangents.utils import test_utils
+from neural_tangents.utils import utils
 
 
 jax_config.parse_flags_with_absl()
@@ -33,28 +37,38 @@ jax_config.parse_flags_with_absl()
 TAYLOR_MATRIX_SHAPES = [(3, 3), (4, 4)]
 TAYLOR_RANDOM_SAMPLES = 10
 
-STANDARD = 'FLAT'
+FLAT = 'FLAT'
 POOLING = 'POOLING'
+CONV = 'CONV'
 
-TRAIN_SHAPES = [(4, 4), (4, 8), (8, 8), (6, 4, 4, 3), (4, 4, 4, 3)]
-TEST_SHAPES = [(2, 4), (6, 8), (16, 8), (2, 4, 4, 3), (2, 4, 4, 3)]
-NETWORK = [STANDARD, STANDARD, STANDARD, STANDARD, POOLING]
+TRAIN_SHAPES = [(4, 4), (4, 8), (8, 8), (6, 4, 4, 3), (4, 4, 4, 3),
+                (4, 4, 4, 3)]
+TEST_SHAPES = [(2, 4), (6, 8), (16, 8), (2, 4, 4, 3), (2, 4, 4, 3),
+               (2, 4, 4, 3)]
+NETWORK = [FLAT, FLAT, FLAT, FLAT, POOLING,
+           CONV]
 OUTPUT_LOGITS = [1, 2, 3]
 
-CONVOLUTION_CHANNELS = 256
+CONVOLUTION_CHANNELS = 8
 test_utils.update_test_tolerance()
 
 
 def _build_network(input_shape, network, out_logits):
   if len(input_shape) == 1:
-    assert network == 'FLAT'
+    assert network == FLAT
     return stax.Dense(out_logits, W_std=2.0, b_std=0.5)
   elif len(input_shape) == 3:
-    if network == 'POOLING':
+    if network == POOLING:
       return stax.serial(
           stax.Conv(CONVOLUTION_CHANNELS, (3, 3), W_std=2.0, b_std=0.05),
           stax.GlobalAvgPool(), stax.Dense(out_logits, W_std=2.0, b_std=0.5))
-    elif network == 'FLAT':
+    elif network == CONV:
+      return stax.serial(
+          stax.Conv(CONVOLUTION_CHANNELS, (1, 2), W_std=1.5, b_std=0.1),
+          stax.Relu(),
+          stax.Conv(CONVOLUTION_CHANNELS, (3, 2), W_std=2.0, b_std=0.05),
+      )
+    elif network == FLAT:
       return stax.serial(
           stax.Conv(CONVOLUTION_CHANNELS, (3, 3), W_std=2.0, b_std=0.05),
           stax.Flatten(), stax.Dense(out_logits, W_std=2.0, b_std=0.5))
@@ -64,14 +78,27 @@ def _build_network(input_shape, network, out_logits):
     raise ValueError('Expected flat or image test input.')
 
 
-def _kernel_fns(key, input_shape, network, out_logits):
+def _kernel_fns(key,
+                input_shape,
+                network,
+                out_logits,
+                diagonal_axes,
+                trace_axes):
   init_fn, f, _ = _build_network(input_shape, network, out_logits)
   _, params = init_fn(key, (-1,) + input_shape)
-  implicit_kernel_fn = jit(empirical.empirical_implicit_ntk_fn(f))
-  direct_kernel_fn = jit(empirical.empirical_direct_ntk_fn(f))
+  implicit_kernel_fn = empirical.empirical_implicit_ntk_fn(f, trace_axes,
+                                                           diagonal_axes)
+  direct_kernel_fn = empirical.empirical_direct_ntk_fn(f, trace_axes,
+                                                       diagonal_axes)
+  nngp_kernel_fn = empirical.empirical_nngp_fn(f, trace_axes, diagonal_axes)
+
+  implicit_kernel_fn = jit(implicit_kernel_fn)
+  direct_kernel_fn = jit(direct_kernel_fn)
+  nngp_kernel_fn = jit(nngp_kernel_fn)
 
   return (partial(implicit_kernel_fn, params=params),
-          partial(direct_kernel_fn, params=params))
+          partial(direct_kernel_fn, params=params),
+          partial(nngp_kernel_fn, params=params))
 
 
 KERNELS = {}
@@ -132,10 +159,8 @@ class EmpiricalTest(jtu.JaxTestCase):
           key, split = random.split(key)
           x = random.normal(split, (shape[-1],))
           self.assertAllClose(EmpiricalTest.f_lin_exact(x0, x, params, do_alter,
-                                          do_shift_x=do_shift_x),
-                              f_lin(x, params, do_alter,
-                                    do_shift_x=do_shift_x),
-                              check_dtypes=True)
+                                                        do_shift_x=do_shift_x),
+                              f_lin(x, params, do_alter, do_shift_x=do_shift_x))
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -177,13 +202,11 @@ class EmpiricalTest(jtu.JaxTestCase):
           key, split = random.split(key)
           x = random.normal(split, (shape[-1],))
           self.assertAllClose(EmpiricalTest.f_lin_exact(x0, x, params, do_alter,
-                                          do_shift_x=do_shift_x),
-                              f_lin(x, params, do_alter, do_shift_x=do_shift_x),
-                              check_dtypes=True)
+                                                        do_shift_x=do_shift_x),
+                              f_lin(x, params, do_alter, do_shift_x=do_shift_x))
           self.assertAllClose(f_2_exact(x0, x, params, do_alter,
                                         do_shift_x=do_shift_x),
-                              f_2(x, params, do_alter, do_shift_x=do_shift_x),
-                              check_dtypes=True)
+                              f_2(x, params, do_alter, do_shift_x=do_shift_x))
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -203,15 +226,82 @@ class EmpiricalTest(jtu.JaxTestCase):
     data_self = random.normal(self_split, train_shape)
     data_other = random.normal(other_split, test_shape)
 
-    implicit, direct = kernel_fn(key, train_shape[1:], network)
+    implicit, direct, _ = kernel_fn(key, train_shape[1:], network,
+                                    diagonal_axes=(), trace_axes=())
 
     g = implicit(data_self, None)
     g_direct = direct(data_self, None)
-    self.assertAllClose(g, g_direct, check_dtypes=False)
+    self.assertAllClose(g, g_direct)
 
     g = implicit(data_other, data_self)
     g_direct = direct(data_other, data_self)
-    self.assertAllClose(g, g_direct, check_dtypes=False)
+    self.assertAllClose(g, g_direct)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name': '_diagonal_axes={}_trace_axes={}'.format(
+              diagonal_axes, trace_axes),
+          'diagonal_axes': diagonal_axes,
+          'trace_axes': trace_axes,
+      }
+                          for diagonal_axes in [(),
+                                                (0,),
+                                                (0, 1),
+                                                (0, 1, 2),
+                                                (0, 1, 2, 3),]
+                          for trace_axes in [(),
+                                               (0,),
+                                               (0, 1),
+                                               (-1,),
+                                               (1,),
+                                               (0, -1),
+                                               (-1, -2),
+                                               (0, 1, 2, 3),
+                                               (3, 1, 2, 0),
+                                               (1, 2, 3),
+                                               (-3, -2),
+                                               (-3, -1),
+                                               (-2, -4)]))
+  def testAxes(self, diagonal_axes, trace_axes):
+    key = random.PRNGKey(0)
+    key, self_split, other_split = random.split(key, 3)
+    data_self = random.normal(self_split, (4, 5, 6, 3))
+    data_other = random.normal(other_split, (2, 5, 6, 3))
+
+    _diagonal_axes = utils.canonicalize_axis(diagonal_axes, data_self)
+    _trace_axes = utils.canonicalize_axis(trace_axes, data_self)
+
+    if any(d == c for d in _diagonal_axes for c in _trace_axes):
+      raise unittest.SkipTest(
+          'diagonal axes must be different from channel axes.')
+
+    implicit, direct, nngp = KERNELS['empirical_logits_3'](
+        key,
+        (5, 6, 3),
+        CONV,
+        diagonal_axes=diagonal_axes,
+        trace_axes=trace_axes)
+
+    n_marg = len(_diagonal_axes)
+    n_chan = len(_trace_axes)
+
+    g = implicit(data_self, None)
+    g_direct = direct(data_self, None)
+    g_nngp = nngp(data_self, None)
+
+    self.assertAllClose(g, g_direct)
+    self.assertEqual(g_nngp.shape, g.shape)
+    self.assertEqual(2 * (data_self.ndim - n_chan) - n_marg, g_nngp.ndim)
+
+    if 0 not in _trace_axes and 0 not in _diagonal_axes:
+      g = implicit(data_other, data_self)
+      g_direct = direct(data_other, data_self)
+      g_nngp = nngp(data_other, data_self)
+
+      self.assertAllClose(g, g_direct)
+      self.assertEqual(g_nngp.shape, g.shape)
+      self.assertEqual(2 * (data_self.ndim - n_chan) - n_marg, g_nngp.ndim)
+
 
 if __name__ == '__main__':
   absltest.main()

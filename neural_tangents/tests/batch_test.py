@@ -1,3 +1,5 @@
+# Lint as: python3
+
 # Copyright 2019 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -31,7 +33,7 @@ from neural_tangents.utils.kernel import Kernel
 
 jax_config.parse_flags_with_absl()
 
-STANDARD = 'FLAT'
+FLAT = 'FLAT'
 POOLING = 'POOLING'
 INTERMEDIATE_CONV = 'INTERMEDIATE_CONV'
 
@@ -39,7 +41,7 @@ INTERMEDIATE_CONV = 'INTERMEDIATE_CONV'
 # Conv + Pooling.
 TRAIN_SHAPES = [(2, 4), (4, 8), (8, 8), (8, 4, 4, 3), (4, 3, 3, 3)]
 TEST_SHAPES = [(2, 4), (2, 8), (16, 8), (2, 4, 4, 3), (2, 3, 3, 3)]
-NETWORK = [STANDARD, STANDARD, STANDARD, STANDARD, INTERMEDIATE_CONV]
+NETWORK = [FLAT, FLAT, FLAT, FLAT, INTERMEDIATE_CONV]
 OUTPUT_LOGITS = [1, 2, 3]
 CONVOLUTION_CHANNELS = 4
 WIDTH = 1024
@@ -55,16 +57,16 @@ def _build_network(input_shape, network, out_logits, use_dropout):
         stax.Dense(WIDTH, W_std=2.0, b_std=0.5), dropout,
         stax.Dense(out_logits, W_std=2.0, b_std=0.5))
   elif len(input_shape) == 3:
-    if network == 'POOLING':
+    if network == POOLING:
       return stax.serial(
           stax.Conv(CONVOLUTION_CHANNELS, (2, 2), W_std=2.0, b_std=0.05),
           stax.GlobalAvgPool(), dropout,
           stax.Dense(out_logits, W_std=2.0, b_std=0.5))
-    elif network == 'FLAT':
+    elif network == FLAT:
       return stax.serial(
           stax.Conv(CONVOLUTION_CHANNELS, (2, 2), W_std=2.0, b_std=0.05),
           stax.Flatten(), dropout, stax.Dense(out_logits, W_std=2.0, b_std=0.5))
-    elif network == 'INTERMEDIATE_CONV':
+    elif network == INTERMEDIATE_CONV:
       return stax.Conv(CONVOLUTION_CHANNELS, (2, 2), W_std=2.0, b_std=0.05)
     else:
       raise ValueError('Unexpected network type found: {}'.format(network))
@@ -117,13 +119,13 @@ def _test_kernel_against_batched(cls,
     # In the parallel setting, `x1_is_x2` is not computed correctly when x1==x2.
     g_b = g_b.replace(x1_is_x2=g.x1_is_x2)
 
-  cls.assertAllClose(g, g_b, check_dtypes=True)
+  cls.assertAllClose(g, g_b)
 
   g = kernel_fn(train, test)
   g_b = batched_kernel_fn(train, test)
   if is_parallel_only and isinstance(g_b, Kernel):
     g_b = g_b.replace(x1_is_x2=g.x1_is_x2)
-  cls.assertAllClose(g, g_b, check_dtypes=True)
+  cls.assertAllClose(g, g_b)
 
 
 class BatchTest(test_utils.NeuralTangentsTestCase):
@@ -294,13 +296,13 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
       # In the parallel setting, `x1_is_x2` is not computed correctly
       # when x1==x2.
       composed_ker_out = composed_ker_out.replace(x1_is_x2=ker_out.x1_is_x2)
-    self.assertAllClose(ker_out, composed_ker_out, True)
+    self.assertAllClose(ker_out, composed_ker_out)
 
     ker_out = ker_fn(ker_fn(x_self, x_other))
     composed_ker_out = composed_ker_fn(x_self, x_other)
     if batching_fn == batch._parallel:
       composed_ker_out = composed_ker_out.replace(x1_is_x2=ker_out.x1_is_x2)
-    self.assertAllClose(ker_out, composed_ker_out, True)
+    self.assertAllClose(ker_out, composed_ker_out)
 
     # Check convolutional + pooling.
     x_self = random.normal(rng, (8, 10, 10, 3))
@@ -318,12 +320,12 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     composed_ker_out = composed_ker_fn(x_self)
     if batching_fn == batch._parallel:
       composed_ker_out = composed_ker_out.replace(x1_is_x2=ker_out.x1_is_x2)
-    self.assertAllClose(ker_out, composed_ker_out, True)
+    self.assertAllClose(ker_out, composed_ker_out)
     ker_out = readout_ker_fn(block_ker_fn(x_self, x_other))
     composed_ker_out = composed_ker_fn(x_self, x_other)
     if batching_fn == batch._parallel:
       composed_ker_out = composed_ker_out.replace(x1_is_x2=ker_out.x1_is_x2)
-    self.assertAllClose(ker_out, composed_ker_out, True)
+    self.assertAllClose(ker_out, composed_ker_out)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -393,7 +395,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
               x1, x2, do_flip, keys, do_square, params, _unused=True, p=0.65)
           res_2 = kernel_fn_pmapped(
               x1, x2, do_flip, keys, do_square, params, _unused=True)
-          self.assertAllClose(res_1, res_2, True)
+          self.assertAllClose(res_1, res_2)
 
     test_utils.stub_out_pmap(batch, 1)
     x1 = np.arange(0, 10).reshape((1, 10))
@@ -405,10 +407,9 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
               x1, x2, do_flip, keys, do_square, params, _unused=False, p=0.65)
           res_2 = kernel_fn_pmapped(
               x1, x2, do_flip, keys, do_square, params, _unused=None)
-          self.assertAllClose(res_1[0], res_2[0], True)
+          self.assertAllClose(res_1[0], res_2[0])
           self.assertAllClose(
-              tree_map(partial(np.expand_dims, axis=0), res_1[1]), res_2[1],
-              True)
+              tree_map(partial(np.expand_dims, axis=0), res_1[1]), res_2[1])
 
     kernel_fn_pmapped = batch._jit_or_pmap_broadcast(kernel_fn, device_count=2)
     x1 = np.arange(0, 20).reshape((2, 10))
@@ -423,9 +424,9 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
           res_1 = kernel_fn(x1, x2, do_flip, keys, do_square, params, p=0.2)
           res_2 = kernel_fn_pmapped(
               x1, x2, do_flip, keys, do_square, params, _unused=None, p=0.2)
-          self.assertAllClose(res_1[0][0], res_2[0][0], True)
-          self.assertAllClose(res_1[0][1], res_2[0][1], True)
-          self.assertAllClose(tree_map(broadcast, res_1[1]), res_2[1], True)
+          self.assertAllClose(res_1[0][0], res_2[0][0])
+          self.assertAllClose(res_1[0][1], res_2[0][1])
+          self.assertAllClose(tree_map(broadcast, res_1[1]), res_2[1])
 
 
 if __name__ == '__main__':

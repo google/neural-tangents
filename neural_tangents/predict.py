@@ -13,48 +13,71 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Functions to make predictions on the test set using NTK kernel."""
+
+"""Functions to make predictions on the train/test set using NTK/NNGP.
+
+Most functions in this module accept training data as inputs and return a new
+function `predict_fn` that computes predictions on the train set / given test
+set / timesteps.
+
+WARNING: `trace_axes` parameter supplied to prediction functions must match the
+respective parameter supplied to the function used to compute the kernel.
+Namely, this is the same `trace_axes` used to compute the empirical kernel
+(`utils/empirical.py`; `diagonal_axes` must be `()`), or `channel_axis` in the
+output of the top layer used to compute the closed-form kernel (`stax.py`; note
+that closed-form kernels currently only support a single `channel_axis`).
+"""
 
 
 import collections
-import functools
-
+from jax import lax
 from jax.api import grad
-from jax.api import jit
+from jax.experimental import ode
 import jax.numpy as np
 import jax.scipy as sp
-
-from jax.tree_util import tree_all
 from jax.tree_util import tree_map
-from neural_tangents.utils import empirical
-from neural_tangents.utils.utils import canonicalize_get
-from neural_tangents.utils.utils import get_namedtuple
-from neural_tangents.utils.utils import named_tuple_factory
+from neural_tangents.utils import utils, dataclasses
 import scipy as osp
-from scipy.integrate._ode import ode
-
-from neural_tangents.utils.typing import KernelFn
-from typing import Union, Tuple, Callable, Iterable, Dict, Any
-
-
-Gaussian = collections.namedtuple('Gaussian', 'mean covariance')
+from neural_tangents.utils.typing import KernelFn, Axes, Get
+from typing import Union, Tuple, Callable, Iterable, Optional, Dict
+from functools import lru_cache
 
 
-# pylint: disable=g-bare-generic
+"""Alias for optional arrays or scalars."""
+ArrayOrScalar = Union[None, int, float, np.ndarray]
+
+
 def gradient_descent_mse(
-    g_dd: np.ndarray,
+    ntk_train_train: np.ndarray,
     y_train: np.ndarray,
-    g_td: np.ndarray = None,
-    diag_reg: float = 0.) -> Callable:
-  """Predicts the outcome of function space gradient descent training on MSE.
+    learning_rate: float = 1.,
+    diag_reg: float = 0.,
+    diag_reg_absolute_scale: bool = False,
+    trace_axes: Axes = (-1,)
+) -> Callable[
+    [ArrayOrScalar,
+     ArrayOrScalar,
+     ArrayOrScalar,
+     Optional[np.ndarray]],
+    Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]
+]:
+  r"""Predicts the outcome of function space gradient descent training on MSE.
 
-  Analytically solves for the continuous-time version of gradient descent.
+  Solves in closed form for the continuous-time version of gradient descent.
 
-  Uses the analytic solution for gradient descent on an MSE loss in function
+  Uses the closed-form solution for gradient descent on an MSE loss in function
   space detailed in [*] given a Neural Tangent Kernel over the dataset. Given
-  NTKs, this function will return a function that predicts the time evolution
-  for function space points at arbitrary times. Note that times are continuous
-  and are measured in units of the learning rate so t = learning_rate * steps.
+  NTK, this function will return a function that predicts the time evolution
+  for function space points at arbitrary time[s] (training step[s]) `t`. Note
+  that these time[s] (step[s]) are continuous and are interpreted in units of
+  the `learning_rate` so `absolute_time = learning_rate * t`, and the scales of
+  `learning_rate` and `t` are interchangeable.
+
+  Note that first invocation of the returned `predict_fn` will be slow and
+  allocate a lot of memory for its whole lifetime, as either eigendecomposition
+  (`t` is a scalar or an array) or Cholesky factorization (`t=None`) of
+  `ntk_train_train` is performed and cached for future invocations (or both, if
+  the function is called on both finite and infinite (`t=None`) times).
 
   [*] https://arxiv.org/abs/1806.07572
 
@@ -62,257 +85,203 @@ def gradient_descent_mse(
     >>> from neural_tangents import empirical_ntk_fn
     >>> from neural_tangents import predict
     >>>
-    >>> train_time = 1e-7
+    >>> t = 1e-7
     >>> kernel_fn = empirical_ntk_fn(f)
-    >>> g_td = kernel_fn(x_test, x_train, params)
+    >>> ntk_test_train = kernel_fn(x_test, x_train, params)
     >>>
-    >>> predict_fn = predict.gradient_descent_mse(g_dd, y_train, g_td)
+    >>> predict_fn = predict.gradient_descent_mse(ntk_train_train, y_train)
     >>>
-    >>> fx_train_initial = f(params, x_train)
-    >>> fx_test_initial = f(params, x_test)
+    >>> fx_train_0 = f(params, x_train)
+    >>> fx_test_0 = f(params, x_test)
     >>>
-    >>> fx_train_final, fx_test_final = predict_fn(
-    >>>          fx_train_initial, fx_test_initial, train_time)
+    >>> fx_train_t, fx_test_t = predict_fn(t, fx_train_0, fx_test_0,
+    >>>                                    ntk_test_train)
 
   Args:
-    g_dd: A kernel on the training data. The kernel should be an `np.ndarray`
-      of shape [n_train * output_dim, n_train * output_dim] or
-      [n_train, n_train]. In the latter case, the kernel is assumed to be block
-      diagonal over the logits.
-    y_train: A `np.ndarray` of shape [n_train, output_dim] of targets for the
-      training data.
-    g_td: A Kernel relating training data with test data. The kernel should be
-      an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim] or
-      [n_test, n_train]. Note; g_td should have been created in the convention
-      kernel_fn(x_train, x_test, params).
-    diag_reg: A float, representing the strength of the regularization.
+    ntk_train_train:
+      kernel on the training data. Must have the shape of
+      `zip(y_train.shape, y_train.shape)` with `trace_axes` absent.
+    y_train:
+      targets for the training data.
+    learning_rate:
+      learning rate, step size.
+    diag_reg:
+      a scalar representing the strength of the diagonal regularization for
+      `ntk_train_train`, i.e. computing `ntk_train_train + diag_reg * I` during
+      Cholesky factorization or eigendecomposition.
+    diag_reg_absolute_scale:
+      `True` for `diag_reg` to represent regularization in absolute units,
+      `False` to be `diag_reg * np.mean(np.trace(ntk_train_train))`.
+    trace_axes:
+      `f(x_train)` axes such that `ntk_train_train` lacks these pairs of
+      dimensions and is to be interpreted as :math:`\Theta \otimes I`, i.e.
+      block-diagonal along `trace_axes`. These can can be specified either to
+      save space and compute, or to even improve approximation accuracy of the
+      infinite-width or infinite-samples limit, since in in these limits the
+      covariance along channel / feature / logit axes indeed converges to a
+      constant-diagonal matrix. However, if you target linearized dynamics of a
+      specific finite-width network, `trace_axes=()` will yield most accurate
+      result.
 
   Returns:
-    A function that predicts outputs after t = learning_rate * steps of
-    training.
-
-    If g_td is None:
-      The function returned is predict(fx, t). Here fx is an `np.ndarray` of
-      network outputs and has shape [n_train, output_dim], t is a floating point
-      time. predict(fx, t) returns an `np.ndarray` of predictions of shape
-      [n_train, output_dim].
-
-    If g_td is not None:
-      If a test set Kernel is specified then it returns a function,
-      predict(fx_train, fx_test, t). Here fx_train and fx_test are ndarays of
-      network outputs and have shape [n_train, output_dim] and
-      [n_test, output_dim] respectively and t is a floating point time.
-      predict(fx_train, fx_test, t) returns a tuple of predictions of shape
-      [n_train, output_dim] and [n_test, output_dim] for train and test points
-      respectively.
+    A function of signature
+    `predict_fn(t, fx_train_0, fx_test_0, ntk_test_train)` that
+    returns output train [and test] set[s] predictions at time[s] `t`.
   """
+  _, odd, first, _ = _get_axes(ntk_train_train)
+  trace_axes = utils.canonicalize_axis(trace_axes, y_train)
+  trace_axes = tuple(-y_train.ndim + a for a in trace_axes)
+  n_t_axes, n_non_t_axes = len(trace_axes), y_train.ndim - len(trace_axes)
+  last_t_axes = tuple(range(-n_t_axes, 0))
+  non_t_axes = tuple(range(-y_train.ndim, -n_t_axes))
 
-  g_dd = empirical.flatten_features(g_dd)
+  @lru_cache(1)
+  def get_predict_fn_inf():
+    solve = _get_cho_solve(ntk_train_train, diag_reg, diag_reg_absolute_scale)
 
-  normalization = y_train.size
-  output_dimension = y_train.shape[-1]
-  expm1_fn, inv_expm1_fn = (_make_expm1_fn(normalization),
-                            _make_inv_expm1_fn(normalization))
+    def predict_fn_inf(fx_train_0, fx_test_0, ntk_test_train):
+      fx_train_t = y_train.astype(ntk_train_train.dtype)
+      if fx_test_0 is None:
+        return fx_train_t
 
-  def fl(fx):
-    """Flatten outputs."""
-    return np.reshape(fx, (-1,))
+      rhs = y_train if fx_train_0 is None else y_train - fx_train_0
+      dfx_test = np.tensordot(ntk_test_train, solve(rhs, trace_axes),
+                              (odd, first))
+      dfx_test = np.moveaxis(dfx_test, last_t_axes, trace_axes)
+      fx_test_t = fx_test_0 + dfx_test
 
-  def ufl(fx):
-    """Unflatten outputs."""
-    return np.reshape(fx, (-1, output_dimension))
+      if fx_train_0 is None:
+        return fx_test_t
+      return fx_train_t, fx_test_t
 
-  # Check to see whether the kernel has a logit dimension.
-  if y_train.size > g_dd.shape[-1]:
-    out_dim, ragged = divmod(y_train.size, g_dd.shape[-1])
-    if ragged or out_dim != y_train.shape[-1]:
-      raise ValueError()
-    fl = lambda x: x
-    ufl = lambda x: x
+    return predict_fn_inf
 
-  g_dd_plus_reg = _add_diagonal_regularizer(g_dd, diag_reg)
-  expm1_dot_vec, inv_expm1_dot_vec = _eigen_fns(g_dd_plus_reg,
-                                                (expm1_fn, inv_expm1_fn))
+  @lru_cache(1)
+  def get_predict_fn_finite():
+    expm1_fn, inv_expm1_fn = _get_fns_in_eigenbasis(
+        ntk_train_train,
+        diag_reg,
+        diag_reg_absolute_scale,
+        (_make_expm1_fn(y_train.size),
+         _make_inv_expm1_fn(y_train.size))
+    )
 
-  if g_td is None:
+    rhs_shape = tuple(y_train.shape[a] for a in trace_axes)
 
-    def train_predict(dt, fx=0.0):
-      gx_train = fl(fx - y_train)
-      dgx = expm1_dot_vec(gx_train, dt)
-      return ufl(dgx) + fx
+    def predict_fn_finite(t, fx_train_0, fx_test_0, ntk_test_train):
+      t = np.array(t) * learning_rate
+      t_shape, t_ndim = t.shape, t.ndim
+      t = t.reshape((-1, 1))
 
-    return train_predict
+      rhs = -y_train if fx_train_0 is None else fx_train_0 - y_train
+      rhs = np.moveaxis(rhs, trace_axes, last_t_axes).reshape(
+          (-1,) + rhs_shape)
+      shape = t_shape + ntk_train_train.shape[1::2] + rhs_shape
 
-  g_td = empirical.flatten_features(g_td)
+      if fx_train_0 is not None:
+        dfx_train = expm1_fn(rhs, t).reshape(shape)
+        dfx_train = np.moveaxis(dfx_train, last_t_axes, trace_axes)
+        fx_train_t = fx_train_0 + dfx_train
 
-  def predict_using_kernel(dt, fx_train=0., fx_test=0.):
-    gx_train = fl(fx_train - y_train)
-    dgx = expm1_dot_vec(gx_train, dt)
-    # Note: consider use a linalg solve instead of the eigeninverse
-    # dfx = sp.linalg.solve(g_dd, dgx, sym_pos=True)
-    dfx = inv_expm1_dot_vec(gx_train, dt)
-    dfx = np.dot(g_td, dfx)
-    return ufl(dgx) + fx_train, fx_test + ufl(dfx)
+      if fx_test_0 is not None:
+        dfx_test = inv_expm1_fn(rhs, t).reshape(shape)
+        dfx_test = np.tensordot(ntk_test_train, dfx_test, (odd, non_t_axes))
+        dfx_test = np.moveaxis(
+            dfx_test,
+            tuple(range(n_non_t_axes, n_non_t_axes + t_ndim)) + last_t_axes,
+            tuple(range(t_ndim)) + trace_axes)
+        fx_test_t = fx_test_0 + dfx_test
 
-  return predict_using_kernel
+      if fx_train_0 is not None and fx_test_0 is not None:
+        return fx_train_t, fx_test_t
+      if fx_test_0 is None:
+        return fx_train_t
+      return fx_test_t
+
+
+    return predict_fn_finite
+
+  def predict_fn(
+      t: ArrayOrScalar = None,
+      fx_train_0: ArrayOrScalar = 0.,
+      fx_test_0: ArrayOrScalar = None,
+      ntk_test_train: np.ndarray = None
+  ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+    """Return output predictions on train [and test] set[s] at time[s] `t`.
+
+    Args:
+      t:
+        a scalar of array of scalars of any shape. `t=None` is treated as
+        infinity and returns the same result as `t=np.inf`, but is computed
+        using identity or linear solve for train and test predictions
+        respectively instead of eigendecomposition, saving time and precision.
+        Equivalent of training steps (but can be fractional).
+      fx_train_0:
+        output of the network at `t == 0` on the training set. `fx_train_0=None`
+        means to not compute predictions on the training set.
+      fx_test_0:
+        output of the network at `t == 0` on the test set. `fx_test_0=None`
+        means to not compute predictions on the test set.
+      ntk_test_train:
+        kernel relating test data with training data. Must have the shape of
+        `zip(y_test.shape, y_train.shape)` with `trace_axes` absent. Pass
+        `ntk_test_train=None` if you only need predictions on the training set.
+
+    Returns:
+      `fx_train_t` or `(fx_train_t, fx_test_t)` if `fx_test_0 != None` with
+      potentially additional leading time dimensions matching `t.shape`.
+
+    Raises:
+      ValueError: if `fx_test_0` is not `None`, but `ntk_test_train` is `None`.
+    """
+    _check_inputs(fx_train_0, fx_test_0, ntk_test_train)
+
+    # Infinite time
+    if t is None:
+      return get_predict_fn_inf()(fx_train_0, fx_test_0, ntk_test_train)
+
+    # Finite time
+    return get_predict_fn_finite()(t, fx_train_0, fx_test_0, ntk_test_train)
+
+  return predict_fn
+
+
+@dataclasses.dataclass
+class ODEState:
+  fx_train: np.ndarray = None
+  fx_test: np.ndarray = None
+  qx_train: np.ndarray = None
+  qx_test: np.ndarray = None
 
 
 def gradient_descent(
-    g_dd: np.ndarray,
-    y_train: np.ndarray,
     loss: Callable[[np.ndarray, np.ndarray], float],
-    g_td: np.ndarray = None) -> Callable:
-  """Predicts the outcome of function space gradient descent training on `loss`.
-
-  Solves for continuous-time gradient descent using an ODE solver.
-
-  Solves the function space ODE for continuous gradient descent with a given
-  loss (detailed in [*]) given a Neural Tangent Kernel over the dataset. This
-  function returns a function that predicts the time evolution for function
-  space points at arbitrary times. Note that times are continuous and are
-  measured in units of the learning rate so that t = learning_rate * steps.
-
-  This function uses the scipy ode solver with the 'dopri5' algorithm.
-
-  [*] https://arxiv.org/abs/1902.06720
-
-  Example:
-    >>> from neural_tangents import empirical_ntk_fn
-    >>> from jax.experimental import stax
-    >>> from neural_tangents import predict
-    >>>
-    >>> train_time = 1e-7
-    >>> kernel_fn = empirical_ntk_fn(f)
-    >>> g_td = kernel_fn(x_test, x_train, params)
-    >>>
-    >>> from jax.experimental import stax
-    >>> cross_entropy = lambda fx, y_hat: -np.mean(stax.logsoftmax(fx) * y_hat)
-    >>> predict_fn = predict.gradient_descent(
-    >>>     g_dd, y_train, cross_entropy, g_td)
-    >>>
-    >>> fx_train_initial = f(params, x_train)
-    >>> fx_test_initial = f(params, x_test)
-    >>>
-    >>> fx_train_final, fx_test_final = predict_fn(
-    >>>     fx_train_initial, fx_test_initial, train_time)
-
-  Args:
-    g_dd: A Kernel on the training data. The kernel should be an `np.ndarray`
-      of shape [n_train * output_dim, n_train * output_dim] or
-      [n_train, n_train]. In the latter case it is assumed that the kernel is
-      block diagonal over the logits.
-    y_train: A `np.ndarray` of shape [n_train, output_dim] of labels for the
-      training data.
-    loss: A loss function whose signature is loss(fx, y_hat) where fx is an
-      `np.ndarray` of function space output_dim of the network and y_hat are
-      targets. Note: the loss function should treat the batch and output
-      dimensions symmetrically.
-    g_td: A Kernel relating training data with test data. The kernel should be
-      an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim] or
-      [n_test, n_train]. Note: g_td should have been created in the convention
-      kernel_fn(x_test, x_train, params).
-
-  Returns:
-    A function that predicts outputs after t = learning_rate * steps of
-    training.
-
-    If g_td is None:
-      The function returned is predict(fx, t). Here fx is an `np.ndarray` of
-      network outputs and has shape [n_train, output_dim], t is a floating point
-      time. predict(fx, t) returns an `np.ndarray` of predictions of shape
-      [n_train, output_dim].
-
-    If g_td is not None:
-      If a test set Kernel is specified then it returns a function,
-      predict(fx_train, fx_test, t). Here fx_train and fx_test are ndarays of
-      network outputs and have shape [n_train, output_dim] and
-      [n_test, output_dim] respectively and t is a floating point time.
-      predict(fx_train, fx_test, t) returns a tuple of predictions of shape
-      [n_train, output_dim] and [n_test, output_dim] for train and test points
-      respectively.
-  """
-
-  output_dimension = y_train.shape[-1]
-
-  g_dd = empirical.flatten_features(g_dd)
-
-  def fl(fx):
-    """Flatten outputs."""
-    return np.reshape(fx, (-1,))
-
-  def ufl(fx):
-    """Unflatten outputs."""
-    return np.reshape(fx, (-1, output_dimension))
-
-  # These functions are used inside the integrator only if the kernel is
-  # diagonal over the logits.
-  ifl = lambda x: x
-  iufl = lambda x: x
-
-  # Check to see whether the kernel has a logit dimension.
-  if y_train.size > g_dd.shape[-1]:
-    out_dim, ragged = divmod(y_train.size, g_dd.shape[-1])
-    if ragged or out_dim != y_train.shape[-1]:
-      raise ValueError()
-    ifl = fl
-    iufl = ufl
-
-  y_train = np.reshape(y_train, (-1))
-  grad_loss = grad(functools.partial(loss, y_hat=y_train))
-
-  if g_td is None:
-    dfx_dt = lambda unused_t, fx: -ifl(np.dot(g_dd, iufl(grad_loss(fx))))
-
-    def predict(dt, fx=0.):
-      r = ode(dfx_dt).set_integrator('dopri5')
-      r.set_initial_value(fl(fx), 0)
-      r.integrate(dt)
-
-      return ufl(r.y)
-  else:
-    g_td = empirical.flatten_features(g_td)
-
-    def dfx_dt(unused_t, fx, train_size):
-      fx_train = fx[:train_size]
-      dfx_train = -ifl(np.dot(g_dd, iufl(grad_loss(fx_train))))
-      dfx_test = -ifl(np.dot(g_td, iufl(grad_loss(fx_train))))
-      return np.concatenate((dfx_train, dfx_test), axis=0)
-
-    def predict(dt, fx_train=0., fx_test=0.):
-      r = ode(dfx_dt).set_integrator('dopri5')
-
-      fx = fl(np.concatenate((fx_train, fx_test), axis=0))
-      train_size, output_dim = fx_train.shape
-      r.set_initial_value(fx, 0).set_f_params(train_size * output_dim)
-      r.integrate(dt)
-      fx = ufl(r.y)
-
-      return fx[:train_size], fx[train_size:]
-
-  return predict
-
-
-def momentum(
-    g_dd: np.ndarray,
+    ntk_train_train: np.ndarray,
     y_train: np.ndarray,
-    loss: Callable[[np.ndarray, np.ndarray], np.ndarray],
-    learning_rate: float,
-    g_td: np.ndarray = None,
-    momentum: float = 0.9) -> Tuple[Callable, Callable, Callable]:
-  r"""Predicts the outcome of function space training using momentum descent.
+    learning_rate: float = 1.,
+    momentum: float = None,
+    trace_axes: Axes = (-1,)
+) -> Callable[
+    [ArrayOrScalar,
+     Union[ArrayOrScalar, ODEState],
+     ArrayOrScalar,
+     Optional[np.ndarray]],
+    Union[np.ndarray, Tuple[np.ndarray, np.ndarray], ODEState]
+]:
+  r"""Predicts the outcome of function space training using gradient descent.
 
-  Solves a continuous-time version of standard momentum instead of
-  Nesterov momentum using an ODE solver.
+  Uses an ODE solver. If `momentum != None`, solves a continuous-time version of
+  gradient descent with momentum (note: this case uses standard momentum as
+  opposed to Nesterov momentum).
 
-  Solves the function space ODE for momentum with a given loss (detailed
-  in [*]) given a Neural Tangent Kernel over the dataset. This function returns
-  a triplet of functions that initialize state variables, predicts the time
-  evolution for function space points at arbitrary times and retrieves the
-  function-space outputs from the state. Note that times are continuous and are
-  measured in units of the learning rate so that
-  t = \sqrt(learning_rate) * steps.
-
-  This function uses the scipy ode solver with the 'dopri5' algorithm.
+  Solves the function space ODE for [momentum] gradient descent with a given
+  `loss` (detailed in [*]) given a Neural Tangent Kernel[s] over the dataset[s]
+  at arbitrary time[s] (step[s]) `t`. Note that for gradient descent
+  `absolute_time = learning_rate * t` and the scales of the learning rate and
+  query step[s] `t` are interchangeable. However, the momentum gradient descent
+  ODE is solved in the units of `learning_rate**0.5`, and therefore
+  `absolute_time = learning_rate**0.5 * t`, hence the `learning_rate` and
+  training time[s] (step[s]) `t` scales are not interchangeable.
 
   [*] https://arxiv.org/abs/1902.06720
 
@@ -320,409 +289,670 @@ def momentum(
     >>> from neural_tangents import empirical_ntk_fn
     >>> from neural_tangents import predict
     >>>
-    >>> train_time = 1e-7
+    >>> t = 1e-7
     >>> learning_rate = 1e-2
+    >>> momentum = 0.9
     >>>
     >>> kernel_fn = empirical_ntk_fn(f)
-    >>> g_td = kernel_fn(x_test, x_train, params)
+    >>> ntk_test_train = kernel_fn(x_test, x_train, params)
     >>>
     >>> from jax.experimental import stax
     >>> cross_entropy = lambda fx, y_hat: -np.mean(stax.logsoftmax(fx) * y_hat)
-    >>> init_fn, predict_fn, get_fn = predict.momentum(
-    >>>                   g_dd, y_train, cross_entropy, learning_rate, g_td)
+    >>> predict_fn = predict.gradient_descent(cross_entropy, ntk_train_train,
+    >>>                                       y_train, learning_rate, momentum)
     >>>
-    >>> fx_train_initial = f(params, x_train)
-    >>> fx_test_initial = f(params, x_test)
+    >>> fx_train_0 = f(params, x_train)
+    >>> fx_test_0 = f(params, x_test)
     >>>
-    >>> lin_state = init_fn(fx_train_initial, fx_test_initial)
-    >>> lin_state = predict_fn(lin_state, train_time)
-    >>> fx_train_final, fx_test_final = get_fn(lin_state)
+    >>> fx_train_t, fx_test_t = predict_fn(t, fx_train_0, fx_test_0,
+    >>>                                    ntk_test_train)
 
   Args:
-    g_dd: Kernel on the training data. The kernel should be an `np.ndarray` of
-      shape [n_train * output_dim, n_train * output_dim].
-    y_train: A `np.ndarray` of shape [n_train, output_dim] of labels for the
-      training data.
-    loss: A loss function whose signature is loss(fx, y_hat) where fx an
-      `np.ndarray` of function space outputs of the network and y_hat are
-      labels. Note: the loss function should treat the batch and output
-      dimensions symmetrically.
-    learning_rate:  A float specifying the learning rate.
-    g_td: Kernel relating training data with test data. Should be an
-      `np.ndarray` of shape [n_test * output_dim, n_train * output_dim]. Note:
-      g_td should have been created in the convention g_td = kernel_fn(x_test,
-      x_train, params).
-    momentum: float specifying the momentum.
+    loss:
+      a loss function whose signature is `loss(f(x_train), y_train)`. Note:
+      the loss function should treat the batch and output dimensions
+      symmetrically.
+    ntk_train_train:
+      kernel on the training data. Must have the shape of
+      `zip(y_train.shape, y_train.shape)` with `trace_axes` absent.
+    y_train:
+      targets for the training data.
+    learning_rate:
+      learning rate, step size.
+    momentum:
+      momentum scalar.
+    trace_axes:
+      `f(x_train)` axes such that `ntk_train_train` lacks these pairs of
+      dimensions and is to be interpreted as :math:`\Theta \otimes I`, i.e.
+      block-diagonal along `trace_axes`. These can can be specified either to
+      save space and compute, or to even improve approximation accuracy of the
+      infinite-width or infinite-samples limit, since in in these limits the
+      covariance along channel / feature / logit axes indeed converges to a
+      constant-diagonal matrix. However, if you target linearized dynamics of a
+      specific finite-width network, `trace_axes=()` will yield most accurate
+      result.
 
   Returns:
-    Functions to predicts outputs after t = \sqrt(learning_rate) * steps of
-    training. Generically three functions are returned, an init_fn that creates
-    auxiliary velocity variables needed for optimization and packs them into
-    a state variable, a predict_fn that computes the time-evolution of the state
-    for some dt, and a get_fn that extracts the predictions from the state.
-
-    If g_td is None:
-      init_fn(fx_train): Takes a single `np.ndarray` of shape
-      [n_train, output_dim] and returns a tuple containing the output_dim as
-      an int and an `np.ndarray` of shape [2 * n_train * output_dim].
-
-      predict_fn(state, dt): Takes a state described above and a floating point
-      time. Returns a new state with the same type and shape.
-
-      get_fn(state): Takes a state and returns an `np.ndarray` of shape
-      [n_train, output_dim].
-
-    If g_td is not None:
-      init_fn(fx_train, fx_test): Takes two `np.ndarray`s of shape
-      [n_train, output_dim] and [n_test, output_dim] respectively. Returns a
-      tuple with an int giving 2 * n_train * output_dim, an int containing the
-      output_dim, and an `np.ndarray` of shape
-      [2 * (n_train + n_test) * output_dim].
-
-      predict_fn(state, dt): Takes a state described above and a floating point
-      time. Returns a new state with the same type and shape.
-
-      get_fn(state): Takes a state and returns two `np.ndarray` of shape
-      [n_train, output_dim] and [n_test, output_dim] respectively.
+    A function that returns output train [and test] set[s] predictions at
+    time[s] `t`.
   """
-  output_dimension = y_train.shape[-1]
+  _, odd, _, _ = _get_axes(ntk_train_train)
+  trace_axes = utils.canonicalize_axis(trace_axes, y_train)
+  non_t_axes = tuple(a for a in range(y_train.ndim) if a not in trace_axes)
+  last_t_axes = range(-len(trace_axes), 0)
 
-  g_dd = empirical.flatten_features(g_dd)
+  dtype = ntk_train_train.dtype
+  grad_loss = grad(lambda fx: loss(fx, y_train))
 
-  momentum = (momentum - 1.0) / np.sqrt(learning_rate)
+  if momentum is not None:
+    learning_rate **= 0.5
+    momentum = (momentum - 1.0) / learning_rate
 
-  def fl(fx):
-    """Flatten outputs."""
-    return np.reshape(fx, (-1,))
+  def get_state_0(fx_train_or_state_0, fx_test_0, fx_test_shape):
+    if isinstance(fx_train_or_state_0, ODEState):
+      fx_train_0 = fx_train_or_state_0.fx_train
+      fx_test_0 = fx_train_or_state_0.fx_test
+      qx_train_0 = fx_train_or_state_0.qx_train
+      qx_test_0 = fx_train_or_state_0.qx_test
+    else:
+      fx_train_0 = fx_train_or_state_0
+      qx_train_0 = qx_test_0 = None
 
-  def ufl(fx):
-    """Unflatten outputs."""
-    return np.reshape(fx, (-1, output_dimension))
+    if fx_train_0 is None:
+      fx_train_0 = np.zeros_like(y_train, dtype)
+    else:
+      fx_train_0 = np.broadcast_to(fx_train_0, y_train.shape)
 
-  # These functions are used inside the integrator only if the kernel is
-  # diagonal over the logits.
-  ifl = lambda x: x
-  iufl = lambda x: x
+    if fx_test_0 is not None:
+      fx_test_0 = np.broadcast_to(fx_test_0, fx_test_shape)
 
-  # Check to see whether the kernel has a logit dimension.
-  if y_train.size > g_dd.shape[-1]:
-    out_dim, ragged = divmod(y_train.size, g_dd.shape[-1])
-    if ragged or out_dim != y_train.shape[-1]:
-      raise ValueError()
-    ifl = fl
-    iufl = ufl
+    if momentum is None:
+      if qx_train_0 is not None or qx_test_0 is not None:
+        raise ValueError('Got passed momentum state variables, while '
+                         '`momentum is None`.')
+    else:
+      qx_train_0 = (np.zeros_like(y_train, dtype) if qx_train_0 is None else
+                    np.broadcast_to(qx_train_0, y_train.shape))
+      qx_test_0 = (None if fx_test_0 is None else
+                   (np.zeros(fx_test_shape, dtype) if qx_test_0 is None
+                    else np.broadcast_to(qx_test_0, fx_test_shape)))
 
-  y_train = np.reshape(y_train, (-1))
-  grad_loss = grad(functools.partial(loss, y_hat=y_train))
+    return ODEState(fx_train_0, fx_test_0, qx_train_0, qx_test_0)  # pytype: disable=wrong-arg-count
 
-  if g_td is None:
+  def get_dstate_dt(ntk_test_train):
+    def dstate_dt(state_t: ODEState, unused_t) -> ODEState:
+      fx_train_t, fx_test_t, qx_train_t, qx_test_t = (
+          state_t.fx_train, state_t.fx_test, state_t.qx_train, state_t.qx_test)
 
-    def dr_dt(unused_t, r):
-      fx, qx = np.split(r, 2)
-      dfx = qx
-      dqx = momentum * qx - ifl(np.dot(g_dd, iufl(grad_loss(fx))))
-      return np.concatenate((dfx, dqx), axis=0)
+      dy_df_t = grad_loss(fx_train_t)
 
-    def init_fn(fx_train=0.):
-      fx_train = fl(fx_train)
-      qx_train = np.zeros_like(fx_train)
-      return np.concatenate((fx_train, qx_train), axis=0)
+      fx_train_t = -np.moveaxis(
+          np.tensordot(ntk_train_train, dy_df_t, (odd, non_t_axes)),
+          last_t_axes, trace_axes
+      )
+      if fx_test_t is not None:
+        fx_test_t = -np.moveaxis(
+            np.tensordot(ntk_test_train, dy_df_t, (odd, non_t_axes)),
+            last_t_axes, trace_axes
+        )
 
-    def predict_fn(state, dt):
-      solver = ode(dr_dt).set_integrator('dopri5')
-      solver.set_initial_value(state, 0)
-      solver.integrate(dt)
+      if momentum is None:
+        return ODEState(fx_train_t, fx_test_t)  # pytype: disable=wrong-arg-count
 
-      return solver.y
+      fx_train_t += momentum * qx_train_t
+      if qx_test_t is not None:
+        fx_test_t += momentum * qx_test_t
 
-    def get_fn(state):
-      return ufl(np.split(state, 2)[0])
+      return ODEState(qx_train_t, qx_test_t, fx_train_t, fx_test_t)  # pytype: disable=wrong-arg-count
+    return dstate_dt
 
-  else:
-    g_td = empirical.flatten_features(g_td)
+  def predict_fn(
+      t: ArrayOrScalar = None,
+      fx_train_or_state_0: Union[ArrayOrScalar, ODEState] = 0.,
+      fx_test_0: ArrayOrScalar = None,
+      ntk_test_train: np.ndarray = None
+  ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray], ODEState]:
+    """Return output predictions on train [and test] set[s] at time[s] `t`.
 
-    def dr_dt(unused_t, r, train_size):
-      train, test = r[:train_size], r[train_size:]
-      fx_train, qx_train = np.split(train, 2)
-      _, qx_test = np.split(test, 2)
-      dfx_train = qx_train
-      dqx_train = \
-          momentum * qx_train - ifl(np.dot(g_dd, iufl(grad_loss(fx_train))))
-      dfx_test = qx_test
-      dqx_test = \
-          momentum * qx_test - ifl(np.dot(g_td, iufl(grad_loss(fx_train))))
-      return np.concatenate((dfx_train, dqx_train, dfx_test, dqx_test), axis=0)
+    Args:
+      t:
+        a scalar or array of scalars of any shape in strictly increasing order.
+        `t=None` is equivalent to `t=np.inf` and may not converge. Equivalent of
+        training steps (but can be fractional).
+      fx_train_or_state_0:
+        either (a) output of the network at `t == 0` on the training set or (b)
+        complete ODE state (`predict.ODEState`). Pass an ODE state if you want
+        to operate on the full ODE state instead of output variables only
+        (useful for inspecting auxiliary variables or resuming an optimizer with
+        auxiliary variables from a specific state. Note that only
+        `momentum != None` optimizer currently has auxiliary variables. To
+        initialize an ODE state from scratch, call
+        `predict.ODEState(fx_train_0, fx_test_0)`. If an ODE state is passed, an
+        ODE state is returned. `fx_train_0=None` means to not compute
+        predictions on the training set.
+      fx_test_0:
+        output of the network at `t == 0` on the test set. `fx_test_0=None`
+        means to not compute predictions on the test set.
+      ntk_test_train:
+        kernel relating test data with training data. Must have the shape of
+        `zip(y_test.shape, y_train.shape)` with `trace_axes` absent. Pass
+        `ntk_test_train=None` if you only need predictions on the training set.
 
-    def init_fn(fx_train=0., fx_test=0.):
-      train_size = fx_train.shape[0]
-      fx_train, fx_test = fl(fx_train), fl(fx_test)
-      qx_train = np.zeros_like(fx_train)
-      qx_test = np.zeros_like(fx_test)
-      return (2 * train_size * output_dimension,
-              np.concatenate((fx_train, qx_train, fx_test, qx_test), axis=0))
+    Returns:
+      `fx_train_t` or `(fx_train_t, fx_test_t)` if `fx_test_0 != None` with
+      potentially additional leading time dimensions matching `t.shape`.
+      Alternatively can return an `ODEState` at time[s] `t`.
 
-    def predict_fn(state, dt):
-      train_size, state = state
-      solver = ode(dr_dt).set_integrator('dopri5')
-      solver.set_initial_value(state, 0).set_f_params(train_size)
-      solver.integrate(dt)
+    Raises:
+      ValueError: if `fx_test_0` is not `None`, but `ntk_test_train` is `None`.
+    """
+    _check_inputs(fx_train_or_state_0, fx_test_0, ntk_test_train)
 
-      return train_size, solver.y
+    t = np.array(t if t is not None else np.inf, dtype) * learning_rate
+    t_shape = t.shape
+    t = t.reshape((-1,))
 
-    def get_fn(state):
-      train_size, state = state
-      train, test = state[:train_size], state[train_size:]
-      return ufl(np.split(train, 2)[0]), ufl(np.split(test, 2)[0])
+    # ODE solver requires `t[0]` to be the time where `fx_train_0` [and
+    # `fx_test_0`] are evaluated, but also a strictly increasing sequence of
+    # timesteps, so we always temporarily append an [almost] `0` at the start.
+    identity = lambda x: x
+    t0 = lax.cond(t[0] == 0.,
+                  np.full((1,), -1e-24, t.dtype), identity,
+                  np.zeros((1,), t.dtype), identity)
+    t = np.concatenate([t0, t])
 
-  return init_fn, predict_fn, get_fn
+    # Solve the ODE.
+    fx_test_shape = _get_fx_test_shape(y_train, ntk_test_train, trace_axes)
+    state_0 = get_state_0(fx_train_or_state_0, fx_test_0, fx_test_shape)
+    state_t = ode.odeint(get_dstate_dt(ntk_test_train), state_0, t)
+
+    # Remove the added `t0`.
+    trim = lambda x: x[1:].reshape(t_shape + x.shape[1:])
+    trim_tree = lambda tree: tree_map(trim, tree)
+    state_t = trim_tree(state_t)
+
+    # `ODEState` -> `ODEState`
+    if isinstance(fx_train_or_state_0, ODEState):
+      return state_t
+
+    # `np.ndarray` -> `np.ndarray`
+    fx_train_t, fx_test_t = state_t.fx_train, state_t.fx_test
+
+    if fx_train_or_state_0 is not None and fx_test_0 is None:
+      return fx_train_t
+    if fx_test_0 is not None and fx_train_or_state_0 is None:
+      return fx_test_t
+    return fx_train_t, fx_test_t
+
+  return predict_fn
 
 
-def gp_inference(kernel_fn: KernelFn,
-                 x_train: np.ndarray,
-                 y_train: np.ndarray,
-                 x_test: np.ndarray,
-                 get: Union[str, Tuple[str, ...]],
-                 diag_reg: Union[float, Iterable[float]] = 0.,
-                 compute_cov: bool = False,
-                 **kernel_fn_kwargs) -> Union[Gaussian, np.ndarray]:
-  """Compute the mean and variance of the `posterior` of NNGP and NTK.
+Gaussian = collections.namedtuple('Gaussian', 'mean covariance')
 
-  Note that this method is equivalent to `gradient_descent_mse_gp` at infinite
-  time.
 
-  Example:
-    >>> predict = gradient_descent_mse_gp(kernel_fn, x_train, y_train, x_test,
-    >>>                                   get, diag_reg, compute_cov)
-    >>> predict(np.inf) == predict(None) == gp_inference(kernel_fn, x_train,
-    >>>     y_train, x_test, get, diag_reg, compute_cov)
+def gp_inference(
+    k_train_train,
+    y_train: np.ndarray,
+    diag_reg: float = 0.,
+    diag_reg_absolute_scale: bool = False,
+    trace_axes: Axes = (-1,)):
+  r"""Compute the mean and variance of the `posterior` of NNGP and NTK.
+
+  Note that first invocation of the returned `predict_fn` will be slow and
+  allocate a lot of memory for its whole lifetime, as a Cholesky factorization
+  of `k_train_train.nngp` or `k_train_train.ntk` (or both) is performed and
+  cached for future invocations.
 
   Args:
-    kernel_fn: A kernel function that computes NNGP and NTK.
-    x_train: A `np.ndarray`, representing the training data.
-    y_train: A `np.ndarray`, representing the labels of the training data.
-    x_test: A `np.ndarray`, representing the test data.
-    get: string, the mode of the Gaussian process, either "nngp" or "ntk", or a
-      tuple, or None. If `None` then both `nngp` and `ntk` predictions are
-      returned.
-    diag_reg: A float or iterable of floats, representing the strength of the
-      regularization.
-    compute_cov: A boolean. If `True` computing both `mean` and `variance` and
-    :**kernel_fn_kwargs: optional keyword arguments passed to `kernel_fn`.
-      only `mean` otherwise.
-  Returns:
-    Either a Gaussian(`mean`, `variance`) namedtuple or `mean` of the GP
-    posterior or generator function returning Gaussian or `mean` corresponding
-    to diag_reg values.
-  """
-  if get is None:
-    get = ('nngp', 'ntk')
-  kdd, ktd, nngp_tt = _get_matrices(kernel_fn, x_train, x_test, get,
-                                    compute_cov, **kernel_fn_kwargs)
-  gp_inference_mat = (_gp_inference_mat_jit_cpu if _is_on_cpu(kdd) else
-                      _gp_inference_mat_jit)
-  try:
-    iterator = iter(diag_reg)
-  except TypeError:
-    # diag_reg is a number.
-    return gp_inference_mat(kdd, ktd, nngp_tt, y_train, get, diag_reg)
-
-  def iter_func():
-    for diag_reg in iterator:
-      yield gp_inference_mat(kdd, ktd, nngp_tt, y_train, get, diag_reg)
-  return iter_func()
-
-
-@get_namedtuple('Gaussians')
-def _gp_inference_mat(kdd: np.ndarray,
-                      ktd: np.ndarray,
-                      nngp_tt: np.ndarray,
-                      y_train: np.ndarray,
-                      get: Union[str, Tuple[str, ...]],
-                      diag_reg: float) -> Union[Gaussian, np.ndarray]:
-  """Compute the mean and variance of the `posterior` of NNGP and NTK.
-
-  Args:
-    kdd: A train-train `Kernel` namedtuple.
-    ktd: A test-train `Kernel` namedtuple.
-    nngp_tt: A test-test `nngp` kernel.
-    y_train: A `np.ndarray`, representing the train targets.
-    get: string, the mode of the Gaussian process, either "nngp" or "ntk", or a
-      tuple, or `None`. If `None` then both `nngp` and `ntk` predictions are
-      returned.
-    diag_reg: A float, representing the strength of the regularization.
+    k_train_train:
+      train-train kernel. Can be (a) `np.ndarray`, (b) `Kernel` namedtuple, (c)
+      `Kernel` object. Must contain the necessary `nngp` and/or `ntk` kernels
+      for arguments provided to the returned `predict_fn` function. For
+      example, if you request to compute posterior test [only] NTK covariance in
+      future `predict_fn` invocations, `k_train_train` must contain both `ntk`
+      and `nngp` kernels.
+    y_train:
+      train targets.
+    diag_reg:
+      a scalar representing the strength of the diagonal regularization for
+      `k_train_train`, i.e. computing `k_train_train + diag_reg * I` during
+      Cholesky factorization.
+    diag_reg_absolute_scale:
+      `True` for `diag_reg` to represent regularization in absolute units,
+      `False` to be `diag_reg * np.mean(np.trace(k_train_train))`.
+    trace_axes:
+      `f(x_train)` axes such that `k_train_train`,
+      `k_test_train`[, and `nngp_test_test`] lack these pairs of dimensions and
+      are to be interpreted as :math:`\Theta \otimes I`, i.e. block-diagonal
+      along `trace_axes`. These can can be specified either to save space and
+      compute, or to even improve approximation accuracy of the infinite-width
+      or infinite-samples limit, since in in these limits the covariance along
+      channel / feature / logit axes indeed converges to a  constant-diagonal
+      matrix. However, if you target linearized dynamics of a specific
+      finite-width network, `trace_axes=()` will yield most accurate result.
 
   Returns:
-    Either a Gaussian(`mean`, `variance`) namedtuple or `mean` of the GP
-    posterior.
+    A function of signature `predict_fn(get, k_test_train, nngp_test_test)`
+    computing posterior Gaussian distribution (mean or mean and covariance)
+    on a given test set.
   """
-  out = {}
-  if get is None:
-    get = ('nngp', 'ntk')
-  if 'nngp' in get:
-    op = _inv_operator(kdd.nngp, diag_reg)
-    pred_mean = _mean_prediction(op, ktd.nngp, y_train)
-    if nngp_tt is not None:
-      pred_cov = _nngp_cov(op, ktd.nngp, nngp_tt)
-    out['nngp'] = (
-        Gaussian(pred_mean, pred_cov) if nngp_tt is not None else pred_mean)
+  even, odd, first, last = _get_axes(_get_first(k_train_train))
+  trace_axes = utils.canonicalize_axis(trace_axes, y_train)
 
-  if 'ntk' in get:
-    op = _inv_operator(kdd.ntk, diag_reg)
-    pred_mean = _mean_prediction(op, ktd.ntk, y_train)
-    if nngp_tt is not None:
-      pred_cov = _ntk_cov(op, ktd.ntk, kdd.nngp, ktd.nngp, nngp_tt)
-    out['ntk'] = (Gaussian(pred_mean, pred_cov) if nngp_tt is not None
-                  else pred_mean)
+  @lru_cache(2)
+  def solve(g: str):
+    k_dd = _get_attr(k_train_train, g)
+    return _get_cho_solve(k_dd, diag_reg, diag_reg_absolute_scale)
 
-  return out
+  @lru_cache(2)
+  def k_inv_y(g: str):
+    return solve(g)(y_train, trace_axes)
+
+  @utils.get_namedtuple('Gaussians')
+  def predict_fn(get: Get,
+                 k_test_train=None,
+                 nngp_test_test: np.ndarray = None
+                 ) -> Dict[str, Union[np.ndarray, Gaussian]]:
+    """`test`-set posterior given respective covariance matrices.
+
+    Args:
+      get:
+        string, the mode of the Gaussian process, either "nngp" or "ntk", or a
+        tuple, or `None`. If `None` then both `nngp` and `ntk` predictions are
+        returned.
+      k_test_train:
+        test-train kernel. Can be (a) `np.ndarray`, (b) `Kernel` namedtuple, (c)
+        `Kernel` object. Must contain the necessary `nngp` and/or `ntk` kernels
+        for arguments provided to the returned `predict_fn` function. For
+        example, if you request to compute posterior test [only] NTK covariance,
+        `k_test_train` must contain both `ntk` and `nngp` kernels. If `None`,
+        returns predictions on the training set. Note that train-set outputs are
+        always `N(y_train, 0)` and mostly returned for API consistency.
+      nngp_test_test:
+        A test-test NNGP array. Provide if you want to compute test-test
+        posterior covariance. `nngp_test_tes=None`, means to not compute it. If
+        `k_test_train is None`, pass any non-`None` value (e.g. `True`) if you
+        want to get train-train posterior covariance. Note that train-set
+        outputs are always `N(y_train, 0)` and mostly returned for API
+        consistency.
+
+    Returns:
+      Either a `Gaussian('mean', 'variance')` namedtuple or `mean` of the GP
+      posterior on the  `test` set.
+    """
+    if get is None:
+      get = ('nngp', 'ntk')
+
+    out = {}
+
+    for g in get:
+      k_dd = _get_attr(k_train_train, g)
+      k_td = None if k_test_train is None else _get_attr(k_test_train, g)
+
+      if k_td is None:
+        # Train set predictions.
+        y = y_train.astype(k_dd.dtype)
+      else:
+        # Test set predictions.
+        y = np.tensordot(k_td, k_inv_y(g), (odd, first))
+        y = np.moveaxis(y, range(-len(trace_axes), 0), trace_axes)
+
+      if nngp_test_test is not None:
+        if k_td is None:
+          out[g] = Gaussian(y, np.zeros_like(k_dd, k_dd.dtype))
+        else:
+          if (g == 'ntk' and
+              (not hasattr(k_train_train, 'nngp') or
+               not hasattr(k_test_train, 'nngp'))):
+            raise ValueError(
+                'If `"ntk" in get`, and `nngp_test_test is not None`, '
+                'and `k_test_train is not None`, i.e. you request the '
+                'NTK posterior covariance on the test set, you need '
+                'both NTK and NNGP train-train and test-train matrices'
+                'contained in `k_test_train` and `k_train_train`. '
+                'Hence they must be `namedtuple`s with `nngp` and '
+                '`ntk` attributes.')
+
+          k_td_nngp_inv_y = solve(g)(_get_attr(k_test_train, 'nngp'), even)
+
+          if g == 'nngp':
+            cov = np.tensordot(k_td, k_td_nngp_inv_y, (odd, first))
+            cov = nngp_test_test - utils.zip_axes(cov)
+            out[g] = Gaussian(y, cov)
+
+          elif g == 'ntk':
+            term_1 = solve(g)(k_td, even)
+            cov = np.tensordot(_get_attr(k_train_train, 'nngp'), term_1,
+                               (odd, first))
+            cov = np.tensordot(term_1, cov, (first, first))
+
+            term_2 = np.tensordot(k_td, k_td_nngp_inv_y, (odd, first))
+            term_2 += np.moveaxis(term_2, first, last)
+            cov = utils.zip_axes(cov - term_2) + nngp_test_test
+            out[g] = Gaussian(y, cov)
+
+          else:
+            raise ValueError(g)
+
+      else:
+        out[g] = y
+
+    return out
+
+  return predict_fn
 
 
-_gp_inference_mat_jit = jit(_gp_inference_mat, static_argnums=(4,))
+"""Helper type to fit cache dictionaries to `get` API."""
+_Kernel = collections.namedtuple('Kernel', 'nngp ntk')
+_Kernel.__new__.__defaults__ = (None,) * len(_Kernel._fields)
 
 
-_gp_inference_mat_jit_cpu = jit(_gp_inference_mat, static_argnums=(4,),
-                                backend='cpu')
-
-
-def _get_matrices(kernel_fn, x_train, x_test, get, compute_cov,
-                  **kernel_fn_kwargs):
-  get = _get_dependency(get, compute_cov)
-  kdd = kernel_fn(x_train, None, get, **kernel_fn_kwargs)
-  ktd = kernel_fn(x_test, x_train, get, **kernel_fn_kwargs)
-  if compute_cov:
-    nngp_tt = kernel_fn(x_test, x_test, 'nngp', **kernel_fn_kwargs)
-  else:
-    nngp_tt = None
-  return kdd, ktd, nngp_tt
-
-
-# TODO(schsam): Refactor this method to make use of @getter.
-def gradient_descent_mse_gp(kernel_fn: KernelFn,
-                            x_train: np.ndarray,
-                            y_train: np.ndarray,
-                            x_test: np.ndarray,
-                            get: Union[str, Tuple[str, ...]],
-                            diag_reg: float = 0.0,
-                            compute_cov: bool = False,
-                            **kernel_fn_kwargs) -> Callable:
-  """Predicts the gaussian embedding induced by gradient descent with mse loss.
+def gradient_descent_mse_ensemble(
+    kernel_fn: KernelFn,
+    x_train: np.ndarray,
+    y_train: np.ndarray,
+    learning_rate: float = 1.,
+    diag_reg: float = 0.0,
+    diag_reg_absolute_scale: bool = False,
+    trace_axes: Axes = (-1,),
+    **kernel_fn_kwargs):
+  r"""Predicts the gaussian embedding induced by gradient descent on MSE loss.
 
   This is equivalent to an infinite ensemble of networks after marginalizing
   out the initialization.
 
+  Note that first invocation of the returned `predict_fn` will be slow and
+  allocate a lot of memory for its whole lifetime, as the kernel computation,
+  and either eigendecomposition (`t` is a scalar or an array) or Cholesky
+  factorization (`t=None`) of `kernel_fn(x_train, x_train)` is performed and
+  cached for future invocations (or both, if the function is called on both
+  finite and infinite (`t=None`) times).
+
   Args:
-    kernel_fn: A kernel function that computes NNGP and NTK.
-    x_train: A `np.ndarray`, representing the training data.
-    y_train: A `np.ndarray`, representing the labels of the training data.
-    x_test: A `np.ndarray`, representing the test data.
-    get: string, the mode of the Gaussian process, either "nngp" or "ntk", or
-      a tuple.
-    diag_reg: A float, representing the strength of the regularization.
-    compute_cov: A boolean. If `True` computing both `mean` and `variance` and
-      only `mean` otherwise.
-    :**kernel_fn_kwargs: optional keyword arguments passed to `kernel_fn`.
+    kernel_fn:
+      A kernel function that computes NNGP and NTK.
+    x_train:
+      training inputs.
+    y_train:
+      training targets.
+    learning_rate:
+      learning rate, step size.
+    diag_reg:
+      a scalar representing the strength of the diagonal regularization for
+      `kernel_fn(x_train, x_train)`, i.e. computing
+      `kernel_fn(x_train, x_train) + diag_reg * I` during Cholesky factorization
+       or eigendecomposition.
+    diag_reg_absolute_scale:
+      `True` for `diag_reg` to represent regularization in absolute units,
+      `False` to be `diag_reg * np.mean(np.trace(kernel_fn(x_train, x_train)))`.
+    trace_axes:
+      `f(x_train)` axes such that `kernel_fn(x_train, x_train)`,
+      `kernel_fn(x_test, x_train)`[, and `kernel_fn(x_test, x_test)`] lack these
+      pairs of dimensions and are to be interpreted as :math:`\Theta \otimes I`,
+      i.e. block-diagonal along `trace_axes`. These can can be specified either
+      to save space and compute, or to even improve approximation accuracy of
+      the infinite-width or infinite-samples limit, since in in these limits the
+      covariance along channel / feature / logit axes indeed converges to a
+      constant-diagonal matrix. However, if you target linearized dynamics of a
+      specific finite-width network, `trace_axes=()` will yield most accurate
+      result.
+    **kernel_fn_kwargs:
+      optional keyword arguments passed to `kernel_fn`.
 
   Returns:
-    A function that predicts the gaussian parameters at t:
-    predict(t) -> Gaussian(mean, variance).
-    If compute_cov is False, only returns the mean.
+    A function with signature `predict_fn(t, x_test, get, compute_cov)`
+    returning either mean or mean and covariance of infinite-width network
+    outputs on `x_test` at time[s] `t`, in the `get` regime ('nngp', 'ntk', or.
   """
-  if get is None:
-    get = ('nngp', 'ntk')
+  expm1 = _make_expm1_fn(y_train.size)
+  inv_expm1 = _make_inv_expm1_fn(y_train.size)
 
-  if isinstance(get, str):
-    # NOTE(schsam): This seems like an ugly solution that involves an extra
-    # indirection. It might be nice to clean it up.
-    def _predict(t=None):
-      return gradient_descent_mse_gp(
-          kernel_fn,
-          x_train,
-          y_train,
-          x_test,
-          diag_reg=diag_reg,
-          get=(get,),
-          compute_cov=compute_cov,
-          **kernel_fn_kwargs
-      )(t)[0]
+  trace_axes = utils.canonicalize_axis(trace_axes, y_train)
+  trace_axes = tuple(-y_train.ndim + a for a in trace_axes)
+  n_trace_axes = len(trace_axes)
+  last_t_axes = range(-n_trace_axes, 0)
+  trace_shape = tuple(y_train.shape[a] for a in trace_axes)
 
-    return _predict
+  y_train_flat = np.moveaxis(y_train, trace_axes, last_t_axes).reshape(
+      (-1,) + trace_shape)
 
-  _, get = canonicalize_get(get)
+  k_dd_cache = {}
 
-  normalization = y_train.size
-  op_fn = _make_inv_expm1_fn(normalization)
+  def get_k_train_train(get: Tuple[str, ...]) -> _Kernel:
+    if len(get) == 1:
+      get = get[0]
+      if get not in k_dd_cache:
+        k_dd_cache[get] = kernel_fn(x_train, None, get=get, **kernel_fn_kwargs)
 
-  eigenspace: Dict[str, Any] = {}
+    elif len(get) == 2:
+      if not any(g in k_dd_cache for g in get):
+        k_dd_cache.update(
+            kernel_fn(x_train, None, get=get, **kernel_fn_kwargs)._asdict())
+      else:
+        for g in get:
+          if g not in k_dd_cache:
+            k_dd_cache[g] = kernel_fn(x_train, None, get=g, **kernel_fn_kwargs)
 
-  kdd, ktd, nngp_tt = _get_matrices(kernel_fn, x_train, x_test, get,
-                                    compute_cov, **kernel_fn_kwargs)
-  gp_inference_mat = (_gp_inference_mat_jit_cpu if _is_on_cpu(kdd) else
-                      _gp_inference_mat_jit)
+    else:
+      raise ValueError(get)
+    return _Kernel(**k_dd_cache)
 
-  @_jit_cpu(kdd)
-  def predict(t=None):
-    """`t=None` is equivalent to infinite time and calls `gp_inference`."""
+  @lru_cache(2)
+  def eigenspace(get: str):
+    k_dd = getattr(get_k_train_train((get,)), get)
+    k_dd = _add_diagonal_regularizer(utils.make_2d(k_dd), diag_reg,
+                                     diag_reg_absolute_scale)
+    return np.linalg.eigh(k_dd)
+
+  @lru_cache(4)
+  def predict_inf(get: Get):
+    _, get = utils.canonicalize_get(get)
+    k_dd = get_k_train_train(get)
+    return gp_inference(k_dd, y_train, diag_reg, diag_reg_absolute_scale,
+                        trace_axes)
+
+  def get_matrices(get: Get, x_test: Optional[np.ndarray], compute_cov: bool):
+    get = _get_dependency(get, compute_cov)
+    k_dd = get_k_train_train(get)
+    if x_test is None:
+      k_td = None
+      nngp_tt = compute_cov or None
+    else:
+      k_td = kernel_fn(x_test, x_train, get=get, **kernel_fn_kwargs)
+      if compute_cov:
+        nngp_tt = kernel_fn(x_test, None, get='nngp', **kernel_fn_kwargs)
+      else:
+        nngp_tt = None
+    return k_dd, k_td, nngp_tt
+
+  @utils.get_namedtuple('Gaussians')
+  def predict_fn(t: ArrayOrScalar = None,
+                 x_test: np.ndarray = None,
+                 get: Get = None,
+                 compute_cov: bool = False) -> Dict[str, Gaussian]:
+    """Return output mean and covariance on the test set at time[s] `t`.
+
+    Args:
+      t:
+        a scalar of array of scalars of any shape. `t=None` is treated as
+        infinity and returns the same result as `t=np.inf`, but is computed
+        using linear solve for test predictions instead of eigendecomposition,
+        saving time and precision.
+      x_test:
+        test inputs. `None` means to return predictions on the train-set inputs.
+      get:
+        string, the mode of the Gaussian process, either "nngp" or "ntk", or a
+        tuple. `get=None` is equivalent to `get=("nngp", "ntk")`.
+      compute_cov:
+        if `True` computing both `mean` and `variance` and only `mean`
+        otherwise.
+
+    Returns:
+      `fx_test_mean_t` or `(fx_test_mean_t, fx_test_cov_t)` if
+      `compute_cov == True` with potentially additional leading time dimensions.
+    """
+    if get is None:
+      get = ('nngp', 'ntk')
+
+    # train-train, test-train, test-test.
+    k_dd, k_td, nngp_tt = get_matrices(get, x_test, compute_cov)
+
+    # Infinite time.
     if t is None:
-      return gp_inference_mat(kdd, ktd, nngp_tt, y_train, get, diag_reg)
+      return predict_inf(get)(get=get, k_test_train=k_td,
+                              nngp_test_test=nngp_tt)
 
-    if not eigenspace:
-      for g in get:
-        k = kdd.nngp if g == 'nngp' else kdd.ntk
-        k_dd_plus_reg = _add_diagonal_regularizer(k, diag_reg)
-        eigenspace[g] = np.linalg.eigh(k_dd_plus_reg)
+    # Finite time.
+    t = np.array(t) * learning_rate
+    t_shape = t.shape
+    t = t.reshape((-1, 1))
+
+    def reshape_mean(mean):
+      k = _get_first(k_dd if k_td is None else k_td)
+      mean = mean.reshape(t_shape + k.shape[::2] + trace_shape)
+      mean = np.moveaxis(mean, last_t_axes, trace_axes)
+      return mean
+
+    def reshape_cov(cov):
+      k = _get_first(k_dd if k_td is None else k_td)
+      cov_shape_t = t_shape + k.shape[::2] * 2
+      return utils.zip_axes(cov.reshape(cov_shape_t), len(t_shape))
 
     out = {}
 
-    if 'nngp' in get:
-      evals, evecs = eigenspace['nngp']
-      op_evals = -op_fn(evals, t)
-      pred_mean = _mean_prediction_einsum(evecs, op_evals, ktd.nngp, y_train)
-      if compute_cov:
-        op_evals_x2 = -op_fn(evals, 2 * t)
-        pred_cov = nngp_tt - np.einsum(
-            'mj,ji,i,ki,lk->ml',
-            ktd.nngp,
-            evecs,
-            op_evals_x2,
-            evecs,
-            ktd.nngp,
+    for g in get:
+      evals, evecs = eigenspace(g)
+
+      # Training set.
+      if k_td is None:
+        mean = np.einsum(
+            'ji,ti,ki,k...->tj...',
+            evecs, -expm1(evals, t), evecs, y_train_flat,
             optimize=True)
 
-      out['nngp'] = Gaussian(pred_mean, pred_cov) if compute_cov else pred_mean
-
-    if 'ntk' in get:
-      evals, evecs = eigenspace['ntk']
-      op_evals = -op_fn(evals, t)
-      pred_mean = _mean_prediction_einsum(evecs, op_evals, ktd.ntk, y_train)
-      if compute_cov:
-        # inline the covariance calculation with einsum.
-        term_1 = np.einsum(
-            'mi,i,ki,lk->ml', evecs, op_evals, evecs, ktd.ntk, optimize=True)
-        pred_cov = np.einsum(
-            'ji,jk,kl->il', term_1, kdd.nngp, term_1, optimize=True)
-        term_2 = np.einsum(
-            'mj,ji,i,ki,lk->ml',
-            ktd.ntk,
-            evecs,
-            op_evals,
-            evecs,
-            ktd.nngp,
+      # Test set.
+      else:
+        neg_inv_expm1 = -inv_expm1(evals, t)
+        ktd_g = utils.make_2d(getattr(k_td, g))
+        mean = np.einsum(
+            'lj,ji,ti,ki,k...->tl...',
+            ktd_g, evecs, neg_inv_expm1, evecs, y_train_flat,
             optimize=True)
-        term_2 += np.transpose(term_2)
-        pred_cov += -term_2 + nngp_tt
 
-      out['ntk'] = Gaussian(pred_mean, pred_cov) if compute_cov else pred_mean
+      mean = reshape_mean(mean)
 
-    returntype = named_tuple_factory('Gaussians', get)
-    return returntype(*tuple(out[g] for g in get))
+      if nngp_tt is not None:
+        nngp_dd = utils.make_2d(k_dd.nngp)
 
-  return predict
+        # Training set.
+        if k_td is None:
+          if g == 'nngp':
+            cov = np.einsum(
+                'ji,ti,ki->tjk',
+                evecs,
+                (np.maximum(evals, 0.) *
+                 np.exp(- 2 * np.maximum(evals, 0.) * t / y_train.size)),
+                evecs,
+                optimize=True)
+
+          elif g == 'ntk':
+            exp = np.einsum(
+                'mi,ti,ki->tmk',
+                evecs,
+                np.exp(-np.maximum(evals, 0.) * t / y_train.size),
+                evecs,
+                optimize=True)
+            cov = np.einsum(
+                'tmk,kl,tnl->tmn',
+                exp,
+                nngp_dd,
+                exp,
+                optimize=True)
+
+          else:
+            raise ValueError(g)
+
+        # Test set.
+        else:
+          _nngp_tt = utils.make_2d(nngp_tt)
+
+          if g == 'nngp':
+            cov = _nngp_tt - np.einsum(
+                'mj,ji,ti,ki,lk->tml',
+                ktd_g, evecs, -inv_expm1(evals, 2 * t), evecs, ktd_g,
+                optimize=True)
+
+          elif g == 'ntk':
+            term_1 = np.einsum(
+                'mi,ti,ki,lk->tml',
+                evecs, neg_inv_expm1, evecs, ktd_g,
+                optimize=True)
+            term_2 = np.einsum(
+                'mj,ji,ti,ki,lk->tml',
+                ktd_g, evecs, neg_inv_expm1, evecs, utils.make_2d(k_td.nngp),  # pytype:disable=attribute-error
+                optimize=True)
+            term_2 += np.moveaxis(term_2, 1, 2)
+            cov = np.einsum(
+                'tji,jk,tkl->til',
+                term_1, nngp_dd, term_1,
+                optimize=True)
+            cov += -term_2 + _nngp_tt
+
+          else:
+            raise ValueError(g)
+
+        out[g] = Gaussian(mean, reshape_cov(cov))
+
+      else:
+        out[g] = mean
+
+    return out
+
+  return predict_fn
 
 
-## Utility functions
-def _get_dependency(get, compute_cov):
+def max_learning_rate(
+    ntk_train_train: np.ndarray,
+    y_train_size: int = None,
+    eps: float = 1e-12) -> float:
+  r"""Computes the maximal feasible learning rate for infinite width NNs.
+
+  The network is assumed to be trained using SGD or full-batch GD with mean
+  squared loss. The loss is assumed to have the form
+  `1/(2 * batch_size * output_size) \|f(train_x) - train_y\|^2`. The maximal
+  feasible learning rate is the largest `\eta` such that the operator
+  `(I - \eta / (batch_size * output_size) * NTK)` is a contraction, which is
+  '2 * batch_size * output_size * lambda_max(NTK)'.
+
+  Args:
+    ntk_train_train: analytic or empirical NTK on the training data.
+    y_train_size: total training set output size, i.e.
+      `f(x_train).size ==  y_train.size`. If `output_size=None` it is inferred
+      from `ntk_train_train.shape` assuming `trace_axes=()`.
+    eps: a float to avoid zero divisor.
+
+  Returns:
+    The maximal feasible learning rate for infinite width NNs.
+  """
+  ntk_train_train = utils.make_2d(ntk_train_train)
+  factor = ntk_train_train.shape[0] if y_train_size is None else y_train_size
+
+  if utils.is_on_cpu(ntk_train_train):
+    max_eva = osp.linalg.eigvalsh(ntk_train_train,
+                                  eigvals=(ntk_train_train.shape[0] - 1,
+                                           ntk_train_train.shape[0] - 1))[-1]
+  else:
+    max_eva = np.linalg.eigvalsh(ntk_train_train)[-1]
+  lr = 2 * factor / (max_eva + eps)
+  return lr
+
+
+# INTERNAL UTILITIES
+
+
+def _get_dependency(get: Get, compute_cov: bool) -> Tuple[str, ...]:
   """Figure out dependency for get."""
-  _, get = canonicalize_get(get)
+  _, get = utils.canonicalize_get(get)
   for g in get:
     if g not in ['nngp', 'ntk']:
       raise NotImplementedError(
@@ -735,207 +965,154 @@ def _get_dependency(get, compute_cov):
   return get_dependency
 
 
-def _eigen_fns(
-    mat: np.ndarray, fns: Tuple[Callable, ...]) -> Tuple[Callable, ...]:
+def _get_fns_in_eigenbasis(k_train_train: np.ndarray,
+                           diag_reg: float,
+                           diag_reg_absolute_scale: bool,
+                           fns: Iterable[Callable]) -> Iterable[Callable]:
   """Build functions of a matrix in its eigenbasis.
 
   Args:
-    mat: an n x n matrix
-    fns: a sequence of functions that add on the eigenvalues (evals, dt) ->
-      modified_evals
+    k_train_train:
+      an n x n matrix
+    fns:
+      a sequence of functions that add on the eigenvalues (evals, dt) ->
+      modified_evals.
 
   Returns:
     A tuple of functions that act as functions of the matrix mat
     acting on vectors: `transform(vec, dt) = fn(mat, dt) @ vec`
   """
-  evals, evecs = np.linalg.eigh(mat)
+  k_train_train = utils.make_2d(k_train_train)
+  k_train_train = _add_diagonal_regularizer(k_train_train, diag_reg,
+                                            diag_reg_absolute_scale)
+  evals, evecs = np.linalg.eigh(k_train_train)
 
-  def transform(fn):
+  def to_eigenbasis(fn):
     """Generates a transform given a function on the eigenvalues."""
-    def _(vec, dt):
-      return np.einsum(
-          'ji,i,ki,k...->j...',
-          evecs, fn(evals, dt), evecs, vec, optimize=True)
+    def new_fn(y_train, t):
+      return np.einsum('ji,ti,ki,k...->tj...',
+                       evecs, fn(evals, t), evecs, y_train,
+                       optimize=True)
 
-    return _
+    return new_fn
 
-  return tuple(transform(fn) for fn in fns)
-
-
-def _add_diagonal_regularizer(covariance, diag_reg=0.):
-  dimension = covariance.shape[0]
-  reg = np.trace(covariance) / dimension
-  return covariance + diag_reg * reg * np.eye(dimension)
+  return (to_eigenbasis(fn) for fn in fns)
 
 
-def _inv_operator(g_dd, diag_reg=0.0):
-  g_dd_plus_reg = _add_diagonal_regularizer(g_dd, diag_reg)
-  return lambda vec: sp.linalg.solve(g_dd_plus_reg, vec, sym_pos=True)
+def _add_diagonal_regularizer(A: np.ndarray,
+                              diag_reg: float,
+                              diag_reg_absolute_scale: bool) -> np.ndarray:
+  dimension = A.shape[0]
+  if not diag_reg_absolute_scale:
+    diag_reg *= np.trace(A) / dimension
+  return A + diag_reg * np.eye(dimension)
 
 
-def _make_flatten_uflatten(g_td, y_train):
-  """Create the flatten and unflatten utilities."""
-  output_dimension = y_train.shape[-1]
+def _get_cho_solve(A: np.ndarray,
+                   diag_reg: float,
+                   diag_reg_absolute_scale: bool,
+                   lower: bool = False) -> Callable[[np.ndarray, Axes],
+                                                    np.ndarray]:
+  x_non_channel_shape = A.shape[1::2]
+  A = utils.make_2d(A)
+  A = _add_diagonal_regularizer(A, diag_reg, diag_reg_absolute_scale)
+  C = sp.linalg.cho_factor(A, lower)
 
-  def fl(fx):
-    """Flatten outputs."""
-    return np.reshape(fx, (-1,))
+  def cho_solve(b: np.ndarray, b_axes: Axes) -> np.ndarray:
+    b_axes = utils.canonicalize_axis(b_axes, b)
+    last_b_axes = range(-len(b_axes), 0)
+    x_shape = x_non_channel_shape + tuple(b.shape[a] for a in b_axes)
 
-  def ufl(fx):
-    """Unflatten outputs."""
-    return np.reshape(fx, (-1, output_dimension))
+    b = np.moveaxis(b, b_axes, last_b_axes)
+    b = b.reshape((A.shape[1], -1))
 
-  if y_train.size > g_td.shape[-1]:
-    out_dim, ragged = divmod(y_train.size, g_td.shape[-1])
-    if ragged or out_dim != output_dimension:
-      raise ValueError('The batch size of `y_train` must be the same as the'
-                       ' last dimension of `g_td`')
-    fl = lambda x: x
-    ufl = lambda x: x
-  return fl, ufl
+    x = sp.linalg.cho_solve(C, b)
+    x = x.reshape(x_shape)
+    return x
 
-
-def _mean_prediction(
-    op: Callable, g_td: np.ndarray, y_train: np.ndarray) -> np.ndarray:
-  """Compute the mean prediction of a Gaussian process.
-
-  Args:
-    op: Some vector operator that projects the data along the relevant
-      directions, op(vec, dt) = M^{-1} @ (I - E^(-M dt)) @ vec
-    g_td: A kernel relating training data with test data. The kernel should be
-      an `np.ndarray` of shape [n_test * output_dim, n_train * output_dim] or
-      [n_test, n_train].
-    y_train: An `np.ndarray` of shape [n_train, output_dim] of targets for the
-      training data.
-
-  Returns:
-    The mean prediction of the GP. `g_td @ op @ y_train`.
-  """
-  fl, ufl = _make_flatten_uflatten(g_td, y_train)
-
-  mean_pred = op(fl(y_train))
-  mean_pred = np.dot(g_td, mean_pred)
-  return ufl(mean_pred)
+  return cho_solve
 
 
-def _mean_prediction_einsum(evecs, op_evals, g_td, y_train):
-  """Einsum powered version of _mean_prediction."""
-  fl, ufl = _make_flatten_uflatten(g_td, y_train)
+def _get_fx_test_shape(y_train: np.ndarray,
+                       k_test_train: np.ndarray,
+                       y_axes: Axes) -> Tuple[int, ...]:
+  if k_test_train is None:
+    return y_train.shape
 
-  mean_pred = np.einsum(
-      'lj,ji,i,ki,k...->l...',
-      g_td, evecs, op_evals, evecs, fl(y_train), optimize=True)
-  return ufl(mean_pred)
-
-
-def _ntk_cov(op, ntk_td, nngp_dd, nngp_td, nngp_tt):
-  """Compute the covariance in the ntk approximation."""
-  # op(vec) here should compute \Theta^{-1} @ (I - e^{-\Theta dt}) @ vec
-  # for the time dependent case and
-  # op(vec) = \Theta^{-1} @ vec for the infinite time case.
-  # below implements Equation 15 from https://arxiv.org/abs/1902.06720
-  term_1 = op(np.transpose(ntk_td))
-  cov = np.dot(nngp_dd, term_1)
-  cov = np.dot(np.transpose(term_1), cov)
-  term_2 = np.dot(ntk_td, op(np.transpose(nngp_td)))
-  term_2 += np.transpose(term_2)
-  cov += (-term_2 + nngp_tt)
-  return cov
+  shape = list(k_test_train.shape[::2])
+  y_axes = utils.canonicalize_axis(y_axes, y_train)
+  for i, c in enumerate(y_train.shape):
+    if i in y_axes:
+      shape.insert(i, c)
+  return tuple(shape)
 
 
-def _nngp_cov(op, g_td, g_tt):
-  """Compute the covariance in the nngp approximation."""
-  # op(vec) here should compute K^{-1} @ (I - e^{-2 K dt}) @ vec
-  # for the time dependent case or
-  # op(vec) = K^{-1} @ vec
-  # for infinite time.
-  # below implements Equation S23 from https://arxiv.org/abs/1902.06720
-  cov = op(np.transpose(g_td))
-  return g_tt - np.dot(g_td, cov)
+def _make_expm1_fn(normalization: float):
 
-
-def _make_expm1_fn(normalization):
-
-  def expm1_fn(evals, dt):
-    # Since our maxtrix really should be positive semidefinite,
+  def expm1_fn(evals: np.ndarray, t: np.ndarray):
+    # Since our matrix really should be positive semidefinite,
     # we can threshold the eigenvalues to squash ones that are negative
     # for numerical reasons.
-    return np.expm1(-np.maximum(evals, 0.) * dt / normalization)
+    return np.expm1(-np.maximum(evals, 0.) * t / normalization)
 
   return expm1_fn
 
 
-def _make_inv_expm1_fn(normalization):
+def _make_inv_expm1_fn(normalization: float):
   expm1_fn = _make_expm1_fn(normalization)
 
-  def _inv_expm1_fn(evals, dt):
-    return expm1_fn(evals, dt) / np.abs(evals)
+  def _inv_expm1_fn(evals: np.ndarray, t: np.ndarray):
+    return expm1_fn(evals, t) / np.abs(evals)
 
   return _inv_expm1_fn
 
 
-def _arr_is_on_cpu(x):
-  # TODO(romann): revisit when https://github.com/google/jax/issues/1431 and
-  # https://github.com/google/jax/issues/1432 are fixed.
-  if hasattr(x, 'device_buffer'):
-    return 'cpu' in str(x.device_buffer.device()).lower()
+def _check_inputs(fx_train_or_state_0: Union[ArrayOrScalar, ODEState],
+                  fx_test_0: ArrayOrScalar,
+                  ntk_test_train: Optional[np.ndarray]):
+  if isinstance(fx_train_or_state_0, ODEState):
+    if fx_test_0 is not None:
+      raise ValueError('`fx_test_0` is included in `ODEState` and must be set'
+                       'to `None`.')
 
-  if isinstance(x, np.ndarray):
-    return True
+    fx_train_0 = fx_train_or_state_0.fx_train
+    fx_test_0 = fx_train_or_state_0.fx_test
 
-  raise NotImplementedError(type(x))
-
-
-def _is_on_cpu(x):
-  return tree_all(tree_map(_arr_is_on_cpu, x))
-
-
-def _jit_cpu(x):
-  def jit_cpu(f):
-    if _is_on_cpu(x):
-      return jit(f, backend='cpu')
-    return jit(f)
-  return jit_cpu
-
-
-def max_learning_rate(
-    kdd: np.ndarray, num_outputs: int = -1, eps: float = 1e-12) -> float:
-  r"""Computing the maximal feasible learning rate for infinite width NNs.
-
-  The network is assumed to be trained using SGD or full-batch GD with mean
-  squared loss. The loss is assumed to have the form
-  :math:`1/(2 * batch_size * num_outputs) \|f(train_x) - train_y\|^2`. The
-  maximal feasible learning rate is the largest `\eta` such that the operator
-  :math:`(I - \eta / (batch_size * num_outputs) * NTK)` is a contraction, which
-  is :math:`2 * batch_size * num_outputs * \lambda_max(NTK)`.
-
-  Args:
-    kdd: The analytic or empirical NTK of (train_x, train_x).
-    num_outputs: The number of outputs of the neural network. If `kdd` is the
-      analytic ntk, `num_outputs` must be provided. Otherwise `num_outputs=-1`
-      and `num_outputs` is computed via the size of `kdd`.
-    eps: A float to avoid zero divisor.
-
-  Returns:
-    The maximal feasible learning rate for infinite width NNs.
-  """
-
-  if kdd.ndim not in [2, 4]:
-    raise ValueError('`kdd` must be a 2d or 4d tensor.')
-  if kdd.ndim == 2 and num_outputs == -1:
-    raise ValueError('`num_outputs` must be provided for theoretical kernel.')
-  if kdd.ndim == 2:
-    factor = kdd.shape[0] * num_outputs
   else:
-    kdd = empirical.flatten_features(kdd)
-    factor = kdd.shape[0]
-  if kdd.shape[0] != kdd.shape[1]:
-    raise ValueError('`kdd` must be a square matrix.')
-  if _is_on_cpu(kdd):
-    max_eva = osp.linalg.eigvalsh(
-        kdd,
-        eigvals=(kdd.shape[0] - 1, kdd.shape[0] - 1))[-1]
-  else:
-    max_eva = np.linalg.eigvalsh(kdd)[-1]
-  lr = 2 * factor / (max_eva + eps)
-  return lr
+    fx_train_0 = fx_train_or_state_0
+
+  if fx_train_0 is None and fx_test_0 is None:
+    raise ValueError('Both `fx_train_0` and `fx_test_0` are `None`, i.e. no'
+                     'predictions will be computed.')
+  if fx_test_0 is not None and ntk_test_train is None:
+    raise ValueError('To get predictions on the test set, please provide'
+                     '`ntk_test_train` kernel to the parent function.')
+
+
+def _get_axes(x: np.ndarray):
+  n = x.ndim
+  return (
+      tuple(range(0, n, 2)),
+      tuple(range(1, n, 2)),
+      tuple(range(0, n // 2)),
+      tuple(range(n // 2, n))
+  )
+
+
+def _get_first(k) -> np.ndarray:
+  if isinstance(k, np.ndarray):
+    return k
+
+  for g in ('nngp', 'ntk'):
+    if hasattr(k, g):
+      v = getattr(k, g)
+      if v is not None:
+        return v
+
+  raise ValueError(k)
+
+
+def _get_attr(k, g: str) -> np.ndarray:
+  if isinstance(k, np.ndarray):
+    return k
+  return getattr(k, g)

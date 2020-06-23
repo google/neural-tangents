@@ -16,7 +16,8 @@
 
 """Common Type Definitions."""
 
-from typing import Tuple, Callable, Union, List, Any, Optional, Iterable, Dict, Type
+from typing import Tuple, Callable, Union, List, Any, Optional, Sequence, \
+  Generator
 import jax.numpy as np
 from neural_tangents.utils.kernel import Kernel
 
@@ -30,7 +31,14 @@ PyTree = Any
   See https://jax.readthedocs.io/en/latest/jax.random.html#jax.random.PRNGKey
   for details.
 """
-PRNGKey = Type[np.array]
+PRNGKey = np.ndarray
+
+
+"""A type alias for axes specification.
+
+  Axes can be specified as integers (`axis=-1`) or sequences (`axis=(1, 3)`).
+"""
+Axes = Union[int, Sequence[int]]
 
 
 # Layer Definition.
@@ -49,13 +57,19 @@ Apply functions do computations with finite-width neural networks. They are
 functions that take a PyTree of parameters and an array of inputs and produce
 an array of outputs.
 """
-
 ApplyFn = Callable[..., np.ndarray]
 
+
 Shapes = Union[Tuple[int, ...], List[Tuple[int, ...]]]
+
+
 Kernels = Union[Kernel, List[Kernel]]
+
+
 KernelOrInput = Union[Kernel, np.ndarray]
-Get = Union[Tuple[str], str, None]
+
+
+Get = Union[Tuple[str, ...], str, None]
 
 
 """A type alias for pure kernel functions.
@@ -92,11 +106,17 @@ EmpiricalKernelFn = Callable[[np.ndarray, Optional[np.ndarray], PyTree, Get],
 A kernel function that produces an estimate of an AnalyticKernel
 by monte carlo sampling given a PRNGKey.
 """
-MonteCarloKernelFn = Callable[[np.ndarray, Optional[np.ndarray], PRNGKey, Get],
-                              Union[np.ndarray, Tuple[np.ndarray, ...]]]
+MonteCarloKernelFn = Callable[
+    [np.ndarray, Optional[np.ndarray], Get],
+    Union[Union[np.ndarray, Tuple[np.ndarray, ...]],
+          Generator[Union[np.ndarray, Tuple[np.ndarray, ...]], None, None]]]
 
 
 KernelFn = Union[AnalyticKernelFn, EmpiricalKernelFn, MonteCarloKernelFn]
+
+
 InternalLayer = Union[Tuple[InitFn, ApplyFn, LayerKernelFn],
                       Tuple[InitFn, ApplyFn, LayerKernelFn, Callable]]
+
+
 Layer = Tuple[InitFn, ApplyFn, AnalyticKernelFn]

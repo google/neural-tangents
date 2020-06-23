@@ -40,7 +40,7 @@ if sys.version_info < (3, 7):
 
 setuptools.setup(
     name='neural-tangents',
-    version='0.2.2',
+    version='0.3.0',
     license='Apache 2.0',
     author='Google',
     author_email='neural-tangents-dev@google.com',

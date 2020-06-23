@@ -20,7 +20,7 @@ import operator as op
 import jax.numpy as np
 from neural_tangents.utils import dataclasses
 from neural_tangents.utils import utils
-from typing import Dict, Tuple, Optional, Callable, Any, Union
+from typing import Dict, Tuple, Optional, Callable, Any
 
 
 @dataclasses.dataclass
@@ -116,14 +116,9 @@ class Kernel:
   mask1: Optional[np.ndarray] = None
   mask2: Optional[np.ndarray] = None
 
-  def replace(self, **kwargs) -> 'Kernel':
-    return dataclasses.replace(self, **kwargs)
-
-  def asdict(self) -> Dict[str, Any]:
-    return dataclasses.asdict(self)
-
-  def astuple(self) -> Tuple[Any, ...]:
-    return dataclasses.astuple(self)
+  replace = ...  # type: Callable[..., 'Kernel']
+  asdict = ...  # type: Callable[[], Dict[str, Any]]
+  astuple = ...  # type: Callable[[], Tuple[Any, ...]]
 
   def slice(self, n1_slice: slice, n2_slice: slice) -> 'Kernel':
     cov1 = self.cov1[n1_slice]
@@ -137,7 +132,7 @@ class Kernel:
         cov1=cov1,
         nngp=self.nngp[n1_slice, n2_slice],
         cov2=cov2,
-        ntk=ntk[n1_slice, n2_slice] if utils.is_array(ntk) else ntk,
+        ntk=ntk if ntk is None or ntk.ndim == 0 else ntk[n1_slice, n2_slice],
         shape1=(cov1.shape[0],) + self.shape1[1:],
         shape2=(cov2.shape[0],) + self.shape2[1:],
         mask1=mask1,
@@ -163,7 +158,7 @@ class Kernel:
     target_axes = tuple(range(-1, -ndim * 2 - 1, -1))
 
     def reverse(mat):
-      if utils.is_array(mat):
+      if mat is not None:
         return np.moveaxis(mat, source_axes, target_axes)
       return mat
 
@@ -191,10 +186,10 @@ class Kernel:
     if axes is None:
       axes = tuple(range(len(self.shape1) - 2))
 
-    def permute(mat: Union[None, float, np.ndarray],
-                batch_ndim: int) -> Union[None, float, np.ndarray]:
-      if utils.is_array(mat):
-        _axes = tuple(batch_ndim + a for a in axes)  # type: ignore
+    def permute(mat: Optional[np.ndarray],
+                batch_ndim: int) -> Optional[np.ndarray]:
+      if mat is not None:
+        _axes = tuple(batch_ndim + a for a in axes)
         if not self.diagonal_spatial:
           _axes = tuple(j for a in _axes
                         for j in (2 * a - batch_ndim,
@@ -216,9 +211,9 @@ class Kernel:
     mask11, mask12, mask22 = self._get_mask_prods(mask1, mask2)
 
     def mask_mat(mat, mask):
-      if not utils.is_array(mat) or mask is None:
+      if mat is None or mask is None:
         return mat
-      return np.where(mask, np.zeros((), mat.dtype), mat)  # pytype: disable=attribute-error
+      return np.where(mask, np.zeros((), mat.dtype), mat)
 
     cov1 = mask_mat(self.cov1, mask11)
     cov2 = mask_mat(self.cov2, mask22)
@@ -232,8 +227,9 @@ class Kernel:
                         mask1=mask1,
                         mask2=mask2)
 
-  def _get_mask_prods(
-    self, mask1: Optional[np.ndarray], mask2: Optional[np.ndarray]
+  def _get_mask_prods(self,
+                      mask1: Optional[np.ndarray],
+                      mask2: Optional[np.ndarray]
     ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
     """Gets outer products of `mask1, mask1`, `mask1, mask2`, `mask2, mask2`."""
     def get_mask_prod(m1, m2, batch_ndim):

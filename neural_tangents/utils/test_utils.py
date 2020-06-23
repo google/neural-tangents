@@ -16,14 +16,15 @@
 
 """Utilities for testing."""
 
+
 import logging
+
 import dataclasses
 from jax.api import jit
 from jax.api import vmap
 from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.test_util as jtu
-import numpy as onp
 from .kernel import Kernel
 import numpy as onp
 
@@ -91,8 +92,16 @@ def assert_close_matrices(self, expected, actual, rtol):
 
 
 class NeuralTangentsTestCase(jtu.JaxTestCase):
-  def assertAllClose(self, x, y, check_dtypes, atol=None, rtol=None,
-                     canonicalize_dtypes=True):
+
+  def assertAllClose(
+      self,
+      x,
+      y,
+      *,
+      check_dtypes=True,
+      atol=None,
+      rtol=None,
+      canonicalize_dtypes=True):
     if isinstance(x, Kernel):
       self.assertIsInstance(y, Kernel)
       x_dict = dataclasses.asdict(x)
