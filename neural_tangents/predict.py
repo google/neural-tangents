@@ -224,7 +224,9 @@ def gradient_descent_mse(
       ntk_test_train:
         kernel relating test data with training data. Must have the shape of
         `zip(y_test.shape, y_train.shape)` with `trace_axes` absent. Pass
-        `ntk_test_train=None` if you only need predictions on the training set.
+        `ntk_test_train=None` if you only need non-regularized (`diag_reg=0`)
+        predictions on the training set. For regularized train-set predictions,
+        pass `ntk_test_train=ntk_train_train`.
 
     Returns:
       `fx_train_t` or `(fx_train_t, fx_test_t)` if `fx_test_0 != None` with
@@ -571,9 +573,12 @@ def gp_inference(
         A test-test NNGP array. Provide if you want to compute test-test
         posterior covariance. `nngp_test_tes=None`, means to not compute it. If
         `k_test_train is None`, pass any non-`None` value (e.g. `True`) if you
-        want to get train-train posterior covariance. Note that train-set
-        outputs are always `N(y_train, 0)` and mostly returned for API
-        consistency.
+        want to get non-regularized (`diag_reg=0`) train-train posterior
+        covariance. Note that non-regularized train-set outputs will always be
+        the zero-variance Gaussian `N(y_train, 0)` and mostly returned for API
+        consistency. For regularized train-set posterior outputs according to a
+        positive `diag_reg`, pass `k_test_train=k_train_train`, and, optionally,
+        `nngp_test_test=nngp_train_train`.
 
     Returns:
       Either a `Gaussian('mean', 'variance')` namedtuple or `mean` of the GP
@@ -791,7 +796,9 @@ def gradient_descent_mse_ensemble(
         using linear solve for test predictions instead of eigendecomposition,
         saving time and precision.
       x_test:
-        test inputs. `None` means to return predictions on the train-set inputs.
+        test inputs. `None` means to return non-regularized (`diag_reg=0`)
+        predictions on the train-set inputs. For regularized predictions, pass
+        `x_test=x_train`.
       get:
         string, the mode of the Gaussian process, either "nngp" or "ntk", or a
         tuple. `get=None` is equivalent to `get=("nngp", "ntk")`.
