@@ -92,7 +92,7 @@ def _empirical_kernel(key, input_shape, network, out_logits):
   init_fn, f, _ = _build_network(input_shape, network, out_logits)
   _, params = init_fn(key, (-1,) + input_shape)
   _kernel_fn = empirical.empirical_kernel_fn(f, trace_axes=())
-  kernel_fn = lambda x1, x2, get: _kernel_fn(x1, x2, params, get)
+  kernel_fn = lambda x1, x2, get: _kernel_fn(x1, x2, get, params)
   return params, f, jit(kernel_fn, static_argnums=(2,))
 
 
@@ -325,7 +325,7 @@ class PredictTest(jtu.JaxTestCase):
     self.assertGreater(np.min(np.linalg.eigh(cov_train_inf)[0]), -1e-8)
 
     _kernel_fn = empirical.empirical_kernel_fn(f)
-    kernel_fn = jit(lambda x1, x2, params: _kernel_fn(x1, x2, params, 'ntk'))
+    kernel_fn = jit(lambda x1, x2, params: _kernel_fn(x1, x2, 'ntk', params))
 
     def predict_empirical(key):
       _, params = init_fn(key, train_shape)
@@ -737,7 +737,7 @@ class PredictTest(jtu.JaxTestCase):
         _, params = init_fn(key, x_train.shape)
         kernel_fn_empirical = empirical.empirical_kernel_fn(apply_fn)
         def kernel_fn(x1, x2, get):
-          return kernel_fn_empirical(x1, x2, params, get)
+          return kernel_fn_empirical(x1, x2, get, params)
 
       for get in [None,
                   'nngp', 'ntk',
@@ -850,9 +850,10 @@ class PredictTest(jtu.JaxTestCase):
 
             kernel_fn = empirical.empirical_kernel_fn(apply_fn,
                                                       trace_axes=trace_axes)
-            ntk_train_train = kernel_fn(x_train, None, params, get='ntk')
+            kernel_fn = jit(kernel_fn, static_argnums=(2,))
+            ntk_train_train = kernel_fn(x_train, None, 'ntk', params)
             if x is not None:
-              ntk_test_train = kernel_fn(x, x_train, params, get='ntk')
+              ntk_test_train = kernel_fn(x, x_train, 'ntk', params)
 
             loss = lambda x, y: 0.5 * np.mean(x - y)**2
             predict_fn_mse = predict.gradient_descent_mse(ntk_train_train,

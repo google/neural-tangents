@@ -87,6 +87,7 @@ def gradient_descent_mse(
     >>>
     >>> t = 1e-7
     >>> kernel_fn = empirical_ntk_fn(f)
+    >>> ntk_train_train = kernel_fn(x_train, None, params)
     >>> ntk_test_train = kernel_fn(x_test, x_train, params)
     >>>
     >>> predict_fn = predict.gradient_descent_mse(ntk_train_train, y_train)
@@ -658,19 +659,30 @@ def gradient_descent_mse_ensemble(
     **kernel_fn_kwargs):
   r"""Predicts the gaussian embedding induced by gradient descent on MSE loss.
 
-  This is equivalent to an infinite ensemble of networks after marginalizing
-  out the initialization.
+  This is equivalent to an infinite ensemble of infinite-width networks after
+  marginalizing out the initialization, if `kernel_fn` is the kernel function of
+  the infinite-width network. Note that `kernel_fn` can in principle also be an
+  empirical / Monte Carlo finite-width kernel function, but in this case the
+  returned output will not have a simple interpretation (unless these functions
+  are used to approximate the infinite-width kernel).
 
   Note that first invocation of the returned `predict_fn` will be slow and
   allocate a lot of memory for its whole lifetime, as the kernel computation,
   and either eigendecomposition (`t` is a scalar or an array) or Cholesky
-  factorization (`t=None`) of `kernel_fn(x_train, x_train)` is performed and
+  factorization (`t=None`) of `kernel_fn(x_train, None, get)` is performed and
   cached for future invocations (or both, if the function is called on both
   finite and infinite (`t=None`) times).
 
   Args:
     kernel_fn:
-      A kernel function that computes NNGP and NTK.
+      A kernel function that computes NNGP and/or NTK. Must have a signature
+      `kernel_fn(x1, x2, get, **kernel_fn_kwargs)` and return a `Kernel` object
+      or a `namedtuple` with `nngp` and/or `ntk` attributes. Therefore, it can
+      be an `AnalyticKernelFn`, but also a `MonteCarloKernelFn`, or an
+      `EmpiricalKernelFn` (but only `nt.empirical_kernel_fn` and not
+      `nt.empirical_ntk_fn` or `ntk.empirical_nngp_fn`, since the latter two do
+      not accept a `get` argument). Note that for meaningful outputs, the kernel
+      function must represent or at least approximate the infinite-width kernel.
     x_train:
       training inputs.
     y_train:
@@ -679,30 +691,32 @@ def gradient_descent_mse_ensemble(
       learning rate, step size.
     diag_reg:
       a scalar representing the strength of the diagonal regularization for
-      `kernel_fn(x_train, x_train)`, i.e. computing
-      `kernel_fn(x_train, x_train) + diag_reg * I` during Cholesky factorization
-       or eigendecomposition.
+      `kernel_fn(x_train, None, get)`, i.e. computing
+      `kernel_fn(x_train, None, get) + diag_reg * I` during Cholesky
+      factorization or eigendecomposition.
     diag_reg_absolute_scale:
       `True` for `diag_reg` to represent regularization in absolute units,
-      `False` to be `diag_reg * np.mean(np.trace(kernel_fn(x_train, x_train)))`.
+      `False` to be
+      `diag_reg * np.mean(np.trace(kernel_fn(x_train, None, get)))`.
     trace_axes:
-      `f(x_train)` axes such that `kernel_fn(x_train, x_train)`,
-      `kernel_fn(x_test, x_train)`[, and `kernel_fn(x_test, x_test)`] lack these
-      pairs of dimensions and are to be interpreted as :math:`\Theta \otimes I`,
-      i.e. block-diagonal along `trace_axes`. These can can be specified either
-      to save space and compute, or to even improve approximation accuracy of
-      the infinite-width or infinite-samples limit, since in in these limits the
-      covariance along channel / feature / logit axes indeed converges to a
-      constant-diagonal matrix. However, if you target linearized dynamics of a
-      specific finite-width network, `trace_axes=()` will yield most accurate
-      result.
+      `f(x_train)` axes such that `kernel_fn(x_train, None, get)`,
+      `kernel_fn(x_test, x_train, get)`[, and `kernel_fn(x_test, None, get)`]
+      lack these pairs of dimensions and are to be interpreted as
+      :math:`\Theta \otimes I`, i.e. block-diagonal along `trace_axes`. These
+      can can be specified either to save space and compute, or to even improve
+      approximation accuracy of the infinite-width or infinite-samples limit,
+      since in in these limits the covariance along channel / feature / logit
+      axes indeed converges to a constant-diagonal matrix. However, if you
+      target linearized dynamics of a specific finite-width network,
+      `trace_axes=()` will yield most accurate result.
     **kernel_fn_kwargs:
       optional keyword arguments passed to `kernel_fn`.
 
   Returns:
     A function with signature `predict_fn(t, x_test, get, compute_cov)`
-    returning either mean or mean and covariance of infinite-width network
-    outputs on `x_test` at time[s] `t`, in the `get` regime ('nngp', 'ntk', or.
+    returning either mean or mean and covariance of the infinite ensemble of
+    infinite-width networks outputs on `x_test` at time[s] `t`, in the `get`
+    regime (`"nngp"`, `"ntk"`, or `("nngp", "ntk")`).
   """
   expm1 = _make_expm1_fn(y_train.size)
   inv_expm1 = _make_inv_expm1_fn(y_train.size)
@@ -722,16 +736,16 @@ def gradient_descent_mse_ensemble(
     if len(get) == 1:
       get = get[0]
       if get not in k_dd_cache:
-        k_dd_cache[get] = kernel_fn(x_train, None, get=get, **kernel_fn_kwargs)
+        k_dd_cache[get] = kernel_fn(x_train, None, get, **kernel_fn_kwargs)
 
     elif len(get) == 2:
       if not any(g in k_dd_cache for g in get):
         k_dd_cache.update(
-            kernel_fn(x_train, None, get=get, **kernel_fn_kwargs)._asdict())
+            kernel_fn(x_train, None, get, **kernel_fn_kwargs)._asdict())
       else:
         for g in get:
           if g not in k_dd_cache:
-            k_dd_cache[g] = kernel_fn(x_train, None, get=g, **kernel_fn_kwargs)
+            k_dd_cache[g] = kernel_fn(x_train, None, g, **kernel_fn_kwargs)
 
     else:
       raise ValueError(get)
@@ -758,9 +772,9 @@ def gradient_descent_mse_ensemble(
       k_td = None
       nngp_tt = compute_cov or None
     else:
-      k_td = kernel_fn(x_test, x_train, get=get, **kernel_fn_kwargs)
+      k_td = kernel_fn(x_test, x_train, get, **kernel_fn_kwargs)
       if compute_cov:
-        nngp_tt = kernel_fn(x_test, None, get='nngp', **kernel_fn_kwargs)
+        nngp_tt = kernel_fn(x_test, None, 'nngp', **kernel_fn_kwargs)
       else:
         nngp_tt = None
     return k_dd, k_td, nngp_tt

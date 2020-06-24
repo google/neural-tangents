@@ -314,7 +314,7 @@ logits = apply_fn_lin((W, b), x)  # (3, 2) np.ndarray
 
 ### Function space:
 
-Outputs of a linearized model evolve identically to those of an infinite one [[11]](#11-wide-neural-networks-of-any-depth-evolve-as-linear-models-under-gradient-descent-neurips-2019-jaehoon-lee-lechao-xiao-samuel-s-schoenholz-yasaman-bahri-roman-novak-jascha-sohl-dickstein-jeffrey-pennington) but with a different kernel - specifically, the Neural Tangent Kernel [[10]](#10-neural-tangent-kernel-convergence-and-generalization-in-neural-networks-neurips-2018-arthur-jacot-franck-gabriel-clément-hongler) evaluated on the specific `apply_fn` of the finite network given specific `params_0` that the network is initialized with. For this we provide the `nt.empirical_kernel_fn` function that accepts any `apply_fn` and returns a `kernel_fn(x1, x2, params, get)` that allows to compute the empirical NTK and/or NNGP (based on `get`) kernels on specific `params`.
+Outputs of a linearized model evolve identically to those of an infinite one [[11]](#11-wide-neural-networks-of-any-depth-evolve-as-linear-models-under-gradient-descent-neurips-2019-jaehoon-lee-lechao-xiao-samuel-s-schoenholz-yasaman-bahri-roman-novak-jascha-sohl-dickstein-jeffrey-pennington) but with a different kernel - specifically, the Neural Tangent Kernel [[10]](#10-neural-tangent-kernel-convergence-and-generalization-in-neural-networks-neurips-2018-arthur-jacot-franck-gabriel-clément-hongler) evaluated on the specific `apply_fn` of the finite network given specific `params_0` that the network is initialized with. For this we provide the `nt.empirical_kernel_fn` function that accepts any `apply_fn` and returns a `kernel_fn(x1, x2, get, params)` that allows to compute the empirical NTK and/or NNGP (based on `get`) kernels on specific `params`.
 
 #### Example:
 
@@ -337,8 +337,8 @@ x_test = random.normal(key2, (4, 2))
 y_train = random.uniform(key1, shape=(3, 2))
 
 kernel_fn = nt.empirical_kernel_fn(apply_fn)
-ntk_train_train = kernel_fn(x_train, x_train, params, 'ntk')
-ntk_test_train = kernel_fn(x_test, x_train, params, 'ntk')
+ntk_train_train = kernel_fn(x_train, None, 'ntk', params)
+ntk_test_train = kernel_fn(x_test, x_train, 'ntk', params)
 mse_predictor = nt.predict.gradient_descent_mse(ntk_train_train, y_train)
 
 t = 5.
