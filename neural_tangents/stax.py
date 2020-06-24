@@ -1,5 +1,3 @@
-# Lint as: python3
-
 # Copyright 2019 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License');
@@ -96,12 +94,14 @@ from neural_tangents.utils.typing import InitFn, AnalyticKernelFn, \
 
 
 class Padding(enum.Enum):
+  """Type of padding in pooling and convolutional layers."""
   CIRCULAR = 'CIRCULAR'
   SAME = 'SAME'
   VALID = 'VALID'
 
 
 class Pooling(enum.Enum):
+  """Type of pooling in pooling layers."""
   AVG = 'AVG'
   SUM = 'SUM'
 
@@ -365,19 +365,20 @@ def Dense(
 
     b_std: Specifies the standard deviation of the biases.
 
-    parameterization: Either 'ntk' or 'standard'.
+    parameterization: Either `"ntk"` or `"standard"`.
 
       Under ntk parameterization (https://arxiv.org/abs/1806.07572, page 3),
-      weights and biases are initialized as :math:`W_{ij} \sim N(0,1)`,
-      :math:`b_i \sim \mathcal{N}(0,1)`, and the finite width layer equation is
+      weights and biases are initialized as
+      :math:`W_{ij} \sim \mathcal{N}(0,1)`, :math:`b_i \sim \mathcal{N}(0,1)`,
+      and the finite width layer equation is
       :math:`z_i = \sigma_W / \sqrt{N} \sum_j W_{ij} x_j + \sigma_b b_i`.
 
       Under standard parameterization (https://arxiv.org/abs/2001.07301),
-      weights and biases are initialized as :math:`W_{ij} \sim \matchal{N}(0,
+      weights and biases are initialized as :math:`W_{ij} \sim \mathcal{N}(0,
       W_std^2/N)`,
       :math:`b_i \sim \mathcal{N}(0,\sigma_b^2)`, and the finite width layer
       equation is
-      :math:`z_i = \sum_j W_ij x_j + b_i`.
+      :math:`z_i = \sum_j W_{ij} x_j + b_i`.
 
     batch_axis: Specifies which axis is contains different elements of the
       batch. Defaults to `0`, the leading axis.
@@ -385,6 +386,9 @@ def Dense(
     channel_axis: Specifies which axis contains the features / channels.
       Defaults to `-1`, the trailing axis. For `kernel_fn`, channel size is
       considered to be infinite.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
   """
   # TODO(jaschasd): after experimentation, evaluate whether to change default
   # parameterization from "ntk" to "standard"
@@ -487,13 +491,16 @@ def GeneralConv(
       with the number of spatial dimensions in `dimension_numbers`.
     strides: The stride of the convolution. The shape of the tuple should agree
       with the number of spatial dimensions in `dimension_nubmers`.
-    padding: Specifies padding for the convolution. Can be one of 'VALID',
-      'SAME', or 'CIRCULAR'. 'CIRCULAR' uses periodic convolutions.
+    padding: Specifies padding for the convolution. Can be one of `"VALID"`,
+      `"SAME"`, or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
     W_std: The standard deviation of the weights.
     b_std: The standard deviation of the biases.
-    parameterization: Either "ntk" or "standard". These parameterizations are
-      the direct analogues for convolution of the corresponding
+    parameterization: Either `"ntk"` or `"standard"`. These parameterizations
+      are the direct analogues for convolution of the corresponding
       parameterizations for `Dense` layers.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
   """
   return _GeneralConv(dimension_numbers,
                       out_chan,
@@ -527,13 +534,16 @@ def Conv(
       with the number of spatial dimensions in `dimension_numbers`.
     strides: The stride of the convolution. The shape of the tuple should agree
       with the number of spatial dimensions in `dimension_nubmers`.
-    padding: Specifies padding for the convolution. Can be one of 'VALID',
-      'SAME', or 'CIRCULAR'. 'CIRCULAR' uses periodic convolutions.
+    padding: Specifies padding for the convolution. Can be one of `"VALID"`,
+      `"SAME"`, or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
     W_std: The standard deviation of the weights.
     b_std: The standard deviation of the biases.
-    parameterization: Either "ntk" or "standard". These parameterizations are
-      the direct analogues for convolution of the corresponding
+    parameterization: Either `"ntk"` or `"standard"`. These parameterizations
+      are the direct analogues for convolution of the corresponding
       parameterizations for `Dense` layers.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
   """
   return _GeneralConv(None,
                       out_chan,
@@ -568,13 +578,16 @@ def _GeneralConv(
       with the number of spatial dimensions in `dimension_numbers`.
     strides: The stride of the convolution. The shape of the tuple should agree
       with the number of spatial dimensions in `dimension_nubmers`.
-    padding: Specifies padding for the convolution. Can be one of 'VALID',
-      'SAME', or 'CIRCULAR'. 'CIRCULAR' uses periodic convolutions.
+    padding: Specifies padding for the convolution. Can be one of `"VALID"`,
+      `"SAME"`, or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
     W_std: The standard deviation of the weights.
     b_std: The standard deviation of the biases.
-    parameterization: Either "ntk" or "standard". These parameterizations are
-      the direct analogues for convolution of the corresponding
+    parameterization: Either `"ntk"` or `"standard"`. These parameterizations
+      are the direct analogues for convolution of the corresponding
       parameterizations for `Dense` layers.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
   """
 
   parameterization = parameterization.lower()
@@ -735,7 +748,7 @@ def FanOut(num: int) -> InternalLayer:
 
   This layer takes an input and produces `num` copies that can be fed into
   different branches of a neural network (for example with residual
-  sconnections).
+  connections).
 
   Args:
     num: The number of going edges to fan out into.
@@ -755,6 +768,9 @@ def FanInSum() -> InternalLayer:
 
   This layer takes a number of inputs (e.g. produced by `FanOut`) and sums the
   inputs to produce a single output.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
   """
   init_fn, apply_fn = ostax.FanInSum
   kernel_fn = lambda ks: _fan_in_kernel_fn(ks, None)
@@ -774,6 +790,9 @@ def FanInConcat(axis: int = -1) -> InternalLayer:
 
   Args:
     axis: Specifies the axis along which input tensors should be concatenated.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
   """
   init_fn, apply_fn = ostax.FanInConcat(axis)
   kernel_fn = lambda ks: _fan_in_kernel_fn(ks, axis)
@@ -812,6 +831,9 @@ def AvgPool(
     channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
       the trailing axis. For `kernel_fn`, channel size is considered to be
       infinite.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
   """
   return _Pool(Pooling.AVG, window_shape, strides, padding, normalize_edges,
                batch_axis, channel_axis)
@@ -840,6 +862,9 @@ def SumPool(
     channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
       the trailing axis. For `kernel_fn`, channel size is considered to be
       infinite.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
   """
   return _Pool(Pooling.SUM, window_shape, strides, padding, False,
                batch_axis, channel_axis)
@@ -874,6 +899,9 @@ def _Pool(
     channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
       the trailing axis. For `kernel_fn`, channel size is considered to be
       infinite.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
   """
 
   strides = strides or (1,) * len(window_shape)
@@ -963,6 +991,9 @@ def GlobalSumPool(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
     channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
       the trailing axis. For `kernel_fn`, channel size is considered to be
       infinite.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
   """
   return _GlobalPool(Pooling.SUM, batch_axis, channel_axis)
 
@@ -981,6 +1012,9 @@ def GlobalAvgPool(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
     channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
       the trailing axis. For `kernel_fn`, channel size is considered to be
       infinite.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
   """
   return _GlobalPool(Pooling.AVG, batch_axis, channel_axis)
 
@@ -1002,6 +1036,9 @@ def _GlobalPool(
     channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
       the trailing axis. For `kernel_fn`, channel size is considered to be
       infinite.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
   """
 
   if pool_type == Pooling.AVG:
@@ -1076,6 +1113,9 @@ def Flatten(batch_axis: int = 0, batch_axis_out: int = 0) -> InternalLayer:
       leading axis.
     batch_axis_out: Specifies the output batch dimension. Defaults to `0`, the
       leading axis.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
   """
   if batch_axis_out in (0, -2):
     batch_axis_out = 0
@@ -1158,6 +1198,9 @@ def Identity() -> InternalLayer:
   """Layer construction function for an identity layer.
 
   Based on `jax.experimental.stax.Identity`.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
   """
   init_fn, apply_fn = ostax.Identity
   kernel_fn = lambda k: k
@@ -1167,6 +1210,14 @@ def Identity() -> InternalLayer:
 @layer
 @_supports_masking(remask_kernel=True)
 def Erf(do_backprop: bool = False) -> InternalLayer:
+  """Error function nonlinearity.
+
+  Args:
+    do_backprop: set to `True` if you wan to backpropagate through the kernel.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
   return _elementwise(_erf,
                       'Erf',
                       do_backprop=do_backprop)
@@ -1175,7 +1226,11 @@ def Erf(do_backprop: bool = False) -> InternalLayer:
 @layer
 @_supports_masking(remask_kernel=True)
 def Sin(a=1., b=1., c=0.) -> InternalLayer:
-  """Returns the function f(x) = a sin(bx + c)."""
+  """Returns the function f(x) = a sin(bx + c).
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
   return _elementwise(_sin, 'Sin', a=1., b=1., c=0.)
 
 
@@ -1184,6 +1239,15 @@ def Sin(a=1., b=1., c=0.) -> InternalLayer:
 def Relu(
     do_backprop: bool = False,
     do_stabilize: bool = False) -> InternalLayer:
+  """ReLU nonlinearity.
+
+  Args:
+    do_backprop: set to `True` if you wan to backpropagate through the kernel.
+    do_stabilize: set to `True` for very deep networks.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
   return _elementwise(_ab_relu,
                       'ReLU',
                       a=0,
@@ -1199,6 +1263,17 @@ def ABRelu(
     b: float,
     do_backprop: bool = False,
     do_stabilize: bool = False) -> InternalLayer:
+  """ABReLU nonlinearity, i.e. `a * min(x, 0) + b * max(x, 0)`.
+
+  Args:
+    a: slope for `x < 0`.
+    b: slope for `x > 0`.
+    do_backprop: set to `True` if you wan to backpropagate through the kernel.
+    do_stabilize: set to `True` for very deep networks.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
   return _elementwise(_ab_relu,
                       f'ABReLU({a}, {b})',
                       a=a,
@@ -1213,6 +1288,16 @@ def LeakyRelu(
     alpha: float,
     do_backprop: bool = False,
     do_stabilize: bool = False) -> InternalLayer:
+  """Leaky ReLU nonlinearity, i.e. `alpha * min(x, 0) + max(x, 0)`.
+
+  Args:
+    alpha: slope for `x < 0`.
+    do_backprop: set to `True` if you wan to backpropagate through the kernel.
+    do_stabilize: set to `True` for very deep networks.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
   return _elementwise(_ab_relu,
                       f'LeakyReLU({alpha})',
                       a=alpha,
@@ -1224,6 +1309,15 @@ def LeakyRelu(
 @layer
 @_supports_masking(remask_kernel=True)
 def Abs(do_backprop: bool = False, do_stabilize: bool = False) -> InternalLayer:
+  """Absolute value nonlinearity.
+
+  Args:
+    do_backprop: set to `True` if you wan to backpropagate through the kernel.
+    do_stabilize: set to `True` for very deep networks.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
   return _elementwise(_ab_relu,
                       'Abs',
                       a=-1,
@@ -1256,6 +1350,7 @@ def GlobalSelfAttention(
   the dot product between keys and queries is scaled by the squared root
   of their dimension. The expression for `nngp`/`ntk` involves an integral
   with no known closed form and thus call to `kernel_fn` results in an error.
+
   2. Fixed: same as Parametric except for scaling the dot products
   between keys and queries by their dimension instead of the square root
   of the same quantity, and tying the key and query weight matrices.
@@ -1300,9 +1395,12 @@ def GlobalSelfAttention(
       the trailing axis. For `kernel_fn`, channel size is considered to be
       infinite.
 
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+
   Raises:
     NotImplementedError: If `fixed` is `False`, call to `kernel_fn` will result
-    in an error as there is no known analytic expression for the kernel.
+      in an error as there is no known analytic expression for the kernel.
   """
 
   OV_gain = W_out_std * W_value_std
@@ -1467,6 +1565,9 @@ def LayerNorm(
     channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
       the trailing axis. For `kernel_fn`, channel size is considered to be
       infinite.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
   """
   def init_fn(rng, input_shape):
     return input_shape, ()
@@ -1563,6 +1664,9 @@ def Dropout(rate: float, mode: str = 'train') -> InternalLayer:
     rate: Specifies the keep `rate`, e.g. `rate=1` is equivalent to
       keeping all neurons.
     mode: Either `train` or `test`.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
   """
   if mode not in ('test', 'train'):
     raise ValueError('The `mode` must be either "test"  or "train".')

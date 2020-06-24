@@ -1,5 +1,3 @@
-# Lint as: python3
-
 # Copyright 2019 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -87,7 +85,7 @@ def taylor_expand(f: Callable[..., np.ndarray],
 
   Args:
     f:
-      `A function that we would like to Taylor expand. It should have the
+      A function that we would like to Taylor expand. It should have the
       signature `f(params, *args, **kwargs)` where `params` is a `PyTree`, and
       `f` returns a `np.ndarray`.
     params:

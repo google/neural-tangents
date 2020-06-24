@@ -25,7 +25,7 @@ author = u'The Neural Tangents Authors'
 # The short X.Y version
 version = u''
 # The full version, including alpha/beta/rc tags
-release = u'0.1.8'
+release = u'0.3.0'
 
 # -- General configuration ---------------------------------------------------
 
@@ -161,8 +161,12 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, 'NeuralTangents', u'Neural Tangents Documentation',
-     author, 'NeuralTangents', 'One line description of project.',
+    (master_doc,
+     'NeuralTangents',
+     u'Neural Tangents Documentation',
+     author,
+     'NeuralTangents',
+     'Neural Tangents: Fast and Easy Infinite Neural Networks in Python',
      'Miscellaneous'),
 ]
 

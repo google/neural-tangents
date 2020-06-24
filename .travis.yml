@@ -6,7 +6,7 @@ python:
   - "3.8"
 install:
   - pip install --upgrade pip
-  - pip install numpy jaxlib jax "tensorflow>=2.2.0rc3" tensorflow-datasets --upgrade
+  - pip install numpy jaxlib jax tensorflow tensorflow-datasets --upgrade
   - git clone https://github.com/google/neural-tangents
   - pip install -e neural-tangents
 script:
