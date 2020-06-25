@@ -73,7 +73,6 @@ STRIDES = [
 ]
 
 ACTIVATIONS = {
-    stax.Erf(): 'erf',
     stax.Relu(): 'Relu',
 }
 
@@ -820,54 +819,79 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
       self.assertEqual(shape2, x2_out_shape)
 
 
+class ActivationTest(test_utils.NeuralTangentsTestCase):
 
-@jtu.parameterized.parameters([
-    {
-        'same_inputs': True
-    },
-    {
-        'same_inputs': False
-    },
-])
-class SinTest(test_utils.NeuralTangentsTestCase):
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              '_{}_{}_{}_{}_{}'.format(
+                  model,
+                  phi_name,
+                  'Same_inputs' if same_inputs else 'Different_inputs',
+                  get,
+                  abc),
+          'model':
+              model,
+          'phi_name':
+              phi_name,
+          'same_inputs':
+              same_inputs,
+          'get': get,
+          'abc': abc,
+      }
+                          for model in ['fc', 'conv-pool', 'conv-flatten']
+                          for phi_name in ['Sin', 'Erf']
+                          for same_inputs in [False, True]
+                          for get in ['nngp', 'ntk']
+                          for abc in product([1., 2., 0.3],
+                                             [1., 1.5, 0.3],
+                                             [0., -np.pi/4., np.pi/2.])))
+  def test_activation(self, same_inputs, model, phi_name, get, abc):
+    platform = xla_bridge.get_backend().platform
+    if platform == 'cpu' and 'conv' in model:
+      raise unittest.SkipTest('Not running CNNs on CPU to save time.')
 
-  def test_sin(self, same_inputs):
     key = random.PRNGKey(1)
-    for a, b, c in product([5.],
-                           [1.5],
-                           [0., -np.pi/4.]):
-      for get in ['nngp', 'ntk']:
-        output_dim = 2048 if get == 'nngp' else 1
-        key, split = random.split(key)
-        for model in ['fc', 'conv-pool', 'conv-flatten']:
-          with self.subTest(get=get, a=a, b=b, c=c, model=model):
-            if model == 'fc':
-              X0_1 = random.normal(key, (6, 7))
-              X0_2 = None if same_inputs else random.normal(split, (10, 7))
-              affine = stax.Dense(2048, 1., 0.)
-              readout = stax.Dense(output_dim)
-            else:
-              if xla_bridge.get_backend().platform == 'cpu':
-                raise unittest.SkipTest('Not running CNNs on CPU to save time.')
-              X0_1 = random.normal(key, (4, 8, 8, 3))
-              X0_2 = None if same_inputs else random.normal(split, (6, 8, 8, 3))
-              affine = stax.Conv(1024, (3, 2), W_std=1., b_std=0.1,
-                                 padding='SAME')
-              readout = stax.serial(stax.GlobalAvgPool() if 'pool' in model else
-                                    stax.Flatten(),
-                                    stax.Dense(output_dim))
-            init_fn, apply_sin, kernel_fn_sin = stax.serial(affine,
-                                                            stax.Sin(a=a,
-                                                                     b=b,
-                                                                     c=c),
-                                                            readout)
-            analytic_kernel = kernel_fn_sin(X0_1, X0_2, get)
-            key, split = random.split(key)
-            mc_kernel_fn = monte_carlo.monte_carlo_kernel_fn(
-                init_fn, apply_sin, key, 200)
-            empirical_kernel = np.squeeze(mc_kernel_fn(X0_1, X0_2, get))
-            test_utils.assert_close_matrices(self, analytic_kernel,
-                                             empirical_kernel, 0.05)
+    key, split = random.split(key)
+    output_dim = 2048 if get == 'nngp' else 1
+
+    if model == 'fc':
+      rtol = 0.02
+      X0_1 = random.normal(key, (6, 7))
+      X0_2 = None if same_inputs else random.normal(split, (10, 7))
+      affine = stax.Dense(1024, 1., 0.)
+      readout = stax.Dense(output_dim)
+      depth = 1
+    else:
+      rtol = 0.05
+      X0_1 = random.normal(key, (4, 8, 8, 3))
+      X0_2 = None if same_inputs else random.normal(split, (6, 8, 8, 3))
+      affine = stax.Conv(1024, (3, 2), W_std=1., b_std=0.1, padding='SAME')
+      readout = stax.serial(stax.GlobalAvgPool() if 'pool' in model else
+                            stax.Flatten(),
+                            stax.Dense(output_dim))
+      depth = 2
+    if platform == 'cpu':
+      num_samplings = 200
+      rtol *= 2
+    else:
+      num_samplings = 500
+    a, b, c = abc
+    if phi_name == 'Sin':
+      activation = stax.Sin(a=a, b=b, c=c)
+    elif phi_name == 'Erf':
+      activation = stax.Erf(a=a, b=b, c=c)
+    else:
+      raise unittest.SkipTest(f'Activation {phi_name} is not implemented.')
+    init_fn, apply_fn, kernel_fn = stax.serial(
+        *[affine, activation]*depth, readout)
+    analytic_kernel = kernel_fn(X0_1, X0_2, get)
+    key, split = random.split(key)
+    mc_kernel_fn = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, split, num_samplings)
+    empirical_kernel = mc_kernel_fn(X0_1, X0_2, get)
+    test_utils.assert_close_matrices(self, analytic_kernel,
+                                     empirical_kernel, rtol)
 
 
 @jtu.parameterized.parameters([

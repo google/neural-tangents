@@ -375,7 +375,7 @@ def Dense(
 
       Under standard parameterization (https://arxiv.org/abs/2001.07301),
       weights and biases are initialized as :math:`W_{ij} \sim \mathcal{N}(0,
-      W_std^2/N)`,
+      W_{std}^2/N)`,
       :math:`b_i \sim \mathcal{N}(0,\sigma_b^2)`, and the finite width layer
       equation is
       :math:`z_i = \sum_j W_{ij} x_j + b_i`.
@@ -1209,25 +1209,38 @@ def Identity() -> InternalLayer:
 
 @layer
 @_supports_masking(remask_kernel=True)
-def Erf(do_backprop: bool = False) -> InternalLayer:
-  """Error function nonlinearity.
-
+def Erf(a: float = 1.,
+        b: float = 1.,
+        c: float = 0.,
+        do_backprop: bool = False) -> InternalLayer:
+  """Affine transform of `Erf` nonlinearity, i.e. `a Erf(b * x) + c`.
   Args:
-    do_backprop: set to `True` if you wan to backpropagate through the kernel.
+    a: a float.
+    b: a float.
+    c: a float.
+    do_backprop: set to `True` if you want to backpropagate through the kernel.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
   return _elementwise(_erf,
                       'Erf',
+                      a=a,
+                      b=b,
+                      c=c,
                       do_backprop=do_backprop)
 
 
 @layer
 @_supports_masking(remask_kernel=True)
-def Sin(a=1., b=1., c=0.) -> InternalLayer:
-  """Returns the function f(x) = a sin(bx + c).
-
+def Sin(a: float = 1.,
+        b: float = 1.,
+        c: float = 0.) -> InternalLayer:
+  """Affine transform of `Sin` nonlinearity, i.e. `a sin(b*x + c)`
+  Args:
+    a: a float.
+    b: a float.
+    c: a float.
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
@@ -1242,7 +1255,7 @@ def Relu(
   """ReLU nonlinearity.
 
   Args:
-    do_backprop: set to `True` if you wan to backpropagate through the kernel.
+    do_backprop: set to `True` if you want to backpropagate through the kernel.
     do_stabilize: set to `True` for very deep networks.
 
   Returns:
@@ -1268,7 +1281,7 @@ def ABRelu(
   Args:
     a: slope for `x < 0`.
     b: slope for `x > 0`.
-    do_backprop: set to `True` if you wan to backpropagate through the kernel.
+    do_backprop: set to `True` if you want to backpropagate through the kernel.
     do_stabilize: set to `True` for very deep networks.
 
   Returns:
@@ -1292,7 +1305,7 @@ def LeakyRelu(
 
   Args:
     alpha: slope for `x < 0`.
-    do_backprop: set to `True` if you wan to backpropagate through the kernel.
+    do_backprop: set to `True` if you want to backpropagate through the kernel.
     do_stabilize: set to `True` for very deep networks.
 
   Returns:
@@ -1312,7 +1325,7 @@ def Abs(do_backprop: bool = False, do_stabilize: bool = False) -> InternalLayer:
   """Absolute value nonlinearity.
 
   Args:
-    do_backprop: set to `True` if you wan to backpropagate through the kernel.
+    do_backprop: set to `True` if you want to backpropagate through the kernel.
     do_stabilize: set to `True` for very deep networks.
 
   Returns:
@@ -1364,7 +1377,7 @@ def GlobalSelfAttention(
   The final computation for single head is then
   :math:`f_h (x) + softmax(<scaling> Q(x) K(x)^T) V(x)`
   and the output of this layer is computed as
-  :math:`f(x) = concat[f_1(x) , ... , f_<n_{heads}> (x)] W_out + b`
+  :math:`f(x) = concat[f_1(x) , ... , f_{<n_{heads}>} (x)] W_{out} + b`
   where the shape of of `b` is `(n_chan_out,)`, i.e., single bias per channel
 
   The `kernel_fn` computes the limiting kernel of the outputs of this layer
@@ -2192,8 +2205,8 @@ def _ab_relu(x, a, b, **kwargs):
   return a * np.minimum(x, 0) + b * np.maximum(x, 0)
 
 
-def _erf(x, **kwargs):
-  return erf(x)
+def _erf(x, a, b, c, **kwargs):
+  return a * erf(b * x) + c
 
 
 def _sin(x, a, b, c, **kwargs):
@@ -2367,7 +2380,7 @@ def _get_erf_kernel(
   return ker_mat, ntk
 
 
-def _transform_kernels_erf(k: Kernel, do_backprop: bool) -> Kernel:
+def _transform_kernels_erf_non_scaled(k: Kernel, do_backprop: bool) -> Kernel:
   """Compute new kernels after an `Erf` layer."""
   cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
@@ -2395,6 +2408,26 @@ def _transform_kernels_erf(k: Kernel, do_backprop: bool) -> Kernel:
                    cov2=cov2,
                    ntk=ntk,
                    is_gaussian=False)
+
+
+def _transform_kernels_affine_erf(
+    k: Kernel,
+    do_backprop: bool,
+    a: float = 1.0,
+    b: float = 1.0,
+    c: float = 0.0) -> Kernel:
+  old_nngp = k.nngp
+  k = k.replace(cov1=b**2 * k.cov1,
+                nngp=b**2 * k.nngp,
+                cov2=None if k.cov2 is None else b**2 * k.cov2,
+                ntk=None if k.ntk is None else b**2 * k.ntk,
+                is_gaussian=False)
+  k = _transform_kernels_erf_non_scaled(k, do_backprop)
+  return k.replace(
+      cov1=_affine(k.cov1, a, c),
+      nngp=_affine(k.nngp, a, c),
+      cov2=_affine(k.cov2, a, c),
+      ntk=None if k.ntk is None else _affine(k.ntk, a, 0.))
 
 
 def _transform_kernels_sin(
@@ -2458,7 +2491,7 @@ def _transform_kernels(
   if fn is _ab_relu:
     return _transform_kernels_ab_relu(k, **fn_kwargs)
   if fn is _erf:
-    return _transform_kernels_erf(k, **fn_kwargs)
+    return _transform_kernels_affine_erf(k, **fn_kwargs)
   if fn is _sin:
     return _transform_kernels_sin(k, **fn_kwargs)
   # TODO(xlc): Monte Carlo approximation to the integral (suggested by schsam@.)
