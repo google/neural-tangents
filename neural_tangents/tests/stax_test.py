@@ -17,6 +17,8 @@
 
 import string
 from functools import partial
+from itertools import product
+
 import random as prandom
 import itertools
 import logging
@@ -818,6 +820,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
       self.assertEqual(shape2, x2_out_shape)
 
 
+
 @jtu.parameterized.parameters([
     {
         'same_inputs': True
@@ -830,14 +833,13 @@ class SinTest(test_utils.NeuralTangentsTestCase):
 
   def test_sin(self, same_inputs):
     key = random.PRNGKey(1)
-    for a, b, c in [(1., 1., 0.),
-                    (1., 1., np.pi/2),
-                    (1.5, 2., np.pi/4),
-                    (10., 25., 2.)]:
+    for a, b, c in product([5.],
+                           [1.5],
+                           [0., -np.pi/4.]):
       for get in ['nngp', 'ntk']:
-        output_dim = 1024 if get == 'nngp' else 1
+        output_dim = 2048 if get == 'nngp' else 1
         key, split = random.split(key)
-        for model in ['fc', 'conv']:
+        for model in ['fc', 'conv-pool', 'conv-flatten']:
           with self.subTest(get=get, a=a, b=b, c=c, model=model):
             if model == 'fc':
               X0_1 = random.normal(key, (6, 7))
@@ -845,11 +847,14 @@ class SinTest(test_utils.NeuralTangentsTestCase):
               affine = stax.Dense(2048, 1., 0.)
               readout = stax.Dense(output_dim)
             else:
+              if xla_bridge.get_backend().platform == 'cpu':
+                raise unittest.SkipTest('Not running CNNs on CPU to save time.')
               X0_1 = random.normal(key, (4, 8, 8, 3))
               X0_2 = None if same_inputs else random.normal(split, (6, 8, 8, 3))
               affine = stax.Conv(1024, (3, 2), W_std=1., b_std=0.1,
                                  padding='SAME')
-              readout = stax.serial(stax.GlobalAvgPool(),
+              readout = stax.serial(stax.GlobalAvgPool() if 'pool' in model else
+                                    stax.Flatten(),
                                     stax.Dense(output_dim))
             init_fn, apply_sin, kernel_fn_sin = stax.serial(affine,
                                                             stax.Sin(a=a,
@@ -857,11 +862,12 @@ class SinTest(test_utils.NeuralTangentsTestCase):
                                                                      c=c),
                                                             readout)
             analytic_kernel = kernel_fn_sin(X0_1, X0_2, get)
-            mc_kernel_fn = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_sin,
-                                                             key, 200)
+            key, split = random.split(key)
+            mc_kernel_fn = monte_carlo.monte_carlo_kernel_fn(
+                init_fn, apply_sin, key, 200)
             empirical_kernel = np.squeeze(mc_kernel_fn(X0_1, X0_2, get))
             test_utils.assert_close_matrices(self, analytic_kernel,
-                                             empirical_kernel, RTOL)
+                                             empirical_kernel, 0.05)
 
 
 @jtu.parameterized.parameters([

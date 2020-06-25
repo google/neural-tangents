@@ -1231,7 +1231,7 @@ def Sin(a=1., b=1., c=0.) -> InternalLayer:
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
-  return _elementwise(_sin, 'Sin', a=1., b=1., c=0.)
+  return _elementwise(_sin, 'Sin', a=a, b=b, c=c)
 
 
 @layer
@@ -2410,20 +2410,22 @@ def _transform_kernels_sin(
                                                   k.diagonal_batch,
                                                   k.diagonal_spatial,
                                                   op.add)
-
-  def _get_sin_kernel(prod, cov, ntk):
-    s1 = a**2 * np.exp(b * (-0.5 * prod + cov)) / 2.
-    s2 = a**2 * np.exp(b * (-0.5 * prod - cov)) / 2. * np.cos(2*c)
-    nngp = s1 - s2
+  half_a_square = a**2 / 2.
+  def _get_sin_kernel(sum_, cov, ntk):
+    s1 = np.exp(b**2 * (-0.5 * sum_ + cov))
+    s2 = np.exp(b**2 * (-0.5 * sum_ - cov)) * np.cos(2*c)
+    nngp = half_a_square * (s1 - s2)
     if ntk is not None:
-      ntk *= (s1 + s2) * b**2
+      ntk *= half_a_square * b**2 * (s1 + s2)
     return nngp, ntk
+  def _get_diag_sin_kernel(mat):
+    return half_a_square *(1. - np.exp(-b**2 * mat) *np.cos(2*c))
   nngp, ntk = _get_sin_kernel(sum12, nngp, ntk)
 
   if k.diagonal_batch and k.diagonal_spatial:
-    cov1 = -a**2 * np.expm1(-2. * b * sum11) / 2.
+    cov1 = _get_diag_sin_kernel(sum11)
     if cov2 is not None:
-      cov2 = -a**2 * np.expm1(-2. * b * sum22) / 2.
+      cov2 = _get_diag_sin_kernel(sum22)
   else:
     cov1 = _get_sin_kernel(sum11, cov1, None)[0]
     if cov2 is not None:
