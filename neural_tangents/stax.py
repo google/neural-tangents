@@ -2258,7 +2258,7 @@ def _get_diagonal_outer_prods(cov1: np.ndarray,
                               axis: Tuple[int, ...] = (),
                               mask1: Optional[np.ndarray] = None,
                               mask2: Optional[np.ndarray] = None
-                        ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+                             ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
   """Gets outer products of diagonals `cov1, cov1`, `cov1, cov2`, `cov2, cov2`.
 
   `prod11[x1, x2, h1, h2, ...]` =
@@ -2460,8 +2460,8 @@ def _transform_kernels(
   if fn is _sin:
     return _transform_kernels_sin(k, **fn_kwargs)
   # TODO(xlc): Monte Carlo approximation to the integral (suggested by schsam@.)
-  raise NotImplementedError('Analaytic kernel for activiation {} is not '
-                            'implmented'.format(fn))
+  raise NotImplementedError(f'Analaytic kernel for activiation {fn} is not '
+                            f'implmented.')
 
 
 def _affine(

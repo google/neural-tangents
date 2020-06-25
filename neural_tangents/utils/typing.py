@@ -101,8 +101,8 @@ EmpiricalKernelFn = Callable[[np.ndarray, Optional[np.ndarray], PyTree, Get],
 
 """A type alias for Monte Carlo kernel functions.
 
-A kernel function that produces an estimate of an AnalyticKernel
-by monte carlo sampling given a PRNGKey.
+A kernel function that produces an estimate of an `AnalyticKernel`
+by monte carlo sampling given a `PRNGKey`.
 """
 MonteCarloKernelFn = Callable[
     [np.ndarray, Optional[np.ndarray], Get],

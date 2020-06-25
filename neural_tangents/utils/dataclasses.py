@@ -33,10 +33,11 @@ def dataclass(clz):
   The `dataclass` decorator makes it easy to define custom classes that can be
   passed safely to Jax. For example:
 
+  >>>  from jax import jit, numpy as np
   >>>  from neural_tangents.utils import dataclasses
   >>>
   >>>  @dataclasses.dataclass
-  >>>  class Data():
+  >>>  class Data:
   >>>    array: np.ndarray
   >>>    a_boolean: bool = dataclasses.field(pytree_node=False)
   >>>

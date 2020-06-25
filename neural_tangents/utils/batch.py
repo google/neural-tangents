@@ -12,8 +12,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Batch kernel calculations serially or in parallel."""
+"""Batch kernel computations serially or in parallel.
 
+This module contains a decorator `batch` that can be applied to any `kernel_fn`
+of signature `kernel_fn(x1, x2, *args, **kwargs)`. The decorated function
+performs the same computation by batching over `x1` and `x2` and concatenating
+the result, allowing to both use multiple accelerators and stay within memory
+limits.
+
+Example:
+  >>>  from jax import numpy as np
+  >>>  import neural_tangents as nt
+  >>>  from neural_tangents import stax
+  >>>
+  >>>  # Define some kernel function.
+  >>>  _, _, kernel_fn = stax.serial(stax.Dense(1), stax.Relu(), stax.Dense(1))
+  >>>
+  >>>  # Compute the kernel in batches, in parallel.
+  >>>  kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=5)
+  >>>
+  >>>  # Generate dummy input data.
+  >>>  x1, x2 = np.ones((40, 10)), np.ones((80, 10))
+  >>>  kernel_fn_batched(x1, x2) == kernel_fn(x1, x2)  # True!
+"""
+
+
+from typing import Callable, Tuple, Union, Iterable, Dict, Any, TypeVar
 from functools import partial
 import warnings
 from jax.api import device_put, devices
@@ -27,19 +51,71 @@ from jax.tree_util import tree_map
 from jax.tree_util import tree_multimap
 from neural_tangents.utils.kernel import Kernel
 from neural_tangents.utils import utils
+from neural_tangents.utils.typing import KernelFn
 import numpy as onp
 
 
-def _scan(f, init, xs):
+def batch(kernel_fn: KernelFn,
+          batch_size: int = 0,
+          device_count: int = -1,
+          store_on_device: bool = True) -> KernelFn:
+  """Returns a function that computes a kernel in batches over all devices.
+
+  Args:
+    kernel_fn:
+      A function that computes a kernel on two batches,
+      `kernel_fn(x1, x2, *args, **kwargs)`. Here `x1` and `x2` are
+      `np.ndarray`s of shapes `(n1,) + input_shape` and `(n2,) + input_shape`.
+      The kernel function should return a `PyTree`.
+    batch_size:
+      specifies the size of each batch that gets processed per physical device.
+      Because we parallelize the computation over columns it should be the case
+      that `x1.shape[0]` is divisible by `device_count * batch_size` and
+      `x2.shape[0]` is divisible by `batch_size`.
+    device_count:
+      specifies the number of physical devices to be used. If
+      `device_count == -1` all devices are used. If `device_count == 0`, no
+      device parallelism is used (a single default device is used).
+    store_on_device:
+      specifies whether the output should be kept on device or brought back to
+      CPU RAM as it is computed. Defaults to `True`. Set to `False` to store
+      and concatenate results using CPU RAM, allowing to compute larger kernels.
+
+  Returns:
+    A new function with the same signature as `kernel_fn` that computes the
+    kernel by batching over the dataset in parallel with the specified
+    `batch_size` using `device_count` devices.
+  """
+  if (device_count == -1 and xla_bridge.device_count() > 1) or device_count > 0:
+    kernel_fn = _parallel(kernel_fn, device_count)
+  else:
+    kernel_fn = _jit_or_pmap_broadcast(kernel_fn, 0)
+
+  if not batch_size:
+    return kernel_fn
+
+  return _serial(kernel_fn, batch_size, store_on_device)
+
+
+# INTERNAL UTILITIES
+
+
+_Carry = TypeVar('_Carry')
+_Input = TypeVar('_Input')
+_Output = TypeVar('_Output')
+
+
+def _scan(f: Callable[[_Carry, _Input], Tuple[_Carry, _Output]],
+          init: _Carry,
+          xs: Iterable[_Input]) -> Tuple[_Carry, _Output]:
   """Implements an unrolled version of scan.
 
-  Based on `jax.lax.scan` and has an identical API.
+  Based on `jax.lax.scan` and has a similar API.
 
   TODO(schsam): We introduce this function because lax.scan currently has a
   higher peak memory usage than the unrolled version. We will aim to swap this
   out for lax.scan when issue #1273 and related have been resolved.
   """
-
   carry = init
   ys = []
   for x in xs:
@@ -49,7 +125,8 @@ def _scan(f, init, xs):
   return carry, tree_multimap(lambda *y: np.stack(y), *ys)
 
 
-def _flatten_batch_dimensions(k, discard_axis=None):
+def _flatten_batch_dimensions(k: np.ndarray,
+                              discard_axis: int = None) -> np.ndarray:
   """Takes a kernel that has been evaluated in batches and flattens."""
   if discard_axis is not None:
     if k.ndim % 2:
@@ -71,78 +148,83 @@ def _flatten_batch_dimensions(k, discard_axis=None):
                        k.shape[2] * k.shape[3]) + k.shape[4:])
 
 
-def _flatten_kernel_dict(k_dict, x2_is_none, is_parallel):
-  if 'nngp' in k_dict:
+def _flatten_kernel_dict(k: Dict[str, Any],
+                         x2_is_none: bool,
+                         is_parallel: bool) -> Dict[str, Any]:
+  if 'nngp' in k:
     # We only use `batch_size` to compute `shape1` and `shape2` for the batch.
     # This only happens if k_dict came from a `Kernel` in which case it must
     # have 'nngp'. I do think there is a failure case if the user called
     # >>> batched_kernel_fn(x1, x2, get=('ntk', 'shape1'))
     # but I don't think this will get hit ever (and certainly before we rework
     # this code).
-    batch_size = {'1': k_dict['nngp'].shape[0], '2': k_dict['nngp'].shape[1]}
+    batch_size = {'1': k['nngp'].shape[0], '2': k['nngp'].shape[1]}
 
-  if 'diagonal_batch' in k_dict and not k_dict['diagonal_batch']:
+  if 'diagonal_batch' in k and not k['diagonal_batch']:
     raise NotImplementedError('Batching not implemented for '
                               '`diagonal_batch == False`.')
 
-  for key, value in k_dict.items():
+  for key, value in k.items():
     if key == 'cov1':
-      k_dict[key] = _flatten_batch_dimensions(value, 1)
-
+      k[key] = _flatten_batch_dimensions(value, 1)
     elif key == 'cov2':
       if x2_is_none:
-        k_dict[key] = None
+        k[key] = None
       else:
-        k_dict[key] = _flatten_batch_dimensions(value, 0)
-
+        k[key] = _flatten_batch_dimensions(value, 0)
     elif key == 'x1_is_x2':
-      k_dict[key] = value[(0,) * value.ndim]
-
+      k[key] = value[(0,) * value.ndim]
     elif key == 'mask1':
       if value is None:
-        k_dict[key] = None
+        k[key] = None
       else:
-        k_dict[key] = _flatten_batch_dimensions(value, 1)
-
+        k[key] = _flatten_batch_dimensions(value, 1)
     elif key == 'mask2':
       if value is None or x2_is_none:
-        k_dict[key] = None
+        k[key] = None
       else:
-        k_dict[key] = -_flatten_batch_dimensions(value, 0)
-
+        k[key] = -_flatten_batch_dimensions(value, 0)
     elif key in ('shape1', 'shape2'):
       if key == 'shape2' and is_parallel:
         continue
-      batch_axis = k_dict['batch_axis']
+      batch_axis = k['batch_axis']
       shape = value
-      k_dict[key] = (shape[:batch_axis] +
-                     (shape[batch_axis] * batch_size[key[-1]],) +
-                     shape[batch_axis + 1:])
-    elif isinstance(k_dict[key], np.ndarray):
-      k_dict[key] = _flatten_batch_dimensions(value, None)
+      k[key] = (shape[:batch_axis] +
+                (shape[batch_axis] * batch_size[key[-1]],) +
+                shape[batch_axis + 1:])
+    elif isinstance(k[key], np.ndarray):
+      k[key] = _flatten_batch_dimensions(value)
     else:
       pass
-  return k_dict
+  return k
 
 
-def _flatten_kernel(k, x2_is_none, is_parallel):
+_KernelType = Union[np.ndarray, Tuple, Kernel]
+
+
+def _flatten_kernel(k: _KernelType,
+                    x2_is_none: bool,
+                    is_parallel: bool) -> _KernelType:
   """Flattens a kernel array or a `Kernel` along the batch dimension."""
   if hasattr(k, '_asdict'):
     return k._replace(**_flatten_kernel_dict(k._asdict(), x2_is_none,
                                              is_parallel))
 
-  if isinstance(k, Kernel):
+  elif isinstance(k, Kernel):
+    # pytype:disable=attribute-error
     return Kernel(**_flatten_kernel_dict(k.asdict(), x2_is_none, is_parallel))
+   # pytype:enable=attribute-error
 
-  if isinstance(k, np.ndarray):
+  elif isinstance(k, np.ndarray):
     return _flatten_batch_dimensions(k)
 
-  raise TypeError(
-      ('Expected kernel to be either a namedtuple, Kernel, or `np.ndarray`, '
-       'got %s.') % type(k))
+  raise TypeError(f'Expected kernel to be either a namedtuple, `Kernel`, or '
+                  f'`np.ndarray`, got {type(k)}.')
 
 
-def _reshape_kernel_for_pmap(k, device_count, n1_per_device):
+def _reshape_kernel_for_pmap(k: Kernel,
+                             device_count: int,
+                             n1_per_device: int) -> Kernel:
   cov2 = k.cov2
   if cov2 is None:
     cov2 = k.cov1
@@ -170,7 +252,9 @@ def _reshape_kernel_for_pmap(k, device_count, n1_per_device):
       mask2=mask2)
 
 
-def _serial(kernel_fn, batch_size, store_on_device=True):
+def _serial(kernel_fn: KernelFn,
+            batch_size: int,
+            store_on_device: bool = True) -> KernelFn:
   """Returns a function that computes a kernel in batches serially.
 
   This function computes the kernel over data in batches where each batch is
@@ -180,20 +264,21 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
   each device processes chunks of work that have batch_size x batch_size.
 
   The dataset size must divide the effective batch size. If parallelism is used
-  this means that |x1| must divide batch_size * device_count and |x2| must
-  divide batch_size.
+  this means that `|x1|` must divide `batch_size * device_count` and `|x2|` must
+  divide `batch_size`.
 
   Args:
-    kernel_fn: A function that computes a kernel between two datasets,
-        `kernel_fn(x1, x2)` or the compositional kernel for an input kernel
-        `kernel_fn(kernel_in)`. Here x1 and x2 are `np.ndarray`s of floats of
-        shape [n1] + input_shape and [n2] + input_shape; `kernel_in` is a Kernel
-        object. The kernel function should return a PyTree.
-    batch_size: Integer specifying the size of batches in which to split the
-        data.
-    store_on_device: A boolean that species whether the computed kernel should
-        be kept on device or brought back to CPU as it is computed. Defaults to
-        True.
+    kernel_fn:
+      A function that computes a kernel between two datasets,
+      `kernel_fn(x1, x2)` or the compositional kernel for an input kernel
+      `kernel_fn(kernel_in)`. Here x1 and x2 are `np.ndarray`s of floats of
+      shape `(n1,) + input_shape` and `(n2,) + input_shape`; `kernel_in` is a
+      `Kernel` object. The kernel function should return a `PyTree`.
+    batch_size:
+      Integer specifying the size of batches in which to split the data.
+    store_on_device:
+      A boolean that species whether the computed kernel should be kept on
+      device or brought back to CPU as it is computed. Defaults to `True`.
 
   Returns:
     A new function with the same signature as kernel_fn that computes the kernel
@@ -210,7 +295,10 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
 
   flatten = partial(_flatten_kernel, is_parallel=False)
 
-  def serial_fn_x1(x1, x2=None, *args, **kwargs):
+  def serial_fn_x1(x1: np.ndarray,
+                   x2: np.ndarray = None,
+                   *args,
+                   **kwargs) -> _KernelType:
     # TODO(xlc): Make batch + dropout work reasonably well.
     if 'key' in kwargs:
       raise NotImplementedError('Batching for the empirical kernel with dropout'
@@ -233,14 +321,14 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
     def row_fn(_, x1):
       return _, _scan(col_fn, x1, x2s)[1]
 
-    def col_fn(x1, x2):
+    def col_fn(x1: np.ndarray, x2: np.ndarray):
       return x1, kernel_fn(x1, x2, *args, **kwargs)
 
     _, kernel = _scan(row_fn, 0, x1s)
     return flatten(kernel, x2_is_none)
 
-  def serial_fn_kernel(kernel, *args, **kwargs):
-    n1, n2 = kernel.nngp.shape[:2]
+  def serial_fn_kernel(k: Kernel, *args, **kwargs) -> Kernel:
+    n1, n2 = k.nngp.shape[:2]
     (n1_batches, n1_batch_size,
      n2_batches, n2_batch_size) = _get_n_batches_and_batch_sizes(n1, n2,
                                                                  batch_size,
@@ -249,56 +337,62 @@ def _serial(kernel_fn, batch_size, store_on_device=True):
     n1s = np.arange(0, n1, n1_batch_size)
     n2s = np.arange(0, n2, n2_batch_size)
 
-    def row_fn(_, n1):
+    def row_fn(_, n1: int) -> Tuple[int, Kernel]:
       return _, _scan(col_fn, n1, n2s)[1]
 
-    def col_fn(n1, n2):
+    def col_fn(n1: int, n2: int) -> Tuple[int, Kernel]:
       # NOTE(schsam): If we end up wanting to enable jit-of-batch then we will
       # probably have to change this to dynamic slicing.
       n1_slice = slice(n1, n1 + n1_batch_size)
       n2_slice = slice(n2, n2 + n2_batch_size)
-      in_kernel = kernel.slice(n1_slice, n2_slice)
+      in_kernel = k.slice(n1_slice, n2_slice)
       return n1, kernel_fn(in_kernel, *args, **kwargs)
 
-    cov2_is_none = kernel.cov2 is None
-    _, kernel = _scan(row_fn, 0, n1s)
+    cov2_is_none = k.cov2 is None
+    _, k = _scan(row_fn, 0, n1s)
     if cov2_is_none:
-      kernel = kernel.replace(cov2=None)
-    return flatten(kernel, cov2_is_none)
+      k = k.replace(cov2=None)
+    return flatten(k, cov2_is_none)
 
   @utils.wraps(kernel_fn)
-  def serial_fn(x1_or_kernel, x2=None, *args, **kwargs):
+  def serial_fn(x1_or_kernel: Union[np.ndarray, Kernel],
+                x2: np.ndarray = None,
+                *args,
+                **kwargs) -> _KernelType:
     if isinstance(x1_or_kernel, np.ndarray):
       return serial_fn_x1(x1_or_kernel, x2, *args, **kwargs)
     elif isinstance(x1_or_kernel, Kernel):
-      assert not x2
+      if x2 is not None:
+        raise ValueError(f'`x2` must be `None`, got {x2}.')
       return serial_fn_kernel(x1_or_kernel, *args, **kwargs)
     else:
-      raise NotImplementedError()
+      raise TypeError(x1_or_kernel, type(x1_or_kernel))
 
   return serial_fn
 
 
-def _parallel(kernel_fn, device_count=-1):
+def _parallel(kernel_fn: KernelFn, device_count: int = -1) -> KernelFn:
   """Returns a function that computes a kernel in batches in parallel.
 
   When batching in parallel, the data is split over a set number of devices.
   The number of devices must be less than or equal to the number of physical
   devices. Moreover, the dataset size needs to divide the device count.
 
-  Given two datasets x1 and x2, parallel splits the kernel calculation over
+  Given two datasets `x1` and `x2`, parallel splits the kernel calculation over
   devices such that each device computes a batch of rows of shape
-  [|x1| / device_count, |x2|].
+  `[|x1| / device_count, |x2|]`.
 
   Args:
-    kernel_fn: A function that computes a kernel between two datasets,
-        `kernel_fn(x1, x2)` or the compositional kernel for an input kernel
-        `kernel_fn(kernel_in)`. Here x1 and x2 are `np.ndarray`s of floats of
-        shape [n1] + input_shape and [n2] + input_shape; `kernel_in` is a Kernel
-        object. The kernel function should return a PyTree.
-    device_count: Integer specifying the number of devices over which to split
-        the data. If device_count = 0, the computation is parallelized over all
-        available devices.
+    kernel_fn:
+      A function that computes a kernel between two datasets,
+      `kernel_fn(x1, x2)` or the compositional kernel for an input kernel
+      `kernel_fn(kernel_in)`. Here `x1` and `x2` are `np.ndarray`s of floats of
+      shape `(n1,) + input_shape` and `(n2,) + input_shape`; `kernel_in` is a
+      Kernel object. The kernel function should return a `PyTree`.
+    device_count:
+      Integer specifying the number of devices over which to split the data. If
+      `device_count == 0`, the computation is parallelized over all available
+      devices.
 
   Returns:
     A new function with the same signature as kernel_fn that computes the kernel
@@ -373,41 +467,11 @@ def _parallel(kernel_fn, device_count=-1):
   return parallel_fn
 
 
-def batch(kernel_fn, batch_size=0, device_count=-1, store_on_device=True):
-  """Returns a function that computes a kernel in batches over all devices.
-
-  Args:
-    kernel_fn: A function that computes a kernel between two datasets,
-      `kernel_fn(x1, x2)`. Here `x1` and `x2` are `np.ndarray`s of floats of
-      shape `[n1,] + input_shape` and `[n2,] + input_shape`. The kernel
-      function should return a PyTree.
-    batch_size: Integer specifying the size of each batch that gets processed
-      per physical device. Because we parallelize the computation over columns
-      it should be the case that `|x1|` is divisible by
-      device_count * batch_size and `|x2|` is divisible by batch_size.
-    device_count: Integer specifying the number of physical devices to be
-      mapped over. If device_count = -1 all devices are used. If
-      device_count = 0, no device parallelism is used.
-    store_on_device: A boolean that species whether the computed kernel should
-      be kept on device or brought back to CPU as it is computed. Defaults to
-      True.
-
-  Returns:
-    A new function with the same signature as kernel_fn that computes the kernel
-    by batching over the dataset in parallel with the specified batch_size.
-  """
-  if (device_count == -1 and xla_bridge.device_count() > 1) or device_count > 0:
-    kernel_fn = _parallel(kernel_fn, device_count)
-  else:
-    kernel_fn = _jit_or_pmap_broadcast(kernel_fn, device_count=0)
-
-  if not batch_size:
-    return kernel_fn
-
-  return _serial(kernel_fn, batch_size, store_on_device)
-
-
-def _get_n_batches_and_batch_sizes(n1, n2, batch_size, device_count):
+def _get_n_batches_and_batch_sizes(n1: int,
+                                   n2: int,
+                                   batch_size: int,
+                                   device_count: int
+                                   ) -> Tuple[int, int, int, int]:
   # TODO(romann): if dropout batching works for different batch sizes, relax.
   max_serial_batch_size = onp.gcd(n1, n2) // device_count
 
@@ -438,34 +502,36 @@ def _get_n_batches_and_batch_sizes(n1, n2, batch_size, device_count):
   return n1_batches, n1_batch_size, n2_batches, n2_batch_size
 
 
-def _is_np_ndarray(x):
+def _is_np_ndarray(x) -> bool:
   return tree_all(tree_map(lambda y: isinstance(y, np.ndarray), x))
 
 
-def _get_jit_or_pmap_broadcast():
+def _get_jit_or_pmap_broadcast() -> Callable[[Callable, int], Callable]:
   """Initializes a cache of pmapped functions closed over non-`np.ndarray` args.
 
   Returns:
     A `jit_or_pmap_broadcast` function allowing to jit or pmap a function as a
-      closure over all non-`np.ndarray` args, all `kwargs`, while broadcasting
-      all `np.ndarray`s in `args` except the first one.
+    closure over all non-`np.ndarray` args, all `kwargs`, while broadcasting
+    all `np.ndarray`s in `args` except the first one.
   """
   cache = {}
 
-  def jit_or_pmap_broadcast(f, device_count=-1):
+  def jit_or_pmap_broadcast(f: Callable, device_count: int = -1) -> Callable:
     """Pmap `f` over the first argument by closing over or broadcasting others.
 
     Args:
-      f: function to pmap. First argument must be an `np.ndarray` or a Kernel.
+      f:
+        function to pmap. First argument must be an `np.ndarray` or a Kernel.
         In either case, ndarrays should have a leading axis having the size of
         `device_count`.
-      device_count: number of XLA devices. `-1` means all available devices. `0`
-        means to just `jit` the function.
+      device_count:
+        number of XLA devices. `-1` means all available devices. `0` means to
+        just `jit` the function.
 
     Returns:
-      A function of the same signature as `f` pmapped over the ndarrays in the
-      first argument. Other arguments are either closed over (non-`np.ndarray`s
-      in `args` and all `kwargs`) or broadcasted to
+      A function of the same signature as `f` pmapped over the `np.ndarray`s in
+      the first argument. Other arguments are either closed over
+      (non-`np.ndarray`s in `args` and all `kwargs`) or broadcasted to
       `(device_count,) + old_shape` (for `np.ndarray`s). If `device_count == 0`,
       `f` is closed over and jitted over all non-array arguments and all
       `kwargs`.
@@ -481,7 +547,7 @@ def _get_jit_or_pmap_broadcast():
       device_count = xla_bridge.device_count()
 
     # TODO(romann): adapt this when JAX allows `axis_in` for `pmap`.
-    def broadcast(arg):
+    def broadcast(arg: np.ndarray) -> np.ndarray:
       if device_count == 0:
         return arg
       # If the argument has already been sharded, no need to broadcast it.
@@ -490,7 +556,7 @@ def _get_jit_or_pmap_broadcast():
       return np.broadcast_to(arg, (device_count,) + arg.shape)
 
     @utils.wraps(f)
-    def f_pmapped(x_or_kernel, *args, **kwargs):
+    def f_pmapped(x_or_kernel: Union[np.ndarray, Kernel], *args, **kwargs):
       args_np, args_np_idxs = [], []
       args_other = {}
 
