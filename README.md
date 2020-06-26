@@ -447,6 +447,8 @@ hrs on full 60k CIFAR-10 dataset for Myrtle-5/7/10 kernels.
 
 Neural Tangents has been used in the following papers:
 
+* [Statistical Mechanics of Generalization in Kernel Regression
+](https://arxiv.org/abs/2006.13198)
 * [Exact posterior distributions of wide Bayesian neural networks
 ](https://arxiv.org/abs/2006.10541)
 * [Infinite attention: NNGP and NTK for deep attention networks
