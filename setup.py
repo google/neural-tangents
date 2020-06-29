@@ -38,9 +38,29 @@ if sys.version_info < (3, 7):
   INSTALL_REQUIRES += ['dataclasses>=0.7']
 
 
+def _get_version() -> str:
+  """Returns the package version.
+
+  Adapted from:
+  https://github.com/deepmind/dm-haiku/blob/d4807e77b0b03c41467e24a247bed9d1897d336c/setup.py#L22
+
+  Returns:
+    Version number.
+  """
+  path = 'neural_tangents/__init__.py'
+  version = '__version__'
+  with open(path) as fp:
+    for line in fp:
+      if line.startswith(version):
+        g = {}
+        exec(line, g)  # pylint: disable=exec-used
+        return g[version]  # pytype: disable=key-error
+    raise ValueError(f'`{version}` not defined in `{path}`.')
+
+
 setuptools.setup(
     name='neural-tangents',
-    version='0.3.0',
+    version=_get_version(),
     license='Apache 2.0',
     author='Google',
     author_email='neural-tangents-dev@google.com',
