@@ -483,7 +483,7 @@ def GeneralConv(
 
   Args:
     dimension_numbers: Specifies which axes should be convolved over. Should
-      match the specification in `jax.lax.dot_general_dilated`.
+      match the specification in `jax.lax.conv_general_dilated`.
     out_chan: The number of output channels / features of the
       convolution. This is ignored in by the `kernel_fn` in NTK
       parameterization.
