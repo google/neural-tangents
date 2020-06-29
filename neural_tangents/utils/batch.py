@@ -20,6 +20,11 @@ performs the same computation by batching over `x1` and `x2` and concatenating
 the result, allowing to both use multiple accelerators and stay within memory
 limits.
 
+Note that you typically should not apply the `jax.jit` decorator to the
+resulting `batched_kernel_fn`, as its purpose is explicitly serial execution in
+order to save memory. Further, you do not need to apply `jax.jit` to the input
+`kernel_fn` function, as it is JITted internally.
+
 Example:
   >>>  from jax import numpy as np
   >>>  import neural_tangents as nt
@@ -60,6 +65,11 @@ def batch(kernel_fn: KernelFn,
           device_count: int = -1,
           store_on_device: bool = True) -> KernelFn:
   """Returns a function that computes a kernel in batches over all devices.
+
+  Note that you typically should not apply the `jax.jit` decorator to the
+  resulting `batched_kernel_fn`, as its purpose is explicitly serial execution
+  in order to save memory. Further, you do not need to apply `jax.jit` to the
+  input `kernel_fn` function, as it is JITted internally.
 
   Args:
     kernel_fn:

@@ -12,11 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Functions to compute Monte Carlo NNGP and NTK estimates.
+"""Function to compute Monte Carlo NNGP and NTK estimates.
 
-The library has a public function `monte_carlo_kernel_fn` that allow to compute
+This module contains a function `monte_carlo_kernel_fn` that allow to compute
 Monte Carlo estimates of NNGP and NTK kernels of arbitrary functions. For more
 details on how individual samples are computed, refer to `utils/empirical.py`.
+
+Note that the `monte_carlo_kernel_fn` accepts arguments like `batch_size`,
+`device_count`, and `store_on_device`, and is appropriately batched /
+parallelized. You don't need to apply the `nt.batch` or `jax.jit` decorators to
+it. Further, you do not need to apply `jax.jit` to the input `apply_fn`
+function, as the resulting empirical kernel function is JITted internally.
 """
 
 
@@ -119,6 +125,11 @@ def monte_carlo_kernel_fn(
     diagonal_axes: Axes = ()
     ) -> MonteCarloKernelFn:
   """Return a Monte Carlo sampler of NTK and NNGP kernels of a given function.
+
+  Note that the returned function is appropriately batched / parallelized. You
+  don't need to apply the `nt.batch` or `jax.jit` decorators  to it. Further,
+  you do not need to apply `jax.jit` to the input `apply_fn` function, as the
+  resulting empirical kernel function is JITted internally.
 
   Args:
     init_fn:
