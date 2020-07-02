@@ -1266,6 +1266,26 @@ def Sin(a: float = 1.,
 
 @layer
 @_supports_masking(remask_kernel=True)
+def Rbf(gamma: float = 1.0) -> InternalLayer:
+  """Returns the dual activation function layer for normalized RBF or sqaured exponential kernel.
+
+  Dual activation function is `f(x) = sqrt(2)*sin(sqrt(2*gamma) x + pi/4)`.
+
+  NNGP kernel transformation correspond to (with input dimension `d`)
+    `k = exp(- gamma / d * ||x - x'||^2) = exp(- gamma*(q11 + q22 - 2 * q12))`.
+
+  Args:
+    gamma: related to characteristic length-scale (l) that controls width of
+      the kernel, where `gamma = 1 / (2 l^2)`.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  return _elementwise(_rbf, 'Rbf', gamma=gamma)
+
+
+@layer
+@_supports_masking(remask_kernel=True)
 def Relu(
     do_backprop: bool = False,
     do_stabilize: bool = False) -> InternalLayer:
@@ -2234,6 +2254,10 @@ def _sin(x, a, b, c, **kwargs):
   return a * np.sin(b * x + c)
 
 
+def _rbf(x, gamma, **kwargs):
+  return np.sqrt(2) * np.sin(np.sqrt(2 * gamma) * x + np.pi/4)
+
+
 def _arccos(x, do_backprop):
   if do_backprop:
     # https://github.com/google/jax/issues/654
@@ -2555,6 +2579,39 @@ def _transform_kernels_sin(
                    is_gaussian=False)
 
 
+def _transform_kernels_rbf(
+    k: Kernel,
+    gamma: float = 1.0) -> Kernel:
+  """Compute new kernels after an `Rbf` layer."""
+  cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
+
+  sum11, sum12, sum22 = _get_diagonal_outer_prods(cov1,
+                                                  cov2,
+                                                  k.diagonal_batch,
+                                                  k.diagonal_spatial,
+                                                  op.add)
+
+  def _get_rbf_kernel(sum_, cov, ntk):
+    s1 = np.exp(gamma * (-sum_ + 2 * cov))
+    nngp = s1
+    if ntk is not None:
+      ntk *= 2 * gamma * s1
+    return nngp, ntk
+
+  nngp, ntk = _get_rbf_kernel(sum12, nngp, ntk)
+
+  if k.diagonal_batch and k.diagonal_spatial:
+    cov1 = np.ones_like(sum11)
+    if cov2 is not None:
+      cov2 = np.ones_like(sum22)
+  else:
+    cov1 = _get_rbf_kernel(sum11, cov1, None)[0]
+    if cov2 is not None:
+      cov2 = _get_rbf_kernel(sum22, cov2, None)[0]
+
+  return k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk, is_gaussian=False)
+
+
 def _transform_kernels(
     k: Kernel,
     fn: Callable[[float], float],
@@ -2563,7 +2620,7 @@ def _transform_kernels(
 
   Args:
     k: a `Kernel` object.
-    fn: nonlinearity function, can only be Relu, Erf or Identity.
+    fn: nonlinearity function, can only be Relu, Erf, Sine or Identity.
     **fn_kwargs: arguments passed to a `_transform_kernels_<name>` function.
 
   Returns:
@@ -2578,6 +2635,8 @@ def _transform_kernels(
     return _transform_kernels_affine_erf(k, **fn_kwargs)
   if fn is _sin:
     return _transform_kernels_sin(k, **fn_kwargs)
+  if fn is _rbf:
+    return _transform_kernels_rbf(k, **fn_kwargs)
   if fn is _gelu:
     return _transform_kernels_gelu(k, **fn_kwargs)
   # TODO(xlc): Monte Carlo approximation to the integral (suggested by schsam@.)

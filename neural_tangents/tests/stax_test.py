@@ -16,10 +16,9 @@
 
 
 import string
-from functools import partial
-from itertools import product
 
 import random as prandom
+import functools
 import itertools
 import logging
 from absl.testing import absltest
@@ -272,9 +271,9 @@ def _get_net_pool(width, is_ntk, pool_type, padding,
   phi = stax.Relu()
   parameterization = 'ntk'
 
-  fc = partial(
+  fc = functools.partial(
       stax.Dense, W_std=W_std, b_std=b_std, parameterization=parameterization)
-  conv = partial(
+  conv = functools.partial(
       stax.Conv,
       filter_shape=(3, 2),
       strides=None,
@@ -284,7 +283,7 @@ def _get_net_pool(width, is_ntk, pool_type, padding,
       parameterization=parameterization)
 
   if pool_type == 'AVG':
-    pool_fn = partial(stax.AvgPool, normalize_edges=normalize_edges)
+    pool_fn = functools.partial(stax.AvgPool, normalize_edges=normalize_edges)
     global_pool_fn = stax.GlobalAvgPool
   elif pool_type == 'SUM':
     pool_fn = stax.SumPool
@@ -821,6 +820,91 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
 
 class ActivationTest(test_utils.NeuralTangentsTestCase):
 
+  @stax.layer
+  def _RBF(self, gamma):
+    init_fn = lambda key, input_shape: (input_shape, ())
+    def apply_fn(unused_params, unused_xs, **kwargs):
+      raise NotImplementedError()
+    def kernel_fn(kernels):
+      if kernels.ntk is not None:
+        raise ValueError('RBF Kernel does not have an associated NTK.')
+
+      if kernels.nngp.ndim > 2:
+        raise ValueError(
+            ('RBF Kernel is not defined for covariance matrices with dimension'
+             ' greater than two.'))
+
+      input_dim = kernels.shape1[1]
+      cov1 = kernels.cov1
+      cov1 = np.reshape(cov1, (cov1.shape[0], 1))
+      cov2 = cov1 if kernels.cov2 is None else kernels.cov2
+      cov2 = np.reshape(cov2, (1, cov2.shape[0]))
+      nngp = kernels.nngp
+
+      # TODO(schsam): Update cov1 and cov2 if we want to compose this kernel
+      # with other kernels.
+      return kernels.replace(
+          nngp=np.exp(-input_dim * gamma * (cov1 + cov2 - 2 * nngp)))
+    return init_fn, apply_fn, kernel_fn
+
+
+  def _test_activation(self, activation_fn, same_inputs, model, get,
+                       rbf_gamma=None):
+    platform = xla_bridge.get_backend().platform
+    if platform == 'cpu' and 'conv' in model:
+      raise unittest.SkipTest('Not running CNNs on CPU to save time.')
+
+    key = random.PRNGKey(1)
+    key, split = random.split(key)
+    output_dim = 2048 if get == 'nngp' else 1
+    b_std = 0.5
+    W_std = 2.0
+    if activation_fn[2].__name__ == 'Sin':
+      W_std = 0.9
+    if activation_fn[2].__name__ == 'Rbf':
+      W_std = 1.0
+      b_std = 0.0
+
+    if model == 'fc':
+      rtol = 0.05
+      X0_1 = random.normal(key, (6, 7))
+      X0_2 = None if same_inputs else random.normal(split, (10, 7))
+      affine = stax.Dense(1024, W_std, b_std)
+      readout = stax.Dense(output_dim)
+      depth = 1
+    else:
+      rtol = 0.1
+      X0_1 = random.normal(key, (4, 8, 8, 3))
+      X0_2 = None if same_inputs else random.normal(split, (6, 8, 8, 3))
+      affine = stax.Conv(1024, (3, 2), W_std=W_std, b_std=b_std, padding='SAME')
+      readout = stax.serial(stax.GlobalAvgPool() if 'pool' in model else
+                            stax.Flatten(),
+                            stax.Dense(output_dim))
+      depth = 2
+    if platform == 'cpu':
+      num_samplings = 200
+      rtol *= 2
+    else:
+      num_samplings = (500 if activation_fn[2].__name__ in ('Sin', 'Rbf')
+                       else 300)
+
+    init_fn, apply_fn, kernel_fn = stax.serial(
+        *[affine, activation_fn]*depth, readout)
+    analytic_kernel = kernel_fn(X0_1, X0_2, get)
+    mc_kernel_fn = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, split, num_samplings)
+    empirical_kernel = mc_kernel_fn(X0_1, X0_2, get)
+    test_utils.assert_close_matrices(self, analytic_kernel,
+                                     empirical_kernel, rtol)
+
+    # Check match with explicit RBF
+    if rbf_gamma is not None and get == 'nngp' and model == 'fc':
+      input_dim = X0_1.shape[1]
+      _, _, kernel_fn = self._RBF(rbf_gamma / input_dim)
+      direct_rbf_kernel = kernel_fn(X0_1, X0_2, get)
+      test_utils.assert_close_matrices(self, analytic_kernel,
+                                       direct_rbf_kernel, rtol)
+
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
@@ -841,42 +925,13 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
       }
                           for model in ['fc', 'conv-pool', 'conv-flatten']
                           for phi_name in ['Sin', 'Erf', 'Gelu']
-                          for same_inputs in [True, False]
+                          for same_inputs in [False, True]
                           for get in ['nngp', 'ntk']
-                          for abc in product([1., 2., 0.3],
-                                             [1., 1.5, 0.3],
-                                             [0., -np.pi/4., np.pi/2.])
-                          ))
+                          for abc in itertools.product(
+                              [1., 2., 0.3],
+                              [1., 1.5, 0.3],
+                              [0., -np.pi/4., np.pi/2.])))
   def test_activation(self, same_inputs, model, phi_name, get, abc):
-    platform = xla_bridge.get_backend().platform
-    if platform == 'cpu' and 'conv' in model:
-      raise unittest.SkipTest('Not running CNNs on CPU to save time.')
-
-    key = random.PRNGKey(1)
-    key, split = random.split(key)
-    output_dim = 2048 if get == 'nngp' else 1
-    W_std = 0.9 if phi_name == 'Sin' else 2.
-    if model == 'fc':
-      rtol = 0.02
-      X0_1 = random.normal(key, (6, 7))
-      X0_2 = None if same_inputs else random.normal(split, (10, 7))
-      affine = stax.Dense(1024, W_std, 0.5)
-      readout = stax.Dense(output_dim)
-      depth = 1
-    else:
-      rtol = 0.05
-      X0_1 = random.normal(key, (4, 8, 8, 3))
-      X0_2 = None if same_inputs else random.normal(split, (6, 8, 8, 3))
-      affine = stax.Conv(1024, (3, 2), W_std=W_std, b_std=0.5, padding='SAME')
-      readout = stax.serial(stax.GlobalAvgPool() if 'pool' in model else
-                            stax.Flatten(),
-                            stax.Dense(output_dim))
-      depth = 2
-    if platform == 'cpu':
-      num_samplings = 200
-      rtol *= 2
-    else:
-      num_samplings = 500 if phi_name == 'Sin' else 300
     a, b, c = abc
     if phi_name == 'Sin':
       activation = stax.Sin(a=a, b=b, c=c)
@@ -888,14 +943,34 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
         unittest.SkipTest('Skip `Gelu` test if (a, b, c) != (1., 1., 0.).')
     else:
       raise unittest.SkipTest(f'Activation {phi_name} is not implemented.')
-    init_fn, apply_fn, kernel_fn = stax.serial(
-        *[affine, activation]*depth, readout)
-    analytic_kernel = kernel_fn(X0_1, X0_2, get)
-    mc_kernel_fn = monte_carlo.monte_carlo_kernel_fn(
-        init_fn, apply_fn, split, num_samplings)
-    empirical_kernel = mc_kernel_fn(X0_1, X0_2, get)
-    test_utils.assert_close_matrices(self, analytic_kernel,
-                                     empirical_kernel, rtol)
+    self._test_activation(activation, same_inputs, model, get)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              '_{}_Rbf_{}_{}_{}'.format(
+                  model,
+                  'Same_inputs' if same_inputs else 'Different_inputs',
+                  get,
+                  gamma),
+          'model':
+              model,
+          'same_inputs':
+              same_inputs,
+          'get': get,
+          'gamma': gamma,
+      }
+                          for model in ['fc', 'conv-pool', 'conv-flatten']
+                          for same_inputs in [False, True]
+                          for get in ['nngp', 'ntk']
+                          for gamma in [1e-6, 1e-4, 1e-2, 1.0, 2.]
+                          ))
+
+  def test_rbf(self, same_inputs, model, get, gamma):
+    activation = stax.Rbf(gamma)
+    self._test_activation(activation, same_inputs, model, get,
+                          rbf_gamma=gamma)
+
 
 
 @jtu.parameterized.parameters([
