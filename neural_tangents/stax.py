@@ -483,7 +483,7 @@ def GeneralConv(
 
   Args:
     dimension_numbers: Specifies which axes should be convolved over. Should
-      match the specification in `jax.lax.conv_general_dilated`.
+      match the specification in `jax.lax.dot_general_dilated`.
     out_chan: The number of output channels / features of the
       convolution. This is ignored in by the `kernel_fn` in NTK
       parameterization.
@@ -1233,10 +1233,27 @@ def Erf(a: float = 1.,
 
 @layer
 @_supports_masking(remask_kernel=True)
+def Gelu(do_backprop: bool = False) -> InternalLayer:
+  """Gelu function.
+
+  Args:
+    do_backprop: set to `True` if you want to backpropagate through the kernel.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  return _elementwise(_gelu,
+                      'Gelu',
+                      do_backprop=do_backprop)
+
+
+@layer
+@_supports_masking(remask_kernel=True)
 def Sin(a: float = 1.,
         b: float = 1.,
         c: float = 0.) -> InternalLayer:
   """Affine transform of `Sin` nonlinearity, i.e. `a sin(b*x + c)`
+
   Args:
     a: a float.
     b: a float.
@@ -2209,6 +2226,10 @@ def _erf(x, a, b, c, **kwargs):
   return a * erf(b * x) + c
 
 
+def _gelu(x, **kwargs):
+  return 0.5 * x * (1. + erf(x / np.sqrt(2.)))
+
+
 def _sin(x, a, b, c, **kwargs):
   return a * np.sin(b * x + c)
 
@@ -2371,11 +2392,11 @@ def _get_erf_kernel(
     prod: np.ndarray,
     do_backprop: bool,
     ntk: np.ndarray = None) -> Tuple[np.ndarray, Optional[np.ndarray]]:
-  dot_sigma = 4 / (np.pi * np.sqrt(prod - 4 * ker_mat**2))
-  ker_mat = _arcsin(2 * ker_mat / _safe_sqrt(prod), do_backprop) * 2 / np.pi
-
   if ntk is not None:
+    dot_sigma = 4 / (np.pi * np.sqrt(prod - 4 * ker_mat**2))
     ntk *= dot_sigma
+  ker_mat = _arcsin(2 * ker_mat / np.sqrt(prod), do_backprop) * 2 / np.pi
+
 
   return ker_mat, ntk
 
@@ -2402,6 +2423,69 @@ def _transform_kernels_erf_non_scaled(k: Kernel, do_backprop: bool) -> Kernel:
     cov1, _ = _get_erf_kernel(cov1, prod11, do_backprop)
     if cov2 is not None:
       cov2, _ = _get_erf_kernel(cov2, prod22, do_backprop)
+
+  return k.replace(cov1=cov1,
+                   nngp=nngp,
+                   cov2=cov2,
+                   ntk=ntk,
+                   is_gaussian=False)
+
+
+def _get_gelu_kernel(nngp: np.ndarray,
+                     prod: np.ndarray,
+                     prod_plus_1: np.ndarray,
+                     do_backprop: bool,
+                     ntk: np.ndarray = None
+                     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+  delta_squared = prod_plus_1 - nngp**2
+  delta = _safe_sqrt(delta_squared)
+  ratio = nngp / _safe_sqrt(prod_plus_1)
+  new_nngp = (nngp**2 + prod * delta_squared) / (prod_plus_1 * delta)
+  new_nngp += nngp * _arcsin(ratio, do_backprop)
+  new_nngp /= 2 * np.pi
+  new_nngp += 0.25 * nngp
+
+  if ntk is not None:
+    second_term = 0.25 + _arcsin(ratio, do_backprop) / (2 * np.pi)
+    first_term = 1 / delta_squared + (1 - prod) / prod_plus_1 + 1
+    first_term *= nngp / delta / (2. * np.pi)
+    dot_sigma = first_term + second_term
+    ntk *= dot_sigma
+  return new_nngp, ntk
+
+
+def _get_gelu_nngp_diag(nngp_diag: np.ndarray, do_backprop: bool) -> np.ndarray:
+  new_diag = nngp_diag / ((nngp_diag + 1.) * np.sqrt(1. + 2.* nngp_diag))
+  new_diag += _arcsin(nngp_diag/(nngp_diag + 1), do_backprop) / 2
+  new_diag /= np.pi
+  new_diag += 0.25
+  new_diag *= nngp_diag
+  return new_diag
+
+
+def _transform_kernels_gelu(k: Kernel, do_backprop: bool) -> Kernel:
+  """Compute new kernels after an `Gelu` layer; NNGP see `arXiv:2002.08517`."""
+  cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
+
+  cov1_plus_1 = cov1 + 1
+  cov2_plus_1 = None if cov2 is None else cov2 + 1
+
+  prod11_plus_1, prod12_plus_1, prod22_plus_1 = _get_diagonal_outer_prods(
+      cov1_plus_1, cov2_plus_1, k.diagonal_batch, k.diagonal_spatial, op.mul)
+  prod11, prod12, prod22 = _get_diagonal_outer_prods(
+      cov1, cov2, k.diagonal_batch, k.diagonal_spatial, op.mul)
+
+  nngp, ntk = _get_gelu_kernel(nngp, prod12, prod12_plus_1, do_backprop,
+                               ntk=ntk)
+
+  if k.diagonal_batch and k.diagonal_spatial:
+    cov1 = _get_gelu_nngp_diag(cov1, do_backprop)
+    if cov2 is not None:
+      cov2 = _get_gelu_nngp_diag(cov2, do_backprop)
+  else:
+    cov1, _ = _get_gelu_kernel(cov1, prod11, prod11_plus_1, do_backprop)
+    if cov2 is not None:
+      cov2, _ = _get_gelu_kernel(cov2, prod22, prod22_plus_1, do_backprop)
 
   return k.replace(cov1=cov1,
                    nngp=nngp,
@@ -2494,6 +2578,8 @@ def _transform_kernels(
     return _transform_kernels_affine_erf(k, **fn_kwargs)
   if fn is _sin:
     return _transform_kernels_sin(k, **fn_kwargs)
+  if fn is _gelu:
+    return _transform_kernels_gelu(k, **fn_kwargs)
   # TODO(xlc): Monte Carlo approximation to the integral (suggested by schsam@.)
   raise NotImplementedError(f'Analaytic kernel for activiation {fn} is not '
                             f'implmented.')

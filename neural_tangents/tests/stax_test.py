@@ -840,12 +840,13 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
           'abc': abc,
       }
                           for model in ['fc', 'conv-pool', 'conv-flatten']
-                          for phi_name in ['Sin', 'Erf']
-                          for same_inputs in [False, True]
+                          for phi_name in ['Sin', 'Erf', 'Gelu']
+                          for same_inputs in [True, False]
                           for get in ['nngp', 'ntk']
                           for abc in product([1., 2., 0.3],
                                              [1., 1.5, 0.3],
-                                             [0., -np.pi/4., np.pi/2.])))
+                                             [0., -np.pi/4., np.pi/2.])
+                          ))
   def test_activation(self, same_inputs, model, phi_name, get, abc):
     platform = xla_bridge.get_backend().platform
     if platform == 'cpu' and 'conv' in model:
@@ -854,19 +855,19 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
     key = random.PRNGKey(1)
     key, split = random.split(key)
     output_dim = 2048 if get == 'nngp' else 1
-
+    W_std = 0.9 if phi_name == 'Sin' else 2.
     if model == 'fc':
       rtol = 0.02
       X0_1 = random.normal(key, (6, 7))
       X0_2 = None if same_inputs else random.normal(split, (10, 7))
-      affine = stax.Dense(1024, 1., 0.)
+      affine = stax.Dense(1024, W_std, 0.5)
       readout = stax.Dense(output_dim)
       depth = 1
     else:
       rtol = 0.05
       X0_1 = random.normal(key, (4, 8, 8, 3))
       X0_2 = None if same_inputs else random.normal(split, (6, 8, 8, 3))
-      affine = stax.Conv(1024, (3, 2), W_std=1., b_std=0.1, padding='SAME')
+      affine = stax.Conv(1024, (3, 2), W_std=W_std, b_std=0.5, padding='SAME')
       readout = stax.serial(stax.GlobalAvgPool() if 'pool' in model else
                             stax.Flatten(),
                             stax.Dense(output_dim))
@@ -875,18 +876,21 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
       num_samplings = 200
       rtol *= 2
     else:
-      num_samplings = 500
+      num_samplings = 500 if phi_name == 'Sin' else 300
     a, b, c = abc
     if phi_name == 'Sin':
       activation = stax.Sin(a=a, b=b, c=c)
     elif phi_name == 'Erf':
       activation = stax.Erf(a=a, b=b, c=c)
+    elif phi_name == 'Gelu':
+      activation = stax.Gelu()
+      if a != 1. or b != 1. or c != 0.:
+        unittest.SkipTest('Skip `Gelu` test if (a, b, c) != (1., 1., 0.).')
     else:
       raise unittest.SkipTest(f'Activation {phi_name} is not implemented.')
     init_fn, apply_fn, kernel_fn = stax.serial(
         *[affine, activation]*depth, readout)
     analytic_kernel = kernel_fn(X0_1, X0_2, get)
-    key, split = random.split(key)
     mc_kernel_fn = monte_carlo.monte_carlo_kernel_fn(
         init_fn, apply_fn, split, num_samplings)
     empirical_kernel = mc_kernel_fn(X0_1, X0_2, get)
