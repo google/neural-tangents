@@ -16,7 +16,6 @@
 
 
 import math
-import unittest
 
 from absl.testing import absltest
 from jax import test_util as jtu
@@ -238,7 +237,7 @@ class PredictTest(jtu.JaxTestCase):
     trace_axes = () if g_dd.ndim == 4 else (-1,)
     if loss == 'mse_analytic':
       if momentum is not None:
-        raise unittest.SkipTest(momentum)
+        raise absltest.SkipTest(momentum)
       predictor = predict.gradient_descent_mse(g_dd, y_train,
                                                learning_rate=learning_rate,
                                                trace_axes=trace_axes)

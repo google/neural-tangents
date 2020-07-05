@@ -15,7 +15,6 @@
 """Tests for `utils/empirical.py`."""
 
 from functools import partial
-import unittest
 
 from absl.testing import absltest
 from jax import test_util as jtu
@@ -270,7 +269,7 @@ class EmpiricalTest(jtu.JaxTestCase):
     _trace_axes = utils.canonicalize_axis(trace_axes, data_self)
 
     if any(d == c for d in _diagonal_axes for c in _trace_axes):
-      raise unittest.SkipTest(
+      raise absltest.SkipTest(
           'diagonal axes must be different from channel axes.')
 
     implicit, direct, nngp = KERNELS['empirical_logits_3'](
