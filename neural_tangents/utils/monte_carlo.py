@@ -57,7 +57,7 @@ def _sample_once_kernel_fn(kernel_fn: EmpiricalKernelFn,
       **apply_fn_kwargs):
     init_key, dropout_key1, dropout_key2 = random.split(key, 3)
     keys = np.where(utils.x1_is_x2(x1, x2), dropout_key1,
-                    (dropout_key1, dropout_key2))
+                    np.stack([dropout_key1, dropout_key2]))
     _, params = init_fn(init_key, x1.shape)
     return kernel_fn(x1, x2, get, params, keys=keys, **apply_fn_kwargs)
   return kernel_fn_sample_once
