@@ -419,14 +419,17 @@ def dot_general(lhs: np.ndarray,
   n_batch_dims = len(batch_dims)
   leading_batch_dims = range(n_batch_dims)
 
-  dimension_numbers = ((contracting_dims, contracting_dims),
-                       (leading_batch_dims, leading_batch_dims))
-
   lhs = np.moveaxis(lhs, batch_dims, leading_batch_dims)
   if rhs is None:
     rhs = lhs
   else:
     rhs = np.moveaxis(rhs, batch_dims, leading_batch_dims)
+
+  shifted_contracting_dims = [i + sum(1 if i < b else 0 for b in batch_dims)
+                              for i in contracting_dims]
+
+  dimension_numbers = ((shifted_contracting_dims, shifted_contracting_dims),
+                       (leading_batch_dims, leading_batch_dims))
 
   prod = lax.dot_general(lhs, rhs, dimension_numbers, precision)
   prod = zip_axes(prod, n_batch_dims)

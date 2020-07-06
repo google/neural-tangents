@@ -245,20 +245,25 @@ class EmpiricalTest(jtu.JaxTestCase):
                                                 (0,),
                                                 (0, 1),
                                                 (0, 1, 2),
-                                                (0, 1, 2, 3),]
+                                                (0, 1, 2, 3),
+                                                (-1,),
+                                                (-2,),
+                                                (0, -1),
+                                                (1, -2),
+                                                (2, 3)]
                           for trace_axes in [(),
-                                               (0,),
-                                               (0, 1),
-                                               (-1,),
-                                               (1,),
-                                               (0, -1),
-                                               (-1, -2),
-                                               (0, 1, 2, 3),
-                                               (3, 1, 2, 0),
-                                               (1, 2, 3),
-                                               (-3, -2),
-                                               (-3, -1),
-                                               (-2, -4)]))
+                                             (0,),
+                                             (0, 1),
+                                             (-1,),
+                                             (1,),
+                                             (0, -1),
+                                             (-1, -2),
+                                             (0, 1, 2, 3),
+                                             (3, 1, 2, 0),
+                                             (1, 2, 3),
+                                             (-3, -2),
+                                             (-3, -1),
+                                             (-2, -4)]))
   def testAxes(self, diagonal_axes, trace_axes):
     key = random.PRNGKey(0)
     key, self_split, other_split = random.split(key, 3)
@@ -282,22 +287,24 @@ class EmpiricalTest(jtu.JaxTestCase):
     n_marg = len(_diagonal_axes)
     n_chan = len(_trace_axes)
 
-    g = implicit(data_self, None)
-    g_direct = direct(data_self, None)
     g_nngp = nngp(data_self, None)
-
-    self.assertAllClose(g, g_direct)
-    self.assertEqual(g_nngp.shape, g.shape)
     self.assertEqual(2 * (data_self.ndim - n_chan) - n_marg, g_nngp.ndim)
 
-    if 0 not in _trace_axes and 0 not in _diagonal_axes:
-      g = implicit(data_other, data_self)
-      g_direct = direct(data_other, data_self)
-      g_nngp = nngp(data_other, data_self)
+    g_direct = direct(data_self, None)
+    self.assertEqual(g_nngp.shape, g_direct.shape)
 
-      self.assertAllClose(g, g_direct)
-      self.assertEqual(g_nngp.shape, g.shape)
+    g = implicit(data_self, None)
+    self.assertAllClose(g_direct, g)
+
+    if 0 not in _trace_axes and 0 not in _diagonal_axes:
+      g_nngp = nngp(data_other, data_self)
       self.assertEqual(2 * (data_self.ndim - n_chan) - n_marg, g_nngp.ndim)
+
+      g_direct = direct(data_other, data_self)
+      self.assertEqual(g_nngp.shape, g_direct.shape)
+
+      g = implicit(data_other, data_self)
+      self.assertAllClose(g_direct, g)
 
 
 if __name__ == '__main__':
