@@ -1,3 +1,4 @@
+merge_mode: replace
 language: python
 python:
   - "3.6"
@@ -6,8 +7,7 @@ python:
 install:
   - pip install --upgrade pip
   - pip install numpy jaxlib jax tensorflow tensorflow-datasets --upgrade
-  - cd google
+  - git clone https://github.com/google/neural-tangents
   - pip install -e neural-tangents
 script:
-  - set -e
   - for f in neural-tangents/neural_tangents/tests/*.py; do python $f; done
