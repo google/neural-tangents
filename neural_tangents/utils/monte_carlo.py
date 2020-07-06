@@ -269,3 +269,4 @@ def _canonicalize_n_samples(
     raise TypeError(f'`n_samples` must be either an integer of a set of '
                     f'integers, got {type(n_samples)}.')
   return n_samples, get_generator
+
