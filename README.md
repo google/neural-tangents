@@ -88,7 +88,7 @@ python neural-tangents/examples/infinite_fcn.py
 python neural-tangents/examples/weight_space.py
 python neural-tangents/examples/function_space.py
 
-for f in neural-tangents/neural_tangents/tests/*.py; do python $f; done
+set -e; for f in neural-tangents/neural_tangents/tests/*.py; do python $f; done
 ```
 
 
