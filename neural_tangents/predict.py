@@ -457,9 +457,9 @@ def gradient_descent(
     # `fx_test_0`] are evaluated, but also a strictly increasing sequence of
     # timesteps, so we always temporarily append an [almost] `0` at the start.
     identity = lambda x: x
-    t0 = lax.cond(t[0] == 0.,
-                  np.full((1,), -1e-24, t.dtype), identity,
-                  np.zeros((1,), t.dtype), identity)
+    t0 = np.where(t[0] == 0,
+                  np.full((1,), -1e-24, t.dtype),
+                  np.zeros((1,), t.dtype))
     t = np.concatenate([t0, t])
 
     # Solve the ODE.

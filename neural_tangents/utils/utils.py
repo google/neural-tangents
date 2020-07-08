@@ -355,10 +355,10 @@ def get_masked_array(x: ArrayOrList,
     if mask_constant is None:
       mask = None
     else:
-      id_fn = lambda m: m
       mask = lax.cond(np.isnan(mask_constant),
-                      np.isnan(x), id_fn,
-                      x == mask_constant, id_fn)
+                      lambda x: np.isnan(x),
+                      lambda x: x == mask_constant,
+                      x)
   else:
     raise TypeError(x, type(x))
 
