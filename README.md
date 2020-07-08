@@ -75,7 +75,8 @@ or, to use the bleeding-edge version from GitHub source,
 
 ```
 git clone https://github.com/google/neural-tangents
-pip install -e neural-tangents
+cd neural-tangents
+pip install -e .
 ```
 
 You can now run the examples (using [`tensorflow_datasets`](https://github.com/tensorflow/datasets))
@@ -84,11 +85,11 @@ and tests by calling:
 ```
 pip install tensorflow tensorflow-datasets --upgrade
 
-python neural-tangents/examples/infinite_fcn.py
-python neural-tangents/examples/weight_space.py
-python neural-tangents/examples/function_space.py
+python examples/infinite_fcn.py
+python examples/weight_space.py
+python examples/function_space.py
 
-set -e; for f in neural-tangents/neural_tangents/tests/*.py; do python $f; done
+set -e; for f in tests/*.py; do python $f; done
 ```
 
 
