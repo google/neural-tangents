@@ -3,21 +3,13 @@
 | [**Quickstart**](#colab-notebooks)
 | [**Install guide**](#installation)
 | [**Reference docs**](https://neural-tangents.readthedocs.io/en/latest/)
+| [**Release notes**](https://github.com/google/neural-tangents/releases)
 
 [![PyPI](https://img.shields.io/pypi/v/neural-tangents)](https://pypi.org/project/neural-tangents/) [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/neural-tangents)](https://pypi.org/project/neural-tangents/)
 [![Build Status](https://travis-ci.org/google/neural-tangents.svg?branch=master)](https://travis-ci.org/google/neural-tangents)
 [![Readthedocs](https://readthedocs.org/projects/neural-tangents/badge/?version=latest)](https://neural-tangents.readthedocs.io/en/latest/?badge=latest)
 [![PyPI - License](https://img.shields.io/pypi/l/neural_tangents)](https://github.com/google/neural-tangents/blob/master/LICENSE)
 
-**News:**
-
-* [Huge overhaul of `nt.predict` and `nt.utils.empirical` for improved performance and cleaner API](https://github.com/google/neural-tangents/commit/a76bbb494f19af4f8c9c1a1b0904e91b105f769e) - breaking change!
-
-* [Support for `a sin(b x + c)` activation.](https://github.com/google/neural-tangents/commit/a936d8794c4cefc27359484c01eac77b4a4ddde1)
-
-* Neural Tangents just got faster! >4X speedup in computing analytic
-kernels for CNN architectures with pooling, starting from version 0.2.1. See our
-[Performance](#performance).
 
 ## Overview
 
@@ -74,8 +66,7 @@ pip install neural-tangents
 or, to use the bleeding-edge version from GitHub source,
 
 ```
-git clone https://github.com/google/neural-tangents
-cd neural-tangents
+git clone https://github.com/google/neural-tangents; cd neural-tangents
 pip install -e .
 ```
 
@@ -246,16 +237,6 @@ The `neural_tangents` (`nt`) package contains the following modules and function
 
 
 ## Technical gotchas
-
-
-### 64-bit precision
-To enable 64-bit precision, set the respective JAX flag _before_ importing `neural_tangents` (see the JAX [guide](https://colab.research.google.com/github/google/jax/blob/master/notebooks/Common_Gotchas_in_JAX.ipynb#scrollTo=YTktlwTTMgFl)), for example:
-
-```python
-from jax.config import config
-config.update("jax_enable_x64", True)
-import neural_tangents as nt  # 64-bit precision enabled
-```
 
 
 ### [`nt.stax`](https://github.com/google/neural-tangents/blob/master/neural_tangents/stax.py) vs [`jax.experimental.stax`](https://github.com/google/jax/blob/master/jax/experimental/stax.py)
@@ -441,13 +422,15 @@ please [file a bug](https://github.com/google/neural-tangents/issues/new)!
 Colab notebook [Performance Benchmark](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/myrtle_kernel_with_neural_tangents.ipynb)
 demonstrates how one would construct and benchmark kernels. To demonstrate
 flexibility, we took architecture from [[16]](#16-neural-kernels-without-tangents)
-as an example. With `NVIDIA V100` 64bit precision, `nt` took 316/330/508 GPU
-hrs on full 60k CIFAR-10 dataset for Myrtle-5/7/10 kernels.
+as an example. With `NVIDIA V100` 64-bit precision, `nt` took 316/330/508 GPU-hours on full 60k CIFAR-10 dataset for Myrtle-5/7/10 kernels.
 
 ## Papers
 
 Neural Tangents has been used in the following papers:
 
+* [The Surprising Simplicity of the Early-Time Learning Dynamics of Neural Networks
+](https://arxiv.org/abs/2006.14599)
+* [When Do Neural Networks Outperform Kernel Methods?](https://arxiv.org/abs/2006.13409)
 * [Statistical Mechanics of Generalization in Kernel Regression
 ](https://arxiv.org/abs/2006.13198)
 * [Exact posterior distributions of wide Bayesian neural networks
