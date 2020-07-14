@@ -3046,7 +3046,9 @@ def _conv_kernel_diagonal_spatial(
   filter_size = functools.reduce(op.mul, filter_shape, 1)
   filter_shape = (1,) * batch_ndim + filter_shape
   strides = (1,) * batch_ndim + strides
-  mat = lax._reduce_window_sum(mat, filter_shape, strides, padding.name)
+  padding_vals = lax.padtype_to_pads(
+      mat.shape, filter_shape, strides, padding.name)
+  mat = lax._reduce_window_sum(mat, filter_shape, strides, padding_vals)
   mat /= filter_size
   return mat
 
@@ -3318,12 +3320,15 @@ def _pool_mask(
     window_shape.insert(i, 1)
     strides.insert(i, 1)
 
+  padding_vals = lax.padtype_to_pads(
+      mask.shape, window_shape, strides, padding.name)
+
   # Get the output shape.
   out_shape = lax.reduce_window_shape_tuple(
       mask.shape,
       window_shape,
       strides,
-      padding.name
+      padding_vals
   )
 
   # If shapes don't match, stride through the mask.
