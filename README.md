@@ -163,7 +163,7 @@ predict_fn = nt.predict.gradient_descent_mse_ensemble(kernel_fn, x_train,
 y_test_nngp = predict_fn(x_test=x_test, get='nngp')
 # (20, 1) np.ndarray test predictions of an infinite Bayesian network
 
-y_test_ntk = predict_fn(x_test=x_test, get='nngp')
+y_test_ntk = predict_fn(x_test=x_test, get='ntk')
 # (20, 1) np.ndarray test predictions of an infinite continuous
 # gradient descent trained network at convergence (t = inf)
 
