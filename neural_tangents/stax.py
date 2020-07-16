@@ -86,8 +86,7 @@ from jax.scipy.special import erf
 from jax.tree_util import tree_map, tree_flatten, tree_unflatten
 from neural_tangents.utils import utils
 from neural_tangents.utils.kernel import Kernel
-from neural_tangents.utils.typing import InitFn, AnalyticKernelFn, \
-  LayerKernelFn, InternalLayer, Layer, Kernels, Shapes, Axes
+from neural_tangents.utils.typing import InitFn, AnalyticKernelFn, LayerKernelFn, InternalLayer, Layer, Kernels, Shapes, Axes, Get
 
 
 # Enums
@@ -172,11 +171,11 @@ def _requires(**static_reqs):
                                  f'but input kernel has `{key} == {v_kernel}`, '
                                  f'making the infinite limit ill-defined.')
 
-            elif key == 'mask_constant':
-              pass
-
             else:
-              raise NotImplementedError(key)
+              # Any other name is recognized as a keyword-argument threaded
+              # through all `kernel_fn` down to `_inputs_to_kernel` rather than
+              # a requirement for this layer.
+              pass
 
       return kernel_fn(k)
 
@@ -242,7 +241,8 @@ def _supports_masking(remask_kernel: bool):
           return None
         return _mask_fn(mask, input_shape)
 
-      def apply_fn_with_masking(params, inputs, mask_constant=None, **kwargs):
+      def apply_fn_with_masking(params, inputs, *,
+                                mask_constant=None, **kwargs):
         inputs = utils.get_masked_array(inputs, mask_constant)
         inputs, mask = inputs.masked_value, inputs.mask
         outputs = apply_fn(params, inputs, mask=mask, **kwargs)
@@ -436,7 +436,7 @@ def Dense(
     return outputs
 
   @_requires(batch_axis=batch_axis, channel_axis=channel_axis)
-  def kernel_fn(k: Kernel):
+  def kernel_fn(k: Kernel, **kwargs):
     """Compute the transformed kernels after a dense layer."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
@@ -659,7 +659,7 @@ def _GeneralConv(
 
   @_requires(batch_axis=dimension_numbers[0].index('N'),
              channel_axis=dimension_numbers[0].index('C'))
-  def kernel_fn(k: Kernel):
+  def kernel_fn(k: Kernel, **kwargs):
     """Compute the transformed kernels after a conv layer."""
     cov1, nngp, cov2, ntk, is_reversed = (k.cov1, k.nngp, k.cov2, k.ntk,
                                           k.is_reversed)
@@ -757,7 +757,7 @@ def FanOut(num: int) -> InternalLayer:
     `(init_fn, apply_fn, kernel_fn)`.
   """
   init_fn, apply_fn = ostax.FanOut(num)
-  kernel_fn = lambda k: [k] * num
+  kernel_fn = lambda k, **kwargs: [k] * num
   return init_fn, apply_fn, kernel_fn
 
 
@@ -773,7 +773,7 @@ def FanInSum() -> InternalLayer:
     `(init_fn, apply_fn, kernel_fn)`.
   """
   init_fn, apply_fn = ostax.FanInSum
-  kernel_fn = lambda ks: _fan_in_kernel_fn(ks, None)
+  kernel_fn = lambda ks, **kwargs: _fan_in_kernel_fn(ks, None)
 
   def mask_fn(mask, input_shape):
     return _sum_masks(mask)
@@ -795,7 +795,7 @@ def FanInConcat(axis: int = -1) -> InternalLayer:
     `(init_fn, apply_fn, kernel_fn)`.
   """
   init_fn, apply_fn = ostax.FanInConcat(axis)
-  kernel_fn = lambda ks: _fan_in_kernel_fn(ks, axis)
+  kernel_fn = lambda ks, **kwargs: _fan_in_kernel_fn(ks, axis)
 
   def mask_fn(mask, input_shape):
     return _concat_masks(mask, input_shape, axis)
@@ -949,7 +949,7 @@ def _Pool(
   @_requires(batch_axis=batch_axis,
              channel_axis=channel_axis,
              diagonal_spatial=False)
-  def kernel_fn(k: Kernel):
+  def kernel_fn(k: Kernel, **kwargs):
     """Kernel transformation."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
@@ -1065,7 +1065,7 @@ def _GlobalPool(
   @_requires(batch_axis=batch_axis,
              channel_axis=channel_axis,
              diagonal_spatial=False)
-  def kernel_fn(k: Kernel):
+  def kernel_fn(k: Kernel, **kwargs):
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
     def _pool(ker_mat, batch_ndim, mask=None):
@@ -1151,7 +1151,7 @@ def Flatten(batch_axis: int = 0, batch_axis_out: int = 0) -> InternalLayer:
   @_requires(batch_axis=batch_axis,
              channel_axis=None,
              diagonal_spatial=True)
-  def kernel_fn(k: Kernel):
+  def kernel_fn(k: Kernel, **kwargs):
     """Compute kernels."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
@@ -1203,7 +1203,7 @@ def Identity() -> InternalLayer:
     `(init_fn, apply_fn, kernel_fn)`.
   """
   init_fn, apply_fn = ostax.Identity
-  kernel_fn = lambda k: k
+  kernel_fn = lambda k, **kwargs: k
   return init_fn, apply_fn, kernel_fn
 
 
@@ -1529,7 +1529,7 @@ def GlobalSelfAttention(
   @_requires(batch_axis=batch_axis,
              channel_axis=channel_axis,
              diagonal_spatial=False)
-  def kernel_fn(k: Kernel):
+  def kernel_fn(k: Kernel, **kwargs):
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
     if not fixed:
@@ -1629,7 +1629,7 @@ def LayerNorm(
     return (inputs - mean) / np.sqrt(eps + var)
 
   @_requires(batch_axis=batch_axis, channel_axis=channel_axis)
-  def kernel_fn(k: Kernel):
+  def kernel_fn(k: Kernel, **kwargs):
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
     if not k.is_gaussian:
@@ -1724,7 +1724,7 @@ def Dropout(rate: float, mode: str = 'train') -> InternalLayer:
     raise ValueError('The `rate` must be > 0. and <= 1.')
 
   init_fn, apply_fn = ostax.Dropout(rate, mode=mode)
-  kernel_fn_test = lambda kernels: kernels
+  kernel_fn_test = lambda k, **kwargs: k
 
   def kernel_fn_train(k: Kernel):
     """kernel_fn for `train` mode."""
@@ -1909,13 +1909,16 @@ def _cov(
 def _inputs_to_kernel(
     x1: np.ndarray,
     x2: Optional[np.ndarray],
+    *,
     diagonal_batch: bool,
     diagonal_spatial: bool,
     compute_ntk: bool,
     batch_axis: int,
     channel_axis: Optional[int],
     mask_constant: Optional[float],
-    eps: float = 1e-12) -> Kernel:
+    eps: float = 1e-12,
+    **kwargs
+) -> Kernel:
   """Transforms (batches of) inputs to a `Kernel`.
 
   This is a private function. Docstring and example are for internal reference.
@@ -2161,12 +2164,14 @@ def _preprocess_kernel_fn(
     return _set_shapes(init_fn, kernel, out_kernel)
 
   @utils.get_namedtuple('AnalyticKernel')
-  def kernel_fn_any(x1_or_kernel,
-                    x2=None,
-                    get=None,
-                    mask_constant=None,
-                    diagonal_batch=None,
-                    diagonal_spatial=None):
+  def kernel_fn_any(x1_or_kernel: Union[np.ndarray, Kernels],
+                    x2: np.ndarray = None,
+                    get: Get = None,
+                    *,
+                    mask_constant: float = None,
+                    diagonal_batch: bool = None,
+                    diagonal_spatial: bool = None,
+                    **kwargs):
     """Returns the `Kernel` resulting from applying `kernel_fn` to given inputs.
 
     Args:
@@ -2220,12 +2225,14 @@ def _preprocess_kernel_fn(
 
       return kernel_fn_kernel(x1_or_kernel,
                               diagonal_batch=diagonal_batch,
-                              diagonal_spatial=diagonal_spatial)
+                              diagonal_spatial=diagonal_spatial,
+                              **kwargs)
 
     return kernel_fn_x1(x1_or_kernel, x2, get,
                         diagonal_batch=diagonal_batch,
                         diagonal_spatial=diagonal_spatial,
-                        mask_constant=mask_constant)
+                        mask_constant=mask_constant,
+                        **kwargs)
 
   setattr(kernel_fn_any, _INPUT_REQ, getattr(kernel_fn, _INPUT_REQ))
   return kernel_fn_any
@@ -2233,7 +2240,7 @@ def _preprocess_kernel_fn(
 
 def _elementwise(fn, name, **fn_kwargs):
   init_fn, apply_fn = ostax.elementwise(fn, **fn_kwargs)
-  kernel_fn = lambda kernels: _transform_kernels(kernels, fn, **fn_kwargs)
+  kernel_fn = lambda k, **kwargs: _transform_kernels(k, fn, **fn_kwargs)
   init_fn.__name__ = apply_fn.__name__ = kernel_fn.__name__ = name
   return init_fn, apply_fn, kernel_fn
 

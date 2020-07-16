@@ -824,7 +824,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
     init_fn = lambda key, input_shape: (input_shape, ())
     def apply_fn(unused_params, unused_xs, **kwargs):
       raise NotImplementedError()
-    def kernel_fn(kernels):
+    def kernel_fn(kernels, **kwargs):
       if kernels.ntk is not None:
         raise ValueError('RBF Kernel does not have an associated NTK.')
 
@@ -1743,7 +1743,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
         device_count=0 if concat in (0, -2) else -1)
 
     kernel_fn = jit(kernel_fn, static_argnums=(2,))
-    exact = kernel_fn(x1, x2, get, mask_constant)
+    exact = kernel_fn(x1, x2, get, mask_constant=mask_constant)
     empirical = kernel_fn_mc(x1, x2, get=get, mask_constant=mask_constant)
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
@@ -1930,7 +1930,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
     )
 
     kernel_fn = jit(kernel_fn, static_argnums=(2,))
-    exact = kernel_fn(x1, x2, get, mask_constant)
+    exact = kernel_fn(x1, x2, get, mask_constant=mask_constant)
     empirical = kernel_fn_mc(x1, x2, get=get, mask_constant=mask_constant)
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
