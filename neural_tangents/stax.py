@@ -78,6 +78,7 @@ from jax import numpy as np
 from jax import ops
 from jax import random
 from jax.abstract_arrays import ShapedArray
+from jax.api import grad
 from jax.api_util import flatten_fun
 import jax.experimental.stax as ostax
 import jax.interpreters.partial_eval as pe
@@ -87,6 +88,8 @@ from jax.tree_util import tree_map, tree_flatten, tree_unflatten
 from neural_tangents.utils import utils
 from neural_tangents.utils.kernel import Kernel
 from neural_tangents.utils.typing import InitFn, AnalyticKernelFn, LayerKernelFn, InternalLayer, Layer, Kernels, Shapes, Axes, Get
+
+import scipy as osp
 
 
 # Enums
@@ -1224,7 +1227,7 @@ def Erf(a: float = 1.,
     `(init_fn, apply_fn, kernel_fn)`.
   """
   return _elementwise(_erf,
-                      'Erf',
+                      f'Erf({a}, {b}, {c})',
                       a=a,
                       b=b,
                       c=c,
@@ -1261,7 +1264,7 @@ def Sin(a: float = 1.,
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
-  return _elementwise(_sin, 'Sin', a=a, b=b, c=c)
+  return _elementwise(_sin, f'Sin({a}, {b}, {c})', a=a, b=b, c=c)
 
 
 @layer
@@ -1281,7 +1284,7 @@ def Rbf(gamma: float = 1.0) -> InternalLayer:
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
-  return _elementwise(_rbf, 'Rbf', gamma=gamma)
+  return _elementwise(_rbf, f'Rbf({gamma})', gamma=gamma)
 
 
 @layer
@@ -1374,6 +1377,46 @@ def Abs(do_backprop: bool = False, do_stabilize: bool = False) -> InternalLayer:
                       b=1,
                       do_backprop=do_backprop,
                       do_stabilize=do_stabilize)
+
+
+@layer
+@_supports_masking(remask_kernel=True)
+def _NumericalActivation(fn: Callable[[float], float],
+                         deg: int,
+                         df: Callable[[float], float] = None,
+                         do_backprop: bool = False) -> InternalLayer:
+  """Activation function using numerical integegration.
+
+  Supports general activation functions using Gauss-Hermite quadrature.
+
+  Args:
+    fn: activation function.
+    deg: number of sample points and weights for quadrature. It must be >= 1.
+      We observe for smooth activations deg=25 is a good place to start.
+      For non-smooth activation functions (e.g. ReLU, Abs) quadrature is not
+      recommended (for now use `nt.monte_carlo_kernel_fn`). Due to bivariate
+      integration, compute time and memory scale as O(deg**2) for more
+      precision. See eq (13) in
+      https://mathworld.wolfram.com/Hermite-GaussQuadrature.html
+      for error estimates in the case of 1d Gauss-Hermite qudarture.
+    df: optional, derivative of the activation funtion(`fn`). If not provided,
+      it is computed by `jax.grad`. Providing analytic derivative can speed up
+      the NTK computations.
+    do_backprop: set to `True` if you want to backpropagate through the kernel.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  warnings.warn(
+      f'Numerical Activation Layer with fn={fn}, deg={deg} used!'
+      'Note that numerical error is  controlled by `deg` and for a given'
+      'tolerance level, required `deg` will highly be dependent on the choice'
+      'of `fn`.')
+  quad_points = osp.special.roots_hermite(deg)
+  if df is None:
+    df = np.vectorize(grad(fn))
+  return _elementwise(fn, f'_NumericalActivation({fn},deg={deg})', df=df,
+                      quad_points=quad_points, do_backprop=do_backprop)
 
 
 @layer
@@ -2238,9 +2281,16 @@ def _preprocess_kernel_fn(
   return kernel_fn_any
 
 
-def _elementwise(fn, name, **fn_kwargs):
+def _elementwise(fn, name, df=None, quad_points=None, **fn_kwargs):
   init_fn, apply_fn = ostax.elementwise(fn, **fn_kwargs)
-  kernel_fn = lambda k, **kwargs: _transform_kernels(k, fn, **fn_kwargs)
+  def kernel_fn(k: Kernel, **kwargs):
+    if quad_points is not None:
+      do_backprop = fn_kwargs['do_backprop']
+      return _transform_kernels_quadrature(k, fn, df, quad_points, do_backprop)
+    if fn in _POINTWISE_KERNEL_TRANSFORMS:
+      return _POINTWISE_KERNEL_TRANSFORMS[fn](k, **fn_kwargs)
+    raise NotImplementedError(
+        f'Analaytic kernel for activiation {fn} is not implmented.')
   init_fn.__name__ = apply_fn.__name__ = kernel_fn.__name__ = name
   return init_fn, apply_fn, kernel_fn
 
@@ -2428,7 +2478,6 @@ def _get_erf_kernel(
     ntk *= dot_sigma
   ker_mat = _arcsin(2 * ker_mat / np.sqrt(prod), do_backprop) * 2 / np.pi
 
-
   return ker_mat, ntk
 
 
@@ -2526,12 +2575,7 @@ def _transform_kernels_gelu(k: Kernel, do_backprop: bool) -> Kernel:
 
 
 def _transform_kernels_affine_erf(
-    k: Kernel,
-    do_backprop: bool,
-    a: float = 1.0,
-    b: float = 1.0,
-    c: float = 0.0) -> Kernel:
-  old_nngp = k.nngp
+    k: Kernel, do_backprop: bool, a: float, b: float, c: float) -> Kernel:
   k = k.replace(cov1=b**2 * k.cov1,
                 nngp=b**2 * k.nngp,
                 cov2=None if k.cov2 is None else b**2 * k.cov2,
@@ -2545,11 +2589,7 @@ def _transform_kernels_affine_erf(
       ntk=None if k.ntk is None else _affine(k.ntk, a, 0.))
 
 
-def _transform_kernels_sin(
-    k: Kernel,
-    a: float = 1.0,
-    b: float = 1.0,
-    c: float = 0.0) -> Kernel:
+def _transform_kernels_sin(k: Kernel, a: float, b: float, c: float) -> Kernel:
   """Compute new kernels after an `Sin` layer."""
   cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
@@ -2586,9 +2626,7 @@ def _transform_kernels_sin(
                    is_gaussian=False)
 
 
-def _transform_kernels_rbf(
-    k: Kernel,
-    gamma: float = 1.0) -> Kernel:
+def _transform_kernels_rbf(k: Kernel, gamma: float) -> Kernel:
   """Compute new kernels after an `Rbf` layer."""
   cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
@@ -2619,36 +2657,91 @@ def _transform_kernels_rbf(
   return k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk, is_gaussian=False)
 
 
-def _transform_kernels(
+_POINTWISE_KERNEL_TRANSFORMS = {
+    _ab_relu: _transform_kernels_ab_relu,
+    _erf: _transform_kernels_affine_erf,
+    _sin: _transform_kernels_sin,
+    _rbf: _transform_kernels_rbf,
+    _gelu: _transform_kernels_gelu
+}
+
+
+def _gauss_hermite_quadrature(f, q11, q22, q12, quad_points, do_backprop):
+  """Simple Gauss-Hermite quadrature routine."""
+
+  xs, ws = quad_points
+  x = xs.reshape((xs.shape[0],) + (1,) * (q12.ndim + 1))
+  y = xs.reshape((1, xs.shape[0]) + (1,) * q12.ndim)
+
+  fvals = f(_sqrt(2*q11, do_backprop) * x) * f(
+      q12/_sqrt(q11/2, do_backprop) * x + _sqrt(
+          2*(q22 - q12**2/q11), do_backprop)* y)
+
+  return np.tensordot(np.outer(ws, ws), fvals, ((0, 1), (0, 1))) / np.pi
+
+
+def _gauss_hermite_quadrature_diag(f, q11, quad_points, do_backprop):
+  xs, ws = quad_points
+  x = xs.reshape((xs.shape[0],) + (1,) * q11.ndim)
+  fval = f(_sqrt(2*q11, do_backprop) * x) ** 2
+
+  return np.tensordot(ws, fval, ((0,), (0,))) / np.sqrt(np.pi)
+
+
+def _get_kernel_from_quad(q11, q22, q12, f, df, quad_points, ntk, do_backprop):
+  ker_mat = _gauss_hermite_quadrature(
+      f, q11, q22, q12, quad_points, do_backprop)
+  if ntk is not None:
+    dot_sigma = _gauss_hermite_quadrature(
+        df, q11, q22, q12, quad_points, do_backprop)
+    ntk *= dot_sigma
+
+  return ker_mat, ntk
+
+
+def _transform_kernels_quadrature(
     k: Kernel,
-    fn: Callable[[float], float],
-    **fn_kwargs) -> Kernel:
-  """Apply transformation to kernels.
+    f: Callable[[float], float],
+    df: Callable[[float], float],
+    quad_points: Tuple[np.ndarray, np.ndarray],
+    do_backprop: bool) -> Kernel:
+  """Kernel transformation of activation function using quadrature."""
+  cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
-  Args:
-    k: a `Kernel` object.
-    fn: nonlinearity function, can only be Relu, Erf, Sine or Identity.
-    **fn_kwargs: arguments passed to a `_transform_kernels_<name>` function.
+  d1 = _get_diagonal(cov1, k.diagonal_batch, k.diagonal_spatial)
+  d2 = _get_diagonal(cov2, k.diagonal_batch, k.diagonal_spatial)
 
-  Returns:
-    The transformed kernel.
-  """
-  if not k.is_gaussian:
-    raise ValueError('An affine layer (i.e. dense or convolution) '
-                     'has to be applied before a nonlinearity layer.')
-  if fn is _ab_relu:
-    return _transform_kernels_ab_relu(k, **fn_kwargs)
-  if fn is _erf:
-    return _transform_kernels_affine_erf(k, **fn_kwargs)
-  if fn is _sin:
-    return _transform_kernels_sin(k, **fn_kwargs)
-  if fn is _rbf:
-    return _transform_kernels_rbf(k, **fn_kwargs)
-  if fn is _gelu:
-    return _transform_kernels_gelu(k, **fn_kwargs)
-  # TODO(xlc): Monte Carlo approximation to the integral (suggested by schsam@.)
-  raise NotImplementedError(f'Analaytic kernel for activiation {fn} is not '
-                            f'implmented.')
+  end_axis = 1 if k.diagonal_spatial else cov1.ndim
+  q11 = utils.interleave_ones(d1, 0, end_axis, True)
+  q22 = utils.interleave_ones(d2 if d2 is not None else d1, 0, end_axis, False)
+
+  nngp, ntk = _get_kernel_from_quad(
+      q11, q22, nngp, f, df, quad_points, ntk, do_backprop)
+
+  if k.diagonal_batch and k.diagonal_spatial:
+    cov1 = _gauss_hermite_quadrature_diag(f, cov1, quad_points, do_backprop)
+    if cov2 is not None:
+      cov2 = _gauss_hermite_quadrature_diag(f, cov2, quad_points, do_backprop)
+
+  else:
+    start_axis = 1 if k.diagonal_batch else 0
+    q11 = utils.interleave_ones(d1, start_axis, end_axis, True)
+    q22 = utils.interleave_ones(d1, start_axis, end_axis, False)
+
+    cov1, _ = _get_kernel_from_quad(
+        q11, q22, cov1, f, None, quad_points, None, do_backprop)
+
+    if cov2 is not None:
+      q11 = utils.interleave_ones(d2, start_axis, end_axis, True)
+      q22 = utils.interleave_ones(d2, start_axis, end_axis, False)
+      cov2, _ = _get_kernel_from_quad(
+          q11, q22, cov2, f, None, quad_points, None, do_backprop)
+
+  return k.replace(cov1=cov1,
+                   nngp=nngp,
+                   cov2=cov2,
+                   ntk=ntk,
+                   is_gaussian=False)
 
 
 def _affine(

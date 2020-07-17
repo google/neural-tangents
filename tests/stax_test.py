@@ -971,6 +971,85 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
                           rbf_gamma=gamma)
 
 
+class NumericalActivationTest(test_utils.NeuralTangentsTestCase):
+
+  def _test_activation(self, activation, fn, same_inputs, model, get):
+    platform = xla_bridge.get_backend().platform
+    if platform == 'cpu' and 'conv' in model:
+      raise absltest.SkipTest('Not running CNNs on CPU to save time.')
+
+    key, split = random.split(random.PRNGKey(1))
+
+    output_dim = 1
+    b_std = 0.01
+    W_std = 1.0
+    rtol = 2e-3
+    deg = 25
+    if get == 'ntk':
+      rtol *= 2
+    if xla_bridge.get_backend().platform == 'tpu':
+      rtol *= 2
+
+    if model == 'fc':
+      X0_1 = random.normal(key, (3, 7))
+      X0_2 = None if same_inputs else random.normal(split, (5, 7))
+      affine = stax.Dense(1024, W_std, b_std)
+      readout = stax.Dense(output_dim)
+      depth = 1
+    else:
+      X0_1 = random.normal(key, (2, 8, 8, 3))
+      X0_2 = None if same_inputs else random.normal(split, (3, 8, 8, 3))
+      affine = stax.Conv(1024, (3, 2), W_std=W_std, b_std=b_std, padding='SAME')
+      readout = stax.serial(stax.GlobalAvgPool() if 'pool' in model else
+                            stax.Flatten(),
+                            stax.Dense(output_dim))
+      depth = 2
+
+    _, _, kernel_fn = stax.serial(*[affine, activation]*depth, readout)
+    analytic_kernel = kernel_fn(X0_1, X0_2, get)
+
+    _, _, kernel_fn = stax.serial(
+        *[affine, stax._NumericalActivation(fn, deg=deg)]*depth, readout)
+    numerical_activation_kernel = kernel_fn(X0_1, X0_2, get)
+
+    test_utils.assert_close_matrices(self, analytic_kernel,
+                                     numerical_activation_kernel, rtol)
+
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              '_{}_{}_{}_{}'.format(
+                  model,
+                  phi_name,
+                  'Same_inputs' if same_inputs else 'Different_inputs',
+                  get),
+          'model': model,
+          'phi_name': phi_name,
+          'same_inputs': same_inputs,
+          'get': get,
+      }
+                          for model in ['fc', 'conv-pool', 'conv-flatten']
+                          for phi_name in ['Erf', 'Gelu', 'Sin', 'Cos']
+                          for same_inputs in [False, True]
+                          for get in ['nngp', 'ntk']))
+  def test_numerical_activation(self, same_inputs, model, phi_name, get):
+    if phi_name == 'Erf':
+      activation = stax.Erf()
+      fn = functools.partial(stax._erf, a=1, b=1, c=0)
+    elif phi_name == 'Gelu':
+      activation = stax.Gelu()
+      fn = stax._gelu
+    elif phi_name == 'Sin':
+      activation = stax.Sin()
+      fn = np.sin
+    elif phi_name == 'Cos':
+      activation = stax.Sin(c=np.pi/2)
+      fn = np.cos
+    else:
+      raise NotImplementedError(f'Activation {phi_name} is not implemented.')
+    self._test_activation(activation, fn, same_inputs, model, get)
+
 
 @jtu.parameterized.parameters([
     {
