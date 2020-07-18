@@ -314,6 +314,18 @@ def outer_prod(x, y, start_axis, end_axis, prod_op):
   return prod_op(x, y)
 
 
+def reverse_zipped(mat: np.ndarray, start_axis: int = 0) -> np.ndarray:
+  if mat is not None:
+    source_axes = tuple(j
+                        for i in range(mat.ndim - 2, start_axis - 1, -2)
+                        for j in (i, i + 1))
+
+    target_axes = range(start_axis, mat.ndim)
+    mat = np.moveaxis(mat, source_axes, target_axes)
+
+  return mat
+
+
 ArrayOrList = Union[Optional[np.ndarray], List[Optional[np.ndarray]]]
 
 
@@ -346,26 +358,30 @@ def get_masked_array(x: ArrayOrList,
     return MaskedArray(*(list(f) for f in fields))
 
   if x is None:
-    mask = None
+    mask_mat = None
 
   elif isinstance(x, MaskedArray):
-    x, mask = x.astuple()
+    x, mask_mat = x.astuple()
 
   elif isinstance(x, np.ndarray):
     if mask_constant is None:
-      mask = None
+      mask_mat = None
     else:
-      mask = lax.cond(np.isnan(mask_constant),
-                      lambda x: np.isnan(x),
-                      lambda x: x == mask_constant,
-                      x)
+      mask_mat = lax.cond(np.isnan(mask_constant),
+                          lambda x: np.isnan(x),
+                          lambda x: x == mask_constant,
+                          x)
   else:
     raise TypeError(x, type(x))
 
-  if mask is not None:
-    x = np.where(mask, np.zeros((), x.dtype), x)
+  x = mask(x, mask_mat)
+  return MaskedArray(x, mask_mat)  # pytype: disable=wrong-arg-count
 
-  return MaskedArray(x, mask)  # pytype: disable=wrong-arg-count
+
+def mask(x: Optional[np.ndarray], mask_mat: Optional[np.ndarray]):
+  if x is None or mask_mat is None:
+    return x
+  return np.where(mask_mat, np.zeros((), x.dtype), x)
 
 
 def size_at(x: Union[np.ndarray, Sequence[int]],
@@ -377,6 +393,18 @@ def size_at(x: Union[np.ndarray, Sequence[int]],
     axes = range(len(x))
 
   return functools.reduce(operator.mul, [x[a] for a in axes], 1)
+
+
+def shape_and_axes(
+    x: Union[np.ndarray, Sequence[int]],
+    ignore_axes: Iterable[int] = ()) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+  if hasattr(x, 'shape'):
+    x = x.shape
+  ndim = len(x)
+  ignore_axes = tuple(i % ndim for i in ignore_axes)
+  axes = tuple(i for i in range(ndim) if i not in ignore_axes)
+  shape = tuple(x[i] for i in axes)
+  return shape, axes
 
 
 def get_res_batch_dims(contracting_dims: List[int],

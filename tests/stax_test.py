@@ -15,16 +15,17 @@
 """Tests for stax.py."""
 
 
-import string
-
-import random as prandom
 import functools
 import itertools
 import logging
+import random as prandom
+import string
+from typing import Tuple
+
 from absl.testing import absltest
-from jax.api import jit
 from jax import ops
 from jax import test_util as jtu
+from jax.api import jit
 from jax.config import config as jax_config
 from jax.lib import xla_bridge
 import jax.numpy as np
@@ -33,7 +34,6 @@ from neural_tangents import stax
 from neural_tangents.utils import monte_carlo
 from neural_tangents.utils import test_utils
 import numpy as onp
-from typing import Tuple
 
 
 jax_config.parse_flags_with_absl()
@@ -50,7 +50,7 @@ INPUT_SHAPE = (BATCH_SIZE, 8, 6, 4)
 
 WIDTHS = [2**10]
 
-N_SAMPLES = 100
+N_SAMPLES = 128
 
 RTOL = 0.025
 
@@ -77,8 +77,7 @@ ACTIVATIONS = {
 PROJECTIONS = [
     'FLAT',
     'POOL',
-    'ATTN_FIXED',
-    'ATTN_PARAM'
+    'ATTN',
 ]
 
 LAYER_NORM = [
@@ -240,14 +239,13 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
   elif proj_into_2d.startswith('ATTN'):
     n_heads = int(np.sqrt(width))
     n_chan_val = int(np.round(float(width) / n_heads))
-    fixed = proj_into_2d == 'ATTN_FIXED'
     proj_layer = stax.serial(
         stax.GlobalSelfAttention(
             n_chan_out=width,
             n_chan_key=width,
             n_chan_val=n_chan_val,
             n_heads=n_heads,
-            fixed=fixed,
+            linear_scaling=True,
             W_key_std=W_std,
             W_value_std=W_std,
             W_query_std=W_std,
@@ -370,8 +368,9 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     net = _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res,
                    padding, phi, strides, width, is_ntk, proj_into_2d,
                    pool_type, layer_norm, parameterization, use_dropout)
-    self._check_agreement_with_empirical(net, same_inputs, use_dropout, is_ntk,
-                                         proj_into_2d)
+    self._check_agreement_with_empirical(
+        net, same_inputs, use_dropout, is_ntk,
+        rtol=0.03 if proj_into_2d == 'ATTN' else RTOL)
 
   # pylint: disable=g-complex-comprehension
   @jtu.parameterized.named_parameters(
@@ -425,8 +424,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     net = _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res,
                    padding, phi, strides, width, is_ntk, proj_into_2d,
                    pool_type, layer_norm, parameterization, use_dropout)
-    self._check_agreement_with_empirical(net, same_inputs, use_dropout, is_ntk,
-                                         proj_into_2d)
+    self._check_agreement_with_empirical(net, same_inputs, use_dropout, is_ntk)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -486,7 +484,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
                    padding, phi, strides, width, is_ntk, proj_into_2d,
                    pool_type, layer_norm, parameterization, use_dropout)
     self._check_agreement_with_empirical(net, same_inputs, use_dropout, is_ntk,
-                                         proj_into_2d, True)
+                                         0.05)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -513,7 +511,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
               strides,
           'normalize_edges':
               normalize_edges
-      } for width in WIDTHS for same_inputs in [False, True]
+      } for width in WIDTHS for same_inputs in [False]
                           for is_ntk in [False, True]
                           for pool_type in POOL_TYPES for padding in PADDINGS
                           for filter_shape in FILTER_SHAPES
@@ -521,11 +519,8 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
                           for normalize_edges in [True, False]))
   def test_pool(self, width, same_inputs, is_ntk, pool_type,
                 padding, filter_shape, strides, normalize_edges):
-    is_conv = True
     use_dropout = False
-    proj_into_2d = 'POOL'
     # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
-
     if xla_bridge.get_backend().platform == 'cpu':
       raise absltest.SkipTest('Not running CNN models on CPU to save time.')
     if pool_type == 'SUM' and normalize_edges:
@@ -533,8 +528,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
 
     net = _get_net_pool(width, is_ntk, pool_type,
                         padding, filter_shape, strides, normalize_edges)
-    self._check_agreement_with_empirical(net, same_inputs, use_dropout, is_ntk,
-                                         proj_into_2d)
+    self._check_agreement_with_empirical(net, same_inputs, use_dropout, is_ntk)
 
   def test_avg_pool(self):
     X1 = np.ones((4, 2, 3, 2))
@@ -652,8 +646,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     net = _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res,
                    padding, phi, strides, width, is_ntk, proj_into_2d,
                    pool_type, layer_norm, parameterization, use_dropout)
-    self._check_agreement_with_empirical(net, same_inputs, use_dropout, is_ntk,
-                                         proj_into_2d)
+    self._check_agreement_with_empirical(net, same_inputs, use_dropout, is_ntk)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -763,8 +756,8 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
       same_inputs,
       use_dropout,
       is_ntk,
-      proj_into_2d,
-      use_layer_norm=False):
+      rtol=RTOL
+  ):
     ((init_fn, apply_fn, kernel_fn),
      input_shape, device_count, channel_axis) = net
 
@@ -784,37 +777,20 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     def _get_empirical(n_samples, get):
       kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
           init_fn, apply_fn, key, n_samples, device_count=device_count,
-          trace_axes=(channel_axis,)
-      )
+          trace_axes=(channel_axis,))
       if same_inputs:
         assert x2 is None
       return kernel_fn_empirical(x1, x2, get)
 
-    if proj_into_2d == 'ATTN_PARAM':
-      # no analytic kernel available, just test forward/backward pass
-      _get_empirical(1, 'ntk' if is_ntk else 'nngp')
+    if is_ntk:
+      exact, shape1, shape2 = kernel_fn(x1, x2, ('ntk', 'shape1', 'shape2'))
+      empirical = _get_empirical(num_samples, 'ntk')
     else:
-      platform = xla_bridge.get_backend().platform
-      if proj_into_2d == 'ATTN_FIXED':
-        if platform == 'tpu':
-          rtol = 0.08
-        else:
-          rtol = 0.04
-      else:
-        if use_layer_norm and platform == 'tpu':
-          rtol = 0.05
-        else:
-          rtol = RTOL
-
-      if is_ntk:
-        exact, shape1, shape2 = kernel_fn(x1, x2, ('ntk', 'shape1', 'shape2'))
-        empirical = np.reshape(_get_empirical(num_samples, 'ntk'), exact.shape)
-      else:
-        exact, shape1, shape2 = kernel_fn(x1, x2, ('nngp', 'shape1', 'shape2'))
-        empirical = _get_empirical(num_samples, 'nngp')
-      test_utils.assert_close_matrices(self, exact, empirical, rtol)
-      self.assertEqual(shape1, x1_out_shape)
-      self.assertEqual(shape2, x2_out_shape)
+      exact, shape1, shape2 = kernel_fn(x1, x2, ('nngp', 'shape1', 'shape2'))
+      empirical = _get_empirical(num_samples, 'nngp')
+    test_utils.assert_close_matrices(self, exact, empirical, rtol)
+    self.assertEqual(shape1, x1_out_shape)
+    self.assertEqual(shape2, x2_out_shape)
 
 
 class ActivationTest(test_utils.NeuralTangentsTestCase):
@@ -845,7 +821,6 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
       return kernels.replace(
           nngp=np.exp(-input_dim * gamma * (cov1 + cov2 - 2 * nngp)))
     return init_fn, apply_fn, kernel_fn
-
 
   def _test_activation(self, activation_fn, same_inputs, model, get,
                        rbf_gamma=None):
@@ -1014,7 +989,6 @@ class NumericalActivationTest(test_utils.NeuralTangentsTestCase):
 
     test_utils.assert_close_matrices(self, analytic_kernel,
                                      numerical_activation_kernel, rtol)
-
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -1544,12 +1518,12 @@ class ConvNDTest(test_utils.NeuralTangentsTestCase):
           n_chan_key=width,
           n_chan_val=n_chan_val,
           n_heads=n_heads,
-          fixed=True,
+          linear_scaling=True,
           W_key_std=2.,
           W_value_std=1.,
           W_query_std=1.,
           W_out_std=1.0,
-          b_std=0.01,
+          b_std=0.1,
           channel_axis=channel_axis), proj)
 
     nn = stax.serial(
@@ -1850,7 +1824,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
           'use_attn': use_attn,
           'n': n
       }
-                          for proj in ['avg', 'flatten']
+                          for proj in ['avg']
                           for use_attn in [True]
                           for same_inputs in [False]
                           for get in ['nngp', 'ntk']
@@ -2011,6 +1985,164 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
     kernel_fn = jit(kernel_fn, static_argnums=(2,))
     exact = kernel_fn(x1, x2, get, mask_constant=mask_constant)
     empirical = kernel_fn_mc(x1, x2, get=get, mask_constant=mask_constant)
+    test_utils.assert_close_matrices(self, empirical, exact, tol)
+
+
+class AttentionTest(test_utils.NeuralTangentsTestCase):
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              f'[same_inputs={same_inputs}_'
+              f'get={get}_'
+              f'axis={mask_axis}'
+              f'_mask={mask_constant}_'
+              f'p={p}_'
+              f'linear_scaling={linear_scaling}_'
+              f'n={n}_pos_emb_type={pos_emb_type}_'
+              f'n_chan_pos_emb={n_chan_pos_emb}'
+              f'_pos_emb_decay_fn={pos_emb_decay_fn}_'
+              f'val_pos_emb={val_pos_emb}_'
+              f'W_pos_emb_std={W_pos_emb_std}]',
+          'same_inputs': same_inputs,
+          'get': get,
+          'n': n,
+          'linear_scaling': linear_scaling,
+          'mask_constant': mask_constant,
+          'p': p,
+          'mask_axis': mask_axis,
+          'pos_emb_type': pos_emb_type,
+          'n_chan_pos_emb': n_chan_pos_emb,
+          'pos_emb_decay_fn': pos_emb_decay_fn,
+          'val_pos_emb': val_pos_emb,
+          'W_pos_emb_std': W_pos_emb_std
+      }
+                          for same_inputs in [
+                              False
+                          ]
+                          for get in [
+                              'nngp',
+                              'ntk'
+                          ]
+                          for n in [
+                              2,
+                          ]
+                          for linear_scaling in [
+                              True,
+                              False
+                          ]
+                          for mask_constant in [
+                              10.
+                          ]
+                          for p in [0.5]
+                          for mask_axis in [(-1,)]
+                          for pos_emb_type in [
+                              'CONCAT',
+                              'SUM',
+                              'NONE'
+                          ]
+                          for n_chan_pos_emb in ([None]
+                                                 if pos_emb_type != 'CONCAT'
+                                                 else [None, 512])
+                          for pos_emb_decay_fn in [
+                              None,
+                              'linear'
+                          ]
+                          for val_pos_emb in ([
+                              True,
+                              False
+                          ] if pos_emb_type != 'NONE' else [True])
+                          for W_pos_emb_std in ([
+                              2,
+                          ] if pos_emb_type != 'NONE' else [0.])
+                          ))
+  def test_attention(
+      self,
+      same_inputs,
+      get,
+      n,
+      linear_scaling,
+      mask_constant,
+      p,
+      mask_axis,
+      pos_emb_type,
+      n_chan_pos_emb,
+      pos_emb_decay_fn,
+      val_pos_emb,
+      W_pos_emb_std):
+    if xla_bridge.get_backend().platform == 'cpu':
+      raise absltest.SkipTest('Skipping attention tests on CPU for speed.')
+
+    width = 1024
+    n_samples = 1024
+    tol = 0.05
+    key = random.PRNGKey(1)
+    n_chan_in = 2
+    spatial_shape = (2, 3, 4, 3, 2, 1)[:n]
+    mask_axis = [i % (n + 2) for i in mask_axis]
+
+    def get_x0(batch_size):
+      x0 = random.normal(key, (batch_size,) + spatial_shape + (n_chan_in,))
+      if mask_constant is not None:
+        mask_shape = [1 if i in mask_axis else s
+                      for i, s in enumerate(x0.shape)]
+        mask = random.bernoulli(key, p=p, shape=mask_shape)
+        x0 = np.where(mask, mask_constant, x0)
+        x0 = np.sort(x0, 1)
+      return x0
+
+    X0_1 = get_x0(2)
+    X0_2 = None if same_inputs else get_x0(4)
+
+    pos_emb_fns = {
+        None: None,
+        'one_hot': lambda x: x == 0,
+        'linear': lambda x: 1 / (1 + 4 * x)
+    }
+
+    def get_attn():
+      return stax.GlobalSelfAttention(
+          linear_scaling=linear_scaling,
+          n_chan_out=width,
+          n_chan_key=width,
+          n_chan_val=int(np.round(float(width) / int(np.sqrt(width)))),
+          n_heads=int(np.sqrt(width)),
+          n_chan_pos_emb=n_chan_pos_emb,
+          attention_mechanism='SOFTMAX' if linear_scaling else 'IDENTITY',
+          pos_emb_type=pos_emb_type,
+          W_pos_emb_std=W_pos_emb_std,
+          pos_emb_decay_fn=pos_emb_fns[pos_emb_decay_fn],
+          val_pos_emb=val_pos_emb,
+          W_key_std=0.9,
+          W_out_std=1.2,
+          W_query_std=0.7,
+          W_value_std=1.5,
+          b_std=0.9
+      )
+
+    nn = stax.serial(
+        stax.Conv(width, (1,) * n, padding='SAME'),
+        get_attn(),
+        stax.Relu(),
+        stax.GlobalAvgPool()
+    )
+
+    if get == 'nngp':
+      init_fn, apply_fn, kernel_fn = nn
+    elif get == 'ntk':
+      init_fn, apply_fn, kernel_fn = stax.serial(nn, stax.Dense(1, 1., 0.))
+    else:
+      raise ValueError(get)
+
+    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, key, n_samples,
+        device_count=-1
+    )
+
+    kernel_fn = jit(kernel_fn, static_argnums=(2,))
+    exact = kernel_fn(X0_1, X0_2, get, mask_constant=mask_constant)
+
+    empirical = kernel_fn_mc(X0_1, X0_2, get=get, mask_constant=mask_constant)
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
 

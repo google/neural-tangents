@@ -159,27 +159,16 @@ class Kernel:
       `reverse(kernels).nngp` has shape
       `(batch_size_1, batch_size_2, ..., D, D, W, W, H, H)`.
     """
-    # Number of spatial dimensions = total - (1 for batch + 1 for channels)
-    ndim = len(self.shape1) - 2
+    batch_ndim = 1 if self.diagonal_batch else 2
+    cov1 = utils.reverse_zipped(self.cov1, batch_ndim)
+    cov2 = utils.reverse_zipped(self.cov2, batch_ndim)
+    nngp = utils.reverse_zipped(self.nngp, 2)
+    ntk = utils.reverse_zipped(self.ntk, 2)
 
-    # ndim == 3: (-5, -6, -3, -4, -1, -2)
-    source_axes = tuple(j for i in range(-ndim * 2, 0, 2) for j in (i + 1, i))
-
-    # ndim == 3: (-1, -2, -3, -4, -5, -6)
-    target_axes = tuple(range(-1, -ndim * 2 - 1, -1))
-
-    def reverse(mat):
-      if mat is not None:
-        return np.moveaxis(mat, source_axes, target_axes)
-      return mat
-
-    cov1, nngp, cov2, ntk = map(reverse, (self.cov1,
-                                          self.nngp,
-                                          self.cov2,
-                                          self.ntk))
     return self.replace(cov1=cov1,
                         nngp=nngp,
-                        cov2=cov2, ntk=ntk,
+                        cov2=cov2,
+                        ntk=ntk,
                         is_reversed=not self.is_reversed)
 
   def transpose(self, axes: Tuple[int, ...] = None) -> 'Kernel':
@@ -221,15 +210,10 @@ class Kernel:
     """Mask all covariance matrices according to `mask1`, `mask2`"""
     mask11, mask12, mask22 = self._get_mask_prods(mask1, mask2)
 
-    def mask_mat(mat, mask):
-      if mat is None or mask is None:
-        return mat
-      return np.where(mask, np.zeros((), mat.dtype), mat)
-
-    cov1 = mask_mat(self.cov1, mask11)
-    cov2 = mask_mat(self.cov2, mask22)
-    nngp = mask_mat(self.nngp, mask12)
-    ntk = mask_mat(self.ntk, mask12)
+    cov1 = utils.mask(self.cov1, mask11)
+    cov2 = utils.mask(self.cov2, mask22)
+    nngp = utils.mask(self.nngp, mask12)
+    ntk = utils.mask(self.ntk, mask12)
 
     return self.replace(cov1=cov1,
                         nngp=nngp,
