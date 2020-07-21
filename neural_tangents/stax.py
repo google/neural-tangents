@@ -180,7 +180,7 @@ def _requires(**static_reqs):
               # a requirement for this layer.
               pass
 
-      return kernel_fn(k)
+      return kernel_fn(k, **user_reqs)
 
     setattr(new_kernel_fn, _INPUT_REQ, frozendict.frozendict(static_reqs))
     return new_kernel_fn
@@ -309,9 +309,9 @@ def serial(*layers: Layer) -> InternalLayer:
   init_fn, apply_fn = ostax.serial(*zip(init_fns, apply_fns))
 
   @_requires(**_get_input_req_attr(kernel_fns))
-  def kernel_fn(k: Kernels) -> Kernels:
+  def kernel_fn(k: Kernels, **kwargs) -> Kernels:
     for f in kernel_fns:
-      k = f(k)
+      k = f(k, **kwargs)
     return k
 
   return init_fn, apply_fn, kernel_fn
@@ -341,8 +341,8 @@ def parallel(*layers: Layer) -> InternalLayer:
     return list(init_fn_stax(rng, input_shape))
 
   @_requires(**_get_input_req_attr(kernel_fns))
-  def kernel_fn(ks: List[Kernel]) -> List[Kernel]:
-    return [f(k) for k, f in zip(ks, kernel_fns)]
+  def kernel_fn(ks: List[Kernel], **kwargs) -> List[Kernel]:
+    return [f(k, **kwargs) for k, f in zip(ks, kernel_fns)]
 
   return init_fn, apply_fn, kernel_fn
 
@@ -2080,7 +2080,7 @@ def Dropout(rate: float, mode: str = 'train') -> InternalLayer:
   init_fn, apply_fn = ostax.Dropout(rate, mode=mode)
   kernel_fn_test = lambda k, **kwargs: k
 
-  def kernel_fn_train(k: Kernel):
+  def kernel_fn_train(k: Kernel, **kwargs):
     """kernel_fn for `train` mode."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
@@ -2575,10 +2575,6 @@ def _preprocess_kernel_fn(
     if (isinstance(x1_or_kernel, Kernel) or
         (isinstance(x1_or_kernel, list) and
          all(isinstance(k, Kernel) for k in x1_or_kernel))):
-
-      if mask_constant is not None:
-        raise ValueError('`mask_constant` parameter only applies to array '
-                         'inputs, and would have no effect on a `Kernel`.')
 
       return kernel_fn_kernel(x1_or_kernel,
                               diagonal_batch=diagonal_batch,
