@@ -68,7 +68,7 @@ import enum
 import functools
 import operator as op
 import string
-from typing import Union, Tuple, Callable, Iterable, Dict, List, Optional
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 import warnings
 
 import frozendict
@@ -78,17 +78,17 @@ from jax import numpy as np
 from jax import ops
 from jax import random
 from jax.abstract_arrays import ShapedArray
+from jax.api import eval_shape
 from jax.api import grad
 from jax.api_util import flatten_fun
 import jax.experimental.stax as ostax
 import jax.interpreters.partial_eval as pe
 from jax.lib import xla_bridge
 from jax.scipy.special import erf
-from jax.tree_util import tree_map, tree_flatten, tree_unflatten
+from jax.tree_util import tree_flatten, tree_map, tree_unflatten
 from neural_tangents.utils import utils
 from neural_tangents.utils.kernel import Kernel
-from neural_tangents.utils.typing import InitFn, AnalyticKernelFn, LayerKernelFn, InternalLayer, Layer, Kernels, Shapes, Axes, PyTree, Get
-
+from neural_tangents.utils.typing import AnalyticKernelFn, Axes, Get, InitFn, InternalLayer, Kernels, Layer, LayerKernelFn, PyTree, Shapes
 import scipy as osp
 
 
@@ -1290,11 +1290,11 @@ def Sin(a: float = 1.,
 @layer
 @_supports_masking(remask_kernel=True)
 def Rbf(gamma: float = 1.0) -> InternalLayer:
-  """Returns the dual activation function layer for normalized RBF or squared exponential kernel.
+  """Dual activation function for normalized RBF or squared exponential kernel.
 
   Dual activation function is `f(x) = sqrt(2)*sin(sqrt(2*gamma) x + pi/4)`.
-    NNGP kernel transformation correspond to (with input dimension `d`)
-    `k = exp(- gamma / d * ||x - x'||^2) = exp(- gamma*(q11 + q22 - 2 * q12))`.
+  NNGP kernel transformation correspond to (with input dimension `d`)
+  `k = exp(- gamma / d * ||x - x'||^2) = exp(- gamma*(q11 + q22 - 2 * q12))`.
 
   Args:
     gamma:
@@ -3741,12 +3741,14 @@ def _pool_mask(
       mask.shape, window_shape, strides, padding.name)
 
   # Get the output shape.
-  out_shape = lax.reduce_window_shape_tuple(
-      mask.shape,
+  out_shape = eval_shape(lambda x: lax.reduce_window(
+      x,
+      False,
+      op.or_,
       window_shape,
       strides,
       padding_vals
-  )
+  ), mask).shape
 
   # If shapes don't match, stride through the mask.
   if mask.shape != out_shape:
