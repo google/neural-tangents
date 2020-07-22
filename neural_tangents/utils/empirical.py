@@ -29,6 +29,10 @@ refer to individual functions' docstrings for details.
 
 import operator
 from typing import Union, Callable, Optional, Tuple, Dict
+import warnings
+
+
+from jax import random
 from jax.api import eval_shape
 from jax.api import jacobian
 from jax.api import jvp
@@ -182,9 +186,6 @@ def empirical_implicit_ntk_fn(f: ApplyFn,
   def ntk_fn(x1: np.ndarray,
              x2: Optional[np.ndarray],
              params: PyTree,
-             keys: Union[PRNGKey,
-                         Tuple[PRNGKey, PRNGKey],
-                         np.ndarray] = None,
              **apply_fn_kwargs) -> np.ndarray:
     """Computes a single sample of the empirical NTK (implicit differentiation).
 
@@ -197,14 +198,13 @@ def empirical_implicit_ntk_fn(f: ApplyFn,
       params:
         A `PyTree` of parameters about which we would like to compute the
         neural tangent kernel.
-      keys:
-        `None` or a PRNG key or a tuple of PRNG keys or a (2, 2) array of
-        dtype `uint32`. If `key=None`, then the function `f` is deterministic
-        and requires no PRNG key; else if `keys` is a single PRNG key, then `x1`
-        and `x2` must be the same and share the same PRNG key; else `x1` and
-        `x2` use two different PRNG keys.
       **apply_fn_kwargs:
-        keyword arguments passed to `apply_fn`.
+        keyword arguments passed to `apply_fn`. `apply_fn_kwargs` will be split
+        into `apply_fn_kwargs1` and `apply_fn_kwargs2` by the `_split_kwargs`
+        function which will be passed to `apply_fn`. In particular, the rng key
+        in `apply_fn_kwargs`, will be split into two different (if `x1 != x2`)
+        or same (if `x1 == x2`) rng keys. See the `_read_key` function for more
+        details.
 
     Returns:
       A single sample of the empirical NTK. The shape of the kernel is "almost"
@@ -213,11 +213,10 @@ def empirical_implicit_ntk_fn(f: ApplyFn,
       2) `diagonal_axes` are present only once.
       All other axes are present twice.
     """
-    key1, key2 = _read_keys(keys)
-    # TODO(xlc): find a good way to check utils.x1_is_x2(x1, x2) == (key1==key2)
 
-    f1 = _get_f_params(f, x1, key1, **apply_fn_kwargs)
-    f2 = f1 if x2 is None else _get_f_params(f, x2, key2, **apply_fn_kwargs)
+    apply_fn_kwargs1, apply_fn_kwargs2 = _split_kwargs(apply_fn_kwargs, x1, x2)
+    f1 = _get_f_params(f, x1, **apply_fn_kwargs1)
+    f2 = f1 if x2 is None else _get_f_params(f, x2, **apply_fn_kwargs2)
 
     def delta_vjp_jvp(delta):
       def delta_vjp(delta):
@@ -297,9 +296,6 @@ def empirical_direct_ntk_fn(f: ApplyFn,
   def ntk_fn(x1: np.ndarray,
              x2: Optional[np.ndarray],
              params: PyTree,
-             keys: Union[PRNGKey,
-                         Tuple[PRNGKey, PRNGKey],
-                         np.ndarray] = None,
              **apply_fn_kwargs) -> np.ndarray:
     """Computes a single sample of the empirical NTK (jacobian outer product).
 
@@ -312,14 +308,13 @@ def empirical_direct_ntk_fn(f: ApplyFn,
       params:
         A `PyTree` of parameters about which we would like to compute the
         neural tangent kernel.
-      keys:
-        `None` or a PRNG key or a tuple of PRNG keys or a (2, 2) array of
-        dtype `uint32`. If `key=None`, then the function `f` is deterministic
-        and requires no PRNG key; else if `keys` is a single PRNG key, then `x1`
-        and `x2` must be the same and share the same PRNG key; else `x1` and
-        `x2` use two different PRNG keys.
       **apply_fn_kwargs:
-        keyword arguments passed to `apply_fn`.
+        keyword arguments passed to `apply_fn`. `apply_fn_kwargs` will be split
+        into `apply_fn_kwargs1` and `apply_fn_kwargs2` by the `_split_kwargs`
+        function which will be passed to `apply_fn`. In particular, the rng key
+        in `apply_fn_kwargs`, will be split into two different (if `x1!=x2`) or
+        same (if `x1==x2`) rng keys. See the `_read_key` function for more
+        details.
 
     Returns:
       A single sample of the empirical NTK. The shape of the kernel is "almost"
@@ -328,15 +323,15 @@ def empirical_direct_ntk_fn(f: ApplyFn,
       2) `diagonal_axes` are present only once.
       All other axes are present twice.
     """
-    key1, key2 = _read_keys(keys)
 
-    f1 = _get_f_params(f, x1, key1, **apply_fn_kwargs)
+    apply_fn_kwargs1, apply_fn_kwargs2 = _split_kwargs(apply_fn_kwargs, x1, x2)
+    f1 = _get_f_params(f, x1, **apply_fn_kwargs1)
     jac_fn1 = jacobian(f1)
     j1 = jac_fn1(params)
     if x2 is None:
       j2 = j1
     else:
-      f2 = _get_f_params(f, x2, key2, **apply_fn_kwargs)
+      f2 = _get_f_params(f, x2, **apply_fn_kwargs2)
       jac_fn2 = jacobian(f2)
       j2 = jac_fn2(params)
 
@@ -395,9 +390,6 @@ def empirical_nngp_fn(f: ApplyFn,
   def nngp_fn(x1: np.ndarray,
               x2: Optional[np.ndarray],
               params: PyTree,
-              keys: Union[PRNGKey,
-                          Tuple[PRNGKey, PRNGKey],
-                          np.ndarray] = None,
               **apply_fn_kwargs) -> np.ndarray:
     """Computes a single sample of the empirical NNGP.
 
@@ -410,13 +402,13 @@ def empirical_nngp_fn(f: ApplyFn,
       params:
         A `PyTree` of parameters about which we would like to compute the
         neural tangent kernel.
-      keys: `None` or a PRNG key or a tuple of PRNG keys or a (2, 2) array of
-        dtype `uint32`. If `key=None`, then the function `f` is deterministic
-        and requires no PRNG key; else if `keys` is a single PRNG key, then `x1`
-        and `x2` must be the same and share the same PRNG key; else `x1` and
-        `x2` use two different PRNG keys.
       **apply_fn_kwargs:
-        keyword arguments passed to `apply_fn`.
+        keyword arguments passed to `apply_fn`. `apply_fn_kwargs` will be split
+        into `apply_fn_kwargs1` and `apply_fn_kwargs2` by the `_split_kwargs`
+        function which will be passed to `apply_fn`. In particular, the rng key
+        in `apply_fn_kwargs`, will be split into two different (if `x1!=x2`) or
+        same (if `x1==x2`) rng keys. See the `_read_key` function for more
+        details.
 
     Returns:
       A single sample of the empirical NNGP. The shape of the kernel is "almost"
@@ -425,18 +417,19 @@ def empirical_nngp_fn(f: ApplyFn,
       2) `diagonal_axes` are present only once.
       All other axes are present twice.
     """
-    key1, key2 = _read_keys(keys)
 
-    def output(x, rng):
-      out = f(params, x, rng=rng, **apply_fn_kwargs)
+    def output(x, **kwargs):
+      out = f(params, x, **kwargs)
       masked_output = utils.get_masked_array(out)
       return masked_output.masked_value
 
-    out1 = output(x1, key1)
+    apply_fn_kwargs1, apply_fn_kwargs2 = _split_kwargs(apply_fn_kwargs, x1, x2)
+
+    out1 = output(x1, **apply_fn_kwargs1)
     if x2 is None:
       out2 = out1
     else:
-      out2 = output(x2, key2)
+      out2 = output(x2, **apply_fn_kwargs2)
 
     dot = utils.dot_general(out1, out2, trace_axes, diagonal_axes)
     return dot / utils.size_at(out1, trace_axes)
@@ -497,9 +490,6 @@ def empirical_kernel_fn(f: ApplyFn,
                 x2: Optional[np.ndarray],
                 get: Union[None, str, Tuple[str, ...]],
                 params: PyTree,
-                keys: Union[PRNGKey,
-                            Tuple[PRNGKey, PRNGKey],
-                            np.ndarray] = None,
                 **apply_fn_kwargs) -> Dict[str, np.ndarray]:
     """Computes a single sample of the empirical kernel of type `get`.
 
@@ -515,14 +505,13 @@ def empirical_kernel_fn(f: ApplyFn,
       params:
         A `PyTree` of parameters about which we would like to compute the
         neural tangent kernel.
-      keys:
-        `None` or a PRNG key or a tuple of PRNG keys or a (2, 2) array of
-        dtype `uint32`. If `key=None`, then the function `f` is deterministic
-        and requires no PRNG key; else if `keys` is a single PRNG key, then `x1`
-        and `x2` must be the same and share the same PRNG key; else `x1` and
-        `x2` use two different PRNG keys.
       **apply_fn_kwargs:
-        keyword arguments passed to `apply_fn`.
+        keyword arguments passed to `apply_fn`. `apply_fn_kwargs` will be split
+        into `apply_fn_kwargs1` and `apply_fn_kwargs2` by the `_split_kwargs`
+        function which will be passed to `apply_fn`. In particular, the rng key
+        in `apply_fn_kwargs`, will be split into two different (if `x1!=x2`) or
+        same (if `x1==x2`) rng keys. See the `_read_key` function for more
+        details.
 
     Returns:
       A single sample of the empirical kernel. The shape is "almost"
@@ -537,38 +526,48 @@ def empirical_kernel_fn(f: ApplyFn,
     """
     if get is None:
       get = ('nngp', 'ntk')
-    return {g: kernel_fns[g](x1, x2, params, keys, **apply_fn_kwargs)
-            for g in get}
 
+    return {g: kernel_fns[g](x1, x2, params, **apply_fn_kwargs)
+            for g in get}  # pytype: disable=wrong-arg-count
   return kernel_fn
 
 
 # INTERNAL UTILITIES
 
 
-def _get_f_params(f, x, rng, **apply_fn_kwargs):
+def _read_keys(key, x1, x2):
+  """Read dropout key.
+
+     `key` might be a tuple of two rng keys or a single rng key or None. In
+     either case, `key` will be mapped into two rng keys `key1` and `key2` to
+     make sure `(x1==x2) == (key1==key2)`.
+  """
+
+  if key is None or x2 is None:
+    key1 = key2 = key
+  elif isinstance(key, tuple) and len(key) == 2:
+    key1, key2 = key
+    new_key = np.where(utils.x1_is_x2(key1, key2),
+                       random.fold_in(key2, 1), key2)
+    key2 = np.where(utils.x1_is_x2(x1, x2), key1, new_key)
+    warnings.warn('The value of `key[1]` might be replaced by a new value if '
+                  'key[0] == key[1] and x1 != x2 or key[0] != key[1] and '
+                  'x1 == x2.')
+  elif isinstance(key, np.ndarray):
+    key1 = key
+    key2 = np.where(utils.x1_is_x2(x1, x2), key1, random.fold_in(key, 1))
+  else:
+    raise TypeError(type(key))
+  return key1, key2
+
+
+def _get_f_params(f, x, **apply_fn_kwargs):
   def _f(p):
-    out = f(p, x, rng=rng, **apply_fn_kwargs)
+    out = f(p, x, **apply_fn_kwargs)
     # TODO(romann): normalize properly if output is masked.
     out = utils.get_masked_array(out)
     return out.masked_value
   return _f
-
-
-def _read_keys(keys: Union[None, PRNGKey, Tuple[PRNGKey, PRNGKey]]
-              ) -> Tuple[Optional[PRNGKey], Optional[PRNGKey]]:
-  if keys is None or (hasattr(keys, 'shape') and keys.shape == (2,)):
-    key1 = key2 = keys
-  elif isinstance(keys, tuple):
-    # assuming x1 and x2 using key1 and key2, resp.
-    key1, key2 = keys
-  elif isinstance(keys, np.ndarray) and keys.shape == (2, 2):
-    key1, key2 = keys[0], keys[1]
-  else:
-    raise ValueError('`keys` must be one of the following: `None`, a PRNG '
-                     'key, a tuple of PRNG keys or a `(2, 2)` array of dtype '
-                     '`unint32`.')
-  return key1, key2
 
 
 def _trace_and_diagonal(ntk: np.ndarray,
@@ -619,3 +618,29 @@ def _trace_and_diagonal(ntk: np.ndarray,
   res_diagonal_axes = utils.get_res_batch_dims(trace_axes, diagonal_axes)
   ntk = np.moveaxis(ntk, range(-n_diag, 0), res_diagonal_axes)
   return ntk / contract_size
+
+
+def _split_kwargs(kwargs, x1, x2):
+  """Spliting `kwargs`.
+
+     Specifically,
+       1. if kwarg is an rng key, it will be split into two keys.
+       2. else if it is a tuple of length two, the tuple will be split into two
+          parts, one for kwargs1 and the other for kwargs2.
+       3. else it is copied to kwargs1 and kwargs2.
+
+  """
+  kwargs1 = {}
+  kwargs2 = {}
+  for k, v in kwargs.items():
+    if k == 'rng':
+      key1, key2 = _read_keys(v, x1, x2)
+      kwargs1[k] = key1
+      kwargs2[k] = key2
+    elif isinstance(v, tuple) and len(v) == 2:
+      kwargs1[k] = v[0]
+      kwargs2[k] = v[1]
+    else:
+      kwargs1[k] = kwargs2[k] = v
+
+  return kwargs1, kwargs2

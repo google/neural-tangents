@@ -33,6 +33,7 @@ import jax.random as random
 from neural_tangents import stax
 from neural_tangents.utils import monte_carlo
 from neural_tangents.utils import test_utils
+from neural_tangents.utils import batch
 import numpy as onp
 
 
@@ -44,13 +45,13 @@ MODELS = [
     'conv'
 ]
 
-BATCH_SIZE = 2
+BATCH_SIZE = 4
 
-INPUT_SHAPE = (BATCH_SIZE, 8, 6, 4)
+INPUT_SHAPE = (BATCH_SIZE, 8, 6, 3)
 
 WIDTHS = [2**10]
 
-N_SAMPLES = 128
+N_SAMPLES = 100
 
 RTOL = 0.025
 
@@ -486,6 +487,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     self._check_agreement_with_empirical(net, same_inputs, use_dropout, is_ntk,
                                          0.05)
 
+
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
@@ -616,11 +618,6 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
                           for proj_into_2d in ['FLAT', 'POOL']))
   def test_dropout(self, model, width, same_inputs, is_ntk, padding, strides,
                    filter_shape, phi, use_pooling, proj_into_2d):
-    if xla_bridge.get_backend().platform == 'tpu' and same_inputs:
-      raise absltest.SkipTest(
-          'Skip TPU test for `same_inputs`. Need to handle '
-          'random keys carefully for dropout + empirical kernel.')
-
     pool_type = 'AVG'
     use_dropout = True
     is_conv = 'conv' in model
@@ -764,7 +761,11 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     num_samples = N_SAMPLES * 5 if use_dropout else N_SAMPLES
     key = random.PRNGKey(1)
     x1, x2 = _get_inputs(key, same_inputs, input_shape)
-
+    if xla_bridge.get_backend().platform == 'tpu' and use_dropout:
+      # including a test case for tpu + dropout with (parallel + batching)
+      batch_size = 2
+    else:
+      batch_size = 0
     x1_out_shape, params = init_fn(key, x1.shape)
     if same_inputs:
       assert x2 is None
@@ -777,7 +778,8 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     def _get_empirical(n_samples, get):
       kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
           init_fn, apply_fn, key, n_samples, device_count=device_count,
-          trace_axes=(channel_axis,))
+          trace_axes=(channel_axis,), batch_size=batch_size
+      )
       if same_inputs:
         assert x2 is None
       return kernel_fn_empirical(x1, x2, get)
@@ -2144,6 +2146,69 @@ class AttentionTest(test_utils.NeuralTangentsTestCase):
 
     empirical = kernel_fn_mc(X0_1, X0_2, get=get, mask_constant=mask_constant)
     test_utils.assert_close_matrices(self, empirical, exact, tol)
+
+
+class GNTKTest(test_utils.NeuralTangentsTestCase):
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              f'{get}-{name}-{same_input}-{act_name}-{test_mask}',
+          'get': get,
+          'readout': readout,
+          'same_input': same_input,
+          'activation': activation,
+          'test_mask': test_mask,
+      } for get in ['ntk', 'nngp']
+                          for name, readout in [
+                              ('Flattten', stax.Flatten()),
+                              ('Pooling', stax.GlobalAvgPool())]
+                          for same_input in [True, False]
+                          for act_name, activation in [('Relu', stax.Relu())]
+                          for test_mask in [True, False]
+                          ))
+
+  def test_GNTK(self, get, readout, same_input, activation, test_mask):
+    batch1, batch2 = 6, 8
+    num_nodes, num_channels = 8, 12
+    output_dims = 1 if get == 'ntk' else 1024
+    key = random.PRNGKey(1)
+    key, split1, split2 = random.split(key, 3)
+    x1 = random.normal(split1, (batch1, num_nodes, num_channels))
+    x2 = x1 if same_input else random.normal(split2,
+                                             (batch2, num_nodes, num_channels))
+    if test_mask:
+      mask_constant = 10.
+      key, split1, split2 = random.split(key, 3)
+      mask1 = random.bernoulli(split1, p=0.5, shape=(batch1, num_nodes, 1))
+      x1 = np.where(mask1, mask_constant, x1)
+      if same_input:
+        x2 = x1
+      else:
+        mask2 = random.bernoulli(split2, p=0.5, shape=(batch2, num_nodes, 1))
+        x2 = np.where(mask2, mask_constant, x2)
+    key, split1, split2 = random.split(key, 3)
+    pattern1 = random.uniform(split1, (batch1, num_nodes, num_nodes))
+    pattern2 = pattern1 if same_input else np.abs(
+        random.uniform(split2, (batch2, num_nodes, num_nodes)))
+
+    # Build the infinite network.
+    init_fn, apply_fn, kernel_fn = stax.serial(
+        stax.Dense(128*8*4),
+        activation,
+        stax.Dropout(0.5, mode='train'),
+        stax.Aggregate(),
+        readout,
+        stax.Dense(output_dims))
+    kernel_fn = batch.batch(kernel_fn, batch_size=2)
+    kernel_mc_fn = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, random.PRNGKey(10), 300)
+    empirical = kernel_mc_fn(
+        x1, x2, get=get, mask_constant=mask_constant if test_mask else None,
+        pattern=(pattern1, pattern2))
+    exact = kernel_fn(x1, x2, get, mask_constant=mask_constant if test_mask else None,
+                      pattern=(pattern1, pattern2))
+    RTOL = 0.3
+    test_utils.assert_close_matrices(self, exact, empirical, RTOL)
 
 
 if __name__ == '__main__':

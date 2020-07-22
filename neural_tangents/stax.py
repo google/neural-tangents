@@ -149,9 +149,9 @@ def _requires(**static_reqs):
     """Returns `kernel_fn` with additional consistency checks."""
 
     @utils.wraps(kernel_fn)
-    def new_kernel_fn(k: Kernels, **user_reqs) -> Kernels:
+    def new_kernel_fn(k: Kernels, **kwargs) -> Kernels:
       """Executes `kernel_fn` on `kernels` after checking consistency."""
-      fused_reqs = _fuse_reqs(static_reqs, {}, **user_reqs)
+      fused_reqs = _fuse_reqs(static_reqs, {}, **kwargs)
 
       # `FanInConcat / FanInSum` have no requirements and
       # execute custom consistency checks.
@@ -180,7 +180,7 @@ def _requires(**static_reqs):
               # a requirement for this layer.
               pass
 
-      return kernel_fn(k, **user_reqs)
+      return kernel_fn(k, **kwargs)
 
     setattr(new_kernel_fn, _INPUT_REQ, frozendict.frozendict(static_reqs))
     return new_kernel_fn
@@ -268,7 +268,7 @@ def _supports_masking(remask_kernel: bool):
         else:
           raise TypeError(type(Kernel), Kernel)
 
-        k = kernel_fn(k, **user_reqs)
+        k = kernel_fn(k, **user_reqs)  # type: Kernel
 
         if remask_kernel:
           k = k.mask(mask1, mask2)
@@ -310,6 +310,8 @@ def serial(*layers: Layer) -> InternalLayer:
 
   @_requires(**_get_input_req_attr(kernel_fns))
   def kernel_fn(k: Kernels, **kwargs) -> Kernels:
+     # TODO(xlc): if we drop `x1_is_x2` and use `rng` instead, need split key
+     # inside kernel functions here and parallel below.
     for f in kernel_fns:
       k = f(k, **kwargs)
     return k
@@ -345,6 +347,124 @@ def parallel(*layers: Layer) -> InternalLayer:
     return [f(k, **kwargs) for k, f in zip(ks, kernel_fns)]
 
   return init_fn, apply_fn, kernel_fn
+
+
+@layer
+@_supports_masking(remask_kernel=True)
+def Aggregate(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
+  r"""Layer constructor for aggregation operator (graphical neural network); see
+  e.g. arXiv: 1905.13192.
+
+  Specifically, each `input` (of shape (batch, nodes, channels)) is associated
+  with a `pattern` (of shape (batch, nodes, nodes)) and the output tensor is
+  equal to `np.matmul(pattern, input)`.
+
+  Args:
+    batch_axis:
+      integer, batch axis for `inputs`. Defaults to `0`, the leading axis.
+    channel_axis:
+      integer, channel axis for `inputs`. Defaults to `-1`, the trailing
+      axis. For `kernel_fn`, channel size is considered to be infinite.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  init_fn = lambda rng, input_shape: (input_shape, ())
+
+  def apply_fn(params,
+               inputs: np.ndarray, *,
+               pattern: Optional[np.ndarray] = None, **kwargs):
+    """Compute the transformed tensors after an aggregation layer.
+
+    Args:
+      params:
+        Not used.
+      inputs:
+        A 3D tensor of shape (batch, nodes, channels). Note that the
+        `batch_axis` and ` channel_axis` are usef only for `inputs` not for
+        `pattern` below.
+      pattern:
+        A 3D tensor of shape (batch, nodes, nodes), whose dimension order is
+        fixed.
+
+    Returns:
+      A 3D tensor of shape `(batch, nodes, channels)` which is equal to
+      np.matmul(pattern, inputs).
+    """
+    del params
+    if inputs.ndim != 3:
+      raise ValueError('Currently only support 3D tensor. Abitrary input '
+                       'dimensions will be supported in coming CLs.')
+    if pattern is not None and pattern.ndim != 3:
+      raise ValueError(f'`pattern` must be a 3D tensor. A {pattern.ndim} tensor'
+                       'is found.')
+    _batch_axis = batch_axis % inputs.ndim
+    _channel_axis = channel_axis % inputs.ndim
+    i = [k for k in range(inputs.ndim) if k != _batch_axis and
+         k != _channel_axis]
+    if len(i) != 1:
+      raise ValueError('Currently, only support inputs with node '
+                       'dimension = 1.')
+    i = i[0]
+    ret = lax.dot_general(pattern, inputs, (((2,), (i,)), ((0,), (0,))))
+    return ret
+
+  @_requires(diagonal_spatial=False,
+             batch_axis=batch_axis,
+             channel_axis=channel_axis)
+  def kernel_fn(k: Kernels,
+                *,
+                pattern: Tuple[Optional[np.ndarray],
+                Optional[np.ndarray]] = (None, None),
+                **kwargs):
+    """Compute the transformed kernels after an aggregation kernel layer.
+
+      Specifically, the `nngp`/`ntk` is a 4d tensor of shape
+      `(batch1, batch2, node1, node2)`, where node1 == node2. This tensor will
+      be aggregated (via matrix multiplication) on the left by `pattern[0]` of
+      shape `(batch1, node1, node1)` and on the right by `pattern[1]` of shape
+      `(batch2, node2, node2)`. Ignoring the batch dimensions, the return
+      `nngp/ntk` is `pattern[0] @ nngp/ntk @ pattern[1].T`
+
+    """
+
+    cov1, nngp, cov2, ntk = \
+      k.cov1, k.nngp, k.cov2, k.ntk
+    pattern1, pattern2 = pattern
+
+    def full_conjugate(p1, mat, p2):
+      if mat is None or mat.ndim ==0 or (p1 is None and p2 is None):
+        return mat
+      elif p2 is None:
+        return np.einsum('bli,bcij->bclj', p1, mat, optimize=True)
+      elif p1 is None:
+        np.einsum('bcij,ckj->bcik', mat, p2, optimize=True)
+      else:
+        return np.einsum('bli,bcij,ckj->bclk', p1, mat, p2, optimize=True)
+
+    def diagonal_batch_conjugate(p, mat):
+      if p is None or mat is None or mat.ndim == 0:
+        return mat
+      if k.diagonal_batch:
+        mat = np.einsum('bti, bij, blj->btl', p, mat, p)
+        return mat
+      else:
+        return full_conjugate(p, mat, p)
+
+    cov1 = diagonal_batch_conjugate(pattern1, cov1)
+    cov2 = diagonal_batch_conjugate(pattern2, cov2)
+    nngp = full_conjugate(pattern1, nngp, pattern2)
+    ntk = full_conjugate(pattern1, ntk, pattern2)
+
+    return k.replace(cov1=cov1,
+                     nngp=nngp,
+                     cov2=cov2,
+                     ntk=ntk)
+
+  def mask_fn(mask, input_shape):
+    return np.all(mask, axis=channel_axis, keepdims=True)
+
+  return init_fn, apply_fn, kernel_fn, mask_fn
 
 
 @layer
@@ -2506,17 +2626,17 @@ def _preprocess_kernel_fn(
   if not hasattr(kernel_fn, _INPUT_REQ):
     kernel_fn = _requires()(kernel_fn)
 
-  def kernel_fn_kernel(kernel, **user_reqs):
-    out_kernel = kernel_fn(kernel, **user_reqs)
+  def kernel_fn_kernel(kernel, **kwargs):
+    out_kernel = kernel_fn(kernel, **kwargs)
     return _set_shapes(init_fn, kernel, out_kernel)
 
-  def kernel_fn_x1(x1, x2, get, **user_reqs):
+  def kernel_fn_x1(x1, x2, get, **kwargs):
     # Get input requirements requested by network layers, user, or defaults.
     kernel_fn_reqs = getattr(kernel_fn, _INPUT_REQ)
-    reqs = _fuse_reqs(kernel_fn_reqs, _DEFAULT_INPUT_REQ, **user_reqs)
+    reqs = _fuse_reqs(kernel_fn_reqs, _DEFAULT_INPUT_REQ, **kwargs)
     compute_ntk = (get is None) or ('ntk' in get)
     kernel = _inputs_to_kernel(x1, x2, compute_ntk=compute_ntk, **reqs)
-    out_kernel = kernel_fn(kernel, **user_reqs)
+    out_kernel = kernel_fn(kernel, **kwargs)
     return _set_shapes(init_fn, kernel, out_kernel)
 
   @utils.get_namedtuple('AnalyticKernel')
@@ -2524,6 +2644,8 @@ def _preprocess_kernel_fn(
                     x2: np.ndarray = None,
                     get: Get = None,
                     *,
+                    pattern: Tuple[Optional[np.ndarray],
+                      Optional[np.ndarray]] = None,
                     mask_constant: float = None,
                     diagonal_batch: bool = None,
                     diagonal_spatial: bool = None,
@@ -2531,20 +2653,28 @@ def _preprocess_kernel_fn(
     """Returns the `Kernel` resulting from applying `kernel_fn` to given inputs.
 
     Args:
-      x1_or_kernel: either a `np.ndarray` with the first batch of inputs, or a
-      `Kernel`.
-      x2: an optional `np.ndarray` with the second batch of inputs. `None`
-        means `x2 == x1` or `x1_or_kernel is Kernel`.
-      get: either `None`, a string, or a tuple of strings specifying which data
+      x1_or_kernel:
+        either a `np.ndarray` with the first batch of inputs, or a `Kernel`.
+      x2:
+        an optional `np.ndarray` with the second batch of inputs. `None`  means
+        `x2 == x1` or `x1_or_kernel is Kernel`.
+      get:
+        either `None`, a string, or a tuple of strings specifying which data
         should be returned by the kernel function. Can be "nngp", "ntk", "cov1",
         "cov2", "is_gaussian", "is_reversed", "diagonal_batch",
         "diagonal_spatial", etc.
-      mask_constant: an optional `float`, the value in inputs to be considered
+      pattern:
+        either `None` or a tuple of two `np.ndarray`. The
+        `pattern = (pattern1, pattern2)` is used to specify how the nodes in a
+        graphical network is aggregated.
+      mask_constant:
+        an optional `float`, the value in inputs to be considered
         as masked (e.g. padding in a batch of sentences). `None` means no
         masking. Can also be `np.nan`, `np.inf` etc. Beware of floating point
         precision errors and try to use an atypical for inputs value.
-      diagonal_batch: an optional boolean specifying whether `cov1` and
-        `cov2` in all intermediary layers should store only the diagonal of the
+      diagonal_batch:
+        an optional boolean specifying whether `cov1` and `cov2` in all
+        intermediary layers should store only the diagonal of the
         sample-sample covariance
         (`diagonal_batch == True`,
          `cov1.shape == (batch_size_1, ...)`),
@@ -2553,9 +2683,10 @@ def _preprocess_kernel_fn(
          `cov1.shape == (batch_size_1, batch_size_1, ...)`).
         Defaults to least compute-heavy setting necessary to compute the output
         `nngp` [and `ntk`] covariance.
-      diagonal_spatial: an optional boolean specifying whether all (`cov1`,
-        `ntk`, etc.) covariance matrcies in all intermediary layers should store
-        only the diagonals of the location-location covariances
+      diagonal_spatial:
+        an optional boolean specifying whether all (`cov1`, `ntk`, etc.)
+        covariance matrcies in all intermediary layers should store only the
+        diagonals of the location-location covariances
         (`diagonal_spatial == True`,
          `nngp.shape == (batch_size_1, batch_size_2, height, width, ...)`),
         or the full covariance
@@ -2564,7 +2695,8 @@ def _preprocess_kernel_fn(
                          width, width, ...)`).
         Defaults to least compute-heavy setting necessary to compute the output
         `nngp` [and `ntk`] covariance.
-      **kwargs: other arguments passed to all intermediary `kernel_fn` calls.
+      **kwargs:
+        other arguments passed to all intermediary `kernel_fn` calls.
 
     Returns:
       If `get` is a string, returns the requested `np.ndarray`. If `get` is a
@@ -2577,11 +2709,13 @@ def _preprocess_kernel_fn(
          all(isinstance(k, Kernel) for k in x1_or_kernel))):
 
       return kernel_fn_kernel(x1_or_kernel,
+                              pattern=pattern,
                               diagonal_batch=diagonal_batch,
                               diagonal_spatial=diagonal_spatial,
                               **kwargs)
 
     return kernel_fn_x1(x1_or_kernel, x2, get,
+                        pattern=pattern,
                         diagonal_batch=diagonal_batch,
                         diagonal_spatial=diagonal_spatial,
                         mask_constant=mask_constant,

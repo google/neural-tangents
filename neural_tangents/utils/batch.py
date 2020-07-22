@@ -50,10 +50,11 @@ from jax.api import jit
 from jax.api import pmap
 from jax.interpreters.pxla import ShardedDeviceArray
 from jax.lib import xla_bridge
+from jax import random
 import jax.numpy as np
 from jax.tree_util import tree_all
 from jax.tree_util import tree_map
-from jax.tree_util import tree_multimap
+from jax.tree_util import tree_multimap, tree_flatten, tree_unflatten
 from neural_tangents.utils.kernel import Kernel
 from neural_tangents.utils import utils
 from neural_tangents.utils.typing import KernelFn
@@ -117,7 +118,8 @@ _Output = TypeVar('_Output')
 
 def _scan(f: Callable[[_Carry, _Input], Tuple[_Carry, _Output]],
           init: _Carry,
-          xs: Iterable[_Input]) -> Tuple[_Carry, _Output]:
+          xs: Iterable[_Input],
+          ) -> Tuple[_Carry, _Output]:
   """Implements an unrolled version of scan.
 
   Based on `jax.lax.scan` and has a similar API.
@@ -128,7 +130,9 @@ def _scan(f: Callable[[_Carry, _Input], Tuple[_Carry, _Output]],
   """
   carry = init
   ys = []
-  for x in xs:
+  flat_xs, tree_def = tree_flatten(xs)
+  for flat_x in zip(*flat_xs):
+    x = tree_unflatten(tree_def, flat_x)
     carry, y = f(carry, x)
     ys += [y]
 
@@ -309,10 +313,7 @@ def _serial(kernel_fn: KernelFn,
                    x2: np.ndarray = None,
                    *args,
                    **kwargs) -> _KernelType:
-    # TODO(xlc): Make batch + dropout work reasonably well.
-    if 'key' in kwargs:
-      raise NotImplementedError('Batching for the empirical kernel with dropout'
-                                ' is not implemented. ')
+
     x2_is_none = x2 is None
     if x2_is_none:
       # TODO(schsam): Only compute the upper triangular part of the kernel.
@@ -323,18 +324,40 @@ def _serial(kernel_fn: KernelFn,
      n2_batches, n2_batch_size) = _get_n_batches_and_batch_sizes(n1, n2,
                                                                  batch_size,
                                                                  device_count)
-
+    kwargs_np1 = {}
+    kwargs_np2 = {}
+    kwargs_other = {}
+    for k, v in kwargs.items():
+      if _is_np_ndarray(v):
+        if k == 'rng':
+          key1, key2 = random.split(v)
+          v1 = random.split(key1, n1_batches)
+          v2 = random.split(key2, n2_batches)
+        else:
+          assert isinstance(v, tuple) and len(v) == 2
+          v1 = np.reshape(v[0], (n1_batches, n1_batch_size,) + v[0].shape[1:])
+          v2 = np.reshape(v[1], (n2_batches, n2_batch_size,) + v[1].shape[1:])
+        kwargs_np1[k] = v1
+        kwargs_np2[k] = v2
+      else:
+        kwargs_other[k] = v
     input_shape = x1.shape[1:]
     x1s = np.reshape(x1, (n1_batches, n1_batch_size,) + input_shape)
     x2s = np.reshape(x2, (n2_batches, n2_batch_size,) + input_shape)
 
     def row_fn(_, x1):
-      return _, _scan(col_fn, x1, x2s)[1]
+      return _, _scan(col_fn, x1, (x2s, kwargs_np2))[1]
 
-    def col_fn(x1: np.ndarray, x2: np.ndarray):
-      return x1, kernel_fn(x1, x2, *args, **kwargs)
+    def col_fn(x1, x2):
+      x1, kwargs1 = x1
+      x2, kwargs2 = x2
+      kwargs_merge = {
+          **kwargs_other,
+          **dict((k, (kwargs1[k], kwargs2[k])) for k in kwargs1)
+      }
+      return (x1, kwargs1), kernel_fn(x1, x2, *args, **kwargs_merge)
 
-    _, kernel = _scan(row_fn, 0, x1s)
+    _, kernel = _scan(row_fn, 0, (x1s, kwargs_np1))
     return flatten(kernel, x2_is_none)
 
   def serial_fn_kernel(k: Kernel, *args, **kwargs) -> Kernel:
@@ -347,19 +370,39 @@ def _serial(kernel_fn: KernelFn,
     n1s = np.arange(0, n1, n1_batch_size)
     n2s = np.arange(0, n2, n2_batch_size)
 
-    def row_fn(_, n1: int) -> Tuple[int, Kernel]:
-      return _, _scan(col_fn, n1, n2s)[1]
+    kwargs_np1 = {}
+    kwargs_np2 = {}
 
-    def col_fn(n1: int, n2: int) -> Tuple[int, Kernel]:
+    kwargs_other = {}
+    for key, v in kwargs.items():
+      if _is_np_ndarray(v):
+        assert isinstance(v, tuple) and len(v) == 2
+        v1 = np.reshape(v[0], (n1_batches, n1_batch_size,) + v[0].shape[1:])
+        v2 = np.reshape(v[1], (n2_batches, n2_batch_size,) + v[1].shape[1:])
+        kwargs_np1[key] = v1
+        kwargs_np2[key] = v2
+      else:
+        kwargs_other[key] = v
+
+    def row_fn(_, n1):
+      return _, _scan(col_fn, n1, (n2s, kwargs_np2))[1]
+
+    def col_fn(n1, n2):
       # NOTE(schsam): If we end up wanting to enable jit-of-batch then we will
       # probably have to change this to dynamic slicing.
+      n1, kwargs1 = n1
+      n2, kwargs2 = n2
+      kwargs_merge = {
+          **kwargs_other,
+          **dict((key, (kwargs1[key], kwargs2[key])) for key in kwargs1)
+      }
       n1_slice = slice(n1, n1 + n1_batch_size)
       n2_slice = slice(n2, n2 + n2_batch_size)
       in_kernel = k.slice(n1_slice, n2_slice)
-      return n1, kernel_fn(in_kernel, *args, **kwargs)
+      return (n1, kwargs1), kernel_fn(in_kernel, *args, **kwargs_merge)
 
     cov2_is_none = k.cov2 is None
-    _, k = _scan(row_fn, 0, n1s)
+    _, k = _scan(row_fn, 0, (n1s, kwargs_np1))
     if cov2_is_none:
       k = k.replace(cov2=None)
     return flatten(k, cov2_is_none)
@@ -413,9 +456,6 @@ def _parallel(kernel_fn: KernelFn, device_count: int = -1) -> KernelFn:
     device_count = xla_bridge.device_count()
 
   def parallel_fn_x1(x1, x2=None, *args, **kwargs):
-    if 'key' in kwargs:
-      raise NotImplementedError('Batching for the empirical kernel with dropout'
-                                ' is not implemented. ')
     x2_is_none = x2 is None
     if x2_is_none:
       # TODO(schsam): Only compute the upper triangular part of the kernel.
@@ -436,6 +476,13 @@ def _parallel(kernel_fn: KernelFn, device_count: int = -1) -> KernelFn:
     elif not n1_per_device:
       _device_count = ragged
       n1_per_device = 1
+
+    for k, v in kwargs.items():
+
+      if _is_np_ndarray(v):
+        assert isinstance(v, tuple) and len(v) == 2
+        v0 = np.reshape(v[0], (_device_count, n1_per_device,) + v[0].shape[1:])
+        kwargs[k] = (v0, v[1])
 
     x1 = np.reshape(x1, (_device_count, n1_per_device,) + input_shape)
     kernel = kernel_fn(x1, x2, *args, **kwargs)
@@ -513,6 +560,8 @@ def _get_n_batches_and_batch_sizes(n1: int,
 
 
 def _is_np_ndarray(x) -> bool:
+  if x is None:
+    return False
   return tree_all(tree_map(lambda y: isinstance(y, np.ndarray), x))
 
 
@@ -579,28 +628,37 @@ def _get_jit_or_pmap_broadcast() -> Callable[[Callable, int], Callable]:
           args_np_idxs.append(i)
         else:
           args_other[i] = arg
+      kwargs_np = {}
+      kwargs_other = {}
+      for k, v in kwargs.items():
+        if _is_np_ndarray(v):
+          assert isinstance(v, tuple), len(v) == 2
+          kwargs_np[k] = (v[0], broadcast(v[1]))
+        else:
+          kwargs_other[k] = v
 
       # Check cache before jitting.
       _key = key + \
           tuple(args_other.items()) + \
-          tuple(kwargs.items())
+          tuple(kwargs_other.items())
       if _key in cache:
         _f = cache[_key]
       else:
         # Define a `np.ndarray`-only function as a closure over other arguments.
-        def _f(_x_or_kernel, *_args_np):
+        def _f(_x_or_kernel, *_args_np, **_kwargs_np):
           # Merge args.
           _args_np = {i: _arg_np for i, _arg_np in zip(args_np_idxs, _args_np)}
           _args = {**_args_np, **args_other}
           _args = tuple(v for k, v in sorted(_args.items()))
-          return f(_x_or_kernel, *_args, **kwargs)
+          _kwargs = {**_kwargs_np, **kwargs_other}
+          return f(_x_or_kernel, *_args, **_kwargs)
 
         _f = jit(_f) if device_count == 0 else pmap(_f)
         cache[_key] = _f
 
       # Broadcast `np.ndarray` arguments and apply the new function to them.
       args_np = tree_map(broadcast, args_np)
-      return _f(x_or_kernel, *args_np)
+      return _f(x_or_kernel, *args_np, **kwargs_np)
 
     return f_pmapped
 
