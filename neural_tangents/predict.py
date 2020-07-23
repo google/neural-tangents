@@ -45,7 +45,7 @@ ArrayOrScalar = Union[None, int, float, np.ndarray]
 
 
 def gradient_descent_mse(
-    ntk_train_train: np.ndarray,
+    k_train_train: np.ndarray,
     y_train: np.ndarray,
     learning_rate: float = 1.,
     diag_reg: float = 0.,
@@ -63,20 +63,22 @@ def gradient_descent_mse(
   Solves in closed form for the continuous-time version of gradient descent.
 
   Uses the closed-form solution for gradient descent on an MSE loss in function
-  space detailed in [*] given a Neural Tangent Kernel over the dataset. Given
-  NTK, this function will return a function that predicts the time evolution
-  for function space points at arbitrary time[s] (training step[s]) `t`. Note
-  that these time[s] (step[s]) are continuous and are interpreted in units of
-  the `learning_rate` so `absolute_time = learning_rate * t`, and the scales of
-  `learning_rate` and `t` are interchangeable.
+  space detailed in [*,**] given a Neural Tangent or Neural Network Gaussian
+  Process Kernel over the dataset. Given NNGP or NTK, this function will return
+  a function that predicts the time evolution for function space points at
+  arbitrary time[s] (training step[s]) `t`. Note that these time[s] (step[s])
+  are continuous and are interpreted in units of the `learning_rate` so
+  `absolute_time = learning_rate * t`, and the scales of `learning_rate` and `t`
+  are interchangeable.
 
   Note that first invocation of the returned `predict_fn` will be slow and
   allocate a lot of memory for its whole lifetime, as either eigendecomposition
   (`t` is a scalar or an array) or Cholesky factorization (`t=None`) of
-  `ntk_train_train` is performed and cached for future invocations (or both, if
+  `k_train_train` is performed and cached for future invocations (or both, if
   the function is called on both finite and infinite (`t=None`) times).
 
   [*] https://arxiv.org/abs/1806.07572
+  [**] https://arxiv.org/abs/1902.06720
 
   Example:
     >>> from neural_tangents import empirical_ntk_fn
@@ -84,19 +86,19 @@ def gradient_descent_mse(
     >>>
     >>> t = 1e-7
     >>> kernel_fn = empirical_ntk_fn(f)
-    >>> ntk_train_train = kernel_fn(x_train, None, params)
-    >>> ntk_test_train = kernel_fn(x_test, x_train, params)
+    >>> k_train_train = kernel_fn(x_train, None, params)
+    >>> k_test_train = kernel_fn(x_test, x_train, params)
     >>>
-    >>> predict_fn = predict.gradient_descent_mse(ntk_train_train, y_train)
+    >>> predict_fn = predict.gradient_descent_mse(k_train_train, y_train)
     >>>
     >>> fx_train_0 = f(params, x_train)
     >>> fx_test_0 = f(params, x_test)
     >>>
     >>> fx_train_t, fx_test_t = predict_fn(t, fx_train_0, fx_test_0,
-    >>>                                    ntk_test_train)
+    >>>                                    k_test_train)
 
   Args:
-    ntk_train_train:
+    k_train_train:
       kernel on the training data. Must have the shape of
       `zip(y_train.shape, y_train.shape)` with `trace_axes` absent.
     y_train:
@@ -105,13 +107,13 @@ def gradient_descent_mse(
       learning rate, step size.
     diag_reg:
       a scalar representing the strength of the diagonal regularization for
-      `ntk_train_train`, i.e. computing `ntk_train_train + diag_reg * I` during
+      `k_train_train`, i.e. computing `k_train_train + diag_reg * I` during
       Cholesky factorization or eigendecomposition.
     diag_reg_absolute_scale:
       `True` for `diag_reg` to represent regularization in absolute units,
-      `False` to be `diag_reg * np.mean(np.trace(ntk_train_train))`.
+      `False` to be `diag_reg * np.mean(np.trace(k_train_train))`.
     trace_axes:
-      `f(x_train)` axes such that `ntk_train_train` lacks these pairs of
+      `f(x_train)` axes such that `k_train_train` lacks these pairs of
       dimensions and is to be interpreted as :math:`\Theta \otimes I`, i.e.
       block-diagonal along `trace_axes`. These can can be specified either to
       save space and compute, or to even improve approximation accuracy of the
@@ -123,10 +125,10 @@ def gradient_descent_mse(
 
   Returns:
     A function of signature
-    `predict_fn(t, fx_train_0, fx_test_0, ntk_test_train)` that
+    `predict_fn(t, fx_train_0, fx_test_0, k_test_train)` that
     returns output train [and test] set[s] predictions at time[s] `t`.
   """
-  _, odd, first, _ = _get_axes(ntk_train_train)
+  _, odd, first, _ = _get_axes(k_train_train)
   trace_axes = utils.canonicalize_axis(trace_axes, y_train)
   trace_axes = tuple(-y_train.ndim + a for a in trace_axes)
   n_t_axes, n_non_t_axes = len(trace_axes), y_train.ndim - len(trace_axes)
@@ -135,15 +137,15 @@ def gradient_descent_mse(
 
   @lru_cache(1)
   def get_predict_fn_inf():
-    solve = _get_cho_solve(ntk_train_train, diag_reg, diag_reg_absolute_scale)
+    solve = _get_cho_solve(k_train_train, diag_reg, diag_reg_absolute_scale)
 
-    def predict_fn_inf(fx_train_0, fx_test_0, ntk_test_train):
-      fx_train_t = y_train.astype(ntk_train_train.dtype)
+    def predict_fn_inf(fx_train_0, fx_test_0, k_test_train):
+      fx_train_t = y_train.astype(k_train_train.dtype)
       if fx_test_0 is None:
         return fx_train_t
 
       rhs = y_train if fx_train_0 is None else y_train - fx_train_0
-      dfx_test = np.tensordot(ntk_test_train, solve(rhs, trace_axes),
+      dfx_test = np.tensordot(k_test_train, solve(rhs, trace_axes),
                               (odd, first))
       dfx_test = np.moveaxis(dfx_test, last_t_axes, trace_axes)
       fx_test_t = fx_test_0 + dfx_test
@@ -157,7 +159,7 @@ def gradient_descent_mse(
   @lru_cache(1)
   def get_predict_fn_finite():
     expm1_fn, inv_expm1_fn = _get_fns_in_eigenbasis(
-        ntk_train_train,
+        k_train_train,
         diag_reg,
         diag_reg_absolute_scale,
         (_make_expm1_fn(y_train.size),
@@ -166,7 +168,7 @@ def gradient_descent_mse(
 
     rhs_shape = tuple(y_train.shape[a] for a in trace_axes)
 
-    def predict_fn_finite(t, fx_train_0, fx_test_0, ntk_test_train):
+    def predict_fn_finite(t, fx_train_0, fx_test_0, k_test_train):
       t = np.array(t) * learning_rate
       t_shape, t_ndim = t.shape, t.ndim
       t = t.reshape((-1, 1))
@@ -174,7 +176,7 @@ def gradient_descent_mse(
       rhs = -y_train if fx_train_0 is None else fx_train_0 - y_train
       rhs = np.moveaxis(rhs, trace_axes, last_t_axes).reshape(
           (-1,) + rhs_shape)
-      shape = t_shape + ntk_train_train.shape[1::2] + rhs_shape
+      shape = t_shape + k_train_train.shape[1::2] + rhs_shape
 
       if fx_train_0 is not None:
         dfx_train = expm1_fn(rhs, t).reshape(shape)
@@ -183,7 +185,7 @@ def gradient_descent_mse(
 
       if fx_test_0 is not None:
         dfx_test = inv_expm1_fn(rhs, t).reshape(shape)
-        dfx_test = np.tensordot(ntk_test_train, dfx_test, (odd, non_t_axes))
+        dfx_test = np.tensordot(k_test_train, dfx_test, (odd, non_t_axes))
         dfx_test = np.moveaxis(
             dfx_test,
             tuple(range(n_non_t_axes, n_non_t_axes + t_ndim)) + last_t_axes,
@@ -202,7 +204,7 @@ def gradient_descent_mse(
       t: ArrayOrScalar = None,
       fx_train_0: ArrayOrScalar = 0.,
       fx_test_0: ArrayOrScalar = None,
-      ntk_test_train: np.ndarray = None
+      k_test_train: np.ndarray = None
   ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Return output predictions on train [and test] set[s] at time[s] `t`.
 
@@ -219,28 +221,28 @@ def gradient_descent_mse(
       fx_test_0:
         output of the network at `t == 0` on the test set. `fx_test_0=None`
         means to not compute predictions on the test set.
-      ntk_test_train:
+      k_test_train:
         kernel relating test data with training data. Must have the shape of
         `zip(y_test.shape, y_train.shape)` with `trace_axes` absent. Pass
-        `ntk_test_train=None` if you only need non-regularized (`diag_reg=0`)
+        `k_test_train=None` if you only need non-regularized (`diag_reg=0`)
         predictions on the training set. For regularized train-set predictions,
-        pass `ntk_test_train=ntk_train_train`.
+        pass `k_test_train=k_train_train`.
 
     Returns:
       `fx_train_t` or `(fx_train_t, fx_test_t)` if `fx_test_0 != None` with
       potentially additional leading time dimensions matching `t.shape`.
 
     Raises:
-      ValueError: if `fx_test_0` is not `None`, but `ntk_test_train` is `None`.
+      ValueError: if `fx_test_0` is not `None`, but `k_test_train` is `None`.
     """
-    _check_inputs(fx_train_0, fx_test_0, ntk_test_train)
+    _check_inputs(fx_train_0, fx_test_0, k_test_train)
 
     # Infinite time
     if t is None:
-      return get_predict_fn_inf()(fx_train_0, fx_test_0, ntk_test_train)
+      return get_predict_fn_inf()(fx_train_0, fx_test_0, k_test_train)
 
     # Finite time
-    return get_predict_fn_finite()(t, fx_train_0, fx_test_0, ntk_test_train)
+    return get_predict_fn_finite()(t, fx_train_0, fx_test_0, k_test_train)
 
   return predict_fn
 
@@ -256,7 +258,7 @@ class ODEState:
 
 def gradient_descent(
     loss: Callable[[np.ndarray, np.ndarray], float],
-    ntk_train_train: np.ndarray,
+    k_train_train: np.ndarray,
     y_train: np.ndarray,
     learning_rate: float = 1.,
     momentum: float = None,
@@ -294,25 +296,25 @@ def gradient_descent(
     >>> momentum = 0.9
     >>>
     >>> kernel_fn = empirical_ntk_fn(f)
-    >>> ntk_test_train = kernel_fn(x_test, x_train, params)
+    >>> k_test_train = kernel_fn(x_test, x_train, params)
     >>>
     >>> from jax.experimental import stax
     >>> cross_entropy = lambda fx, y_hat: -np.mean(stax.logsoftmax(fx) * y_hat)
-    >>> predict_fn = predict.gradient_descent(cross_entropy, ntk_train_train,
+    >>> predict_fn = predict.gradient_descent(cross_entropy, k_train_train,
     >>>                                       y_train, learning_rate, momentum)
     >>>
     >>> fx_train_0 = f(params, x_train)
     >>> fx_test_0 = f(params, x_test)
     >>>
     >>> fx_train_t, fx_test_t = predict_fn(t, fx_train_0, fx_test_0,
-    >>>                                    ntk_test_train)
+    >>>                                    k_test_train)
 
   Args:
     loss:
       a loss function whose signature is `loss(f(x_train), y_train)`. Note:
       the loss function should treat the batch and output dimensions
       symmetrically.
-    ntk_train_train:
+    k_train_train:
       kernel on the training data. Must have the shape of
       `zip(y_train.shape, y_train.shape)` with `trace_axes` absent.
     y_train:
@@ -322,7 +324,7 @@ def gradient_descent(
     momentum:
       momentum scalar.
     trace_axes:
-      `f(x_train)` axes such that `ntk_train_train` lacks these pairs of
+      `f(x_train)` axes such that `k_train_train` lacks these pairs of
       dimensions and is to be interpreted as :math:`\Theta \otimes I`, i.e.
       block-diagonal along `trace_axes`. These can can be specified either to
       save space and compute, or to even improve approximation accuracy of the
@@ -336,12 +338,12 @@ def gradient_descent(
     A function that returns output train [and test] set[s] predictions at
     time[s] `t`.
   """
-  _, odd, _, _ = _get_axes(ntk_train_train)
+  _, odd, _, _ = _get_axes(k_train_train)
   trace_axes = utils.canonicalize_axis(trace_axes, y_train)
   non_t_axes = tuple(a for a in range(y_train.ndim) if a not in trace_axes)
   last_t_axes = range(-len(trace_axes), 0)
 
-  dtype = ntk_train_train.dtype
+  dtype = k_train_train.dtype
   grad_loss = grad(lambda fx: loss(fx, y_train))
 
   if momentum is not None:
@@ -379,7 +381,7 @@ def gradient_descent(
 
     return ODEState(fx_train_0, fx_test_0, qx_train_0, qx_test_0)  # pytype: disable=wrong-arg-count
 
-  def get_dstate_dt(ntk_test_train):
+  def get_dstate_dt(k_test_train):
     def dstate_dt(state_t: ODEState, unused_t) -> ODEState:
       fx_train_t, fx_test_t, qx_train_t, qx_test_t = (
           state_t.fx_train, state_t.fx_test, state_t.qx_train, state_t.qx_test)
@@ -387,12 +389,12 @@ def gradient_descent(
       dy_df_t = grad_loss(fx_train_t)
 
       fx_train_t = -np.moveaxis(
-          np.tensordot(ntk_train_train, dy_df_t, (odd, non_t_axes)),
+          np.tensordot(k_train_train, dy_df_t, (odd, non_t_axes)),
           last_t_axes, trace_axes
       )
       if fx_test_t is not None:
         fx_test_t = -np.moveaxis(
-            np.tensordot(ntk_test_train, dy_df_t, (odd, non_t_axes)),
+            np.tensordot(k_test_train, dy_df_t, (odd, non_t_axes)),
             last_t_axes, trace_axes
         )
 
@@ -410,7 +412,7 @@ def gradient_descent(
       t: ArrayOrScalar = None,
       fx_train_or_state_0: Union[ArrayOrScalar, ODEState] = 0.,
       fx_test_0: ArrayOrScalar = None,
-      ntk_test_train: np.ndarray = None
+      k_test_train: np.ndarray = None
   ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray], ODEState]:
     """Return output predictions on train [and test] set[s] at time[s] `t`.
 
@@ -433,10 +435,10 @@ def gradient_descent(
       fx_test_0:
         output of the network at `t == 0` on the test set. `fx_test_0=None`
         means to not compute predictions on the test set.
-      ntk_test_train:
+      k_test_train:
         kernel relating test data with training data. Must have the shape of
         `zip(y_test.shape, y_train.shape)` with `trace_axes` absent. Pass
-        `ntk_test_train=None` if you only need predictions on the training set.
+        `k_test_train=None` if you only need predictions on the training set.
 
     Returns:
       `fx_train_t` or `(fx_train_t, fx_test_t)` if `fx_test_0 != None` with
@@ -444,9 +446,9 @@ def gradient_descent(
       Alternatively can return an `ODEState` at time[s] `t`.
 
     Raises:
-      ValueError: if `fx_test_0` is not `None`, but `ntk_test_train` is `None`.
+      ValueError: if `fx_test_0` is not `None`, but `k_test_train` is `None`.
     """
-    _check_inputs(fx_train_or_state_0, fx_test_0, ntk_test_train)
+    _check_inputs(fx_train_or_state_0, fx_test_0, k_test_train)
 
     t = np.array(t if t is not None else np.inf, dtype) * learning_rate
     t_shape = t.shape
@@ -461,9 +463,9 @@ def gradient_descent(
     t = np.concatenate([t0, t])
 
     # Solve the ODE.
-    fx_test_shape = _get_fx_test_shape(y_train, ntk_test_train, trace_axes)
+    fx_test_shape = _get_fx_test_shape(y_train, k_test_train, trace_axes)
     state_0 = get_state_0(fx_train_or_state_0, fx_test_0, fx_test_shape)
-    state_t = ode.odeint(get_dstate_dt(ntk_test_train), state_0, t)
+    state_t = ode.odeint(get_dstate_dt(k_test_train), state_0, t)
 
     # Remove the added `t0`.
     trim = lambda x: x[1:].reshape(t_shape + x.shape[1:])
@@ -1089,7 +1091,7 @@ def _make_inv_expm1_fn(normalization: float):
 
 def _check_inputs(fx_train_or_state_0: Union[ArrayOrScalar, ODEState],
                   fx_test_0: ArrayOrScalar,
-                  ntk_test_train: Optional[np.ndarray]):
+                  k_test_train: Optional[np.ndarray]):
   if isinstance(fx_train_or_state_0, ODEState):
     if fx_test_0 is not None:
       raise ValueError('`fx_test_0` is included in `ODEState` and must be set'
@@ -1104,9 +1106,9 @@ def _check_inputs(fx_train_or_state_0: Union[ArrayOrScalar, ODEState],
   if fx_train_0 is None and fx_test_0 is None:
     raise ValueError('Both `fx_train_0` and `fx_test_0` are `None`, i.e. no'
                      'predictions will be computed.')
-  if fx_test_0 is not None and ntk_test_train is None:
+  if fx_test_0 is not None and k_test_train is None:
     raise ValueError('To get predictions on the test set, please provide'
-                     '`ntk_test_train` kernel to the parent function.')
+                     '`k_test_train` kernel to the parent function.')
 
 
 def _get_axes(x: np.ndarray):
