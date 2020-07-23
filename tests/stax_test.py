@@ -53,7 +53,7 @@ WIDTHS = [2**10]
 
 N_SAMPLES = 100
 
-RTOL = 0.025
+RTOL = 0.04
 
 FILTER_SHAPES = [
     (2, 1),
@@ -370,8 +370,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
                    padding, phi, strides, width, is_ntk, proj_into_2d,
                    pool_type, layer_norm, parameterization, use_dropout)
     self._check_agreement_with_empirical(
-        net, same_inputs, use_dropout, is_ntk,
-        rtol=0.03 if proj_into_2d == 'ATTN' else RTOL)
+        net, same_inputs, use_dropout, is_ntk, RTOL)
 
   # pylint: disable=g-complex-comprehension
   @jtu.parameterized.named_parameters(
@@ -901,11 +900,11 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
       }
                           for model in ['fc', 'conv-pool', 'conv-flatten']
                           for phi_name in ['Sin', 'Erf', 'Gelu']
-                          for same_inputs in [False, True]
+                          for same_inputs in [False]
                           for get in ['nngp', 'ntk']
                           for abc in itertools.product(
-                              [1., 2., 0.3],
-                              [1., 1.5, 0.3],
+                              [2., 0.3],
+                              [1.5, 0.3],
                               [0., -np.pi/4., np.pi/2.])))
   def test_activation(self, same_inputs, model, phi_name, get, abc):
     a, b, c = abc
@@ -1244,9 +1243,9 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
               'branch_in':
                   branch_in
           }
-          for same_inputs in [False, True]
+          for same_inputs in [False]
           for axis in [None, 0, 1]
-          for n_branches in [1, 2, 3] for get in ['nngp', 'ntk']
+          for n_branches in [2, 3] for get in ['nngp', 'ntk']
           for branch_in in ['dense_before_branch_in',
                             'dense_after_branch_in']))
   def test_fan_in_fc(self, same_inputs, axis, n_branches, get, branch_in):
@@ -1336,9 +1335,9 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
               'readout':
                   readout
           }
-          for same_inputs in [False, True]
+          for same_inputs in [False]
           for axis in [None, 0, 1, 2, 3]
-          for n_branches in [1, 2, 3] for get in ['nngp', 'ntk']
+          for n_branches in [2, 3] for get in ['nngp', 'ntk']
           for branch_in in ['dense_before_branch_in', 'dense_after_branch_in']
           for readout in ['pool', 'flatten']))
   def test_fan_in_conv(self,
@@ -1733,15 +1732,16 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
           }
           for same_inputs in [False] for get in ['ntk', 'nngp']
           for concat in [None, 0, 1] for p in [0.5]
-          for mask_axis in [(), (0,), (1,), (2,), (3,),
-                            (0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3),
-                            (0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3),
+          for mask_axis in [(),
+                            (0,),
+                            (1, 3),
+                            (0, 2, 3),
                             (0, 1, 2, 3)]
           for mask_constant in [10.]))
   def test_mask_fc(self, same_inputs, get, concat, p, mask_axis, mask_constant):
-    width = 1024
+    width = 512
     n_samples = 128
-    tol = 0.025
+    tol = 0.03
     key = random.PRNGKey(1)
 
     def apply_mask(x):
@@ -1830,25 +1830,15 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
                           for use_attn in [True]
                           for same_inputs in [False]
                           for get in ['nngp', 'ntk']
-                          for n in [0, 1, 2]
+                          for n in [2]
                           for concat in [None] + list(range(n + 1))
                           for mask_constant in [10.]
                           for p in [0.5]
                           for mask_axis in [(),
                                             (0,),
                                             (1,),
-                                            (2,),
-                                            (3,),
-                                            (0, 1),
-                                            (0, 2),
-                                            (0, 3),
-                                            (1, 2),
-                                            (1, 3),
                                             (2, 3),
-                                            (0, 1, 2),
                                             (0, 1, 3),
-                                            (0, 2, 3),
-                                            (1, 2, 3),
                                             (0, 1, 2, 3)]
                           ))
   def test_mask_conv(self, same_inputs, get, mask_axis, mask_constant, concat,
@@ -2164,11 +2154,11 @@ class GNTKTest(test_utils.NeuralTangentsTestCase):
                               ('Pooling', stax.GlobalAvgPool())]
                           for same_input in [True, False]
                           for act_name, activation in [('Relu', stax.Relu())]
-                          for test_mask in [True, False]
+                          for test_mask in [True]
                           ))
 
   def test_GNTK(self, get, readout, same_input, activation, test_mask):
-    batch1, batch2 = 6, 8
+    batch1, batch2 = 8, 6
     num_nodes, num_channels = 8, 12
     output_dims = 1 if get == 'ntk' else 1024
     key = random.PRNGKey(1)
@@ -2202,13 +2192,14 @@ class GNTKTest(test_utils.NeuralTangentsTestCase):
     kernel_fn = batch.batch(kernel_fn, batch_size=2)
     kernel_mc_fn = monte_carlo.monte_carlo_kernel_fn(
         init_fn, apply_fn, random.PRNGKey(10), 300)
-    empirical = kernel_mc_fn(
-        x1, x2, get=get, mask_constant=mask_constant if test_mask else None,
-        pattern=(pattern1, pattern2))
-    exact = kernel_fn(x1, x2, get, mask_constant=mask_constant if test_mask else None,
+    empirical = kernel_mc_fn(x1, x2, get,
+                             mask_constant=mask_constant if test_mask else None,
+                             pattern=(pattern1, pattern2))
+    exact = kernel_fn(x1, x2, get,
+                      mask_constant=mask_constant if test_mask else None,
                       pattern=(pattern1, pattern2))
-    RTOL = 0.3
-    test_utils.assert_close_matrices(self, exact, empirical, RTOL)
+    rtol = 0.03
+    test_utils.assert_close_matrices(self, exact, empirical, rtol)
 
 
 if __name__ == '__main__':
