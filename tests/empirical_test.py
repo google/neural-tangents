@@ -250,7 +250,8 @@ class EmpiricalTest(jtu.JaxTestCase):
                                                 (-2,),
                                                 (0, -1),
                                                 (1, -2),
-                                                (2, 3)]
+                                                (2, 3),
+                                                (3, 0, 2)]
                           for trace_axes in [(),
                                              (0,),
                                              (0, 1),
@@ -263,7 +264,8 @@ class EmpiricalTest(jtu.JaxTestCase):
                                              (1, 2, 3),
                                              (-3, -2),
                                              (-3, -1),
-                                             (-2, -4)]))
+                                             (-2, -4),
+                                             (2, 0, -1)]))
   def testAxes(self, diagonal_axes, trace_axes):
     key = random.PRNGKey(0)
     key, self_split, other_split = random.split(key, 3)

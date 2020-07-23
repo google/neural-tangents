@@ -427,12 +427,12 @@ def dot_general(lhs: np.ndarray,
   Precisely, returns `jax.lax.dot_general(lhs, rhs, dimension_numbers)` where
   `dimension_numbers == ((contracting_dims, contracting_dims),
                          (batch_dims, batch_dims))`,
-  but allows arbitrary dimension order and preserves it in the output. See XLA's
+  but preserves the dimension order in the output. See XLA's
    `DotGeneral<https://www.tensorflow.org/xla/operation_semantics#dotgeneral>`.
 
   Args:
-    lhs: np.ndarray.
-    rhs: np.ndarray.
+    lhs: array.
+    rhs: array, must have the same dimensionality as `lhs`.
     contracting_dims: contracting dimensions.
     batch_dims: batch dimensions.
     precision: Optional. Either `None`, which means the default precision for
@@ -441,23 +441,18 @@ def dot_general(lhs: np.ndarray,
   Returns:
     Dot product result with preserved dimension order.
   """
+  if lhs.ndim != rhs.ndim:
+    raise ValueError(f'`lhs` and `rhs` must have the same dimensionality, got'
+                     f'`lhs.ndim == {lhs.ndim}` and `rhs.ndim == {rhs.ndim}`.')
+
   contracting_dims = canonicalize_axis(contracting_dims, lhs)
   batch_dims = canonicalize_axis(batch_dims, lhs)
 
   n_batch_dims = len(batch_dims)
   leading_batch_dims = range(n_batch_dims)
 
-  lhs = np.moveaxis(lhs, batch_dims, leading_batch_dims)
-  if rhs is None:
-    rhs = lhs
-  else:
-    rhs = np.moveaxis(rhs, batch_dims, leading_batch_dims)
-
-  shifted_contracting_dims = [i + sum(1 if i < b else 0 for b in batch_dims)
-                              for i in contracting_dims]
-
-  dimension_numbers = ((shifted_contracting_dims, shifted_contracting_dims),
-                       (leading_batch_dims, leading_batch_dims))
+  dimension_numbers = ((contracting_dims, contracting_dims),
+                       (batch_dims, batch_dims))
 
   prod = lax.dot_general(lhs, rhs, dimension_numbers, precision)
   prod = zip_axes(prod, n_batch_dims)

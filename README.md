@@ -428,6 +428,7 @@ as an example. With `NVIDIA V100` 64-bit precision, `nt` took 316/330/508 GPU-ho
 
 Neural Tangents has been used in the following papers:
 
+* [Bayesian Deep Ensembles via the Neural Tangent Kernel](https://arxiv.org/abs/2007.05864)
 * [The Surprising Simplicity of the Early-Time Learning Dynamics of Neural Networks
 ](https://arxiv.org/abs/2006.14599)
 * [When Do Neural Networks Outperform Kernel Methods?](https://arxiv.org/abs/2006.13409)

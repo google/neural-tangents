@@ -2297,8 +2297,10 @@ def _cov_diag_batch_diag_spatial(x: np.ndarray,
 def _cov_diag_batch_full_spatial(x: np.ndarray,
                                  batch_axis: int,
                                  channel_axis: int) -> np.ndarray:
-  x = np.moveaxis(x, (batch_axis, channel_axis), (0, -1))
-  ret = lax.dot_general(x, x, (((x.ndim - 1,), (x.ndim - 1,)), ((0,), (0,))))
+  ret = lax.dot_general(x, x,
+                        (((channel_axis,), (channel_axis,)),
+                         ((batch_axis,), (batch_axis,)))
+                        )
   ret = utils.zip_axes(ret, 1)
   return ret
 
@@ -2318,16 +2320,20 @@ def _cov_full_batch_diag_spatial(x1: np.ndarray,
                                  x2: np.ndarray,
                                  batch_axis: int,
                                  channel_axis: int) -> np.ndarray:
-  ret = np.matmul(np.moveaxis(x1, (batch_axis, channel_axis), (-2, -1)),
-                  np.moveaxis(x2, (batch_axis, channel_axis), (-1, -2)))
+  diag_axes = tuple(i for i in range(x1.ndim)
+                    if i != batch_axis and i != channel_axis)
+  ret = lax.dot_general(x1, x2,
+                        (((channel_axis,), (channel_axis,)),
+                         (diag_axes, diag_axes))
+                        )
   ret = np.moveaxis(ret, (-2, -1), (0, 1))
   return ret
 
 
-def _cov_diagonal_batch(x: np.ndarray,
-                        diagonal_spatial: bool,
-                        batch_axis: int,
-                        channel_axis: int) -> np.ndarray:
+def _cov_diag_batch(x: np.ndarray,
+                    diagonal_spatial: bool,
+                    batch_axis: int,
+                    channel_axis: int) -> np.ndarray:
   if diagonal_spatial:
     ret = _cov_diag_batch_diag_spatial(x, batch_axis, channel_axis)
   else:
@@ -2512,7 +2518,7 @@ def _inputs_to_kernel(
     x = x.astype(np.float64)
 
     if diagonal_batch:
-      cov = _cov_diagonal_batch(x, diagonal_spatial, batch_axis, channel_axis)
+      cov = _cov_diag_batch(x, diagonal_spatial, batch_axis, channel_axis)
     else:
       cov = _cov(x, x, diagonal_spatial, batch_axis, channel_axis)
 
