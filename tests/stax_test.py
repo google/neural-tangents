@@ -985,7 +985,7 @@ class NumericalActivationTest(test_utils.NeuralTangentsTestCase):
     analytic_kernel = kernel_fn(X0_1, X0_2, get)
 
     _, _, kernel_fn = stax.serial(
-        *[affine, stax._NumericalActivation(fn, deg=deg)]*depth, readout)
+        *[affine, stax.NumericalActivation(fn, deg=deg)]*depth, readout)
     numerical_activation_kernel = kernel_fn(X0_1, X0_2, get)
 
     test_utils.assert_close_matrices(self, analytic_kernel,

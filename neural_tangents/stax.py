@@ -1521,11 +1521,11 @@ def Abs(do_backprop: bool = False, do_stabilize: bool = False) -> InternalLayer:
 
 @layer
 @_supports_masking(remask_kernel=True)
-def _NumericalActivation(fn: Callable[[float], float],
-                         deg: int,
-                         df: Callable[[float], float] = None,
-                         do_backprop: bool = False) -> InternalLayer:
-  """Activation function using numerical integegration.
+def NumericalActivation(fn: Callable[[float], float],
+                        deg: int,
+                        df: Callable[[float], float] = None,
+                        do_backprop: bool = False) -> InternalLayer:
+  """Activation function using numerical integration.
 
   Supports general activation functions using Gauss-Hermite quadrature.
 
@@ -1555,7 +1555,7 @@ def _NumericalActivation(fn: Callable[[float], float],
   quad_points = osp.special.roots_hermite(deg)
   if df is None:
     df = np.vectorize(grad(fn))
-  return _elementwise(fn, f'_NumericalActivation({fn},deg={deg})', df=df,
+  return _elementwise(fn, f'NumericalActivation({fn},deg={deg})', df=df,
                       quad_points=quad_points, do_backprop=do_backprop)
 
 
