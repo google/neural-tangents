@@ -28,7 +28,6 @@ that closed-form kernels currently only support a single `channel_axis`).
 
 
 import collections
-from jax import lax
 from jax.api import grad
 from jax.experimental import ode
 import jax.numpy as np
@@ -37,7 +36,7 @@ from jax.tree_util import tree_map
 from neural_tangents.utils import utils, dataclasses
 import scipy as osp
 from neural_tangents.utils.typing import KernelFn, Axes, Get
-from typing import Union, Tuple, Callable, Iterable, Optional, Dict
+from typing import Union, Tuple, Callable, Iterable, Optional, Dict, NamedTuple
 from functools import lru_cache
 
 
@@ -197,7 +196,6 @@ def gradient_descent_mse(
         return fx_train_t
       return fx_test_t
 
-
     return predict_fn_finite
 
   def predict_fn(
@@ -249,6 +247,7 @@ def gradient_descent_mse(
 
 @dataclasses.dataclass
 class ODEState:
+  """ODE state dataclass holding outputs and auxiliary variables."""
   fx_train: np.ndarray = None
   fx_test: np.ndarray = None
   qx_train: np.ndarray = None
@@ -456,7 +455,6 @@ def gradient_descent(
     # ODE solver requires `t[0]` to be the time where `fx_train_0` [and
     # `fx_test_0`] are evaluated, but also a strictly increasing sequence of
     # timesteps, so we always temporarily append an [almost] `0` at the start.
-    identity = lambda x: x
     t0 = np.where(t[0] == 0,
                   np.full((1,), -1e-24, t.dtype),
                   np.zeros((1,), t.dtype))
@@ -488,7 +486,10 @@ def gradient_descent(
   return predict_fn
 
 
-Gaussian = collections.namedtuple('Gaussian', 'mean covariance')
+class Gaussian(NamedTuple):
+  """A `(mean, covariance)` convenience namedtuple."""
+  mean: np.ndarray
+  covariance: np.ndarray
 
 
 def gp_inference(
