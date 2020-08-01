@@ -28,6 +28,7 @@ that closed-form kernels currently only support a single `channel_axis`).
 
 
 import collections
+import jax
 from jax.api import grad
 from jax.experimental import ode
 import jax.numpy as np
@@ -137,7 +138,8 @@ def gradient_descent_mse(
 
   @lru_cache(1)
   def get_predict_fn_inf():
-    solve = _get_cho_solve(k_train_train, diag_reg, diag_reg_absolute_scale)
+    with jax.core.eval_context():
+      solve = _get_cho_solve(k_train_train, diag_reg, diag_reg_absolute_scale)
 
     def predict_fn_inf(fx_train_0, fx_test_0, k_test_train):
       fx_train_t = y_train.astype(k_train_train.dtype)
@@ -158,13 +160,14 @@ def gradient_descent_mse(
 
   @lru_cache(1)
   def get_predict_fn_finite():
-    expm1_fn, inv_expm1_fn = _get_fns_in_eigenbasis(
-        k_train_train,
-        diag_reg,
-        diag_reg_absolute_scale,
-        (_make_expm1_fn(y_train.size),
-         _make_inv_expm1_fn(y_train.size))
-    )
+    with jax.core.eval_context():
+      expm1_fn, inv_expm1_fn = _get_fns_in_eigenbasis(
+          k_train_train,
+          diag_reg,
+          diag_reg_absolute_scale,
+          (_make_expm1_fn(y_train.size),
+          _make_inv_expm1_fn(y_train.size))
+      )
 
     rhs_shape = tuple(y_train.shape[a] for a in trace_axes)
 
