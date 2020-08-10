@@ -26,7 +26,7 @@ with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
 
 
 INSTALL_REQUIRES = [
-    'jaxlib>=0.1.58',
+    'jaxlib>=0.1.47',
     'jax>=0.1.55',
     'frozendict',
     'dataclasses',
