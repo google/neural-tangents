@@ -26,11 +26,15 @@ from jax import test_util as jtu
 from jax.config import config as jax_config
 from jax.lib import xla_bridge
 import jax.numpy as np
+import numpy as onp
 import jax.random as random
 from neural_tangents import stax
 from neural_tangents.utils import monte_carlo
 from neural_tangents.utils import test_utils
+from absl.testing import absltest
 
+from jax import disable_jit
+disable_jit()
 
 jax_config.parse_flags_with_absl()
 
@@ -42,7 +46,7 @@ MODELS = [
 
 BATCH_SIZE = 2
 
-INPUT_SHAPE = (BATCH_SIZE, 7, 6, 3)
+INPUT_SHAPE = (BATCH_SIZE, 7, 6, 16)
 
 WIDTHS = [2**11]
 
@@ -86,7 +90,8 @@ LAYER_NORM = [
     'NC',
     'NWC',
     'NCHW',
-    'N'
+    'N',
+    'NHW'
 ]
 
 POOL_TYPES = [
@@ -114,6 +119,7 @@ def _get_inputs(key, is_conv, same_inputs, input_shape, new_batch_size=None, fn=
     shape2 = shape[:batch_axis] + (2 * new_batch_size,) + shape[batch_axis + 1:]
   x1 = fn(random.normal(key, shape1))
   x2 = None if same_inputs else 2 * fn(random.normal(split, shape2))
+  print(shape1, shape2)
   return x1, x2
 
 
@@ -173,7 +179,7 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
   )
   affine = conv(width) if is_conv else fc(width)
 
-  rate = np.onp.random.uniform(0.5, 0.9)
+  rate = onp.random.uniform(0.5, 0.9)
   dropout = stax.Dropout(rate, mode='train')
 
   if pool_type == 'AVG':
@@ -196,8 +202,8 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
   dropout_or_identity = dropout if use_dropout else stax.Identity()
   if layer_norm is None:
     norm_phi = phi
-  elif layer_norm == (batch_axis,):
-    norm_phi = stax.BatchNormRelu(batch_axis)
+  elif channel_axis not in layer_norm:
+    norm_phi = stax.BatchNormRelu(layer_norm, channel_axis=channel_axis)
   else:
     norm_phi = stax.serial(
                 stax.LayerNorm(axis=layer_norm,
@@ -450,10 +456,11 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     is_conv = 'conv' in model
     # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
     if is_conv:
-      if xla_bridge.get_backend().platform == 'cpu':
-        raise jtu.SkipTest('Not running CNN models on CPU to save time.')
-      if layer_norm == 'N':
-        raise jtu.SkipTest('Skipping batchnorm test for convolutional networks.')
+      pass
+      # if xla_bridge.get_backend().platform == 'cpu':
+      #   raise jtu.SkipTest('Not running CNN models on CPU to save time.')
+      # if layer_norm == 'N':
+      #   raise jtu.SkipTest('Skipping batchnorm test for convolutional networks.')
     elif proj_into_2d != PROJECTIONS[0] or layer_norm not in ('C', 'NC', 'N'):
       raise jtu.SkipTest('FC models do not have these parameters.')
 
@@ -670,11 +677,11 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     samples = N_SAMPLES
 
     if xla_bridge.get_backend().platform == 'gpu':
-      jtu._default_tolerance[np.onp.dtype(np.onp.float64)] = 5e-4
+      jtu._default_tolerance[onp.dtype(onp.float64)] = 5e-4
       samples = 100 * N_SAMPLES
     else:
-      jtu._default_tolerance[np.onp.dtype(np.onp.float32)] = 5e-2
-      jtu._default_tolerance[np.onp.dtype(np.onp.float64)] = 5e-3
+      jtu._default_tolerance[onp.dtype(onp.float32)] = 5e-2
+      jtu._default_tolerance[onp.dtype(onp.float64)] = 5e-3
 
     # a batch of dense inputs
     x_dense = random.normal(key, (input_count, input_size))
@@ -756,12 +763,13 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
                                       new_batch_size=None):
     (init_fn, apply_fn, kernel_fn), input_shape, device_count = net
 
+    # print(use_dropout)
     num_samples = N_SAMPLES * 5 if use_dropout else N_SAMPLES
     # num_samples *= 10 if new_batch_size is not None else 1
     key = random.PRNGKey(1)
     x1, x2 = _get_inputs(key, is_conv, same_inputs, input_shape,
                          new_batch_size=new_batch_size)
-
+    # print(np.linalg.norm(x1), np.linalg.norm(x2))
     x1_out_shape, params = init_fn(key, x1.shape)
     if same_inputs:
       assert (x2 is None)
@@ -796,7 +804,9 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
         empirical = np.reshape(_get_empirical(num_samples, 'ntk'), exact.shape)
       else:
         exact, shape1, shape2 = kernel_fn(x1, x2, ('nngp', 'shape1', 'shape2'))
+        print('getting empirical')
         empirical = _get_empirical(num_samples, 'nngp')
+        print(empirical)
       test_utils.assert_close_matrices(self, exact, empirical, rtol)
       self.assertEqual(shape1, x1_out_shape)
       self.assertEqual(shape2, x2_out_shape)
@@ -1778,4 +1788,4 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
 if __name__ == '__main__':
-  jtu.absltest.main()
+  absltest.main()
