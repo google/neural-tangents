@@ -37,29 +37,33 @@ flags.DEFINE_integer('batch_size', 0,
 FLAGS = flags.FLAGS
 
 import pdb
+from jax.experimental import callback
+from functools import partial
 
 def main(unused_argv):
   # Build data pipelines.
   print('Loading data.')
   key = random.PRNGKey(0)
   key, split = random.split(key)
-  x_train = random.normal(key=key, shape=[10, 30])
-  x_train2 = random.normal(key=split, shape=[10, 30])
+  x_train = random.normal(key=key, shape=[2, 3, 4, 5])
+  x_train2 = random.normal(key=split, shape=[1, 3, 4, 5])
 
   # Build the infinite network.
   init_fn, apply_fn, kernel_fn = stax.serial(
-      stax.Dense(1000, 2., 0.05),
-      stax.BatchNormRelu(0),
-      stax.Dense(1000, 2., 0.05)
+      stax.Conv(256, (3, 3), padding='SAME'),
+      stax.BatchNormRelu((0, 1, 2)),
+      stax.GlobalAvgPool(),
+      stax.Dense(256, 2., 0.05)
   )
-
-  mc_kernel_fn = nt.monte_carlo_kernel_fn(init_fn, apply_fn, key, 1000)
-  kerobj = kernel_fn(x_train, x_train2)
-  theory_ker = kerobj.nngp
+  # kernel_fn = callback.find_by_value(partial(kernel_fn, get='nngp'), np.nan)
+  kerobj = kernel_fn(x_train, x_train2, get='nngp')
+  theory_ker = kerobj
+  mc_kernel_fn = nt.monte_carlo_kernel_fn(init_fn, apply_fn, key, 10000)
   diff = theory_ker - mc_kernel_fn(x_train, x_train2, get='nngp')
   print(diff)
   # print(kerobj.cov1 - kerobj.nngp)
   print(np.linalg.norm(diff) / np.linalg.norm(theory_ker))
+  # 0.0032839081
   return
 
 
