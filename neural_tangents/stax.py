@@ -1349,13 +1349,26 @@ def Identity() -> InternalLayer:
   return init_fn, apply_fn, kernel_fn
 
 
+def Sigmoid_like():
+  """A sigmoid like function `f(x) = .5 * erf(x / 2.4020563531719796) + .5`.
+
+  The constant `2.4020563531719796` is chosen so that the squared loss between
+  this function the ground true sigmoid is minimized in the interval [-5, 5];
+  see https://gist.github.com/SiuMath/679e8bb4bce13d5f2383a27eca649575.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  return Erf(a=0.5, b=1/2.4020563531719796, c=0.5)
+
+
 @layer
 @_supports_masking(remask_kernel=True)
 def Erf(a: float = 1.,
         b: float = 1.,
         c: float = 0.,
         do_backprop: bool = False) -> InternalLayer:
-  """Affine transform of `Erf` nonlinearity, i.e. `a Erf(b * x) + c`.
+  """Affine transform of `Erf` nonlinearity, i.e. `a * Erf(b * x) + c`.
 
   Args:
     a: output scale.
