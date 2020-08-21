@@ -38,8 +38,6 @@ DEVICE_COUNTS = [0, 1, 2]
 
 STORE_ON_DEVICE = [True, False]
 
-N_SAMPLES = 4
-
 ALL_GET = ('nngp', 'ntk', ('nngp', 'ntk'), None)
 
 test_utils.update_test_tolerance()

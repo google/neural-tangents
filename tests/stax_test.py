@@ -940,7 +940,6 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
                           for get in ['nngp', 'ntk']
                           for gamma in [1e-6, 1e-4, 1e-2, 1.0, 2.]
                           ))
-
   def test_rbf(self, same_inputs, model, get, gamma):
     activation = stax.Rbf(gamma)
     self._test_activation(activation, same_inputs, model, get,
@@ -2138,7 +2137,7 @@ class AttentionTest(test_utils.NeuralTangentsTestCase):
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
 
-class GNTKTest(test_utils.NeuralTangentsTestCase):
+class AggregateTest(test_utils.NeuralTangentsTestCase):
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
@@ -2157,9 +2156,9 @@ class GNTKTest(test_utils.NeuralTangentsTestCase):
                           for test_mask in [True]
                           ))
 
-  def test_GNTK(self, get, readout, same_input, activation, test_mask):
+  def test_aggregate(self, get, readout, same_input, activation, test_mask):
     batch1, batch2 = 8, 6
-    num_nodes, num_channels = 8, 12
+    num_nodes, num_channels = 4, 2
     output_dims = 1 if get == 'ntk' else 1024
     key = random.PRNGKey(1)
     key, split1, split2 = random.split(key, 3)
@@ -2183,7 +2182,7 @@ class GNTKTest(test_utils.NeuralTangentsTestCase):
 
     # Build the infinite network.
     init_fn, apply_fn, kernel_fn = stax.serial(
-        stax.Dense(128*8*4),
+        stax.Dense(128*8),
         activation,
         stax.Dropout(0.5, mode='train'),
         stax.Aggregate(),
@@ -2191,7 +2190,8 @@ class GNTKTest(test_utils.NeuralTangentsTestCase):
         stax.Dense(output_dims))
     kernel_fn = batch.batch(kernel_fn, batch_size=2)
     kernel_mc_fn = monte_carlo.monte_carlo_kernel_fn(
-        init_fn, apply_fn, random.PRNGKey(10), 300)
+        init_fn, apply_fn, random.PRNGKey(10), 128,
+        batch_size=2 if xla_bridge.get_backend().platform == 'tpu' else 0)
     empirical = kernel_mc_fn(x1, x2, get,
                              mask_constant=mask_constant if test_mask else None,
                              pattern=(pattern1, pattern2))
