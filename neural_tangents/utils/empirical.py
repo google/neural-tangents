@@ -353,7 +353,7 @@ def empirical_nngp_fn(f: ApplyFn,
 
   Args:
     f:
-      the function whose NTK we are computing. `f` should have the signature
+      the function whose NNGP we are computing. `f` should have the signature
       `f(params, inputs[, rng])` and should return an `np.ndarray` outputs.
     trace_axes:
       output axes to trace the output kernel over, i.e. compute only the trace

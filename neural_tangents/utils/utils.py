@@ -109,7 +109,7 @@ def get_namedtuple(name):
         canonicalized_args[get_index] = get
       elif defaults is None:
         raise ValueError(
-            '`get_namedtuple` function must have a `get` argument provided or'
+            '`get_namedtuple` function must have a `get` argument provided or '
             'set by default.')
       else:
         get_is_not_tuple, get = canonicalize_get(defaults[get_index -
