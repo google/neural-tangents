@@ -23,8 +23,6 @@ from tensorflow.python.ops import numpy_ops as np
 import tensorflow as tf
 from tensorflow import nn
 import sys
-from tf_conv_general import conv_general_dilated
-from tf_reduce_window import reduce_window
 
 _max = builtins.max
 
