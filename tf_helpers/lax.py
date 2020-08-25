@@ -13,12 +13,6 @@
 # limitations under the License.
 # ==============================================================================
 
-"""
-This file contains TF equivalences for:
-    1. `jax.lax.conv_general_shape_tuple`
-    2. `jax.lax.conv_transpose_shape_tuple`
-    3. `jax.lax.reduce_window_shape_tuple`
-"""
 
 # from tensorflow.compiler.xla.python import xla_client
 import builtins

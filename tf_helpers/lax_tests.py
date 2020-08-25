@@ -14,11 +14,6 @@
 # ==============================================================================
 
 
-"""
-Tests for the general conv operation for TensorFlow.
-
-Zhibo Zhang, 2020.06.07
-"""
 from tensorflow import nn
 import tensorflow as tf
 import lax
