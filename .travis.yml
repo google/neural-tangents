@@ -5,10 +5,10 @@ python:
   - "3.8"
 install:
   - pip install --upgrade pip
-  - pip install pygame==2.0.0.dev6 tfp-nightly tfds-nightly numpy jaxlib jax tf-nightly matplotlib more-itertools --upgrade
+  - pip install pygame==2.0.0.dev6 tfp-nightly tfds-nightly numpy jaxlib tf-nightly matplotlib more-itertools --upgrade
   - pip install git+https://github.com/google/jax.git
   - pip install -e .
-  - cp tf_helpers/lax.py tests/
+  - cp tf_helpers/* tests/
 script:
   - set -e
   - for f in tests/*.py; do python $f; done
