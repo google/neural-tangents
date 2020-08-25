@@ -26,8 +26,8 @@ from jax import numpy as jnp
 import jax
 import sys
 
-class TFConvGeneralTest(tf.test.TestCase, parameterized.TestCase):
 
+class TFConvGeneralTest(tf.test.TestCase, parameterized.TestCase):
 
   @parameterized.parameters(
     {"lhs_np": onp.ones((5, 3)), "rhs_np": onp.ones((3, 2)),
@@ -53,7 +53,6 @@ class TFConvGeneralTest(tf.test.TestCase, parameterized.TestCase):
     ans = jax.lax.dot_general(lhs_np, rhs_np, dims)
     result = lax.dot_general(lhs_np, rhs_np, dims)
     self.assertAllClose(result, tfnp.array(ans))
-
 
   @parameterized.named_parameters([
       ("_lhs_shape={}_rhs_shape={}_strides={}_padding={}"
