@@ -100,19 +100,20 @@ class NeuralTangentsTestCase(jtu.JaxTestCase):
       atol=None,
       rtol=None,
       canonicalize_dtypes=True):
-    if isinstance(x, Kernel):
-      self.assertIsInstance(y, Kernel)
-      x_dict = dataclasses.asdict(x)
-      y_dict = dataclasses.asdict(y)
-      for field in dataclasses.fields(Kernel):
-        is_pytree_node = field.metadata.get('pytree_node', True)
-        if is_pytree_node:
-          super().assertAllClose(
-              x_dict[field.name], y_dict[field.name], check_dtypes=check_dtypes,
-              atol=atol, rtol=rtol, canonicalize_dtypes=canonicalize_dtypes)
-        else:
-          self.assertEqual(x_dict[field.name], y_dict[field.name])
-    else:
-      return super().assertAllClose(
+    def assert_close(x, y):
+      super(NeuralTangentsTestCase, self).assertAllClose(
           x, y, check_dtypes=check_dtypes, atol=atol, rtol=rtol,
           canonicalize_dtypes=canonicalize_dtypes)
+
+    if isinstance(x, Kernel):
+      self.assertIsInstance(y, Kernel)
+      for field in dataclasses.fields(Kernel):
+        name = field.name
+        x_name, y_name = getattr(x, name), getattr(y, name)
+        is_pytree_node = field.metadata.get('pytree_node', True)
+        if is_pytree_node:
+          assert_close(x_name, y_name)
+        else:
+          self.assertEqual(x_name, y_name)
+    else:
+      assert_close(x, y)

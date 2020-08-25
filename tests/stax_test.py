@@ -1554,44 +1554,47 @@ class ConvNDTest(test_utils.NeuralTangentsTestCase):
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
 
-class DiagonalBatchTest(test_utils.NeuralTangentsTestCase):
+@jtu.parameterized.named_parameters(
+    jtu.cases_from_list(
+        {
+            'testcase_name':
+              ' [{}_out={}_in={}]'.format(
+                  'same_inputs' if same_inputs else 'different_inputs',
+                  readout[0].__name__,
+                  readin[0].__name__
+              ),
+            'same_inputs':
+              same_inputs,
+            'readout':
+              readout,
+            'readin':
+              readin
+        }
+        for same_inputs in [False, True]
+        for readout in [stax.Flatten(),
+                        stax.GlobalAvgPool(),
+                        stax.Identity()]
+        for readin in [stax.Flatten(),
+                       stax.GlobalAvgPool(),
+                       stax.Identity()]))
+class DiagonalTest(test_utils.NeuralTangentsTestCase):
 
-  @jtu.parameterized.named_parameters(
-      jtu.cases_from_list(
-          {
-              'testcase_name':
-                  ' [{}_{}]'.format(
-                      'same_inputs' if same_inputs else 'different_inputs',
-                      readout[0].__name__),
-              'same_inputs':
-                  same_inputs,
-              'readout':
-                  readout
-          }
-          for same_inputs in [False]
-          for readout in [stax.Flatten(),
-                          stax.GlobalAvgPool(),
-                          stax.Identity()]))
-  def test_diagonal_batch(self, same_inputs, readout):
+  def _get_kernel_fn(self, same_inputs, readin, readout):
     key = random.PRNGKey(1)
     x1 = random.normal(key, (2, 5, 6, 3))
     x2 = None if same_inputs else random.normal(key, (3, 5, 6, 3))
-
-    if readout[0].__name__ == 'Identity':
-      layers = [stax.Flatten()]
-      filter_shape = ()
-    else:
-      layers = []
-      filter_shape = (2, 3)
-
+    layers = [readin]
+    filter_shape = (2, 3) if readin[0].__name__ == 'Identity' else ()
     layers += [stax.Conv(1, filter_shape, padding='SAME'),
                stax.Relu(),
                stax.Conv(1, filter_shape, padding='SAME'),
                stax.Erf(),
                readout]
-
     _, _, kernel_fn = stax.serial(*layers)
+    return kernel_fn, x1, x2
 
+  def test_diagonal_batch(self, same_inputs, readin, readout):
+    kernel_fn, x1, x2 = self._get_kernel_fn(same_inputs, readin, readout)
     K = kernel_fn(x1, x2)
     K_full = kernel_fn(x1, x2, diagonal_batch=False)
 
@@ -1605,6 +1608,30 @@ class DiagonalBatchTest(test_utils.NeuralTangentsTestCase):
     K_full = K_full.replace(cov1=K.cov1, cov2=K.cov2,
                             diagonal_batch=K.diagonal_batch)
     self.assertAllClose(K_full, K)
+
+  def test_diagonal_spatial(self, same_inputs, readin, readout):
+    kernel_fn, x1, x2 = self._get_kernel_fn(same_inputs, readin, readout)
+    K = kernel_fn(x1, x2)
+    K_full = kernel_fn(x1, x2, diagonal_spatial=False)
+    batch_shape = x1.shape[0], (x1 if x2 is None else x2).shape[0]
+    names = readout[0].__name__, readin[0].__name__
+
+    if 'GlobalAvgPool' in names:
+      self.assertRaises(ValueError, kernel_fn, x1, x2, diagonal_spatial=True)
+      self.assertEqual(K_full.nngp.shape, batch_shape)
+      self.assertAllClose(K_full, K)
+
+    else:
+      K_diag = kernel_fn(x1, x2, diagonal_spatial=True)
+      if 'Flatten' in names:
+        self.assertEqual(K_diag.nngp.shape, batch_shape)
+        self.assertAllClose(K_diag, K)
+        self.assertAllClose(K_diag, K_full)
+
+      else:
+        self.assertEqual(K_diag.nngp.shape, batch_shape + x1.shape[1:-1])
+        self.assertAllClose(K_full, K)
+        self.assertAllClose(K_diag.nngp, np.einsum('...iijj->...ij', K.nngp))
 
 
 @jtu.parameterized.parameters([

@@ -2614,7 +2614,7 @@ def _fuse_reqs(kernel_fn_reqs, default_reqs, **user_reqs):
                            f'`{req} == {v}`, while `kernel_fn` '
                            f'requires `{req} == {kernel_fn_reqs[req]}`.')
 
-        kernel_fn_reqs[req] |= v
+        kernel_fn_reqs[req] &= v
 
       else:
         kernel_fn_reqs[req] = v
