@@ -14,9 +14,8 @@
 # ==============================================================================
 
 
-# from tensorflow.compiler.xla.python import xla_client
 import builtins
-from typing import (NamedTuple, Sequence)
+from typing import NamedTuple, Sequence
 import string
 import numpy as onp
 from tensorflow.python.ops import numpy_ops as np
@@ -26,8 +25,6 @@ import sys
 
 _max = builtins.max
 
-
-#---------------------------------main APIs------------------------------------#
 
 def conv_shape_tuple(lhs_shape, rhs_shape, strides, pads, batch_group_count=1):
   """Compute the shape tuple of a conv given input shapes in canonical order."""
@@ -143,8 +140,6 @@ def padtype_to_pads(in_shape, window_shape, window_strides, padding):
     return [(0, 0)] * len(in_shape)
 
 
-# helper function: 1. conv_general_permutations
-#                  2. conv_shape_tuple
 def conv_general_shape_tuple(lhs_shape, rhs_shape, window_strides, padding,
                              dimension_numbers):
   lhs_perm, rhs_perm, out_perm = conv_general_permutations(dimension_numbers)
@@ -154,8 +149,6 @@ def conv_general_shape_tuple(lhs_shape, rhs_shape, window_strides, padding,
   return tuple(onp.take(out_trans, onp.argsort(out_perm)))
 
 
-# helper function: 1. conv_general_permutations
-#                  2. _conv_transpose_padding
 def conv_transpose_shape_tuple(lhs_shape, rhs_shape, window_strides, padding,
                                dimension_numbers):
   lhs_perm, rhs_perm, out_perm = conv_general_permutations(dimension_numbers)
@@ -174,7 +167,6 @@ def conv_transpose_shape_tuple(lhs_shape, rhs_shape, window_strides, padding,
   return tuple(onp.take(out_trans, onp.argsort(out_perm)))
 
 
-# helper function: 1. padtype_to_pads
 def reduce_window_shape_tuple(operand_shape, window_dimensions, window_strides,
                               padding):
   window_dimensions = (1,) + window_dimensions + (1,)
@@ -186,9 +178,6 @@ def reduce_window_shape_tuple(operand_shape, window_dimensions, window_strides,
   return tuple(t)
 
 
-# helper function: 1. conv_dimension_numbers
-#                  2. _conv_transpose_padding
-#                  3. conv_general_dilated
 def conv_transpose(lhs, rhs, strides, padding,
                    rhs_dilation=None, dimension_numbers=None,
                    transpose_kernel=False, precision=None):
@@ -250,8 +239,6 @@ def conv_transpose(lhs, rhs, strides, padding,
     # flip spatial dims and swap input / output channel axes
     rhs = _flip_axes(rhs, onp.array(dn.rhs_spec)[2:])
     rhs = onp.swapaxes(rhs, dn.rhs_spec[0], dn.rhs_spec[1])
-  # return conv_general_dilated(lhs, rhs, one, pads, strides, rhs_dilation, dn,
-  #                             precision=precision)
   return conv_general_dilated(lhs, rhs, one, pads, strides, rhs_dilation, dn)
 
 
@@ -321,11 +308,6 @@ def reduce_window(inputs, init_value, reducer, window_dimensions, strides,
   # input shape is already finished in apply_fun of Pooling in stax.
   pooling = "AVG" if reducer == np.add else "MAX"
   output = nn.pool(inputs, window_dimensions, pooling, strides, padding)
-  # if pooling_type in ["MAX", "AVG"]:
-  #   return output
-  # If it is sum pooling, mutiply the output by the number of grids inside a
-  # window.
-  # grids = onp.prod(list(window_dimensions))
   return np.asarray(output)
 
 
@@ -376,7 +358,7 @@ def conv_general_dilated(lhs, rhs, window_strides, padding, output_shape, lhs_di
     dim_maps['O'] = rhs_spec[0]
     dim_maps['N'] = lhs_spec[0]
     dim_maps['C'] = lhs_spec[1]
-  # data_format, lhs = conv_dim_translator(lhs, lhs_spec, dim)
+
   lhs = np.moveaxis(lhs, (dim_maps['N'], dim_maps['C']), (0, dim + 1))
   # Adjust the filters, put the dimension 'I' and 'O' at last.
   rhs = np.moveaxis(rhs, (dim_maps['O'], dim_maps['I']), (dim + 1, dim))
@@ -391,13 +373,10 @@ def conv_general_dilated(lhs, rhs, window_strides, padding, output_shape, lhs_di
   if rhs_dilation or (lhs_dilation is None and rhs_dilation is None):
     output = tf_nn_APIs[dim][0](lhs, rhs, strides, padding, data_format, rhs_dilation)
   else:
-    # output_shape = _eval_output_shape(lhs.shape, rhs.shape, padding, window_strides)
     output = tf_nn_APIs[dim][1](lhs, rhs, tf.constant(output_shape), strides, padding, data_format, lhs_dilation)
   output = np.moveaxis(output, (0, dim + 1), (dim_maps['N'], dim_maps['C']))
   return np.asarray(output)
 
-
-#-------------------------------private methods------------------------------#
 
 def _ceil_divide(x1, x2):
   return -onp.floor_divide(onp.negative(x1), x2)
