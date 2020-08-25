@@ -23,8 +23,11 @@ This file contains TF equivalences for:
 # from tensorflow.compiler.xla.python import xla_client
 import builtins
 from typing import (NamedTuple, Sequence)
+import string
 import numpy as onp
+from tensorflow.python.ops import numpy_ops as np
 import tensorflow as tf
+from tensorflow import nn
 import sys
 from tf_conv_general import conv_general_dilated
 from tf_reduce_window import reduce_window
@@ -260,7 +263,7 @@ def conv_transpose(lhs, rhs, strides, padding,
   return conv_general_dilated(lhs, rhs, one, pads, strides, rhs_dilation, dn)
 
 
-def tf_dot_general(lhs, rhs, dimension_numbers, precision=None):
+def dot_general(lhs, rhs, dimension_numbers, precision=None):
   """ The general dot operation for TensorFlow.
 
   An equivalent general dot operation as that in JAX -
@@ -317,26 +320,28 @@ def tf_dot_general(lhs, rhs, dimension_numbers, precision=None):
 
 
 def reduce_window(inputs, init_value, reducer, window_dimensions, strides,
-                  padding):
+                  padding, base_dilation=None, window_dilation=None):
   if reducer not in [np.max, np.add]:
     raise TypeError("Only max pooling and average/sum pooling are supported.")
 
   # Note that there is no need to send in the parameter data format since the
   # input is already of default data format - "N...C". The adjustments of the
   # input shape is already finished in apply_fun of Pooling in stax.
-  pooling = "AVG" if pooling_type == "SUM" else pooling_type
-  output = pool(inputs, window_dimensions, pooling, strides, padding)
-  if pooling_type in ["MAX", "AVG"]:
-    return output
+  pooling = "AVG" if reducer == np.add else "MAX"
+  output = nn.pool(inputs, window_dimensions, pooling, strides, padding)
+  # if pooling_type in ["MAX", "AVG"]:
+  #   return output
   # If it is sum pooling, mutiply the output by the number of grids inside a
   # window.
   # grids = onp.prod(list(window_dimensions))
   return np.asarray(output)
 
 
+# TOTO (Zhibo Zhang): Expand the test cases of general convolution and revise
+#                     the according bugs.
 # TODO (Zhibo Zhang): Support feature_group_count, batch_group_count and precision, and
 #       allow lhs_dilation and rhs_dilation to happen at the same time.
-def conv_general_dilated(lhs, rhs, window_strides, padding, lhs_dilation=None,
+def conv_general_dilated(lhs, rhs, window_strides, padding, output_shape, lhs_dilation=None,
                          rhs_dilation=None, dimension_numbers=None,
                          feature_group_count=1, batch_group_count=1, precision=None):
   """ A general conv API that integrates normal conv, deconvolution,
@@ -345,7 +350,7 @@ def conv_general_dilated(lhs, rhs, window_strides, padding, lhs_dilation=None,
   dim = None
   lhs_spec, rhs_spec, out_spec = dimension_numbers
   if lhs_spec != out_spec:
-    raise TypeError("Current implementation requires the `data_format` of the"
+    raise TypeError("Current implementation requires the `data_format` of the "
                     "inputs and outputs to be the same.")
   if len(lhs_spec) >= 6:
     raise TypeError("Current implmentation does not support 4 or higher"
@@ -394,8 +399,8 @@ def conv_general_dilated(lhs, rhs, window_strides, padding, lhs_dilation=None,
   if rhs_dilation or (lhs_dilation is None and rhs_dilation is None):
     output = tf_nn_APIs[dim][0](lhs, rhs, strides, padding, data_format, rhs_dilation)
   else:
-    output_shape = _eval_output_shape(lhs.shape, rhs.shape, padding, window_strides)
-    output = tf_nn_APIs[dim][1](lhs, rhs, output_shape, strides, padding, data_format, lhs_dilation)
+    # output_shape = _eval_output_shape(lhs.shape, rhs.shape, padding, window_strides)
+    output = tf_nn_APIs[dim][1](lhs, rhs, tf.constant(output_shape), strides, padding, data_format, lhs_dilation)
   output = np.moveaxis(output, (0, dim + 1), (dim_maps['N'], dim_maps['C']))
   return np.asarray(output)
 
@@ -499,6 +504,10 @@ def _eval_output_shape(lhs_shape, rhs_shape, padding, window_strides):
   """
   output_shape = [lhs_shape[0]]
   for i in range(1, len(lhs_shape) - 1):
-    output_shape.append((lhs_shape[i] - 1) * window_strides[i-1] + rhs_shape[i])
+    if padding == "SAME":
+      output_shape.append((lhs_shape[i] - 1) * window_strides[i-1] + rhs_shape[i])
+    if padding == "VALID":
+      output_shape.append((lhs_shape[i] - 1) * window_strides[i-1])
   output_shape.append(lhs_shape[-1])
+  print("output shape: {}".format(output_shape))
   return tf.constant(output_shape)
