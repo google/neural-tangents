@@ -1,3 +1,4 @@
+
 language: python
 python:
   - "3.6"
@@ -5,10 +6,9 @@ python:
   - "3.8"
 install:
   - pip install --upgrade pip
-  - pip install pygame==2.0.0.dev6 tfp-nightly tfds-nightly numpy jaxlib tf-nightly matplotlib more-itertools --upgrade
+  - pip install numpy jaxlib tensorflow tensorflow-datasets --upgrade
   - pip install git+https://github.com/google/jax.git
   - pip install -e .
-  - cp tf_helpers/* tests/
 script:
   - set -e
   - for f in tests/*.py; do python $f; done
