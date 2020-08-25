@@ -281,7 +281,8 @@ def dot_general(lhs, rhs, dimension_numbers, precision=None):
                      len(lhs_batch), len(rhs_batch)))
 
   if len(lhs_batch) == 0 and len(rhs_batch) == 0:
-    return _non_batched_matmul(lhs, rhs, lhs_contraction, rhs_contraction)
+    return np.asarray(
+      tf.tensordot(lhs, rhs, axes=(list(lhs_contraction), list(rhs_contraction))))
 
   if (lhs_rank == rhs_rank == 3 and lhs_batch == (0,) and rhs_batch == (0,)
       and lhs_contraction == (2,) and rhs_contraction == (1,)):
@@ -430,25 +431,6 @@ def _compose_output_rep(lhs_rep, rhs_rep, lhs_contraction, rhs_contraction,
   for i in _minus(range(len(rhs_rep)), rhs_batch + rhs_contraction):
     output_rep.append(rhs_rep[i])
   return ''.join(output_rep)
-
-
-def _non_batched_matmul(lhs, rhs, lhs_contraction, rhs_contraction):
-  """ Compute the non-batched matrix multiplication.
-
-  If it is the general non-batched/single-batched matrix multiplication,
-  use the highly optimized kernel `tf.tensordot` to handle it.
-
-  Args:
-    lhs: an array (the left-hand side matrix/vector to be multiplied)
-    rhs: an array (the right-hand side matrix/vector to be multiplied)
-    lhs_contraction: Sequence[int] (the contraction dimensions of lhs)
-    rhs_contraction: Sequence[int] (the contraction dimensions of rhs)
-
-  Returns:
-    An array that contains the result.
-  """
-  return np.asarray(
-    tf.tensordot(lhs, rhs, axes=(list(lhs_contraction), list(rhs_contraction))))
 
 
 def _conv_general_param_type_converter(window_strides, lhs_dilation, rhs_dilation):
