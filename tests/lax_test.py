@@ -16,7 +16,7 @@
 
 from tensorflow import nn
 import tensorflow as tf
-import tf_helpers import lax
+from tf_helpers import lax
 from tensorflow.python.platform import test
 from absl.testing import parameterized
 import itertools

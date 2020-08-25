@@ -384,7 +384,6 @@ def _ceil_divide(x1, x2):
 
 
 def _conv_transpose_padding(k, s, padding):
-
   if padding == 'SAME':
     pad_len = k + s - 2
     if s > k - 1:
