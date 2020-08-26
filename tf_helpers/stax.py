@@ -128,6 +128,11 @@ def _pooling_layer(reducer, init_val, rescaler=None):
       batch_dim, channel_dim = 0, len(window_shape) + 1
     else:
       batch_dim, channel_dim = spec.index('N'), spec.index('C')
+
+    for i in (batch_dim, channel_dim):
+      window_shape = window_shape[:i] + (1,) + window_shape[i:]
+      strides = strides[:i] + (1,) + strides[i:]
+      
     window_shape = window_shape
     strides = strides
 
