@@ -1388,7 +1388,7 @@ def Erf(a: float = 1.,
 
 
 @layer
-@_supports_masking(remask_kernel=True)
+@_supports_masking(remask_kernel=False)
 def Gelu(do_backprop: bool = False) -> InternalLayer:
   """Gelu function.
 
@@ -1441,7 +1441,7 @@ def Rbf(gamma: float = 1.0) -> InternalLayer:
 
 
 @layer
-@_supports_masking(remask_kernel=True)
+@_supports_masking(remask_kernel=False)
 def Relu(
     do_backprop: bool = False,
     do_stabilize: bool = False) -> InternalLayer:
@@ -1463,7 +1463,7 @@ def Relu(
 
 
 @layer
-@_supports_masking(remask_kernel=True)
+@_supports_masking(remask_kernel=False)
 def ABRelu(
     a: float,
     b: float,
@@ -1489,7 +1489,7 @@ def ABRelu(
 
 
 @layer
-@_supports_masking(remask_kernel=True)
+@_supports_masking(remask_kernel=False)
 def LeakyRelu(
     alpha: float,
     do_backprop: bool = False,
@@ -1513,7 +1513,7 @@ def LeakyRelu(
 
 
 @layer
-@_supports_masking(remask_kernel=True)
+@_supports_masking(remask_kernel=False)
 def Abs(do_backprop: bool = False, do_stabilize: bool = False) -> InternalLayer:
   """Absolute value nonlinearity.
 
