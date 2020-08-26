@@ -37,7 +37,7 @@ from jax.tree_util import tree_map
 from neural_tangents.utils import utils, dataclasses
 import scipy as osp
 from neural_tangents.utils.typing import KernelFn, Axes, Get
-from typing import Union, Tuple, Callable, Iterable, Optional, Dict, NamedTuple
+from typing import Union, Tuple, Callable, Iterable, Optional, Dict, NamedTuple, Generator
 from functools import lru_cache
 
 
@@ -166,7 +166,7 @@ def gradient_descent_mse(
           diag_reg,
           diag_reg_absolute_scale,
           (_make_expm1_fn(y_train.size),
-          _make_inv_expm1_fn(y_train.size))
+           _make_inv_expm1_fn(y_train.size))
       )
 
     rhs_shape = tuple(y_train.shape[a] for a in trace_axes)
@@ -990,10 +990,12 @@ def _get_dependency(get: Get, compute_cov: bool) -> Tuple[str, ...]:
   return get_dependency
 
 
-def _get_fns_in_eigenbasis(k_train_train: np.ndarray,
-                           diag_reg: float,
-                           diag_reg_absolute_scale: bool,
-                           fns: Iterable[Callable]) -> Iterable[Callable]:
+def _get_fns_in_eigenbasis(
+    k_train_train: np.ndarray,
+    diag_reg: float,
+    diag_reg_absolute_scale: bool,
+    fns: Iterable[Callable[[np.ndarray, np.ndarray], np.ndarray]]
+    ) -> Generator[Callable[[np.ndarray, np.ndarray], np.ndarray], None, None]:
   """Build functions of a matrix in its eigenbasis.
 
   Args:
