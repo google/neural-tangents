@@ -148,13 +148,9 @@ def _pooling_layer(reducer, init_val, rescaler=None):
                                                 strides, padding)
       return tfnp.zeros(out_shape), ()
     def apply_fun(params, inputs, **kwargs):
-      inputs = np.moveaxis(inputs, (batch_dim, channel_dim), \
-                          (0, dim + 1))
       output = lax.reduce_window(inputs, init_val, reducer, window_shape,
                               strides, padding)
       return rescale(out, inputs, spec) if rescale else out
-      # return output
-      return tfnp.array(output)
     return init_fun, apply_fun
   return PoolingLayer
 MaxPool = _pooling_layer(tfnp.max, -tfnp.inf)
