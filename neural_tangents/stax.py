@@ -72,6 +72,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 import warnings
 
 import frozendict
+import jax
 from jax import lax
 from jax import linear_util as lu
 from jax import numpy as np
@@ -1753,11 +1754,12 @@ def GlobalSelfAttention(
 
   @functools.lru_cache(1)
   def get_pos_emb_L(spatial_shape):
-    size = utils.size_at(spatial_shape)
-    R = _pos_emb_pdist(spatial_shape, pos_emb_p_norm, pos_emb_decay_fn)
-    R = utils.unzip_axes(R)
-    L = np.linalg.cholesky(np.reshape(R, (size,) * 2)).reshape(R.shape)
-    return L
+    with jax.core.eval_context():
+      size = utils.size_at(spatial_shape)
+      R = _pos_emb_pdist(spatial_shape, pos_emb_p_norm, pos_emb_decay_fn)
+      R = utils.unzip_axes(R)
+      L = np.linalg.cholesky(np.reshape(R, (size,) * 2)).reshape(R.shape)
+      return L
 
   def init_fn(rng, input_shape):
     _channel_axis = channel_axis % len(input_shape)
@@ -3919,7 +3921,6 @@ def _pool_mask(
 # POSITIONAL EMBEDDINGS
 
 
-@functools.lru_cache()
 def _pos_emb_identity(shape: Tuple[int, ...]) -> np.ndarray:
   size = utils.size_at(shape)
   R = np.eye(size).reshape(shape * 2)
@@ -3927,7 +3928,6 @@ def _pos_emb_identity(shape: Tuple[int, ...]) -> np.ndarray:
   return R
 
 
-@functools.lru_cache()
 def _pos_emb_pdist(shape: Tuple[int, ...],
                    pos_emb_p_norm: Optional[float],
                    pos_emb_decay_fn: Optional[Callable[[float], float]]
