@@ -300,6 +300,9 @@ def dot_general(lhs, rhs, dimension_numbers, precision=None):
 
 def reduce_window(inputs, init_value, reducer, window_dimensions, strides,
                   padding, base_dilation=None, window_dilation=None):
+  # Add an extra "batch" dimension and an extra "channel" dimension to pass the
+  # TensorFlow pool dimensionality checker.
+  inputs = np.expand_dims(inputs, axis=(0, inputs.ndim))
   if reducer not in [np.max, np.add]:
     raise TypeError("Only max pooling and average/sum pooling are supported.")
 
