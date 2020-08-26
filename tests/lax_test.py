@@ -14,7 +14,6 @@
 # ==============================================================================
 
 
-from tensorflow import nn
 import tensorflow as tf
 from tf_helpers import lax
 from tensorflow.python.platform import test
