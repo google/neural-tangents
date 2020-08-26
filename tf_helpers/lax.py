@@ -339,7 +339,6 @@ def conv_general_dilated(lhs, rhs, window_strides, padding, output_shape, lhs_di
                     "and dilation to be performed at the same time, but got"
                     " lhs_dilation: {}, rhs_dilation: {}".format(lhs_dilation,
                     rhs_dilation))
-  print("the dim is: {}".format(dim))
   if padding not in ["SAME", "VALID"]:
     raise TypeError("Current implementation requires the padding parameter"
                     "to be either 'VALID' or 'SAME', but got: ", padding)
@@ -365,7 +364,6 @@ def conv_general_dilated(lhs, rhs, window_strides, padding, output_shape, lhs_di
   rhs = np.moveaxis(rhs, (dim_maps['O'], dim_maps['I']), (dim + 1, dim))
   spatial_dim_maps = {1: 'W', 2: "HW", 3: "DHW"}
   data_format = 'N' + spatial_dim_maps[dim] + 'C'
-  print("data format: {}".format(data_format))
   tf_nn_APIs = {1: [nn.conv1d, nn.conv1d_transpose],
                 2: [nn.conv2d, nn.conv2d_transpose],
                 3: [nn.conv3d, nn.conv3d_transpose]}
@@ -461,5 +459,4 @@ def _eval_output_shape(lhs_shape, rhs_shape, padding, window_strides):
     if padding == "VALID":
       output_shape.append((lhs_shape[i] - 1) * window_strides[i-1])
   output_shape.append(lhs_shape[-1])
-  print("output shape: {}".format(output_shape))
   return tf.constant(output_shape)
