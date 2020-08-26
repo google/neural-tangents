@@ -26,7 +26,7 @@ import jax
 import sys
 
 
-class TFConvGeneralTest(tf.test.TestCase, parameterized.TestCase):
+class TFLaxTest(tf.test.TestCase, parameterized.TestCase):
 
   @parameterized.parameters(
     {"lhs_np": onp.ones((5, 3)), "rhs_np": onp.ones((3, 2)),
