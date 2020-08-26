@@ -310,8 +310,8 @@ def reduce_window(inputs, init_value, reducer, window_dimensions, strides,
   # input is already of default data format - "N...C". The adjustments of the
   # input shape is already finished in apply_fun of Pooling in stax.
   pooling = "AVG" if reducer == np.add else "MAX"
-  output = nn.pool(inputs, window_dimensions, pooling, strides, padding)
-  return np.squeeze(np.asarray(output), axis=(0, output.ndim - 1))
+  output = np.asarray(nn.pool(inputs, window_dimensions, pooling, strides, padding))
+  return np.squeeze(output, axis=(0, output.ndim - 1))
 
 
 # TOTO (Zhibo Zhang): Expand the test cases of general convolution and revise
