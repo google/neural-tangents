@@ -132,7 +132,7 @@ def _pooling_layer(reducer, init_val, rescaler=None):
     for i in (batch_dim, channel_dim):
       window_shape = window_shape[:i] + (1,) + window_shape[i:]
       strides = strides[:i] + (1,) + strides[i:]
-      
+
     window_shape = window_shape
     strides = strides
 
@@ -148,7 +148,7 @@ def _pooling_layer(reducer, init_val, rescaler=None):
                                                 strides, padding)
       return tfnp.zeros(out_shape), ()
     def apply_fun(params, inputs, **kwargs):
-      inputs = onp.moveaxis(inputs, (batch_dim, channel_dim), \
+      inputs = np.moveaxis(inputs, (batch_dim, channel_dim), \
                           (0, dim + 1))
       output = lax.reduce_window(inputs, init_val, reducer, window_shape,
                               strides, padding)

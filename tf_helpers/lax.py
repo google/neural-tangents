@@ -34,11 +34,11 @@ def conv_shape_tuple(lhs_shape, rhs_shape, strides, pads, batch_group_count=1):
     msg = "Wrong number of explicit pads for convolution: expected {}, got {}."
     raise TypeError(msg.format(len(lhs_shape) - 2, len(pads)))
 
-  lhs_padded = onp.add(lhs_shape[2:], onp.sum(onp.array(pads).reshape(-1, 2),
+  lhs_padded = onp.add(lhs_shape[2:], np.sum(np.array(pads).reshape(-1, 2),
                                               axis=1))
-  out_space = onp.floor_divide(
-    onp.subtract(lhs_padded, rhs_shape[2:]), strides) + 1
-  out_space = onp.maximum(0, out_space)
+  out_space = np.floor_divide(
+    np.subtract(lhs_padded, rhs_shape[2:]), strides) + 1
+  out_space = np.maximum(0, out_space)
   assert lhs_shape[0] % batch_group_count == 0
   out_shape = (lhs_shape[0] // batch_group_count, rhs_shape[0])
   return tuple(out_shape + tuple(out_space))
@@ -132,7 +132,7 @@ def conv_dimension_numbers(lhs_shape, rhs_shape, dimension_numbers):
 def padtype_to_pads(in_shape, window_shape, window_strides, padding):
   if padding == "SAME":
     out_shape = _ceil_divide(in_shape, window_strides)
-    pad_sizes = onp.maximum(0, (out_shape - 1) * window_strides +
+    pad_sizes = np.maximum(0, (out_shape - 1) * window_strides +
                               window_shape - in_shape)
     return [(pad_size // 2, pad_size - pad_size // 2) for pad_size in pad_sizes]
   elif padding == "VALID":
@@ -142,28 +142,28 @@ def padtype_to_pads(in_shape, window_shape, window_strides, padding):
 def conv_general_shape_tuple(lhs_shape, rhs_shape, window_strides, padding,
                              dimension_numbers):
   lhs_perm, rhs_perm, out_perm = conv_general_permutations(dimension_numbers)
-  lhs_trans = onp.take(lhs_shape, lhs_perm)
-  rhs_trans = onp.take(rhs_shape, rhs_perm)
+  lhs_trans = np.take(lhs_shape, lhs_perm)
+  rhs_trans = np.take(rhs_shape, rhs_perm)
   out_trans = conv_shape_tuple(lhs_trans, rhs_trans, window_strides, padding)
-  return tuple(onp.take(out_trans, onp.argsort(out_perm)))
+  return tuple(np.take(out_trans, np.argsort(out_perm)))
 
 
 def conv_transpose_shape_tuple(lhs_shape, rhs_shape, window_strides, padding,
                                dimension_numbers):
   lhs_perm, rhs_perm, out_perm = conv_general_permutations(dimension_numbers)
-  lhs_trans = onp.take(lhs_shape, lhs_perm)
-  rhs_trans = onp.take(rhs_shape, rhs_perm)
+  lhs_trans = np.take(lhs_shape, lhs_perm)
+  rhs_trans = np.take(rhs_shape, rhs_perm)
   if isinstance(padding, str):
     padding = [_conv_transpose_padding(k, s, padding)
                for k,s in zip(rhs_trans[2:], window_strides)]
-  padding = list(map(onp.sum, padding))
+  padding = list(map(np.sum, padding))
   unpad_out_space = [(i-1) * s - k + 2
                      for i, k, s in zip(lhs_trans[2:],
                                         rhs_trans[2:],
                                         window_strides)]
-  out_space = onp.sum([unpad_out_space, padding], axis=0).tolist()
+  out_space = np.sum([unpad_out_space, padding], axis=0).tolist()
   out_trans = tuple((lhs_trans[0], rhs_trans[0]) + tuple(out_space))
-  return tuple(onp.take(out_trans, onp.argsort(out_perm)))
+  return tuple(np.take(out_trans, np.argsort(out_perm)))
 
 
 def reduce_window_shape_tuple(operand_shape, window_dimensions, window_strides,
@@ -171,9 +171,9 @@ def reduce_window_shape_tuple(operand_shape, window_dimensions, window_strides,
   window_dimensions = (1,) + window_dimensions + (1,)
   window_strides = (1,) + window_strides + (1,)
   pads = padtype_to_pads(operand_shape, window_dimensions, window_strides, padding)
-  operand_padded = onp.add(operand_shape, onp.add(*zip(*pads)))
-  t = onp.floor_divide(
-      onp.subtract(operand_padded, window_dimensions), window_strides) + 1
+  operand_padded = np.add(operand_shape, np.add(*zip(*pads)))
+  t = np.floor_divide(
+      np.subtract(operand_padded, window_dimensions), window_strides) + 1
   return tuple(t)
 
 
@@ -222,7 +222,7 @@ def conv_transpose(lhs, rhs, strides, padding,
     else:
       raise ValueError('No 4+ dimensional dimension_number defaults.')
   dn = conv_dimension_numbers(lhs.shape, rhs.shape, dimension_numbers)
-  k_shape = onp.take(rhs.shape, dn.rhs_spec)
+  k_shape = np.take(rhs.shape, dn.rhs_spec)
   k_sdims = k_shape[2:]
   # Calculate correct output shape given padding and strides.
   pads: Union[str, Sequence[Tuple[int, int]]]
@@ -236,8 +236,8 @@ def conv_transpose(lhs, rhs, strides, padding,
     pads = padding
   if transpose_kernel:
     # flip spatial dims and swap input / output channel axes
-    rhs = _flip_axes(rhs, onp.array(dn.rhs_spec)[2:])
-    rhs = onp.swapaxes(rhs, dn.rhs_spec[0], dn.rhs_spec[1])
+    rhs = _flip_axes(rhs, np.array(dn.rhs_spec)[2:])
+    rhs = np.swapaxes(rhs, dn.rhs_spec[0], dn.rhs_spec[1])
   return conv_general_dilated(lhs, rhs, one, pads, strides, rhs_dilation, dn)
 
 
@@ -379,7 +379,7 @@ def conv_general_dilated(lhs, rhs, window_strides, padding, output_shape, lhs_di
 
 
 def _ceil_divide(x1, x2):
-  return -onp.floor_divide(onp.negative(x1), x2)
+  return -np.floor_divide(np.negative(x1), x2)
 
 
 def _conv_transpose_padding(k, s, padding):
@@ -388,7 +388,7 @@ def _conv_transpose_padding(k, s, padding):
     if s > k - 1:
       pad_a = k - 1
     else:
-      pad_a = int(onp.ceil(pad_len / 2))
+      pad_a = int(np.ceil(pad_len / 2))
   elif padding == 'VALID':
     pad_len = k + s - 2 + _max(k - s, 0)
     pad_a = k - 1
