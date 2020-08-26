@@ -135,7 +135,6 @@ def padtype_to_pads(in_shape, window_shape, window_strides, padding):
     pad_sizes = onp.maximum(0, (out_shape - 1) * window_strides +
                               window_shape - in_shape)
     return [(pad_size // 2, pad_size - pad_size // 2) for pad_size in pad_sizes]
-  # elif padding == PaddingType.VALID:
   elif padding == "VALID":
     return [(0, 0)] * len(in_shape)
 
@@ -321,7 +320,6 @@ def conv_general_dilated(lhs, rhs, window_strides, padding, output_shape, lhs_di
                          feature_group_count=1, batch_group_count=1, precision=None):
   """ A general conv API that integrates normal conv, deconvolution,
   dilated convolution, etc."""
-  # raise TypeError("lhs shape: {}, rhs shape: {}".format(lhs.shape, rhs.shape))
   dim = None
   lhs_spec, rhs_spec, out_spec = dimension_numbers
   if lhs_spec != out_spec:
