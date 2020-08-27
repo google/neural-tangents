@@ -530,11 +530,11 @@ def Dense(
                     + input_shape[_channel_axis + 1:])
     rngs = random.split(rng)
     rng1, rng2 = rngs[0], rngs[1]
-    W = random.normal(seed=rng1, shape=(input_shape[_channel_axis], out_dim))
+    W = random.stateless_random_normal(seed=rng1, shape=(input_shape[_channel_axis], out_dim))
 
     b_shape = [1] * len(input_shape)
     b_shape[channel_axis] = out_dim
-    b = random.normal(seed=rng2, shape=b_shape)
+    b = random.stateless_random_normal(seed=rng2, shape=b_shape)
 
     return output_shape, (W, b)
 
@@ -760,8 +760,8 @@ def _GeneralConv(
                                      filter_shape,
                                      strides,
                                      init_padding.name,
-                                     random.normal,
-                                     random.normal)
+                                     random.stateless_random_normal,
+                                     random.stateless_random_normal)
 
   def standard_init_fn(rng, input_shape):
     output_shape, (W, b) = ntk_init_fn(rng, input_shape)
@@ -1769,7 +1769,7 @@ def GlobalSelfAttention(
     rng_Q, rng_K, rng_V, rng_O, rng_b, rng_pe = random.split(rng, 6)
     rng_Q, rng_K, rng_V, rng_O, rng_b, rng_pe = rngs[0], rngs[1], rngs[2], \
                                                 rngs[3], rngs[4], rngs[5]
-    rand = random.normal
+    rand = random.stateless_random_normal
 
     n_chan_in_keys = n_chan_in_vals = input_shape[channel_axis]
 
