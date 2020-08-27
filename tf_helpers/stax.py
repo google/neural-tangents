@@ -94,7 +94,7 @@ Conv = functools.partial(GeneralConv, ('NHWC', 'HWIO', 'NHWC'))
 
 def elementwise(fun, **fun_kwargs):
   """Layer that applies a scalar function elementwise on its inputs."""
-  init_fun = lambda rng, input_shape: input_shape, ()
+  init_fun = lambda rng, input_shape: (input_shape, ())
   apply_fun = lambda params, inputs, **kwargs: fun(inputs, **fun_kwargs)
   return init_fun, apply_fun
 Tanh = elementwise(tfnp.tanh)
@@ -183,7 +183,7 @@ Flatten = Flatten()
 
 def Identity():
   """Layer construction function for an identity layer."""
-  init_fun = lambda rng, input_shape: input_shape, ()
+  init_fun = lambda rng, input_shape: (input_shape, ())
   apply_fun = lambda params, inputs, **kwargs: inputs
   return init_fun, apply_fun
 Identity = Identity()
@@ -199,7 +199,7 @@ def FanOut(num):
 
 def FanInSum():
   """Layer construction function for a fan-in sum layer."""
-  init_fun = lambda rng, input_shape: input_shape[0], ()
+  init_fun = lambda rng, input_shape: (input_shape[0], ())
   apply_fun = lambda params, inputs, **kwargs: sum(inputs)
   return init_fun, apply_fun
 FanInSum = FanInSum()
