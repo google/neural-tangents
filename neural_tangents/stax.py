@@ -3765,7 +3765,7 @@ def _check_is_implemented(
 def _mean_and_var(
     x: Optional[np.ndarray],
     axis: Axes = None,
-    dtype: np.dtype = None,
+    dtype: np.dtypes = None,
     out: None = None,
     ddof: int = 0,
     keepdims: bool = False,
