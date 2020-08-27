@@ -43,7 +43,7 @@ from tensorflow import ones_initializer as oi
 #   apply_fun: takes params, inputs, and an rng key and applies the layer.
 
 
-def Dense(out_dim, W_init=rn, b_init=rn):
+def Dense(out_dim, W_init=random.stateless_random_normal, b_init=random.stateless_random_normal):
   """Layer constructor function for a dense (fully-connected) layer."""
   def init_fun(rng, input_shape):
     output_shape = input_shape[:-1] + (out_dim,)
@@ -63,8 +63,8 @@ def Dense(out_dim, W_init=rn, b_init=rn):
 
 
 def GeneralConv(dimension_numbers, out_chan, filter_shape,
-                strides=None, padding='VALID', W_init=rn,
-                b_init=rn):
+                strides=None, padding='VALID', W_init=random.stateless_random_normal,
+                b_init=random.stateless_random_normal):
   """Layer construction function for a general convolution layer."""
   lhs_spec, rhs_spec, out_spec = dimension_numbers
   one = (1,) * len(filter_shape)
