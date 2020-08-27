@@ -24,11 +24,13 @@ from .typing import Axes, PyTree
 from . import dataclasses
 from jax import lax
 from jax.lib import xla_bridge
-import jax.numpy as np
 from jax.tree_util import tree_all, tree_map
 from .kernel import Kernel
 import numpy as onp
 
+import tensorflow as tf
+from tensorflow.python.ops import numpy_ops as np
+from tf_helpers import lax
 
 def canonicalize_get(get):
   if get is None:
@@ -66,7 +68,27 @@ def _output_to_dict(output):
     return output
 
   if isinstance(output, Kernel):
-    return output.asdict()
+    # Avoid directly converting the Kernel object to the directionary since
+    # TF Tensor does not allow deep copy.
+    out_dict = {
+      "nngp": output.nngp,
+      "ntk": output.ntk,
+      "cov1": output.cov1,
+      "cov2": output.cov2,
+      "x1_is_x2": output.x1_is_x2,
+      "is_gaussian": output.is_gaussian,
+      "is_reversed": output.is_reversed,
+      "is_input": output.is_input,
+      "diagonal_batch": output.diagonal_batch,
+      "diagonal_spatial": output.diagonal_spatial,
+      "shape1": output.shape1,
+      "shape2": output.shape2,
+      "batch_axis": output.batch_axis,
+      "channel_axis": output.channel_axis,
+      "mask1": output.mask1,
+      "mask2": output.mask2
+    }
+    return out_dict
 
   if hasattr(output, '_asdict'):
     return output._asdict()
@@ -177,8 +199,10 @@ def canonicalize_axis(axis: Axes,
   axis = [axis] if isinstance(axis, int) else list(axis)
   if hasattr(x, 'ndim'):
     ndim = x.ndim
-  elif hasattr(x, '__len__'):
+  elif isinstance(x, tf.TensorShape) or isinstance(x, tuple):
     ndim = len(x)
+  elif hasattr(x, '__len__'):
+    ndim = len(x.shape)
   elif isinstance(x, int):
     ndim = x
   else:
@@ -363,14 +387,14 @@ def get_masked_array(x: ArrayOrList,
   elif isinstance(x, MaskedArray):
     x, mask_mat = x.astuple()
 
-  elif isinstance(x, np.ndarray):
+  elif isinstance(x, np.ndarray) or isinstance(x, onp.ndarray):
+    x = np.asarray(x)
     if mask_constant is None:
       mask_mat = None
     else:
-      mask_mat = lax.cond(np.isnan(mask_constant),
-                          lambda x: np.isnan(x),
-                          lambda x: x == mask_constant,
-                          x)
+      choice_a = lambda: np.isnan(x)
+      choice_b = lambda: x == mask_constant
+      mask_mat = tf.cond(np.isnan(mask_constant), choice_a, choice_b)
   else:
     raise TypeError(x, type(x))
 
