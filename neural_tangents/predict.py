@@ -28,11 +28,7 @@ that closed-form kernels currently only support a single `channel_axis`).
 
 
 import collections
-import jax
-from jax.api import grad
 from jax.experimental import ode
-import jax.numpy as np
-import jax.scipy as sp
 from jax.tree_util import tree_map
 from neural_tangents.utils import utils, dataclasses
 import scipy as osp
@@ -40,6 +36,9 @@ from neural_tangents.utils.typing import KernelFn, Axes, Get
 from typing import Union, Tuple, Callable, Iterable, Optional, Dict, NamedTuple
 from functools import lru_cache
 
+import tensorflow as tf
+from tensorflow.python.ops import numpy_ops as np
+from tf_helpers.extensions import grad
 
 """Alias for optional arrays or scalars."""
 ArrayOrScalar = Union[None, int, float, np.ndarray]
@@ -138,8 +137,7 @@ def gradient_descent_mse(
 
   @lru_cache(1)
   def get_predict_fn_inf():
-    with jax.core.eval_context():
-      solve = _get_cho_solve(k_train_train, diag_reg, diag_reg_absolute_scale)
+    solve = _get_cho_solve(k_train_train, diag_reg, diag_reg_absolute_scale)
 
     def predict_fn_inf(fx_train_0, fx_test_0, k_test_train):
       fx_train_t = y_train.astype(k_train_train.dtype)
@@ -160,14 +158,13 @@ def gradient_descent_mse(
 
   @lru_cache(1)
   def get_predict_fn_finite():
-    with jax.core.eval_context():
-      expm1_fn, inv_expm1_fn = _get_fns_in_eigenbasis(
-          k_train_train,
-          diag_reg,
-          diag_reg_absolute_scale,
-          (_make_expm1_fn(y_train.size),
-          _make_inv_expm1_fn(y_train.size))
-      )
+    expm1_fn, inv_expm1_fn = _get_fns_in_eigenbasis(
+        k_train_train,
+        diag_reg,
+        diag_reg_absolute_scale,
+        (_make_expm1_fn(y_train.size),
+        _make_inv_expm1_fn(y_train.size))
+    )
 
     rhs_shape = tuple(y_train.shape[a] for a in trace_axes)
 
@@ -765,7 +762,7 @@ def gradient_descent_mse_ensemble(
     k_dd = getattr(get_k_train_train((get,)), get)
     k_dd = _add_diagonal_regularizer(utils.make_2d(k_dd), diag_reg,
                                      diag_reg_absolute_scale)
-    return np.linalg.eigh(k_dd)
+    return np.linalg_ops.eig(k_dd)
 
   @lru_cache(4)
   def predict_inf(get: Get):
@@ -967,7 +964,7 @@ def max_learning_rate(
                                   eigvals=(ntk_train_train.shape[0] - 1,
                                            ntk_train_train.shape[0] - 1))[-1]
   else:
-    max_eva = np.linalg.eigvalsh(ntk_train_train)[-1]
+    max_eva = np.linalg_ops.eigvals(ntk_train_train)[-1]
   lr = 2 * factor / (max_eva + eps)
   return lr
 
@@ -1010,7 +1007,7 @@ def _get_fns_in_eigenbasis(k_train_train: np.ndarray,
   k_train_train = utils.make_2d(k_train_train)
   k_train_train = _add_diagonal_regularizer(k_train_train, diag_reg,
                                             diag_reg_absolute_scale)
-  evals, evecs = np.linalg.eigh(k_train_train)
+  evals, evecs = np.linalg_ops.eig(k_train_train)
 
   def to_eigenbasis(fn):
     """Generates a transform given a function on the eigenvalues."""
@@ -1041,7 +1038,7 @@ def _get_cho_solve(A: np.ndarray,
   x_non_channel_shape = A.shape[1::2]
   A = utils.make_2d(A)
   A = _add_diagonal_regularizer(A, diag_reg, diag_reg_absolute_scale)
-  C = sp.linalg.cho_factor(A, lower)
+  C = np.linalg_ops.cholesky(A, lower)
 
   def cho_solve(b: np.ndarray, b_axes: Axes) -> np.ndarray:
     b_axes = utils.canonicalize_axis(b_axes, b)
@@ -1051,7 +1048,7 @@ def _get_cho_solve(A: np.ndarray,
     b = np.moveaxis(b, b_axes, last_b_axes)
     b = b.reshape((A.shape[1], -1))
 
-    x = sp.linalg.cho_solve(C, b)
+    x = np.linalg_ops.cholesky_solve(C, b)
     x = x.reshape(x_shape)
     return x
 
