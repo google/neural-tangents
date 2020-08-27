@@ -47,7 +47,7 @@ def Dense(out_dim, W_init=random.stateless_random_normal, b_init=random.stateles
   """Layer constructor function for a dense (fully-connected) layer."""
   def init_fun(rng, input_shape):
     output_shape = input_shape[:-1] + (out_dim,)
-    keys = split(rng)
+    keys = random.split(rng)
     k1 = keys[0]
     k2 = keys[1]
     # convert the two keys from shape (2,) into a scalar
@@ -78,7 +78,7 @@ def GeneralConv(dimension_numbers, out_chan, filter_shape,
         input_shape, kernel_shape, strides, padding, dimension_numbers)
     bias_shape = [out_chan if c == 'C' else 1 for c in out_spec]
     bias_shape = tuple(itertools.dropwhile(lambda x: x == 1, bias_shape))
-    keys = split(rng)
+    keys = random.split(rng)
     k1 = keys[0]
     k2 = keys[1]
     W = W_init(seed=k1, shape=kernel_shape)
@@ -268,7 +268,7 @@ def serial(*layers):
     rng = kwargs.pop('rng', None)
     rngs = None
     if rng is not None:
-      rngs = split(rng)
+      rngs = random.split(rng)
     else:
       rngs = (None,) * nlayers
     for i in range(nlayers):
@@ -295,7 +295,7 @@ def parallel(*layers):
   nlayers = len(layers)
   init_funs, apply_funs = zip(*layers)
   def init_fun(rng, input_shape):
-    rngs = split(rng)
+    rngs = random.split(rng)
     result = []
     for i in range(nlayers):
       result.append(init_funs[i](rngs[i], input_shape[i]))
@@ -304,7 +304,7 @@ def parallel(*layers):
     rng = kwargs.pop('rng', None)
     rngs = None
     if rng is not None:
-      rngs = split(rng, num=nlayers)
+      rngs = random.split(rng, num=nlayers)
     else:
       rngs = (None,) * nlayers
     result = []
