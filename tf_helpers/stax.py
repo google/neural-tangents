@@ -55,7 +55,7 @@ def Dense(out_dim, W_init=random.stateless_random_normal, b_init=random.stateles
     k2 = stateless_uniform(shape=[], seed=k2, minval=None, maxval=None, dtype=tf.int32)
     W = W_init(seed=k1, shape=(input_shape[-1], out_dim))
     b = b_init(seed=k2, shape=(out_dim,))
-    return tfnp.zeros(output_shape), (W.numpy(), b.numpy())
+    return output_shape, (W.numpy(), b.numpy())
   def apply_fun(params, inputs, **kwargs):
     W, b = params
     return tfnp.dot(inputs, W) + b
@@ -83,7 +83,7 @@ def GeneralConv(dimension_numbers, out_chan, filter_shape,
     k2 = keys[1]
     W = W_init(seed=k1, shape=kernel_shape)
     b = b_init(stddev=1e-6, seed=k2, shape=bias_shape)
-    return tfnp.zeros(output_shape), (W, b)
+    return output_shape, (W, b)
   def apply_fun(params, inputs, **kwargs):
     W, b = params
     return lax.conv_general_dilated(inputs, W, strides, padding, one, one,
@@ -94,9 +94,7 @@ Conv = functools.partial(GeneralConv, ('NHWC', 'HWIO', 'NHWC'))
 
 def elementwise(fun, **fun_kwargs):
   """Layer that applies a scalar function elementwise on its inputs."""
-  def init_fun(rng, input_shape):
-    return (tfnp.zeros(input_shape), ())
-  # init_fun = lambda rng, input_shape: (tfnp.zeros(input_shape), ())
+  init_fun = lambda rng, input_shape: input_shape, ()
   apply_fun = lambda params, inputs, **kwargs: fun(inputs, **fun_kwargs)
   return init_fun, apply_fun
 Tanh = elementwise(tfnp.tanh)
@@ -141,7 +139,7 @@ def _pooling_layer(reducer, init_val, rescaler=None):
       shape.append(input_shape[channel_dim])
       out_shape = lax.reduce_window_shape_tuple(shape, window_shape,
                                                 strides, padding)
-      return tfnp.zeros(out_shape), ()
+      return out_shape, ()
     def apply_fun(params, inputs, **kwargs):
       output = lax.reduce_window(inputs, init_val, reducer, window_shape,
                               strides, padding)
@@ -176,7 +174,7 @@ def Flatten():
   """Layer construction function for flattening all but the leading dim."""
   def init_fun(rng, input_shape):
     output_shape = input_shape[0], functools.reduce(op.mul, input_shape[1:], 1)
-    return tfnp.zeros(output_shape), ()
+    return output_shape, ()
   def apply_fun(params, inputs, **kwargs):
     return tfnp.reshape(inputs, (inputs.shape[0], -1))
   return init_fun, apply_fun
@@ -185,7 +183,7 @@ Flatten = Flatten()
 
 def Identity():
   """Layer construction function for an identity layer."""
-  init_fun = lambda rng, input_shape: (tfnp.zeros(input_shape), ())
+  init_fun = lambda rng, input_shape: input_shape, ()
   apply_fun = lambda params, inputs, **kwargs: inputs
   return init_fun, apply_fun
 Identity = Identity()
@@ -194,14 +192,14 @@ Identity = Identity()
 def FanOut(num):
   """Layer construction function for a fan-out layer."""
   def init_fun(rng, input_shape):
-    return ([tfnp.zeros(input_shape)] * num, ())
+    return ([input_shape] * num, ())
   apply_fun = lambda params, inputs, **kwargs: [inputs] * num
   return init_fun, apply_fun
 
 
 def FanInSum():
   """Layer construction function for a fan-in sum layer."""
-  init_fun = lambda rng, input_shape: (tfnp.zeros(input_shape[0]), ())
+  init_fun = lambda rng, input_shape: input_shape[0], ()
   apply_fun = lambda params, inputs, **kwargs: sum(inputs)
   return init_fun, apply_fun
 FanInSum = FanInSum()
@@ -213,7 +211,7 @@ def FanInConcat(axis=-1):
     ax = axis % len(input_shape[0])
     concat_size = sum(shape[ax] for shape in input_shape)
     out_shape = input_shape[0][:ax] + (concat_size,) + input_shape[0][ax+1:]
-    return tfnp.zeros(out_shape), ()
+    return out_shape, ()
   def apply_fun(params, inputs, **kwargs):
     return tfnp.concatenate(inputs, axis)
   return init_fun, apply_fun
@@ -222,7 +220,7 @@ def FanInConcat(axis=-1):
 def Dropout(rate, mode='train'):
   """Layer construction function for a dropout layer with given rate."""
   def init_fun(rng, input_shape):
-    return tfnp.zeros(input_shape), ()
+    return input_shape, ()
   def apply_fun(params, inputs, **kwargs):
     rng = kwargs.get('rng', None)
     if rng is None:
