@@ -27,10 +27,7 @@ import tensorflow_probability as tfp
 from tensorflow.python.ops import numpy_ops as tfnp
 from tf_helpers import lax
 import numpy as onp
-from stateless_random_ops import split
-from stateless_random_ops import stateless_random_normal as rn
-from tensorflow.random import stateless_uniform
-
+from tensorflow.python.ops import stateless_random_ops as random
 from tensorflow.nn import (relu, log_softmax, softmax, softplus, sigmoid, elu,
                     leaky_relu, selu)
 from tensorflow import zeros_initializer as zi
@@ -50,7 +47,7 @@ def Dense(out_dim, W_init=rn, b_init=rn):
   """Layer constructor function for a dense (fully-connected) layer."""
   def init_fun(rng, input_shape):
     output_shape = input_shape[:-1] + (out_dim,)
-    keys = split(seed=tf.convert_to_tensor(rng, dtype=tf.int32), num=2)
+    keys = split(rng)
     k1 = keys[0]
     k2 = keys[1]
     # convert the two keys from shape (2,) into a scalar
@@ -81,7 +78,7 @@ def GeneralConv(dimension_numbers, out_chan, filter_shape,
         input_shape, kernel_shape, strides, padding, dimension_numbers)
     bias_shape = [out_chan if c == 'C' else 1 for c in out_spec]
     bias_shape = tuple(itertools.dropwhile(lambda x: x == 1, bias_shape))
-    keys = split(seed=tf.convert_to_tensor(rng, dtype=tf.int32), num=2)
+    keys = split(rng)
     k1 = keys[0]
     k2 = keys[1]
     W = W_init(seed=k1, shape=kernel_shape)
@@ -261,7 +258,7 @@ def serial(*layers):
     i = 0
     for init_fun in init_funs:
       i += 1
-      keys = split(seed=tf.convert_to_tensor(rng, dtype=tf.int32), num=2)
+      keys = random.split(rng)
       rng = keys[0]
       layer_rng = keys[1]
       input_shape, param = init_fun(layer_rng, input_shape)
@@ -271,7 +268,7 @@ def serial(*layers):
     rng = kwargs.pop('rng', None)
     rngs = None
     if rng is not None:
-      rngs = split(seed=tf.convert_to_tensor(rng, dtype=tf.int32), num=nlayers)
+      rngs = split(rng)
     else:
       rngs = (None,) * nlayers
     for i in range(nlayers):
@@ -298,7 +295,7 @@ def parallel(*layers):
   nlayers = len(layers)
   init_funs, apply_funs = zip(*layers)
   def init_fun(rng, input_shape):
-    rngs = split(seed=tf.convert_to_tensor(rng, dtype=tf.int32), num=nlayers)
+    rngs = split(rng)
     result = []
     for i in range(nlayers):
       result.append(init_funs[i](rngs[i], input_shape[i]))
@@ -307,7 +304,7 @@ def parallel(*layers):
     rng = kwargs.pop('rng', None)
     rngs = None
     if rng is not None:
-      rngs = split(seed=tf.convert_to_tensor(rng, dtype=tf.int32), num=nlayers)
+      rngs = split(rng, num=nlayers)
     else:
       rngs = (None,) * nlayers
     result = []
