@@ -18,13 +18,16 @@
 import logging
 
 import dataclasses
-from jax.api import jit
-from jax.api import vmap
 from jax.lib import xla_bridge
-import jax.numpy as np
 import jax.test_util as jtu
 from .kernel import Kernel
 import numpy as onp
+
+import tensorflow as tf
+from tensorflow.python.ops import numpy_ops as np
+from tf_helpers.extensions import jit
+from tensorflow import vectorized_map as vmap
+from absl.testing import parameterized
 
 
 def _jit_vmap(f):
@@ -75,8 +78,8 @@ def _log(relative_error, expected, actual, did_pass):
 def assert_close_matrices(self, expected, actual, rtol):
   self.assertEqual(expected.shape, actual.shape)
   relative_error = (
-      np.linalg.norm(actual - expected) /
-      np.maximum(np.linalg.norm(expected), 1e-12))
+      np.linalg_ops.norm(actual - expected) /
+      np.maximum(np.linalg_ops.norm(expected), 1e-12))
   if relative_error > rtol or np.isnan(relative_error):
     _log(relative_error, expected, actual, False)
     self.fail(self.failureException('Relative ERROR: ',
@@ -89,7 +92,7 @@ def assert_close_matrices(self, expected, actual, rtol):
     _log(relative_error, expected, actual, True)
 
 
-class NeuralTangentsTestCase(jtu.JaxTestCase):
+class NeuralTangentsTestCase(tf.test.TestCase, parameterized.TestCase):
 
   def assertAllClose(
       self,
@@ -102,8 +105,42 @@ class NeuralTangentsTestCase(jtu.JaxTestCase):
       canonicalize_dtypes=True):
     if isinstance(x, Kernel):
       self.assertIsInstance(y, Kernel)
-      x_dict = dataclasses.asdict(x)
-      y_dict = dataclasses.asdict(y)
+      x_dict = {
+        "nngp": x.nngp,
+        "ntk": x.ntk,
+        "cov1": x.cov1,
+        "cov2": x.cov2,
+        "x1_is_x2": x.x1_is_x2,
+        "is_gaussian": x.is_gaussian,
+        "is_reversed": x.is_reversed,
+        "is_input": x.is_input,
+        "diagonal_batch": x.diagonal_batch,
+        "diagonal_spatial": x.diagonal_spatial,
+        "shape1": x.shape1,
+        "shape2": x.shape2,
+        "batch_axis": x.batch_axis,
+        "channel_axis": x.channel_axis,
+        "mask1": x.mask1,
+        "mask2": x.mask2
+      }
+      y_dict = {
+        "nngp": y.nngp,
+        "ntk": y.ntk,
+        "cov1": y.cov1,
+        "cov2": y.cov2,
+        "x1_is_x2": y.x1_is_x2,
+        "is_gaussian": y.is_gaussian,
+        "is_reversed": y.is_reversed,
+        "is_input": y.is_input,
+        "diagonal_batch": y.diagonal_batch,
+        "diagonal_spatial": y.diagonal_spatial,
+        "shape1": y.shape1,
+        "shape2": y.shape2,
+        "batch_axis": y.batch_axis,
+        "channel_axis": y.channel_axis,
+        "mask1": y.mask1,
+        "mask2": y.mask2
+      }
       for field in dataclasses.fields(Kernel):
         is_pytree_node = field.metadata.get('pytree_node', True)
         if is_pytree_node:
@@ -114,5 +151,5 @@ class NeuralTangentsTestCase(jtu.JaxTestCase):
           self.assertEqual(x_dict[field.name], y_dict[field.name])
     else:
       return super().assertAllClose(
-          x, y, check_dtypes=check_dtypes, atol=atol, rtol=rtol,
+          onp.array(x), onp.array(y), check_dtypes=check_dtypes, atol=atol, rtol=rtol,
           canonicalize_dtypes=canonicalize_dtypes)
