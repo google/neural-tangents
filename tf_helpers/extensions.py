@@ -28,7 +28,7 @@ import six
 
 import tensorflow.compat.v2 as tf
 
-from tensorflow.python.ops import numpy_ops as np
+from tensorflow.python.ops import numpy_ops as tf_np
 
 _int_dtype_lower_bounds = [
     -2**63, -2**31, -2**15, -2**7, 0, 2**7, 2**15, 2**31, 2**64
