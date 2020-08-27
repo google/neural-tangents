@@ -5,10 +5,9 @@ python:
   - "3.8"
 install:
   - pip install --upgrade pip
-  - pip install numpy jaxlib tensorflow tensorflow-datasets --upgrade
+  - pip install numpy jaxlib tf-nightly tfds-nightly --upgrade
   - pip install git+https://github.com/google/jax.git
   - pip install -e .
 script:
   - set -e
   - for f in tests/*.py; do python $f; done
-
