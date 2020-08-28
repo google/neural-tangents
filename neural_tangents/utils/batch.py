@@ -642,12 +642,9 @@ def _get_jit_or_pmap_broadcast() -> Callable[[Callable, int], Callable]:
           kwargs_other[k] = v
 
       # Check cache before jitting.
-      print("\nOK, original key: {}\n".format(key))
-      # _key = key
       _key = key + \
           tuple(args_other.items()) + \
           tuple(kwargs_other.items())
-      print("after concatenation: {}".format(_key))
 
       # If any of the instance inside `_key` is a tf.Tensor object, use `ref()`
       # method to avoid directly hashing the TF Tensor.
