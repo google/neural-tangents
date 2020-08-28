@@ -270,7 +270,7 @@ def _zip_axes(x: np.ndarray,
     A `np.ndarray` with a new shape.
   """
   if end_axis == -1:
-    end_axis = x.ndim
+    end_axis = len(x.shape)
   half_ndim, ragged = divmod(end_axis - start_axis, 2)
   if ragged:
     raise ValueError(
