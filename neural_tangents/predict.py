@@ -1007,7 +1007,9 @@ def _get_fns_in_eigenbasis(k_train_train: np.ndarray,
   k_train_train = utils.make_2d(k_train_train)
   k_train_train = _add_diagonal_regularizer(k_train_train, diag_reg,
                                             diag_reg_absolute_scale)
-  evals, evecs = np.linalg_ops.eig(k_train_train)
+  print("k_train_train: {}".format(k_train_train))
+  evals, evecs = tf.linalg.eigh(k_train_train)
+  evals, evecs = np.asarray(evals), np.asarray(evecs)
 
   def to_eigenbasis(fn):
     """Generates a transform given a function on the eigenvalues."""

@@ -261,7 +261,6 @@ def serial(*layers):
       layer_rng = keys[1]
       input_shape, param = init_fun(layer_rng, input_shape)
       params.append(param)
-      print("init_fun: {}, params: {}".format(init_fun.__name__, param))
     return input_shape, params
   def apply_fun(params, inputs, **kwargs):
     rng = kwargs.pop('rng', None)
@@ -271,9 +270,7 @@ def serial(*layers):
     else:
       rngs = (None,) * nlayers
     for i in range(nlayers):
-      print("Before: {}, layer: {}".format(inputs, apply_funs[i].__name__))
       inputs = apply_funs[i](params[i], inputs, rng=rngs[i], **kwargs)
-      print("After: {}, layer: {}".format(inputs, apply_funs[i].__name__))
     return inputs
   return init_fun, apply_fun
 

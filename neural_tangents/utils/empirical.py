@@ -226,7 +226,7 @@ def empirical_implicit_ntk_fn(f: ApplyFn,
     # for the outputs of the network. fx_dummy has the same shape as the output
     # of the network on a single piece of input data.
     fx2_struct = eval_on_shapes(f2)(params)
-    fx_dummy = np.ones(fx2_struct.shape, np.float32)
+    fx_dummy = np.ones(fx2_struct.shape, fx2_struct.dtype)
 
     with tf.GradientTape() as tape:
       tape.watch(fx_dummy.data)

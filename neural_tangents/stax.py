@@ -247,7 +247,6 @@ def _supports_masking(remask_kernel: bool):
 
       def apply_fn_with_masking(params, inputs, *,
                                 mask_constant=None, **kwargs):
-        print("masking!")
         inputs = utils.get_masked_array(inputs, mask_constant)
         inputs, mask = inputs.masked_value, inputs.mask
         outputs = apply_fn(params, inputs, mask=mask, **kwargs)
@@ -553,7 +552,6 @@ def Dense(
 
   def apply_fn(params, inputs, **kwargs):
     W, b = params
-    print("inputs: {}, params: {}".format(inputs, params))
     prod = np.moveaxis(np.tensordot(W, inputs, (0, channel_axis)),
                        0, channel_axis)
 
