@@ -651,33 +651,6 @@ def _get_jit_or_pmap_broadcast() -> Callable[[Callable, int], Callable]:
 
       # If any of the instance inside `_key` is a tf.Tensor object, use `ref()`
       # method to avoid directly hashing the TF Tensor.
-      _key = list(_key)
-      # for i in range(len(_key)):
-      #   if isinstance(_key[i], tf.Tensor):
-      #     _key[i] = tuple(map(tuple, _key[i].ref()))
-      #   elif isinstance(_key[i], onp.ndarray):
-      #     _key[i] = tuple(map(tuple, _key[i]))
-      #   elif isinstance(_key[i], tuple):
-      #     _key[i] = list(_key[i])
-      #     for j in range(len(_key[i])):
-      #       if isinstance(_key[i][j], tf.Tensor):
-      #         _key[i][j] = tuple(map(tuple, _key[i][j].ref()))
-      #       elif isinstance(_key[i][j], onp.ndarray):
-      #         _key[i][j] = tuple(map(tuple, _key[i][j]))
-      #       elif isinstance(_key[i][j], list):
-      #         _key[i][j] = tuple(_key[i][j])
-      #     _key[i] = tuple(_key[i])
-      # def f(x):
-      #   if isinstance(x, list):
-      #     return tuple(x)
-      #   elif isinstance(x, tf.Tensor):
-      #     return x.numpy()
-      #   elif isinstance(x, onp.ndarray):
-      #     return tuple(map(tuple, x))
-      #   else:
-      #     return x
-      # _key = tf.nest.map_structure(f, _key)
-      # _key = tf.nest.map_structure(f, _key)
       _key, tree = tree_flatten(_key)
       for i in range(len(_key)):
         if isinstance(_key[i], tf.Tensor):
