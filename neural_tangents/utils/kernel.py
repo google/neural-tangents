@@ -24,7 +24,6 @@ import tensorflow as tf
 from tensorflow.python.ops import numpy_ops as np
 from tf_helpers.bitwise import bitwise_or
 
-@dataclasses.dataclass
 class Kernel:
   """Dataclass containing information about the NTK and NNGP of a model.
 
