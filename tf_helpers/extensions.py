@@ -541,7 +541,7 @@ def _non_batched_matmul(lhs, rhs, lhs_contraction, rhs_contraction):
       lhs, rhs, axes=(list(lhs_contraction), list(rhs_contraction)))
 
 
-def tf_dot_general(lhs, rhs, dimension_numbers):
+def tf_dot_general(lhs, rhs, dimension_numbers, precision=None):
   """The general dot operation for TensorFlow.
 
   An equivalent general dot operation as that in JAX -
@@ -582,7 +582,8 @@ def tf_dot_general(lhs, rhs, dimension_numbers):
                          len(lhs_batch), len(rhs_batch)))
 
   if not lhs_batch and not rhs_batch:
-    return _non_batched_matmul(lhs, rhs, lhs_contraction, rhs_contraction)
+    return _non_batched_matmul(lhs, rhs, lhs_contraction,
+                               rhs_contraction)
 
   if (lhs_rank == rhs_rank == 3 and lhs_batch == (0,) and rhs_batch == (0,) and
       lhs_contraction == (2,) and rhs_contraction == (1,)):
