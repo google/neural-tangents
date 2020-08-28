@@ -55,7 +55,7 @@ def Dense(out_dim, W_init=random.stateless_random_normal, b_init=random.stateles
     k2 = stateless_uniform(shape=[], seed=k2, minval=None, maxval=None, dtype=tf.int32)
     W = W_init(seed=k1, shape=(input_shape[-1], out_dim))
     b = b_init(seed=k2, shape=(out_dim,))
-    return output_shape, (W.numpy(), b.numpy())
+    return output_shape, (np.asarray(W), np.asarray(b))
   def apply_fun(params, inputs, **kwargs):
     W, b = params
     return tfnp.dot(inputs, W) + b
@@ -261,6 +261,7 @@ def serial(*layers):
       layer_rng = keys[1]
       input_shape, param = init_fun(layer_rng, input_shape)
       params.append(param)
+      print("init_fun: {}, params: {}".format(init_fun.__name__, param))
     return input_shape, params
   def apply_fun(params, inputs, **kwargs):
     rng = kwargs.pop('rng', None)
@@ -270,7 +271,9 @@ def serial(*layers):
     else:
       rngs = (None,) * nlayers
     for i in range(nlayers):
+      print("Before: {}, layer: {}".format(inputs, apply_funs[i].__name__))
       inputs = apply_funs[i](params[i], inputs, rng=rngs[i], **kwargs)
+      print("After: {}, layer: {}".format(inputs, apply_funs[i].__name__))
     return inputs
   return init_fun, apply_fun
 

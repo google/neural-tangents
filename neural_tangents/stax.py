@@ -79,7 +79,6 @@ from jax.api import eval_shape
 from jax.api_util import flatten_fun
 import jax.interpreters.partial_eval as pe
 from jax.lib import xla_bridge
-from jax.scipy.special import erf
 from jax.tree_util import tree_flatten, tree_map, tree_unflatten
 from neural_tangents.utils import utils
 from neural_tangents.utils.kernel import Kernel
@@ -89,6 +88,7 @@ import scipy as osp
 import tensorflow as tf
 from tensorflow.python.ops import numpy_ops as np
 from tensorflow.python.ops import stateless_random_ops as random
+from tensorflow.math import erf
 from tf_helpers import lax
 from tf_helpers import stax as ostax
 from tf_helpers.extensions import grad
@@ -247,6 +247,7 @@ def _supports_masking(remask_kernel: bool):
 
       def apply_fn_with_masking(params, inputs, *,
                                 mask_constant=None, **kwargs):
+        print("masking!")
         inputs = utils.get_masked_array(inputs, mask_constant)
         inputs, mask = inputs.masked_value, inputs.mask
         outputs = apply_fn(params, inputs, mask=mask, **kwargs)
@@ -536,7 +537,7 @@ def Dense(
     b_shape[channel_axis] = out_dim
     b = random.stateless_random_normal(seed=rng2, shape=b_shape)
 
-    return output_shape, (W, b)
+    return output_shape, (np.asarray(W), np.asarray(b))
 
   def standard_init_fn(rng, input_shape):
     output_shape, (W, b) = ntk_init_fn(rng, input_shape)
@@ -552,6 +553,7 @@ def Dense(
 
   def apply_fn(params, inputs, **kwargs):
     W, b = params
+    print("inputs: {}, params: {}".format(inputs, params))
     prod = np.moveaxis(np.tensordot(W, inputs, (0, channel_axis)),
                        0, channel_axis)
 
@@ -1785,7 +1787,7 @@ def GlobalSelfAttention(
       pos_emb_shape = list(input_shape)
       pos_emb_shape[channel_axis] = _n_chan_pos_emb
       pos_emb_shape[batch_axis] = 1
-      pos_emb = rand(seed=rng_pe, shape=pos_emb_shape)
+      pos_emb = np.asarray(rand(seed=rng_pe, shape=pos_emb_shape))
 
       if pos_emb_type == PositionalEmbedding.CONCAT:
         n_chan_in_keys += _n_chan_pos_emb
@@ -2766,7 +2768,7 @@ def _ab_relu(x, a, b, **kwargs):
 
 
 def _erf(x, a, b, c, **kwargs):
-  return a * erf(b * x) + c
+  return a * np.asarray(erf(b * x)) + c
 
 
 def _gelu(x, **kwargs):
