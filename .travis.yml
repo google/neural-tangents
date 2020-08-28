@@ -5,7 +5,7 @@ python:
   - "3.8"
 install:
   - pip install --upgrade pip
-  - pip install pygame==2.0.0.dev6 tfp-nightly tfds-nightly numpy jaxlib jax tf-nightly matplotlib more-itertools --upgrade
+  - pip install tfp-nightly tfds-nightly numpy jaxlib jax tf-nightly --upgrade
   - pip install git+https://github.com/google/jax.git
   - pip install -e .
 script:
