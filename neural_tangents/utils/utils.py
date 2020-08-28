@@ -68,7 +68,7 @@ def _output_to_dict(output):
     return output
 
   if isinstance(output, Kernel):
-    # Avoid directly converting the Kernel object to the directionary since
+    # Avoid directly converting the Kernel object to the dictionary since
     # TF Tensor does not allow deep copy.
     out_dict = {
       "nngp": output.nngp,
