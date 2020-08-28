@@ -90,6 +90,7 @@ from jax.tree_util import tree_flatten, tree_map, tree_unflatten
 from neural_tangents.utils import utils
 from neural_tangents.utils.kernel import Kernel
 from neural_tangents.utils.typing import AnalyticKernelFn, Axes, Get, InitFn, InternalLayer, Kernels, Layer, LayerKernelFn, PyTree, Shapes
+import numpy as onp
 import scipy as osp
 
 
@@ -752,7 +753,7 @@ def _GeneralConv(
     init_padding = Padding.SAME
 
   def input_total_dim(input_shape):
-    return input_shape[lhs_spec.index('C')] * np.prod(filter_shape)
+    return input_shape[lhs_spec.index('C')] * onp.prod(filter_shape)
 
   ntk_init_fn, _ = ostax.GeneralConv(dimension_numbers,
                                      out_chan,
@@ -1084,7 +1085,7 @@ def _Pool(
   else:
     def rescaler(dims, strides, padding):
       del dims, strides, padding  # Unused.
-      return lambda outputs, inputs, spec: outputs / np.prod(window_shape)
+      return lambda outputs, inputs, spec: outputs / onp.prod(window_shape)
 
     pool_fn = ostax._pooling_layer(lax.add, 0., rescaler)
     init_fn, apply_fn = pool_fn(window_shape, strides, padding.name, spec)
@@ -3680,7 +3681,7 @@ def _pool_kernel(
                                        padding.name)
       nngp_out /= window_sizes
     else:
-      nngp_out /= np.prod(window_shape)
+      nngp_out /= onp.prod(window_shape)
 
   return nngp_out
 
