@@ -75,7 +75,6 @@ import frozendict
 from jax import linear_util as lu
 from jax import ops
 from jax.abstract_arrays import ShapedArray
-from jax.api import eval_shape
 from jax.api_util import flatten_fun
 import jax.interpreters.partial_eval as pe
 from jax.lib import xla_bridge
@@ -91,7 +90,7 @@ from tensorflow.python.ops import stateless_random_ops as random
 from tensorflow.math import erf
 from tf_helpers import lax
 from tf_helpers import stax as ostax
-from tf_helpers.extensions import grad
+from tf_helpers.extensions import grad, eval_on_shapes
 from tf_helpers.bitwise import bitwise_or, bitwise_and
 # Enums
 
@@ -2535,6 +2534,7 @@ def _inputs_to_kernel(
     x = x.astype(np.float64)
 
     if diagonal_batch:
+      print("diagonal_spatial: {}".format(diagonal_spatial))
       cov = _cov_diag_batch(x, diagonal_spatial, batch_axis, channel_axis)
     else:
       cov = _cov(x, x, diagonal_spatial, batch_axis, channel_axis)
@@ -3780,7 +3780,7 @@ def _mean_and_var(
   if mask is None:
     mean = np.mean(x, axis, dtype, keepdims)
     if get_var:
-      var = np.var(x, axis, dtype, out, ddof, keepdims)
+      var = np.var(x, axis, dtype, ddof, keepdims)
 
   else:
     axis = tuple(utils.canonicalize_axis(axis, x))
