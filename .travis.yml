@@ -12,3 +12,4 @@ script:
   - set -e
   # - for f in tests/*.py; do python $f; done
   - python tests/function_space_test.py
+  - python tests/weight_space_test.py
