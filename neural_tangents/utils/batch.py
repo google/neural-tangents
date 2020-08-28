@@ -416,6 +416,7 @@ def _serial(kernel_fn: KernelFn,
     if isinstance(x1_or_kernel, np.ndarray):
       return serial_fn_x1(x1_or_kernel, x2, *args, **kwargs)
     elif isinstance(x1_or_kernel, onp.ndarray):
+      print("args: , kwargs: ", *args, **kwargs)
       return serial_fn_x1(np.asarray(x1_or_kernel), x2, *args, **kwargs)
     elif isinstance(x1_or_kernel, Kernel):
       if x2 is not None:
@@ -641,26 +642,48 @@ def _get_jit_or_pmap_broadcast() -> Callable[[Callable, int], Callable]:
           kwargs_other[k] = v
 
       # Check cache before jitting.
+      print("\nOK, original key: {}\n".format(key))
+      # _key = key
       _key = key + \
           tuple(args_other.items()) + \
           tuple(kwargs_other.items())
+      print("after concatenation: {}".format(_key))
 
       # If any of the instance inside `_key` is a tf.Tensor object, use `ref()`
       # method to avoid directly hashing the TF Tensor.
       _key = list(_key)
+      # for i in range(len(_key)):
+      #   if isinstance(_key[i], tf.Tensor):
+      #     _key[i] = tuple(map(tuple, _key[i].ref()))
+      #   elif isinstance(_key[i], onp.ndarray):
+      #     _key[i] = tuple(map(tuple, _key[i]))
+      #   elif isinstance(_key[i], tuple):
+      #     _key[i] = list(_key[i])
+      #     for j in range(len(_key[i])):
+      #       if isinstance(_key[i][j], tf.Tensor):
+      #         _key[i][j] = tuple(map(tuple, _key[i][j].ref()))
+      #       elif isinstance(_key[i][j], onp.ndarray):
+      #         _key[i][j] = tuple(map(tuple, _key[i][j]))
+      #       elif isinstance(_key[i][j], list):
+      #         _key[i][j] = tuple(_key[i][j])
+      #     _key[i] = tuple(_key[i])
+      # def f(x):
+      #   if isinstance(x, list):
+      #     return tuple(x)
+      #   elif isinstance(x, tf.Tensor):
+      #     return x.numpy()
+      #   elif isinstance(x, onp.ndarray):
+      #     return tuple(map(tuple, x))
+      #   else:
+      #     return x
+      # _key = tf.nest.map_structure(f, _key)
+      # _key = tf.nest.map_structure(f, _key)
+      _key, tree = tree_flatten(_key)
       for i in range(len(_key)):
         if isinstance(_key[i], tf.Tensor):
-          _key[i] = tuple(map(tuple, _key[i].ref()))
+          _key[i] = tuple(map(tuple, _key[i].numpy()))
         elif isinstance(_key[i], onp.ndarray):
           _key[i] = tuple(map(tuple, _key[i]))
-        elif isinstance(_key[i], tuple):
-          _key[i] = list(_key[i])
-          for j in range(len(_key[i])):
-            if isinstance(_key[i][j], tf.Tensor):
-              _key[i][j] = tuple(map(tuple, _key[i][j].ref()))
-            elif isinstance(_key[i][j], onp.ndarray):
-              _key[i][j] = tuple(map(tuple, _key[i][j]))
-          _key[i] = tuple(_key[i])
       _key = tuple(_key)
 
       if _key in cache:
