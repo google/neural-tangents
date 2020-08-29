@@ -164,10 +164,10 @@ def _normalize_by_window_size(dims, strides, padding):
     for i in sorted(non_spatial_axes):
       window_sizes = tfnp.expand_dims(window_sizes, i)
 
-    return outputs * window_sizes
+    return outputs / window_sizes
   return rescale
-SumPool = _pooling_layer(tfnp.add, 0., _normalize_by_window_size)
-AvgPool = _pooling_layer(tfnp.add, 0.)
+SumPool = _pooling_layer(tfnp.add, 0.)
+AvgPool = _pooling_layer(tfnp.add, 0., _normalize_by_window_size)
 
 
 def Flatten():

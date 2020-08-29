@@ -279,7 +279,7 @@ def reduce_window(inputs, init_value, reducer, window_dimensions, strides,
   # input shape is already finished in apply_fun of Pooling in stax.
   pooling = "AVG" if reducer == np.add else "MAX"
   output = np.asarray(nn.pool(inputs, window_dimensions, pooling, strides, padding))
-  return np.squeeze(output, axis=(0, output.ndim - 1))
+  return np.squeeze(output, axis=(0, output.ndim - 1)) * np.prod(window_dimensions)
 
 
 # TOTO (Zhibo Zhang): Expand the test cases of general convolution and revise
