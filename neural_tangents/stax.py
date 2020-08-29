@@ -72,26 +72,26 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 import warnings
 
 import frozendict
-from jax import lax
 from jax import linear_util as lu
-from jax import numpy as np
 from jax import ops
-from jax import random
 from jax.abstract_arrays import ShapedArray
-from jax.api import eval_shape
-from jax.api import grad
 from jax.api_util import flatten_fun
-import jax.experimental.stax as ostax
 import jax.interpreters.partial_eval as pe
 from jax.lib import xla_bridge
-from jax.scipy.special import erf
 from jax.tree_util import tree_flatten, tree_map, tree_unflatten
 from neural_tangents.utils import utils
 from neural_tangents.utils.kernel import Kernel
 from neural_tangents.utils.typing import AnalyticKernelFn, Axes, Get, InitFn, InternalLayer, Kernels, Layer, LayerKernelFn, PyTree, Shapes
 import scipy as osp
 
-
+import tensorflow as tf
+from tensorflow.python.ops import numpy_ops as np
+from tensorflow.python.ops import stateless_random_ops as random
+from tensorflow.math import erf
+from tf_helpers import lax
+from tf_helpers import stax as ostax
+from tf_helpers.extensions import grad, eval_on_shapes
+from tf_helpers.bitwise import bitwise_or, bitwise_and
 # Enums
 
 
@@ -527,14 +527,15 @@ def Dense(
     _channel_axis = channel_axis % len(input_shape)
     output_shape = (input_shape[:_channel_axis] + (out_dim,)
                     + input_shape[_channel_axis + 1:])
-    rng1, rng2 = random.split(rng)
-    W = random.normal(rng1, (input_shape[_channel_axis], out_dim))
+    rngs = random.split(rng)
+    rng1, rng2 = rngs[0], rngs[1]
+    W = random.stateless_random_normal(seed=rng1, shape=(input_shape[_channel_axis], out_dim))
 
     b_shape = [1] * len(input_shape)
     b_shape[channel_axis] = out_dim
-    b = random.normal(rng2, b_shape)
+    b = random.stateless_random_normal(seed=rng2, shape=b_shape)
 
-    return output_shape, (W, b)
+    return output_shape, (np.asarray(W), np.asarray(b))
 
   def standard_init_fn(rng, input_shape):
     output_shape, (W, b) = ntk_init_fn(rng, input_shape)
@@ -758,8 +759,8 @@ def _GeneralConv(
                                      filter_shape,
                                      strides,
                                      init_padding.name,
-                                     random.normal,
-                                     random.normal)
+                                     random.stateless_random_normal,
+                                     random.stateless_random_normal)
 
   def standard_init_fn(rng, input_shape):
     output_shape, (W, b) = ntk_init_fn(rng, input_shape)
@@ -1085,7 +1086,7 @@ def _Pool(
       del dims, strides, padding  # Unused.
       return lambda outputs, inputs, spec: outputs / np.prod(window_shape)
 
-    pool_fn = ostax._pooling_layer(lax.add, 0., rescaler)
+    pool_fn = ostax._pooling_layer(np.add, 0., rescaler)
     init_fn, apply_fn = pool_fn(window_shape, strides, padding.name, spec)
 
   @_requires(batch_axis=batch_axis,
@@ -1765,7 +1766,9 @@ def GlobalSelfAttention(
                     input_shape[_channel_axis + 1:])
 
     rng_Q, rng_K, rng_V, rng_O, rng_b, rng_pe = random.split(rng, 6)
-    rand = random.normal
+    rng_Q, rng_K, rng_V, rng_O, rng_b, rng_pe = rngs[0], rngs[1], rngs[2], \
+                                                rngs[3], rngs[4], rngs[5]
+    rand = random.stateless_random_normal
 
     n_chan_in_keys = n_chan_in_vals = input_shape[channel_axis]
 
@@ -1781,20 +1784,20 @@ def GlobalSelfAttention(
       pos_emb_shape = list(input_shape)
       pos_emb_shape[channel_axis] = _n_chan_pos_emb
       pos_emb_shape[batch_axis] = 1
-      pos_emb = rand(rng_pe, shape=pos_emb_shape)
+      pos_emb = np.asarray(rand(seed=rng_pe, shape=pos_emb_shape))
 
       if pos_emb_type == PositionalEmbedding.CONCAT:
         n_chan_in_keys += _n_chan_pos_emb
         if val_pos_emb:
           n_chan_in_vals += _n_chan_pos_emb
 
-    key_matrices = rand(rng_K, shape=(n_heads, n_chan_in_keys, n_chan_key))
-    val_matrices = rand(rng_V, shape=(n_heads, n_chan_in_vals, n_chan_val))
-    W_out = rand(rng_O, shape=(n_chan_val * n_heads, n_chan_out))
+    key_matrices = rand(seed=rng_K, shape=(n_heads, n_chan_in_keys, n_chan_key))
+    val_matrices = rand(seed=rng_V, shape=(n_heads, n_chan_in_vals, n_chan_val))
+    W_out = rand(seed=rng_O, shape=(n_chan_val * n_heads, n_chan_out))
 
     b_shape = [1] * len(input_shape)
     b_shape[_channel_axis] = n_chan_out
-    b = rand(rng_b, shape=b_shape)
+    b = rand(seed=rng_b, shape=b_shape)
 
     if linear_scaling:
       query_matrices = None
@@ -1802,7 +1805,7 @@ def GlobalSelfAttention(
                     'ignored, tying the weights '
                     '(see docstring for more details).')
     else:
-      query_matrices = rand(rng_Q, (n_heads, n_chan_in_keys, n_chan_key))
+      query_matrices = rand(seed=rng_Q, shape=(n_heads, n_chan_in_keys, n_chan_key))
 
     return (output_shape,
             (query_matrices, key_matrices, val_matrices, W_out, b, pos_emb))
@@ -2531,6 +2534,7 @@ def _inputs_to_kernel(
     x = x.astype(np.float64)
 
     if diagonal_batch:
+      print("diagonal_spatial: {}".format(diagonal_spatial))
       cov = _cov_diag_batch(x, diagonal_spatial, batch_axis, channel_axis)
     else:
       cov = _cov(x, x, diagonal_spatial, batch_axis, channel_axis)
@@ -2567,13 +2571,12 @@ def _inputs_to_kernel(
 
 def _propagate_shape(init_fn: InitFn, shape: Shapes) -> Shapes:
   """Statically, abstractly, evaluate the init_fn to get shape information."""
-  akey = ShapedArray((2,), np.uint32)
+  akey = tf.TensorSpec((2,), np.uint32)
   closed_init_fn = functools.partial(init_fn, input_shape=shape)
   _, in_tree = tree_flatten(((akey,), {}))
   fun, out_tree = flatten_fun(lu.wrap_init(closed_init_fn), in_tree)
-  out = pe.abstract_eval_fun(fun.call_wrapped, akey)
+  out = eval_on_shapes(fun.call_wrapped)(akey)
   out_shape = tree_unflatten(out_tree(), out)[0]
-  out_shape = tree_map(lambda x: int(x.val), out_shape)
   return out_shape
 
 
@@ -2763,7 +2766,7 @@ def _ab_relu(x, a, b, **kwargs):
 
 
 def _erf(x, a, b, c, **kwargs):
-  return a * erf(b * x) + c
+  return a * np.asarray(erf(b * x)) + c
 
 
 def _gelu(x, **kwargs):
@@ -3420,7 +3423,7 @@ def _concat_kernels(
           sum(mats[j].shape[pad_axis] for j in range(i)),
           sum(mats[j].shape[pad_axis] for j in range(i + 1, n_mats))
       )
-      rows.append(np.pad(mat, pads))
+      rows.append(np.pad(mat, pads, 'constant'))
     mat = np.concatenate(rows, pad_axis + 1)
 
   return mat
@@ -3762,7 +3765,7 @@ def _check_is_implemented(
 def _mean_and_var(
     x: Optional[np.ndarray],
     axis: Axes = None,
-    dtype: np.dtype = None,
+    dtype: np.dtypes = None,
     out: None = None,
     ddof: int = 0,
     keepdims: bool = False,
@@ -3775,9 +3778,9 @@ def _mean_and_var(
     return x, var
 
   if mask is None:
-    mean = np.mean(x, axis, dtype, out, keepdims)
+    mean = np.mean(x, axis, dtype, keepdims)
     if get_var:
-      var = np.var(x, axis, dtype, out, ddof, keepdims)
+      var = np.var(x, axis, dtype, ddof, keepdims)
 
   else:
     axis = tuple(utils.canonicalize_axis(axis, x))
@@ -3809,7 +3812,7 @@ def _sum_masks(masks: List[Optional[np.ndarray]]) -> Optional[np.ndarray]:
     if mask2 is None:
       return mask1
 
-    return mask1 & mask2
+    return bitwise_and(mask1, mask2)
 
   mask = functools.reduce(add_two_masks, masks, None)
   return mask
@@ -3890,14 +3893,14 @@ def _pool_mask(
       mask.shape, window_shape, strides, padding.name)
 
   # Get the output shape.
-  out_shape = eval_shape(lambda x: lax.reduce_window(
+  out_shape = eval_on_shapes(lambda x: lax.reduce_window(
       x,
       False,
       op.or_,
       window_shape,
       strides,
       padding_vals
-  ), mask).shape
+  ))(mask).shape
 
   # If shapes don't match, stride through the mask.
   if mask.shape != out_shape:

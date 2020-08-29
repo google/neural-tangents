@@ -18,13 +18,16 @@
 import logging
 
 import dataclasses
-from jax.api import jit
-from jax.api import vmap
 from jax.lib import xla_bridge
-import jax.numpy as np
 import jax.test_util as jtu
 from .kernel import Kernel
 import numpy as onp
+
+import tensorflow as tf
+from tensorflow.python.ops import numpy_ops as np
+from tf_helpers.extensions import jit
+from tensorflow import vectorized_map as vmap
+from absl.testing import parameterized
 
 
 def _jit_vmap(f):
@@ -75,8 +78,8 @@ def _log(relative_error, expected, actual, did_pass):
 def assert_close_matrices(self, expected, actual, rtol):
   self.assertEqual(expected.shape, actual.shape)
   relative_error = (
-      np.linalg.norm(actual - expected) /
-      np.maximum(np.linalg.norm(expected), 1e-12))
+      np.linalg_ops.norm(actual - expected) /
+      np.maximum(np.linalg_ops.norm(expected), 1e-12))
   if relative_error > rtol or np.isnan(relative_error):
     _log(relative_error, expected, actual, False)
     self.fail(self.failureException('Relative ERROR: ',
@@ -89,7 +92,7 @@ def assert_close_matrices(self, expected, actual, rtol):
     _log(relative_error, expected, actual, True)
 
 
-class NeuralTangentsTestCase(jtu.JaxTestCase):
+class NeuralTangentsTestCase(tf.test.TestCase, parameterized.TestCase):
 
   def assertAllClose(
       self,
@@ -102,8 +105,8 @@ class NeuralTangentsTestCase(jtu.JaxTestCase):
       canonicalize_dtypes=True):
     if isinstance(x, Kernel):
       self.assertIsInstance(y, Kernel)
-      x_dict = dataclasses.asdict(x)
-      y_dict = dataclasses.asdict(y)
+      x_dict = x._asdict()
+      y_dict = y._asdict()
       for field in dataclasses.fields(Kernel):
         is_pytree_node = field.metadata.get('pytree_node', True)
         if is_pytree_node:
@@ -114,5 +117,5 @@ class NeuralTangentsTestCase(jtu.JaxTestCase):
           self.assertEqual(x_dict[field.name], y_dict[field.name])
     else:
       return super().assertAllClose(
-          x, y, check_dtypes=check_dtypes, atol=atol, rtol=rtol,
+          onp.array(x), onp.array(y), check_dtypes=check_dtypes, atol=atol, rtol=rtol,
           canonicalize_dtypes=canonicalize_dtypes)

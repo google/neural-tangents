@@ -26,12 +26,8 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow.python.ops import numpy_ops as tfnp
 from tf_helpers import lax
-from tf_shape_conversion import shape_conversion
 import numpy as onp
-from stateless_random_ops import split
-from stateless_random_ops import stateless_random_normal as rn
-from tensorflow.random import stateless_uniform
-
+from tensorflow.python.ops import stateless_random_ops as random
 from tensorflow.nn import (relu, log_softmax, softmax, softplus, sigmoid, elu,
                     leaky_relu, selu)
 from tensorflow import zeros_initializer as zi
@@ -47,11 +43,11 @@ from tensorflow import ones_initializer as oi
 #   apply_fun: takes params, inputs, and an rng key and applies the layer.
 
 
-def Dense(out_dim, W_init=rn, b_init=rn):
+def Dense(out_dim, W_init=random.stateless_random_normal, b_init=random.stateless_random_normal):
   """Layer constructor function for a dense (fully-connected) layer."""
   def init_fun(rng, input_shape):
     output_shape = input_shape[:-1] + (out_dim,)
-    keys = split(seed=tf.convert_to_tensor(rng, dtype=tf.int32), num=2)
+    keys = random.split(rng)
     k1 = keys[0]
     k2 = keys[1]
     # convert the two keys from shape (2,) into a scalar
@@ -59,7 +55,7 @@ def Dense(out_dim, W_init=rn, b_init=rn):
     k2 = stateless_uniform(shape=[], seed=k2, minval=None, maxval=None, dtype=tf.int32)
     W = W_init(seed=k1, shape=(input_shape[-1], out_dim))
     b = b_init(seed=k2, shape=(out_dim,))
-    return tfnp.zeros(output_shape), (W.numpy(), b.numpy())
+    return output_shape, (np.asarray(W), np.asarray(b))
   def apply_fun(params, inputs, **kwargs):
     W, b = params
     return tfnp.dot(inputs, W) + b
@@ -67,14 +63,13 @@ def Dense(out_dim, W_init=rn, b_init=rn):
 
 
 def GeneralConv(dimension_numbers, out_chan, filter_shape,
-                strides=None, padding='VALID', W_init=rn,
-                b_init=rn):
+                strides=None, padding='VALID', W_init=random.stateless_random_normal,
+                b_init=random.stateless_random_normal):
   """Layer construction function for a general convolution layer."""
   lhs_spec, rhs_spec, out_spec = dimension_numbers
   one = (1,) * len(filter_shape)
   strides = strides or one
   def init_fun(rng, input_shape):
-    input_shape = shape_conversion(input_shape)
     filter_shape_iter = iter(filter_shape)
     kernel_shape = [out_chan if c == 'O' else
                     input_shape[lhs_spec.index('C')] if c == 'I' else
@@ -83,12 +78,12 @@ def GeneralConv(dimension_numbers, out_chan, filter_shape,
         input_shape, kernel_shape, strides, padding, dimension_numbers)
     bias_shape = [out_chan if c == 'C' else 1 for c in out_spec]
     bias_shape = tuple(itertools.dropwhile(lambda x: x == 1, bias_shape))
-    keys = split(seed=tf.convert_to_tensor(rng, dtype=tf.int32), num=2)
+    keys = random.split(rng)
     k1 = keys[0]
     k2 = keys[1]
     W = W_init(seed=k1, shape=kernel_shape)
     b = b_init(stddev=1e-6, seed=k2, shape=bias_shape)
-    return tfnp.zeros(output_shape), (W, b)
+    return output_shape, (W, b)
   def apply_fun(params, inputs, **kwargs):
     W, b = params
     return lax.conv_general_dilated(inputs, W, strides, padding, one, one,
@@ -99,9 +94,7 @@ Conv = functools.partial(GeneralConv, ('NHWC', 'HWIO', 'NHWC'))
 
 def elementwise(fun, **fun_kwargs):
   """Layer that applies a scalar function elementwise on its inputs."""
-  def init_fun(rng, input_shape):
-    return (tfnp.zeros(input_shape), ())
-  # init_fun = lambda rng, input_shape: (tfnp.zeros(input_shape), ())
+  init_fun = lambda rng, input_shape: (input_shape, ())
   apply_fun = lambda params, inputs, **kwargs: fun(inputs, **fun_kwargs)
   return init_fun, apply_fun
 Tanh = elementwise(tfnp.tanh)
@@ -146,7 +139,7 @@ def _pooling_layer(reducer, init_val, rescaler=None):
       shape.append(input_shape[channel_dim])
       out_shape = lax.reduce_window_shape_tuple(shape, window_shape,
                                                 strides, padding)
-      return tfnp.zeros(out_shape), ()
+      return out_shape, ()
     def apply_fun(params, inputs, **kwargs):
       output = lax.reduce_window(inputs, init_val, reducer, window_shape,
                               strides, padding)
@@ -171,17 +164,17 @@ def _normalize_by_window_size(dims, strides, padding):
     for i in sorted(non_spatial_axes):
       window_sizes = tfnp.expand_dims(window_sizes, i)
 
-    return outputs * window_sizes
+    return outputs / window_sizes
   return rescale
-SumPool = _pooling_layer(tfnp.add, 0., _normalize_by_window_size)
-AvgPool = _pooling_layer(tfnp.add, 0.)
+SumPool = _pooling_layer(tfnp.add, 0.)
+AvgPool = _pooling_layer(tfnp.add, 0., _normalize_by_window_size)
 
 
 def Flatten():
   """Layer construction function for flattening all but the leading dim."""
   def init_fun(rng, input_shape):
     output_shape = input_shape[0], functools.reduce(op.mul, input_shape[1:], 1)
-    return tfnp.zeros(output_shape), ()
+    return output_shape, ()
   def apply_fun(params, inputs, **kwargs):
     return tfnp.reshape(inputs, (inputs.shape[0], -1))
   return init_fun, apply_fun
@@ -190,7 +183,7 @@ Flatten = Flatten()
 
 def Identity():
   """Layer construction function for an identity layer."""
-  init_fun = lambda rng, input_shape: (tfnp.zeros(input_shape), ())
+  init_fun = lambda rng, input_shape: (input_shape, ())
   apply_fun = lambda params, inputs, **kwargs: inputs
   return init_fun, apply_fun
 Identity = Identity()
@@ -199,14 +192,14 @@ Identity = Identity()
 def FanOut(num):
   """Layer construction function for a fan-out layer."""
   def init_fun(rng, input_shape):
-    return ([tfnp.zeros(input_shape)] * num, ())
+    return ([input_shape] * num, ())
   apply_fun = lambda params, inputs, **kwargs: [inputs] * num
   return init_fun, apply_fun
 
 
 def FanInSum():
   """Layer construction function for a fan-in sum layer."""
-  init_fun = lambda rng, input_shape: (tfnp.zeros(input_shape[0]), ())
+  init_fun = lambda rng, input_shape: (input_shape[0], ())
   apply_fun = lambda params, inputs, **kwargs: sum(inputs)
   return init_fun, apply_fun
 FanInSum = FanInSum()
@@ -218,7 +211,7 @@ def FanInConcat(axis=-1):
     ax = axis % len(input_shape[0])
     concat_size = sum(shape[ax] for shape in input_shape)
     out_shape = input_shape[0][:ax] + (concat_size,) + input_shape[0][ax+1:]
-    return tfnp.zeros(out_shape), ()
+    return out_shape, ()
   def apply_fun(params, inputs, **kwargs):
     return tfnp.concatenate(inputs, axis)
   return init_fun, apply_fun
@@ -227,7 +220,7 @@ def FanInConcat(axis=-1):
 def Dropout(rate, mode='train'):
   """Layer construction function for a dropout layer with given rate."""
   def init_fun(rng, input_shape):
-    return tfnp.zeros(input_shape), ()
+    return input_shape, ()
   def apply_fun(params, inputs, **kwargs):
     rng = kwargs.get('rng', None)
     if rng is None:
@@ -263,10 +256,9 @@ def serial(*layers):
     i = 0
     for init_fun in init_funs:
       i += 1
-      keys = split(seed=tf.convert_to_tensor(rng, dtype=tf.int32), num=2)
+      keys = random.split(rng)
       rng = keys[0]
       layer_rng = keys[1]
-      input_shape = shape_conversion(input_shape)
       input_shape, param = init_fun(layer_rng, input_shape)
       params.append(param)
     return input_shape, params
@@ -274,7 +266,7 @@ def serial(*layers):
     rng = kwargs.pop('rng', None)
     rngs = None
     if rng is not None:
-      rngs = split(seed=tf.convert_to_tensor(rng, dtype=tf.int32), num=nlayers)
+      rngs = random.split(rng)
     else:
       rngs = (None,) * nlayers
     for i in range(nlayers):
@@ -301,7 +293,7 @@ def parallel(*layers):
   nlayers = len(layers)
   init_funs, apply_funs = zip(*layers)
   def init_fun(rng, input_shape):
-    rngs = split(seed=tf.convert_to_tensor(rng, dtype=tf.int32), num=nlayers)
+    rngs = random.split(rng)
     result = []
     for i in range(nlayers):
       result.append(init_funs[i](rngs[i], input_shape[i]))
@@ -310,7 +302,7 @@ def parallel(*layers):
     rng = kwargs.pop('rng', None)
     rngs = None
     if rng is not None:
-      rngs = split(seed=tf.convert_to_tensor(rng, dtype=tf.int32), num=nlayers)
+      rngs = random.split(rng, num=nlayers)
     else:
       rngs = (None,) * nlayers
     result = []

@@ -30,18 +30,16 @@ refer to individual functions' docstrings for details.
 import operator
 from typing import Union, Callable, Optional, Tuple, Dict
 import warnings
-
-
-from jax import random
-from jax.api import eval_shape
-from jax.api import jacobian
-from jax.api import jvp
-from jax.api import vjp
-import jax.numpy as np
 from jax.tree_util import tree_multimap
 from jax.tree_util import tree_reduce
 from neural_tangents.utils import utils
 from neural_tangents.utils.typing import ApplyFn, EmpiricalKernelFn, PyTree, PRNGKey, Axes
+
+import tensorflow as tf
+from tensorflow.python.ops import numpy_ops as np
+from tensorflow.python.eager import forwardprop
+from tf_helpers.extensions import eval_on_shapes, vjp, _tf_to_np
+from tensorflow.python.ops import stateless_random_ops as random
 
 
 def linearize(f: Callable[..., np.ndarray],
@@ -70,7 +68,7 @@ def linearize(f: Callable[..., np.ndarray],
   """
   def f_lin(p, *args, **kwargs):
     dparams = tree_multimap(lambda x, y: x - y, p, params)
-    f_params_x, proj = jvp(lambda param: f(param, *args, **kwargs),
+    f_params_x, proj = _jvp(lambda param: f(param, *args, **kwargs),
                            (params,), (dparams,))
     return f_params_x + proj
   return f_lin
@@ -109,7 +107,7 @@ def taylor_expand(f: Callable[..., np.ndarray],
       return f(params)
 
     def f_jvp(p):
-      _, val_jvp = jvp(f, (p,), (dparams,))
+      _, val_jvp = _jvp(f, (p,), (dparams,))
       return val_jvp
 
     df = taylorize_r(f_jvp, params, dparams, degree, current_degree+1)
@@ -221,16 +219,19 @@ def empirical_implicit_ntk_fn(f: ApplyFn,
     def delta_vjp_jvp(delta):
       def delta_vjp(delta):
         return vjp(f2, params)[1](delta)
-      return jvp(f1, (params,), delta_vjp(delta))[1]
+      return _jvp(f1, _tf_to_np((params,)), delta_vjp(delta))[1]
 
     # Since we are taking the Jacobian of a linear function (which does not
     # depend on its coefficients), it is more efficient to substitute fx_dummy
     # for the outputs of the network. fx_dummy has the same shape as the output
     # of the network on a single piece of input data.
-    fx2_struct = eval_shape(f2, params)
+    fx2_struct = eval_on_shapes(f2)(params)
     fx_dummy = np.ones(fx2_struct.shape, fx2_struct.dtype)
 
-    ntk = jacobian(delta_vjp_jvp)(fx_dummy)
+    with tf.GradientTape() as tape:
+      tape.watch(fx_dummy.data)
+      y = delta_vjp_jvp(fx_dummy.data)
+    ntk = np.asarray(tape.jacobian(y, fx_dummy.data))
     return _trace_and_diagonal(ntk, trace_axes, diagonal_axes)
 
   return ntk_fn
@@ -326,16 +327,20 @@ def empirical_direct_ntk_fn(f: ApplyFn,
 
     apply_fn_kwargs1, apply_fn_kwargs2 = _split_kwargs(apply_fn_kwargs, x1, x2)
     f1 = _get_f_params(f, x1, **apply_fn_kwargs1)
-    jac_fn1 = jacobian(f1)
-    j1 = jac_fn1(params)
+    with tf.GradientTape() as tape:
+      tape.watch(params)
+      y = f1(params)
+    j1 = np.asarray(tape.jacobian(y, params))
     if x2 is None:
       j2 = j1
     else:
       f2 = _get_f_params(f, x2, **apply_fn_kwargs2)
-      jac_fn2 = jacobian(f2)
-      j2 = jac_fn2(params)
+      with tf.GradientTape() as tape:
+        tape.watch(params)
+        y = f2(params)
+      j2 = np.asarray(tape.jacobian(y, params))
 
-    fx1 = eval_shape(f1, params)
+    fx1 = eval_on_shapes(f1)(params)
     ntk = sum_and_contract(j1, j2, fx1.ndim)
     return ntk / utils.size_at(fx1, trace_axes)
 
@@ -644,3 +649,12 @@ def _split_kwargs(kwargs, x1, x2):
       kwargs1[k] = kwargs2[k] = v
 
   return kwargs1, kwargs2
+
+
+# The functionality below is from:
+#     https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/eager/forwardprop_test.py#L62-L67
+def _jvp(f, primals, tangents):
+  """Compute the jacobian of `f` at `primals` multiplied by `tangents`."""
+  with forwardprop.ForwardAccumulator(primals, tangents) as acc:
+    primals_out = f(*primals)
+  return primals_out, acc.jvp(primals_out.data)

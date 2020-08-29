@@ -46,12 +46,8 @@ from typing import Callable, Tuple, Union, Iterable, Dict, Any, TypeVar
 from functools import partial
 import warnings
 from jax.api import device_put, devices
-from jax.api import jit
-from jax.api import pmap
 from jax.interpreters.pxla import ShardedDeviceArray
 from jax.lib import xla_bridge
-from jax import random
-import jax.numpy as np
 from jax.tree_util import tree_all
 from jax.tree_util import tree_map
 from jax.tree_util import tree_multimap, tree_flatten, tree_unflatten
@@ -59,6 +55,11 @@ from neural_tangents.utils.kernel import Kernel
 from neural_tangents.utils import utils
 from neural_tangents.utils.typing import KernelFn
 import numpy as onp
+
+import tensorflow as tf
+from tensorflow.python.ops import numpy_ops as np
+from tensorflow.python.ops import stateless_random_ops as random
+from tf_helpers.extensions import jit, pmap
 
 
 def batch(kernel_fn: KernelFn,
@@ -305,7 +306,7 @@ def _serial(kernel_fn: KernelFn,
     _kernel_fn = kernel_fn
     @utils.wraps(_kernel_fn)
     def kernel_fn(x1, x2=None, *args, **kwargs):
-      return device_put(_kernel_fn(x1, x2, *args, **kwargs), devices('cpu')[0])
+      return _kernel_fn(x1, x2, *args, **kwargs)
 
   flatten = partial(_flatten_kernel, is_parallel=False)
 
@@ -414,6 +415,9 @@ def _serial(kernel_fn: KernelFn,
                 **kwargs) -> _KernelType:
     if isinstance(x1_or_kernel, np.ndarray):
       return serial_fn_x1(x1_or_kernel, x2, *args, **kwargs)
+    elif isinstance(x1_or_kernel, onp.ndarray):
+      print("args: , kwargs: ", *args, **kwargs)
+      return serial_fn_x1(np.asarray(x1_or_kernel), x2, *args, **kwargs)
     elif isinstance(x1_or_kernel, Kernel):
       if x2 is not None:
         raise ValueError(f'`x2` must be `None`, got {x2}.')
@@ -641,6 +645,17 @@ def _get_jit_or_pmap_broadcast() -> Callable[[Callable, int], Callable]:
       _key = key + \
           tuple(args_other.items()) + \
           tuple(kwargs_other.items())
+
+      # If any of the instance inside `_key` is a tf.Tensor object, use `ref()`
+      # method to avoid directly hashing the TF Tensor.
+      _key, tree = tree_flatten(_key)
+      for i in range(len(_key)):
+        if isinstance(_key[i], tf.Tensor):
+          _key[i] = tuple(map(tuple, _key[i].numpy()))
+        elif isinstance(_key[i], onp.ndarray):
+          _key[i] = tuple(map(tuple, _key[i]))
+      _key = tuple(_key)
+
       if _key in cache:
         _f = cache[_key]
       else:

@@ -30,14 +30,16 @@ from functools import partial
 import operator
 from typing import Union, Tuple, Generator, Set, Iterable, Optional
 
-from jax import random
-import jax.numpy as np
 from jax.tree_util import tree_map
 from jax.tree_util import tree_multimap
 from neural_tangents.utils import batch
 from neural_tangents.utils import empirical
 from neural_tangents.utils import utils
 from neural_tangents.utils.typing import PRNGKey, InitFn, ApplyFn, MonteCarloKernelFn, Axes, Get, EmpiricalKernelFn, PyTree
+
+import tensorflow as tf
+from tensorflow.python.ops import numpy_ops as np
+from tensorflow.python.ops import stateless_random_ops as random
 
 
 def _sample_once_kernel_fn(kernel_fn: EmpiricalKernelFn,
@@ -55,7 +57,8 @@ def _sample_once_kernel_fn(kernel_fn: EmpiricalKernelFn,
       key: PRNGKey,
       get: Get,
       **apply_fn_kwargs):
-    init_key, dropout_key = random.split(key, 2)
+    keys = random.split(key, 2)
+    init_key, dropout_key = keys[0], keys[1]
     _, params = init_fn(init_key, x1.shape)
     return kernel_fn(x1, x2, get, params, rng=dropout_key, **apply_fn_kwargs)
   return kernel_fn_sample_once
@@ -77,7 +80,8 @@ def _sample_many_kernel_fn(
     _key = key
     ker_sampled = None
     for n in range(1, max(n_samples) + 1):
-      _key, split = random.split(_key)
+      keys = random.split(_key)
+      _key, split = keys[0], keys[1]
       one_sample = kernel_fn_sample_once(x1, x2, split, get, **apply_fn_kwargs)
       if ker_sampled is None:
         ker_sampled = one_sample
