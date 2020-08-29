@@ -1079,6 +1079,9 @@ class ABReluTest(test_utils.NeuralTangentsTestCase):
 
         kernels_id = kernel_fn_id(X0_1 * a, None if X0_2 is None else a * X0_2)
         kernels_ab_relu = kernel_fn_ab_relu(X0_1, X0_2)
+        # Manually correct the value of `is_gaussian` because
+        # `ab_relu` (incorrectly) sets `is_gaussian=False` when `a==b`.
+        kernels_ab_relu = kernels_ab_relu.replace(is_gaussian=True)
         self.assertAllClose(kernels_id, kernels_ab_relu)
 
   def test_leaky_relu(self, same_inputs):
@@ -1225,12 +1228,13 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
       jtu.cases_from_list(
           {
               'testcase_name':
-                  ' [{}_axis={}_n_branches={}_{}_{}]'.format(
+                  ' [{}_axis={}_n_branches={}_{}_{}_{}]'.format(
                       'same_inputs' if same_inputs else 'different_inputs',
                       axis,
                       n_branches,
                       get,
-                      branch_in),
+                      branch_in,
+                      fan_in_mode),
               'same_inputs':
                   same_inputs,
               'axis':
@@ -1240,28 +1244,45 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
               'get':
                   get,
               'branch_in':
-                  branch_in
+                  branch_in,
+              'fan_in_mode':
+                  fan_in_mode,
           }
           for same_inputs in [False]
-          for axis in [None, 0, 1]
+          for axis in [0, 1]
           for n_branches in [2, 3] for get in ['nngp', 'ntk']
           for branch_in in ['dense_before_branch_in',
-                            'dense_after_branch_in']))
-  def test_fan_in_fc(self, same_inputs, axis, n_branches, get, branch_in):
-    if axis in (None, 0) and branch_in == 'dense_after_branch_in':
+                            'dense_after_branch_in']
+          for fan_in_mode in ['FanInSum', 'FanInConcate', 'FanInProd']))
+  def test_fan_in_fc(self, same_inputs, axis, n_branches, get, branch_in,
+                     fan_in_mode):
+    if fan_in_mode in ['FanInSum', 'FanInProd']:
+      if axis != 0:
+        raise absltest.SkipTest('`FanInSum` and `FanInProd` are skipped when '
+                                'axis != 0.')
+      axis = None
+    if (fan_in_mode == 'FanInSum' or
+        axis == 0) and branch_in == 'dense_after_branch_in':
       raise absltest.SkipTest('`FanInSum` and `FanInConcat(0)` '
                               'require `is_gaussian`.')
 
-    if axis == 1 and branch_in == 'dense_before_branch_in':
-      raise absltest.SkipTest('`FanInConcat` on feature axis requires a dense '
-                              'layer after concatenation.')
+    if (axis == 1 or fan_in_mode == 'FanInProd') and branch_in == 'dense_before_branch_in':
+      raise absltest.SkipTest(
+          '`FanInConcat` or `FanInProd` on feature axis requires a dense layer'
+          'after concatenation or Hadamard product.')
+    if fan_in_mode == 'FanInSum':
+      fan_in_layer = stax.FanInSum()
+    elif fan_in_mode == 'FanInProd':
+      fan_in_layer = stax.FanInProd()
+    else:
+      fan_in_layer = stax.FanInConcat(axis)
 
     key = random.PRNGKey(1)
-    X0_1 = random.normal(key, (4, 3))
+    X0_1 = np.cos(random.normal(key, (4, 3)))
     X0_2 = None if same_inputs else random.normal(key, (8, 3))
 
     width = 1024
-    n_samples = 256
+    n_samples = 256 * 2
 
     if xla_bridge.get_backend().platform == 'tpu':
       tol = 0.07
@@ -1286,7 +1307,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
       branches += [stax.serial(*branch_layers)]
 
     output_layers = [
-        stax.FanInSum() if axis is None else stax.FanInConcat(axis),
+        fan_in_layer,
         stax.Relu()
     ]
     if branch_in == 'dense_after_branch_in':
@@ -1314,13 +1335,14 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
       jtu.cases_from_list(
           {
               'testcase_name':
-                  ' [{}_axis={}_n_branches={}_{}_{}_{}]'.format(
+                  ' [{}_axis={}_n_branches={}_{}_{}_{}_{}]'.format(
                       'same_inputs' if same_inputs else 'different_inputs',
                       axis,
                       n_branches,
                       get,
                       branch_in,
-                      readout),
+                      readout,
+                      fan_in_mode),
               'same_inputs':
                   same_inputs,
               'axis':
@@ -1332,30 +1354,48 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
               'branch_in':
                   branch_in,
               'readout':
-                  readout
+                  readout,
+              'fan_in_mode':
+                  fan_in_mode,
           }
           for same_inputs in [False]
-          for axis in [None, 0, 1, 2, 3]
+          for axis in [0, 1, 2, 3]
           for n_branches in [2, 3] for get in ['nngp', 'ntk']
           for branch_in in ['dense_before_branch_in', 'dense_after_branch_in']
-          for readout in ['pool', 'flatten']))
+          for readout in ['pool', 'flatten']
+          for fan_in_mode in ['FanInSum', 'FanInConcate', 'FanInProd']))
   def test_fan_in_conv(self,
                        same_inputs,
                        axis,
                        n_branches,
                        get,
                        branch_in,
-                       readout):
+                       readout,
+                       fan_in_mode):
     if xla_bridge.get_backend().platform == 'cpu':
       raise absltest.SkipTest('Not running CNNs on CPU to save time.')
-
-    if axis in (None, 0, 1, 2) and branch_in == 'dense_after_branch_in':
+    if fan_in_mode in ['FanInSum', 'FanInProd']:
+      if axis != 0:
+        raise absltest.SkipTest('`FanInSum` and `FanInProd()` are skipped when '
+                                'axis != 0.')
+      axis = None
+    if (fan_in_mode == 'FanInSum' or
+        axis in [0, 1, 2]) and branch_in == 'dense_after_branch_in':
       raise absltest.SkipTest('`FanInSum` and `FanInConcat(0/1/2)` '
                               'require `is_gaussian`.')
 
-    if axis == 3 and branch_in == 'dense_before_branch_in':
-      raise absltest.SkipTest('`FanInConcat` on feature axis requires a dense '
-                              'layer after concatenation.')
+    if (axis == 3 or fan_in_mode == 'FanInProd') and \
+        branch_in == 'dense_before_branch_in':
+      raise absltest.SkipTest('`FanInConcat` or `FanInProd` on feature axis '
+                              'requires a dense layer after concatenation '
+                              'or Hadamard product.')
+
+    if fan_in_mode == 'FanInSum':
+      fan_in_layer = stax.FanInSum()
+    elif fan_in_mode == 'FanInProd':
+      fan_in_layer = stax.FanInProd()
+    else:
+      fan_in_layer = stax.FanInConcat(axis)
 
     key = random.PRNGKey(1)
     X0_1 = random.normal(key, (2, 5, 6, 3))
@@ -1398,7 +1438,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
       branches += [stax.serial(*branch_layers)]
 
     output_layers = [
-        stax.FanInSum() if axis is None else stax.FanInConcat(axis),
+        fan_in_layer,
         stax.Relu(),
         stax.GlobalAvgPool() if readout == 'pool' else stax.Flatten()
     ]

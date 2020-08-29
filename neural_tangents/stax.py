@@ -917,7 +917,109 @@ def FanInSum() -> InternalLayer:
     `(init_fn, apply_fn, kernel_fn)`.
   """
   init_fn, apply_fn = ostax.FanInSum
-  kernel_fn = lambda ks, **kwargs: _fan_in_kernel_fn(ks, None)
+
+  def kernel_fn(ks: List[Kernel], **kwargs) -> Kernel:
+    ks, is_reversed = _proprocess_kernels_for_fan_in(ks)
+    if not all([k.shape1 == ks[0].shape1 and
+                k.shape2 == ks[0].shape2 for k in ks[1:]]):
+      raise ValueError('All shapes should be equal in `FanInSum/FanInProd`.')
+
+    is_gaussian = all(k.is_gaussian for k in ks)
+    if not is_gaussian and len(ks) != 1:
+      # TODO(xlc): FanInSum/FanInConcat could allow non-Gaussian inputs, but
+      # we need to propogate the mean of the random variables as well.
+      raise NotImplementedError('`FanInSum` layer along the non-channel axis is'
+                                ' only implemented for the case if all input'
+                                ' layers guaranteed to be mean-zero Gaussian,'
+                                ' i.e. having all `is_gaussian set to `True`.')
+
+    _mats_sum = lambda mats: None if mats[0] is None else sum(mats)
+
+    cov1s = [k.cov1 for k in ks]
+    cov2s = [k.cov2 for k in ks]
+    nngps = [k.nngp for k in ks]
+    ntks = [k.ntk for k in ks]
+    cov1, cov2, nngp, ntk = map(_mats_sum, (cov1s, cov2s, nngps, ntks))
+    kers = (nngp, ntk, cov1, cov2)
+
+    return Kernel(*(
+        kers + (ks[0].x1_is_x2,
+                is_gaussian,
+                is_reversed,
+                ks[0].is_input,
+                ks[0].diagonal_batch,
+                ks[0].diagonal_spatial,
+                None,
+                None,
+                ks[0].batch_axis,
+                ks[0].channel_axis,
+                None,
+                None)))
+
+  def mask_fn(mask, input_shape):
+    return _sum_masks(mask)
+
+  return init_fn, apply_fn, kernel_fn, mask_fn
+
+
+@layer
+@_supports_masking(remask_kernel=False)
+def FanInProd() -> InternalLayer:
+  """Layer construction function for a fan-in product layer.
+
+  This layer takes a number of inputs (e.g. produced by `FanOut`) and
+  elementwisely multiply the inputs to produce a single output.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  init_fn, _ = ostax.FanInSum
+
+  def apply_fn(params, inputs, **kwargs):
+    return functools.reduce(np.multiply, inputs)
+
+  def kernel_fn(ks: List[Kernel], **kwargs) -> Kernel:
+    ks, is_reversed = _proprocess_kernels_for_fan_in(ks)
+    if not all([k.shape1 == ks[0].shape1 and
+                k.shape2 == ks[0].shape2 for k in ks[1:]]):
+      raise ValueError('All shapes should be equal in `FanInProd`.')
+
+    is_gaussian = len(ks) == 1 and ks[0].is_gaussan
+
+    def _mats_prod(nngps, ntks):
+      if None in ntks:
+        return functools.reduce(np.multiply, nngps), None
+
+      nngp_prod, ntk_prod = 1., 0.
+      for nngp, ntk in zip(nngps, ntks):
+        ntk_prod = ntk_prod * nngp + nngp_prod * ntk
+        nngp_prod *= nngp
+      return nngp_prod, ntk_prod
+
+    cov1s = [k.cov1 for k in ks]
+    cov2s = [k.cov2 for k in ks]
+    nngps = [k.nngp for k in ks]
+    ntks = [k.ntk for k in ks]
+
+    cov1 = functools.reduce(np.multiply, cov1s)
+    cov2 = None if None in cov2s else functools.reduce(np.multiply, cov2s)
+    nngp, ntk = _mats_prod(nngps, ntks)
+
+    kers = (nngp, ntk, cov1, cov2)
+
+    return Kernel(*(
+        kers + (ks[0].x1_is_x2,
+                is_gaussian,
+                is_reversed,
+                ks[0].is_input,
+                ks[0].diagonal_batch,
+                ks[0].diagonal_spatial,
+                None,
+                None,
+                ks[0].batch_axis,
+                ks[0].channel_axis,
+                None,
+                None)))
 
   def mask_fn(mask, input_shape):
     return _sum_masks(mask)
@@ -939,7 +1041,93 @@ def FanInConcat(axis: int = -1) -> InternalLayer:
     `(init_fn, apply_fn, kernel_fn)`.
   """
   init_fn, apply_fn = ostax.FanInConcat(axis)
-  kernel_fn = lambda ks, **kwargs: _fan_in_kernel_fn(ks, axis)
+
+  def kernel_fn(ks: List[Kernel], **kwargs) -> Kernel:
+    ks, is_reversed = _proprocess_kernels_for_fan_in(ks)
+
+    diagonal_batch = ks[0].diagonal_batch
+    diagonal_spatial = ks[0].diagonal_spatial
+
+    shape1, shape2 = ks[0].shape1, ks[0].shape2
+
+    ndim = len(shape1)
+    _axis = axis % ndim
+    batch_axis = ks[0].batch_axis
+    channel_axis = ks[0].channel_axis
+
+    new_shape1 = shape1[:_axis] + shape1[_axis + 1:]
+    new_shape2 = shape2[:_axis] + shape2[_axis + 1:]
+    for k in ks:
+      k_shape1 = k.shape1[:_axis] + k.shape1[_axis + 1:]
+      k_shape2 = k.shape2[:_axis] + k.shape2[_axis + 1:]
+      if k_shape1 != new_shape1 or k_shape2 != new_shape2:
+        raise ValueError('Non-`axis` shapes should be equal in `FanInConcat`.')
+
+    # Check if inputs are independent Gaussians.
+    if _axis != channel_axis:
+      is_gaussian = all(k.is_gaussian for k in ks)
+      if not is_gaussian:
+        # TODO(xlc): FanInSum/FanInConcat could allow non-Gaussian inputs, but
+        # we need to propogate the mean of the random variables as well.
+        raise NotImplementedError(
+            '`FanInConcat` layer along the non-channel axis is only implemented'
+            'for the case if all input layers guaranteed to be mean-zero '
+            'Gaussian, i.e. having all `is_gaussian set to `True`.')
+    else:
+      # TODO(romann): allow to apply nonlinearity after
+      # channelwise concatenation.
+      # TODO(romann): support concatenating different channelwise masks.
+      is_gaussian = False
+
+    if _axis == batch_axis:
+      warnings.warn(f'Concatenation along the batch axis ({_axis}) gives '
+                    f'inconsistent covariances when batching - '
+                    f'proceed with caution.')
+
+    spatial_axes = tuple(i for i in range(ndim)
+                         if i not in (channel_axis, batch_axis))
+    # Change spatial axis according to the kernel `is_reversed`.
+    if _axis in spatial_axes and is_reversed:
+      _axis = spatial_axes[::-1][spatial_axes.index(_axis)]
+
+    # Map activation tensor axis to the covariance tensor axis.
+    tensor_axis_to_kernel_axis = {
+        **{
+            batch_axis: 0,
+            channel_axis: -1,
+        },
+        **{
+            spatial_axis: idx + 1 for idx, spatial_axis in enumerate(spatial_axes)
+        }
+    }
+
+    _axis = tensor_axis_to_kernel_axis[_axis]
+    widths = [k.shape1[channel_axis] for k in ks]
+
+    cov1 = _concat_kernels([k.cov1 for k in ks], _axis,
+                           diagonal_batch, diagonal_spatial, widths)
+    cov2 = _concat_kernels([k.cov2 for k in ks], _axis,
+                           diagonal_batch, diagonal_spatial, widths)
+    nngp = _concat_kernels([k.nngp for k in ks], _axis,
+                           False, diagonal_spatial, widths)
+    ntk = _concat_kernels([k.ntk for k in ks], _axis,
+                          False, diagonal_spatial, widths)
+
+    kers = (nngp, ntk, cov1, cov2)
+
+    return Kernel(*(
+        kers + (ks[0].x1_is_x2,
+                is_gaussian,
+                is_reversed,
+                ks[0].is_input,
+                diagonal_batch,
+                diagonal_spatial,
+                None,
+                None,
+                batch_axis,
+                channel_axis,
+                None,
+                None)))
 
   def mask_fn(mask, input_shape):
     return _concat_masks(mask, input_shape, axis)
@@ -2753,6 +2941,11 @@ def _preprocess_kernel_fn(
 def _elementwise(fn, name, df=None, quad_points=None, **fn_kwargs):
   init_fn, apply_fn = ostax.elementwise(fn, **fn_kwargs)
   def kernel_fn(k: Kernel, **kwargs):
+    if not k.is_gaussian:
+      raise ValueError('The input to the activation function must be Gaussian, '
+                       'i.e. a random affine transform is required before the '
+                       'activation function.')
+
     if quad_points is not None:
       do_backprop = fn_kwargs['do_backprop']
       return _transform_kernels_quadrature(k, fn, df, quad_points, do_backprop)
@@ -2898,6 +3091,7 @@ def _transform_kernels_ab_relu(
 
   See https://arxiv.org/pdf/1711.09090.pdf for the leaky ReLU derivation.
   """
+
   cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
   if do_stabilize:
@@ -2934,7 +3128,8 @@ def _transform_kernels_ab_relu(
                    nngp=nngp,
                    cov2=cov2,
                    ntk=ntk,
-                   is_gaussian=(a == b))
+                   is_gaussian=False
+                   )
 
 
 def _get_erf_kernel(
@@ -3048,14 +3243,14 @@ def _transform_kernels_affine_erf(
   k = k.replace(cov1=b**2 * k.cov1,
                 nngp=b**2 * k.nngp,
                 cov2=None if k.cov2 is None else b**2 * k.cov2,
-                ntk=None if k.ntk is None else b**2 * k.ntk,
-                is_gaussian=False)
+                ntk=None if k.ntk is None else b**2 * k.ntk)
   k = _transform_kernels_erf_non_scaled(k, do_backprop)
   return k.replace(
       cov1=_affine(k.cov1, a, c),
       nngp=_affine(k.nngp, a, c),
       cov2=_affine(k.cov2, a, c),
-      ntk=None if k.ntk is None else _affine(k.ntk, a, 0.))
+      ntk=None if k.ntk is None else _affine(k.ntk, a, 0.),
+      is_gaussian=False)
 
 
 def _transform_kernels_sin(k: Kernel, a: float, b: float, c: float) -> Kernel:
@@ -3242,23 +3437,14 @@ def _affine(
   return  W_std**2 * mat + b_std**2
 
 
-def _fan_in_kernel_fn(kernels: List[Kernel], axis: Optional[int]) -> Kernel:
-  diagonal_batch = kernels[0].diagonal_batch
-  diagonal_spatial = kernels[0].diagonal_spatial
-
-  shape1, shape2 = kernels[0].shape1, kernels[0].shape2
-
-  ndim = len(shape1)
-  axis = None if axis is None else axis % ndim
-  batch_axis = kernels[0].batch_axis
-  channel_axis = kernels[0].channel_axis
-
+def _proprocess_kernels_for_fan_in(
+    ks: List[Kernel]) -> Tuple[List[Kernel], bool]:
   # Check diagonal requirements.
-  if not all(k.diagonal_batch == diagonal_batch and
-             k.diagonal_spatial == diagonal_spatial and
-             k.batch_axis == batch_axis and
-             k.channel_axis == channel_axis
-             for k in kernels):
+  if not all(k.diagonal_batch == ks[0].diagonal_batch and
+             k.diagonal_spatial == ks[0].diagonal_spatial and
+             k.batch_axis == ks[0].batch_axis and
+             k.channel_axis == ks[0].channel_axis
+             for k in ks[1:]):
     raise NotImplementedError('`FanIn` layers are only implemented for the '
                               'case if all input layers output the same layout '
                               'of covariance matrices, i.e. having all '
@@ -3266,40 +3452,57 @@ def _fan_in_kernel_fn(kernels: List[Kernel], axis: Optional[int]) -> Kernel:
                               '`diagonal_spatial` and other attributes.')
 
   # If kernels have different spatial axes order, transpose some of them.
-  n_kernels = len(kernels)
-  n_reversed = sum(ker.is_reversed for ker in kernels)
+  n_kernels = len(ks)
+  n_reversed = sum(ker.is_reversed for ker in ks)
 
   if n_reversed > n_kernels / 2:
     is_reversed = True
     for i in range(n_kernels):
-      if not kernels[i].is_reversed:
-        kernels[i] = kernels[i].reverse()
+      if not ks[i].is_reversed:
+        ks[i] = ks[i].reverse()
 
   else:
     is_reversed = False
     for i in range(n_kernels):
-      if kernels[i].is_reversed:
-        kernels[i] = kernels[i].reverse()
+      if ks[i].is_reversed:
+        ks[i] = ks[i].reverse()
 
-  # Check shapes.
-  if axis is None:
-    if not all([k.shape1 == shape1 and k.shape2 == shape2 for k in kernels]):
-      raise ValueError('All shapes should be equal in `FanInSum`.')
+  # Warnings.
+  warnings.warn('`FanIn` layers assume independent inputs which is not verified'
+                ' in the code. Please make sure to have at least one `Dense` / '
+                '`Conv` / `GlobalSelfAttention` etc. layer in each branch.')
 
-  else:
-    new_shape1 = shape1[:axis] + shape1[axis + 1:]
-    new_shape2 = shape2[:axis] + shape2[axis + 1:]
-    for k in kernels:
-      k_shape1 = k.shape1[:axis] + k.shape1[axis + 1:]
-      k_shape2 = k.shape2[:axis] + k.shape2[axis + 1:]
-      if k_shape1 != new_shape1 or k_shape2 != new_shape2:
-        raise ValueError('Non-`axis` shapes should be equal in `FanInConcat`.')
+  return ks, is_reversed
+
+
+def _fan_in_kernel_fn_concat(ks: List[Kernel], axis: int) -> Kernel:
+  ks, is_reversed = _proprocess_kernels_for_fan_in(ks)
+
+  diagonal_batch = ks[0].diagonal_batch
+  diagonal_spatial = ks[0].diagonal_spatial
+
+  shape1, shape2 = ks[0].shape1, ks[0].shape2
+
+  ndim = len(shape1)
+  axis = axis % ndim
+  batch_axis = ks[0].batch_axis
+  channel_axis = ks[0].channel_axis
+
+  new_shape1 = shape1[:axis] + shape1[axis + 1:]
+  new_shape2 = shape2[:axis] + shape2[axis + 1:]
+  for k in ks:
+    k_shape1 = k.shape1[:axis] + k.shape1[axis + 1:]
+    k_shape2 = k.shape2[:axis] + k.shape2[axis + 1:]
+    if k_shape1 != new_shape1 or k_shape2 != new_shape2:
+      raise ValueError('Non-`axis` shapes should be equal in `FanInConcat`.')
 
   # Check if inputs are independent Gaussians.
-  if axis is None or axis != channel_axis:
-    is_gaussian = all(k.is_gaussian for k in kernels)
+  if axis != channel_axis:
+    is_gaussian = all(k.is_gaussian for k in ks)
     if not is_gaussian:
-      raise NotImplementedError('`FanInSum` or `FanInConcat` layer along the '
+      # TODO(xlc): FanInSum/FanInConcat could allow non-Gaussian inputs, but
+      # we need to propogate the mean of the random variables as well.
+      raise NotImplementedError('`FanInConcat` layer along the '
                                 'non-channel axis is only implemented for the '
                                 'case if all input layers guaranteed to be mean'
                                 '-zero Gaussian, i.e. having all `is_gaussian '
@@ -3309,10 +3512,6 @@ def _fan_in_kernel_fn(kernels: List[Kernel], axis: Optional[int]) -> Kernel:
     # TODO(romann): support concatenating different channelwise masks.
     is_gaussian = False
 
-  # Warnings.
-  warnings.warn('`FanIn` layers assume independent inputs which is not verified'
-                ' in the code. Please make sure to have at least one `Dense` / '
-                '`Conv` / `GlobalSelfAttention` etc. layer in each branch.')
   if axis == batch_axis:
     warnings.warn(f'Concatenation along the batch axis ({axis}) gives '
                   f'inconsistent covariances when batching - '
@@ -3327,7 +3526,6 @@ def _fan_in_kernel_fn(kernels: List[Kernel], axis: Optional[int]) -> Kernel:
   # Map activation tensor axis to the covariance tensor axis.
   tensor_axis_to_kernel_axis = {
       **{
-          None: None,
           batch_axis: 0,
           channel_axis: -1,
       },
@@ -3335,24 +3533,26 @@ def _fan_in_kernel_fn(kernels: List[Kernel], axis: Optional[int]) -> Kernel:
           spatial_axis: idx + 1 for idx, spatial_axis in enumerate(spatial_axes)
       }
   }
-  axis = tensor_axis_to_kernel_axis[axis]
-  widths = [k.shape1[channel_axis] for k in kernels]
 
-  cov1 = _concat_kernels([k.cov1 for k in kernels], axis,
+  axis = tensor_axis_to_kernel_axis[axis]
+  widths = [k.shape1[channel_axis] for k in ks]
+
+  cov1 = _concat_kernels([k.cov1 for k in ks], axis,
                          diagonal_batch, diagonal_spatial, widths)
-  cov2 = _concat_kernels([k.cov2 for k in kernels], axis,
+  cov2 = _concat_kernels([k.cov2 for k in ks], axis,
                          diagonal_batch, diagonal_spatial, widths)
-  nngp = _concat_kernels([k.nngp for k in kernels], axis,
+  nngp = _concat_kernels([k.nngp for k in ks], axis,
                          False, diagonal_spatial, widths)
-  ntk = _concat_kernels([k.ntk for k in kernels], axis,
+  ntk = _concat_kernels([k.ntk for k in ks], axis,
                         False, diagonal_spatial, widths)
+
   kers = (nngp, ntk, cov1, cov2)
 
   return Kernel(*(
-      kers + (kernels[0].x1_is_x2,
+      kers + (ks[0].x1_is_x2,
               is_gaussian,
               is_reversed,
-              kernels[0].is_input,
+              ks[0].is_input,
               diagonal_batch,
               diagonal_spatial,
               None,
@@ -3374,7 +3574,7 @@ def _concat_kernels(
   Args:
     mats: Covariance tensors of the same shape.
     axis: Specifies the axis along which the covariances (not activations) are
-      concatenated. `None` corresponds to sum, `-1` to averaging.
+      concatenated. `-1` corresponds to averaging.
     diagonal_batch: Specifies whether `cov1` and `cov2` store only
       the diagonal of the sample-sample covariance
       (`diagonal_batch == True`,
@@ -3400,12 +3600,8 @@ def _concat_kernels(
   n_mats = len(mats)
   mat_ndim = mats[0].ndim
 
-  # Sum if `axis == None` i.e. called from `FanInSum`.
-  if axis is None:
-    mat = sum(mats)
-
   # Averaging if concatenating along features or diagonalized dimension.
-  elif axis == -1:
+  if axis == -1:
     if all(w == widths[0] for w in widths):
       widths = [1] * len(widths)
     mat = sum(mats[i] * widths[i] for i in range(n_mats)) / sum(widths)
