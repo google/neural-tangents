@@ -2209,13 +2209,13 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
 
     # Build the infinite network.
     init_fn, apply_fn, kernel_fn = stax.serial(
-        stax.Dense(128*8),
+        stax.Dense(128 * 8),
         activation,
         stax.Dropout(0.5, mode='train'),
         stax.Aggregate(),
         readout,
         stax.Dense(output_dims))
-    kernel_fn = batch.batch(kernel_fn, batch_size=2)
+    kernel_fn = batch.batch(kernel_fn, batch_size=4)
     kernel_mc_fn = monte_carlo.monte_carlo_kernel_fn(
         init_fn, apply_fn, random.PRNGKey(10), 128,
         batch_size=2 if xla_bridge.get_backend().platform == 'tpu' else 0)

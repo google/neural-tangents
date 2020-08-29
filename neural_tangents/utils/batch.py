@@ -97,12 +97,18 @@ def batch(kernel_fn: KernelFn,
     kernel by batching over the dataset in parallel with the specified
     `batch_size` using `device_count` devices.
   """
-  if (device_count == -1 and xla_bridge.device_count() > 1) or device_count > 0:
-    kernel_fn = _parallel(kernel_fn, device_count)
+  input_req = getattr(kernel_fn, 'input_req', {})
+  dropout_in_analytic_kernel = input_req.get('use_dropout', False)
+  use_multidevice = device_count > 0 or (device_count == -1 and
+                                         xla_bridge.device_count() > 1)
+  use_serial = bool(batch_size)
+  if use_multidevice:
+    kernel_fn = _parallel(kernel_fn, use_serial,
+                          dropout_in_analytic_kernel, device_count)
   else:
     kernel_fn = _jit_or_pmap_broadcast(kernel_fn, 0)
 
-  if not batch_size:
+  if not use_serial:
     return kernel_fn
 
   return _serial(kernel_fn, batch_size, store_on_device)
@@ -327,6 +333,7 @@ def _serial(kernel_fn: KernelFn,
     kwargs_np1 = {}
     kwargs_np2 = {}
     kwargs_other = {}
+
     for k, v in kwargs.items():
       if _is_np_ndarray(v):
         if k == 'rng':
@@ -424,7 +431,11 @@ def _serial(kernel_fn: KernelFn,
   return serial_fn
 
 
-def _parallel(kernel_fn: KernelFn, device_count: int = -1) -> KernelFn:
+def _parallel(kernel_fn: KernelFn,
+              use_serial: bool = True,
+              dropout_in_analytic_kernel: bool = False,
+              device_count: int = -1,
+              ) -> KernelFn:
   """Returns a function that computes a kernel in batches in parallel.
 
   When batching in parallel, the data is split over a set number of devices.
@@ -442,6 +453,13 @@ def _parallel(kernel_fn: KernelFn, device_count: int = -1) -> KernelFn:
       `kernel_fn(kernel_in)`. Here `x1` and `x2` are `np.ndarray`s of floats of
       shape `(n1,) + input_shape` and `(n2,) + input_shape`; `kernel_in` is a
       Kernel object. The kernel function should return a `PyTree`.
+    use_serial:
+      Whether `serial` will be called after `_parallel`. The only use case is to
+      make sure when `dropout` is used in the analytic/empirical kernel, the
+      batch size in each device is square.
+    dropout_in_analytic_kernel:
+      whether `dropout` is used in the analytic kernel. See `use_serial` above
+      for the only use case.
     device_count:
       Integer specifying the number of devices over which to split the data. If
       `device_count == 0`, the computation is parallelized over all available
@@ -462,6 +480,15 @@ def _parallel(kernel_fn: KernelFn, device_count: int = -1) -> KernelFn:
       x2 = x1
 
     n1 = x1.shape[0]
+    n2 = n1 if x2_is_none else x2.shape[0]
+    dropout_in_empirical_kernel = getattr(kwargs, 'rng', None) is not None
+    if n1 == n2 and (dropout_in_empirical_kernel or
+                     dropout_in_analytic_kernel) and not use_serial:
+      raise NotImplementedError(
+          'Batching for empirical / analytic kernels with dropout'
+          ' is not implemented for non-square batch size. '
+          'Using `serial` (i.e. use a non-zero batch_size in the '
+          '`batch` function.) could enforce square batch size in each device.')
 
     assert x1.shape[1:] == x2.shape[1:]
     input_shape = x1.shape[1:]
@@ -490,6 +517,13 @@ def _parallel(kernel_fn: KernelFn, device_count: int = -1) -> KernelFn:
 
   def parallel_fn_kernel(kernel, *args, **kwargs):
     n1 = kernel.cov1.shape[0]
+    n2 = n1 if kernel.cov2 is None else kernel.cov2.shape[0]
+    if n1 == n2 and dropout_in_analytic_kernel and not use_serial:
+      raise NotImplementedError(
+          'Batching for analytic kernels with dropout'
+          ' is not implemented for non-square batch size. '
+          'Using `serial` (i.e. use a non-zero batch_size in '
+          '`batch` function.) could force square batch size in each device.')
 
     _device_count = device_count
 
@@ -539,7 +573,6 @@ def _get_n_batches_and_batch_sizes(n1: int,
         'fit the dataset.' % (batch_size, n2_batch_size))
 
   n1_batch_size = n2_batch_size * device_count
-
   n1_batches, ragged = divmod(n1, n1_batch_size)
   if ragged:
     # TODO(schsam): Relax this constraint.

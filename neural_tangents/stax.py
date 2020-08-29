@@ -2216,6 +2216,7 @@ def Dropout(rate: float, mode: str = 'train') -> InternalLayer:
   init_fn, apply_fn = ostax.Dropout(rate, mode=mode)
   kernel_fn_test = lambda k, **kwargs: k
 
+  @_requires(use_dropout=True)
   def kernel_fn_train(k: Kernel, **kwargs):
     """kernel_fn for `train` mode."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -2258,6 +2259,7 @@ _INPUT_REQ = 'input_req'
 _DEFAULT_INPUT_REQ = frozendict.frozendict({'diagonal_batch': True,
                                             'diagonal_spatial': False,
                                             'batch_axis': 0,
+                                            'use_dropout': False,
                                             'channel_axis': -1,
                                             'mask_constant': None})
 
@@ -2281,7 +2283,7 @@ def _get_input_req_attr(kernel_fns: List[LayerKernelFn]) -> Dict[str, bool]:
     req_f = getattr(f, _INPUT_REQ, {})
 
     for k, v in req_f.items():
-      if k in ('batch_axis', 'channel_axis'):
+      if k in ('batch_axis', 'channel_axis', 'use_dropout'):
         req[k] = v
 
       elif k in ('diagonal_batch', 'diagonal_spatial'):
@@ -2408,6 +2410,7 @@ def _inputs_to_kernel(
     *,
     diagonal_batch: bool,
     diagonal_spatial: bool,
+    use_dropout: bool,
     compute_ntk: bool,
     batch_axis: int,
     channel_axis: Optional[int],
