@@ -17,13 +17,15 @@
 
 import operator as op
 from typing import Dict, Tuple, Optional, Callable, Any
-from neural_tangents.utils import dataclasses
+import dataclasses
 from neural_tangents.utils import utils
 
 import tensorflow as tf
 from tensorflow.python.ops import numpy_ops as np
 from tf_helpers.bitwise import bitwise_or
 
+
+@dataclasses.dataclass
 class Kernel:
   """Dataclass containing information about the NTK and NNGP of a model.
 
@@ -111,18 +113,18 @@ class Kernel:
   cov2: Optional[np.ndarray]
   x1_is_x2: np.ndarray
 
-  is_gaussian: bool = dataclasses.field(pytree_node=False)
-  is_reversed: bool = dataclasses.field(pytree_node=False)
-  is_input: bool = dataclasses.field(pytree_node=False)
+  is_gaussian: bool
+  is_reversed: bool
+  is_input: bool
 
-  diagonal_batch: bool = dataclasses.field(pytree_node=False)
-  diagonal_spatial: bool = dataclasses.field(pytree_node=False)
+  diagonal_batch: bool
+  diagonal_spatial: bool
 
-  shape1: Tuple[int, ...] = dataclasses.field(pytree_node=False)
-  shape2: Tuple[int, ...] = dataclasses.field(pytree_node=False)
+  shape1: Tuple[int, ...]
+  shape2: Tuple[int, ...]
 
-  batch_axis: int = dataclasses.field(pytree_node=False)
-  channel_axis: int = dataclasses.field(pytree_node=False)
+  batch_axis: int
+  channel_axis: int 
 
   mask1: Optional[np.ndarray] = None
   mask2: Optional[np.ndarray] = None
@@ -260,3 +262,24 @@ class Kernel:
               if mask2 is not None else mask11)
     mask12 = get_mask_prod(mask1, mask2, 2)
     return mask11, mask12, mask22
+
+  def _asdict():
+    """Return the Kernel object in the form of a dictionary."""
+    return {
+      "nngp": self.nngp,
+      "ntk": self.ntk,
+      "cov1": self.cov1,
+      "cov2": self.cov2,
+      "x1_is_x2": self.x1_is_x2,
+      "is_gaussian": self.is_gaussian,
+      "is_reversed": self.is_reversed,
+      "is_input": self.is_input,
+      "diagonal_batch": self.diagonal_batch,
+      "diagonal_spatial": self.diagonal_spatial,
+      "shape1": self.shape1,
+      "shape2": self.shape2,
+      "batch_axis": self.batch_axis,
+      "channel_axis": self.channel_axis,
+      "mask1": self.mask1,
+      "mask2": self.mask2
+    }
