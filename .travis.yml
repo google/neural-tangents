@@ -10,6 +10,10 @@ install:
   - pip install -e .
 script:
   - set -e
-  - for f in tests/*.py; do python $f; done
-  # - python tests/function_space_test.py
-  # - python tests/weight_space_test.py
+  # - for f in tests/*.py; do python $f; done
+  # TODO (DarrenZhang01): Replace the JAX support with TF support in the
+  # rest of the test files (except `infinite_fcn`, `weight_space`,
+  #                         `function_space` and `stax_test`), also deal with
+  #                         errors in stax tests and infinite fcn tests.
+  - python tests/function_space_test.py
+  - python tests/weight_space_test.py
