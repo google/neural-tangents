@@ -77,9 +77,9 @@ def dataclass(clz):
     kwargs = dict(meta_args + data_args)
     return data_clz(**kwargs)
 
-  jax.tree_util.register_pytree_node(data_clz,
-                                     iterate_clz,
-                                     clz_from_iterable)
+  # jax.tree_util.register_pytree_node(data_clz,
+  #                                    iterate_clz,
+  #                                    clz_from_iterable)
 
   def replace(self: data_clz, **kwargs) -> data_clz:
     return dataclasses.replace(self, **kwargs)
