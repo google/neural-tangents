@@ -29,7 +29,7 @@ with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
 
 
 INSTALL_REQUIRES = [
-    'jax>=0.1.62',
+    'jax>=0.1.75',
     'frozendict>=1.2',
 ]
 

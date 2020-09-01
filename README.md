@@ -428,6 +428,7 @@ as an example. With `NVIDIA V100` 64-bit precision, `nt` took 316/330/508 GPU-ho
 
 Neural Tangents has been used in the following papers:
 
+* [Asymptotics of Wide Convolutional Neural Networks](https://arxiv.org/abs/2008.08675)
 * [Finite Versus Infinite Neural Networks: an Empirical Study](https://arxiv.org/abs/2007.15801)
 * [Bayesian Deep Ensembles via the Neural Tangent Kernel](https://arxiv.org/abs/2007.05864)
 * [The Surprising Simplicity of the Early-Time Learning Dynamics of Neural Networks
@@ -454,6 +455,7 @@ Neural Tangents has been used in the following papers:
 * [Training Dynamics of Deep Networks using Stochastic Gradient Descent via Neural Tangent Kernel](https://arxiv.org/abs/1905.13654)
 * [Wide Neural Networks of Any Depth Evolve as Linear Models Under Gradient
 Descent](https://arxiv.org/abs/1902.06720)
+* [Bayesian Deep Convolutional Networks with Many Channels are Gaussian Processes](https://arxiv.org/abs/1810.05148)
 
 Please let us know if you make use of the code in a publication and we'll add it
 to the list!
