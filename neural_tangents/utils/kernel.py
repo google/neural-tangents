@@ -17,7 +17,6 @@
 
 import operator as op
 from typing import Dict, Tuple, Optional, Callable, Any
-# import dataclasses
 from neural_tangents.utils import utils, dataclasses
 
 import tensorflow as tf
