@@ -263,10 +263,8 @@ def _supports_masking(remask_kernel: bool):
           mask1 = mask_fn(k.mask1, k.shape1)
           mask2 = mask_fn(k.mask2, k.shape2)
         elif isinstance(k, list):
-          mask1 = mask_fn([k.mask1 for k in k],
-                          [k.shape1 for k in k])
-          mask2 = mask_fn([k.mask2 for k in k],
-                          [k.shape2 for k in k])
+          mask1 = mask_fn([k.mask1 for k in k], [k.shape1 for k in k])
+          mask2 = mask_fn([k.mask2 for k in k], [k.shape2 for k in k])
         else:
           raise TypeError(type(Kernel), Kernel)
 
@@ -458,15 +456,9 @@ def Aggregate(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
     nngp = full_conjugate(pattern1, nngp, pattern2)
     ntk = full_conjugate(pattern1, ntk, pattern2)
 
-    return k.replace(cov1=cov1,
-                     nngp=nngp,
-                     cov2=cov2,
-                     ntk=ntk)
+    return k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
 
-  def mask_fn(mask, input_shape):
-    return np.all(mask, axis=channel_axis, keepdims=True)
-
-  return init_fn, apply_fn, kernel_fn, mask_fn
+  return init_fn, apply_fn, kernel_fn
 
 
 @layer
