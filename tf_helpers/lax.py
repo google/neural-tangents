@@ -310,7 +310,7 @@ def conv_general_dilated(lhs, rhs, window_strides, padding, output_shape, lhs_di
                     rhs_dilation))
   if padding not in ['SAME', 'VALID']:
     raise TypeError('Current implementation requires the padding parameter'
-                    'to be either 'VALID' or 'SAME', but got: ', padding)
+                    'to be either `VALID` or `SAME`, but got: ', padding)
   # Convert params from int/Sequence[int] to list of ints.
   strides, lhs_dilation, rhs_dilation = _conv_general_param_type_converter(
     window_strides, lhs_dilation, rhs_dilation
