@@ -31,8 +31,6 @@ from tensorflow import nn
 from tf_helpers.extensions import tf_dot_general
 import sys
 
-_max = builtins.max
-
 
 def conv_shape_tuple(lhs_shape, rhs_shape, strides, pads, batch_group_count=1):
   """Compute the shape tuple of a conv given input shapes in canonical order."""
@@ -365,7 +363,7 @@ def _conv_transpose_padding(k, s, padding):
     else:
       pad_a = int(np.ceil(pad_len / 2))
   elif padding == 'VALID':
-    pad_len = k + s - 2 + _max(k - s, 0)
+    pad_len = k + s - 2 + max(k - s, 0)
     pad_a = k - 1
   else:
     raise ValueError('Padding mode must be `SAME` or `VALID`.')
