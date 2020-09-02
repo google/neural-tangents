@@ -32,7 +32,7 @@ def conv_shape_tuple(lhs_shape, rhs_shape, strides, pads, batch_group_count=1):
   if isinstance(pads, str):
     pads = padtype_to_pads(lhs_shape[2:], rhs_shape[2:], strides, pads)
   if len(pads) != len(lhs_shape) - 2:
-    msg = "Wrong number of explicit pads for convolution: expected {}, got {}."
+    msg = 'Wrong number of explicit pads for convolution: expected {}, got {}.'
     raise TypeError(msg.format(len(lhs_shape) - 2, len(pads)))
 
   lhs_padded = onp.add(lhs_shape[2:], np.sum(np.array(pads).reshape(-1, 2),
@@ -63,20 +63,20 @@ class ConvDimensionNumbers(NamedTuple):
 def conv_general_permutations(dimension_numbers):
   """Utility for convolution dimension permutations relative to Conv HLO."""
   lhs_spec, rhs_spec, out_spec = dimension_numbers
-  lhs_char, rhs_char, out_char = charpairs = ("N", "C"), ("O", "I"), ("N", "C")
+  lhs_char, rhs_char, out_char = charpairs = ('N', 'C'), ('O', 'I'), ('N', 'C')
   for i, (a, b) in enumerate(charpairs):
     if not dimension_numbers[i].count(a) == dimension_numbers[i].count(b) == 1:
-      msg = ("convolution dimension_numbers[{}] must contain the characters "
-             "'{}' and '{}' exactly once, got {}.")
+      msg = ('convolution dimension_numbers[{}] must contain the characters '
+             '`{}` and `{}` exactly once, got {}.')
       raise TypeError(msg.format(i, a, b, dimension_numbers[i]))
     if len(dimension_numbers[i]) != len(set(dimension_numbers[i])):
-      msg = ("convolution dimension_numbers[{}] cannot have duplicate "
-             "characters, got {}.")
+      msg = ('convolution dimension_numbers[{}] cannot have duplicate '
+             'characters, got {}.')
       raise TypeError(msg.format(i, dimension_numbers[i]))
   if not (set(lhs_spec) - set(lhs_char) == set(rhs_spec) - set(rhs_char) ==
           set(out_spec) - set(out_char)):
-    msg = ("convolution dimension_numbers elements must each have the same "
-           "set of spatial characters, got {}.")
+    msg = ('convolution dimension_numbers elements must each have the same '
+           'set of spatial characters, got {}.')
     raise TypeError(msg.format(dimension_numbers))
 
   def getperm(spec, charpair):
@@ -104,7 +104,7 @@ def conv_dimension_numbers(lhs_shape, rhs_shape, dimension_numbers):
   if isinstance(dimension_numbers, ConvDimensionNumbers):
     return dimension_numbers
   if len(lhs_shape) != len(rhs_shape):
-    msg = "convolution requires lhs and rhs ndim to be equal, got {} and {}."
+    msg = 'convolution requires lhs and rhs ndim to be equal, got {} and {}.'
     raise TypeError(msg.format(len(lhs_shape), len(rhs_shape)))
 
   if dimension_numbers is None:
@@ -112,13 +112,13 @@ def conv_dimension_numbers(lhs_shape, rhs_shape, dimension_numbers):
     return ConvDimensionNumbers(iota, iota, iota)
   elif isinstance(dimension_numbers, (list, tuple)):
     if len(dimension_numbers) != 3:
-      msg = "convolution dimension_numbers list/tuple must be length 3, got {}."
+      msg = 'convolution dimension_numbers list/tuple must be length 3, got {}.'
       raise TypeError(msg.format(len(dimension_numbers)))
     if not all(isinstance(elt, str) for elt in dimension_numbers):
-      msg = "convolution dimension_numbers elements must be strings, got {}."
+      msg = 'convolution dimension_numbers elements must be strings, got {}.'
       raise TypeError(msg.format(tuple(map(type, dimension_numbers))))
-    msg = ("convolution dimension_numbers[{}] must have len equal to the ndim "
-           "of lhs and rhs, got {} for lhs and rhs shapes {} and {}.")
+    msg = ('convolution dimension_numbers[{}] must have len equal to the ndim '
+           'of lhs and rhs, got {} for lhs and rhs shapes {} and {}.')
     for i, elt in enumerate(dimension_numbers):
       if len(elt) != len(lhs_shape):
         raise TypeError(msg.format(i, len(elt), lhs_shape, rhs_shape))
@@ -126,17 +126,17 @@ def conv_dimension_numbers(lhs_shape, rhs_shape, dimension_numbers):
     lhs_spec, rhs_spec, out_spec = conv_general_permutations(dimension_numbers)
     return ConvDimensionNumbers(lhs_spec, rhs_spec, out_spec)
   else:
-    msg = "convolution dimension_numbers must be tuple/list or None, got {}."
+    msg = 'convolution dimension_numbers must be tuple/list or None, got {}.'
     raise TypeError(msg.format(type(dimension_numbers)))
 
 
 def padtype_to_pads(in_shape, window_shape, window_strides, padding):
-  if padding == "SAME":
+  if padding == 'SAME':
     out_shape = _ceil_divide(in_shape, window_strides)
     pad_sizes = np.maximum(0, (out_shape - 1) * window_strides +
                               window_shape - in_shape)
     return [(pad_size // 2, pad_size - pad_size // 2) for pad_size in pad_sizes]
-  elif padding == "VALID":
+  elif padding == 'VALID':
     return [(0, 0)] * len(in_shape)
 
 
@@ -272,12 +272,12 @@ def reduce_window(inputs, init_value, reducer, window_dimensions, strides,
   # TensorFlow pool dimensionality checker.
   inputs = np.expand_dims(inputs, axis=(0, inputs.ndim))
   if reducer not in [np.max, np.add]:
-    raise TypeError("Only max pooling and average/sum pooling are supported.")
+    raise TypeError('Only max pooling and average/sum pooling are supported.')
 
   # Note that there is no need to send in the parameter data format since the
-  # input is already of default data format - "N...C". The adjustments of the
+  # input is already of default data format - 'N...C'. The adjustments of the
   # input shape is already finished in apply_fun of Pooling in stax.
-  pooling = "AVG" if reducer == np.add else "MAX"
+  pooling = 'AVG' if reducer == np.add else 'MAX'
   output = np.asarray(nn.pool(inputs, window_dimensions, pooling, strides, padding))
   return np.squeeze(output, axis=(0, output.ndim - 1)) * np.prod(window_dimensions)
 
@@ -294,23 +294,23 @@ def conv_general_dilated(lhs, rhs, window_strides, padding, output_shape, lhs_di
   dim = None
   lhs_spec, rhs_spec, out_spec = dimension_numbers
   if lhs_spec != out_spec:
-    raise TypeError("Current implementation requires the `data_format` of the "
-                    "inputs and outputs to be the same.")
+    raise TypeError('Current implementation requires the `data_format` of the '
+                    'inputs and outputs to be the same.')
   if len(lhs_spec) >= 6:
-    raise TypeError("Current implmentation does not support 4 or higher"
-                    "dimensional convolution, but got: ", len(lhs_spec) - 2)
+    raise TypeError('Current implmentation does not support 4 or higher'
+                    'dimensional convolution, but got: ', len(lhs_spec) - 2)
   dim = len(lhs_spec) - 2
   if lhs_dilation and rhs_dilation:
     if lhs_dilation == (1,) * dim and rhs_dilation == (1,) * dim:
       lhs_dilation, rhs_dilation = None, None
     else:
-      raise TypeError("Current implementation does not support that deconvolution"
-                    "and dilation to be performed at the same time, but got"
-                    " lhs_dilation: {}, rhs_dilation: {}".format(lhs_dilation,
+      raise TypeError('Current implementation does not support that deconvolution'
+                    'and dilation to be performed at the same time, but got'
+                    ' lhs_dilation: {}, rhs_dilation: {}'.format(lhs_dilation,
                     rhs_dilation))
-  if padding not in ["SAME", "VALID"]:
-    raise TypeError("Current implementation requires the padding parameter"
-                    "to be either 'VALID' or 'SAME', but got: ", padding)
+  if padding not in ['SAME', 'VALID']:
+    raise TypeError('Current implementation requires the padding parameter'
+                    'to be either 'VALID' or 'SAME', but got: ', padding)
   # Convert params from int/Sequence[int] to list of ints.
   strides, lhs_dilation, rhs_dilation = _conv_general_param_type_converter(
     window_strides, lhs_dilation, rhs_dilation
@@ -331,7 +331,7 @@ def conv_general_dilated(lhs, rhs, window_strides, padding, output_shape, lhs_di
   lhs = np.moveaxis(lhs, (dim_maps['N'], dim_maps['C']), (0, dim + 1))
   # Adjust the filters, put the dimension 'I' and 'O' at last.
   rhs = np.moveaxis(rhs, (dim_maps['O'], dim_maps['I']), (dim + 1, dim))
-  spatial_dim_maps = {1: 'W', 2: "HW", 3: "DHW"}
+  spatial_dim_maps = {1: 'W', 2: 'HW', 3: 'DHW'}
   data_format = 'N' + spatial_dim_maps[dim] + 'C'
   tf_nn_APIs = {1: [nn.conv1d, nn.conv1d_transpose],
                 2: [nn.conv2d, nn.conv2d_transpose],
@@ -390,9 +390,9 @@ def _eval_output_shape(lhs_shape, rhs_shape, padding, window_strides):
   """
   output_shape = [lhs_shape[0]]
   for i in range(1, len(lhs_shape) - 1):
-    if padding == "SAME":
+    if padding == 'SAME':
       output_shape.append((lhs_shape[i] - 1) * window_strides[i-1] + rhs_shape[i])
-    if padding == "VALID":
+    if padding == 'VALID':
       output_shape.append((lhs_shape[i] - 1) * window_strides[i-1])
   output_shape.append(lhs_shape[-1])
   return tf.constant(output_shape)
