@@ -17,3 +17,4 @@ script:
   #                         errors in stax tests and infinite fcn tests.
   - python tests/function_space_test.py
   - python tests/weight_space_test.py
+  - python tests/infinite_fcn_test.py

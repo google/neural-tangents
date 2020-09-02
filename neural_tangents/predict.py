@@ -1007,7 +1007,6 @@ def _get_fns_in_eigenbasis(k_train_train: np.ndarray,
   k_train_train = utils.make_2d(k_train_train)
   k_train_train = _add_diagonal_regularizer(k_train_train, diag_reg,
                                             diag_reg_absolute_scale)
-  print("k_train_train: {}".format(k_train_train))
   evals, evecs = tf.linalg.eigh(k_train_train)
   evals, evecs = np.asarray(evals), np.asarray(evecs)
 
@@ -1050,7 +1049,7 @@ def _get_cho_solve(A: np.ndarray,
     b = np.moveaxis(b, b_axes, last_b_axes)
     b = b.reshape((A.shape[1], -1))
 
-    x = np.linalg_ops.cholesky_solve(C, b)
+    x = np.asarray(np.linalg_ops.cholesky_solve(C, b))
     x = x.reshape(x_shape)
     return x
 

@@ -76,10 +76,10 @@ class TFLaxTest(tf.test.TestCase, parameterized.TestCase):
       for dimension_numbers, perms in [
         (("NHWC", "HWIO", "NHWC"), ([0, 2, 3, 1], [2, 3, 1, 0]))
       ]])
-  def testConvGeneralDilated(self, lhs_shape, rhs_shape, strides,
-                             padding, lhs_dilation, rhs_dilation,
-                             feature_group_count, batch_group_count,
-                             dimension_numbers, perms):
+  def test_tf_conv_general_dilated(self, lhs_shape, rhs_shape, strides,
+                                   padding, lhs_dilation, rhs_dilation,
+                                   feature_group_count, batch_group_count,
+                                   dimension_numbers, perms):
     tf.print("dimension_numbers: {}".format(dimension_numbers), output_stream=sys.stdout)
     lhs_perm, rhs_perm = perms  # permute to compatible shapes
 

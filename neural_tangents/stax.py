@@ -2534,7 +2534,6 @@ def _inputs_to_kernel(
     x = x.astype(np.float64)
 
     if diagonal_batch:
-      print("diagonal_spatial: {}".format(diagonal_spatial))
       cov = _cov_diag_batch(x, diagonal_spatial, batch_axis, channel_axis)
     else:
       cov = _cov(x, x, diagonal_spatial, batch_axis, channel_axis)
@@ -2571,11 +2570,11 @@ def _inputs_to_kernel(
 
 def _propagate_shape(init_fn: InitFn, shape: Shapes) -> Shapes:
   """Statically, abstractly, evaluate the init_fn to get shape information."""
-  akey = tf.TensorSpec((2,), np.uint32)
+  akey = tf.TensorSpec((2,), np.int32)
   closed_init_fn = functools.partial(init_fn, input_shape=shape)
   _, in_tree = tree_flatten(((akey,), {}))
   fun, out_tree = flatten_fun(lu.wrap_init(closed_init_fn), in_tree)
-  out = eval_on_shapes(fun.call_wrapped)(akey)
+  out = eval_on_shapes(fun.call_wrapped, allow_static_outputs=True)(akey)
   out_shape = tree_unflatten(out_tree(), out)[0]
   return out_shape
 
@@ -2826,7 +2825,7 @@ def _get_diagonal(
 
   batch_ndim = 1 if diagonal_batch else 2
   start_axis = 2 - batch_ndim
-  end_axis = batch_ndim if diagonal_spatial else cov.ndim
+  end_axis = batch_ndim if diagonal_spatial else len(cov.shape)
   cov = utils.unzip_axes(cov, start_axis, end_axis)
   return utils.diagonal_between(cov, start_axis, end_axis)
 

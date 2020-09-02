@@ -20,11 +20,13 @@ By default, this example does inference on a small CIFAR10 subset.
 import time
 from absl import app
 from absl import flags
-import jax.numpy as np
 import neural_tangents as nt
 from neural_tangents import stax
 from examples import datasets
 from examples import util
+
+import tensorflow as tf
+from tensorflow.python.ops import numpy_ops as np
 
 
 flags.DEFINE_integer('train_size', 1000,
@@ -50,7 +52,6 @@ def main(unused_argv):
       stax.Relu(),
       stax.Dense(1, 2., 0.05)
   )
-
   # Optionally, compute the kernel in batches, in parallel.
   kernel_fn = nt.batch(kernel_fn,
                        device_count=0,
@@ -61,8 +62,6 @@ def main(unused_argv):
   predict_fn = nt.predict.gradient_descent_mse_ensemble(kernel_fn, x_train,
                                                         y_train, diag_reg=1e-3)
   fx_test_nngp, fx_test_ntk = predict_fn(x_test=x_test)
-  fx_test_nngp.block_until_ready()
-  fx_test_ntk.block_until_ready()
 
   duration = time.time() - start
   print('Kernel construction and inference done in %s seconds.' % duration)

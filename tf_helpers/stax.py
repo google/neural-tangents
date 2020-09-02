@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Stax is a small but flexible neural net specification library from scratch.
+"""This is an adapted version of stax, based on TensorFlow, originated from
 
-For an example of its use, see examples/resnet50.py.
+- https://github.com/google/jax/blob/master/jax/experimental/stax.py
 """
 
 import functools

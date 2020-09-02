@@ -17,8 +17,7 @@
 
 import operator as op
 from typing import Dict, Tuple, Optional, Callable, Any
-import dataclasses
-from neural_tangents.utils import utils
+from neural_tangents.utils import utils, dataclasses
 
 import tensorflow as tf
 from tensorflow.python.ops import numpy_ops as np
@@ -124,7 +123,7 @@ class Kernel:
   shape2: Tuple[int, ...]
 
   batch_axis: int
-  channel_axis: int 
+  channel_axis: int
 
   mask1: Optional[np.ndarray] = None
   mask2: Optional[np.ndarray] = None
