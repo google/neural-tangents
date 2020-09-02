@@ -309,10 +309,10 @@ def conv_general_dilated(lhs, rhs, window_strides, padding, output_shape, lhs_di
     if lhs_dilation == (1,) * dim and rhs_dilation == (1,) * dim:
       lhs_dilation, rhs_dilation = None, None
     else:
-      raise TypeError('Current implementation does not support that deconvolution'
-                    'and dilation to be performed at the same time, but got'
-                    ' lhs_dilation: {}, rhs_dilation: {}'.format(lhs_dilation,
-                    rhs_dilation))
+      raise TypeError('Current implementation does not support that '
+                      'deconvolution and dilation to be performed at the same '
+                      'time, but got lhs_dilation: {}, rhs_dilation: {}'.format(
+                          lhs_dilation, rhs_dilation))
   if padding not in ['SAME', 'VALID']:
     raise TypeError('Current implementation requires the padding parameter'
                     'to be either `VALID` or `SAME`, but got: ', padding)
