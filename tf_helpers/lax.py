@@ -14,6 +14,13 @@
 # ==============================================================================
 
 
+"""
+This file contains some TF-based lax utilities. Some utilities, except
+general convolution, general dot and reduce window and their dependencies,
+are adpated from https://github.com/google/jax/blob/master/jax/lax/lax.py.
+"""
+
+
 import builtins
 from typing import NamedTuple, Sequence
 import string
