@@ -10,6 +10,13 @@
 [![Readthedocs](https://readthedocs.org/projects/neural-tangents/badge/?version=latest)](https://neural-tangents.readthedocs.io/en/latest/?badge=latest)
 [![PyPI - License](https://img.shields.io/pypi/l/neural_tangents)](https://github.com/google/neural-tangents/blob/master/LICENSE)
 
+## News
+Until JAX 0.1.76 is released, please clone JAX from head:
+
+```
+pip install git+https://www.github.com/google/jax
+```
+
 
 ## Overview
 
@@ -55,7 +62,8 @@ An easy way to get started with Neural Tangents is by playing around with the fo
 To use GPU, first follow [JAX's](https://www.github.com/google/jax/) GPU installation instructions. Otherwise, install JAX on CPU by running
 
 ```
-pip install jaxlib jax --upgrade
+pip install jaxlib --upgrade
+pip install git+https://www.github.com/google/jax
 ```
 
 Once JAX is installed install Neural Tangents by running
@@ -227,11 +235,11 @@ The `neural_tangents` (`nt`) package contains the following modules and function
 
   * `predict.gradient_descent` - inference with a single infinite width / linearized network trained on arbitrary loss with continuous (momentum) gradient descent for an arbitrary finite time. Computed using an ODE solver.
 
-  * `predict.gradient_descent_mse_ensemble` - inference with an infinite ensemble of infinite width networks, either fully Bayesian (`get='nngp'`) or inference with MSE loss using continuous gradient descent (`get='ntk'`). Finite-time Bayesian inference (e.g. `t=1., get='nngp'`) is interpreted as gradient descent on the top layer only (see [[11]](#11-wide-neural-networks-of-any-depth-evolve-as-linear-models-under-gradient-descent))), since it converges to exact Gaussian process inference with NNGP (`t=None, get='nngp'`). Computed in closed form.
+  * `predict.gradient_descent_mse_ensemble` - inference with an infinite ensemble of infinite width networks, either fully Bayesian (`get='nngp'`) or inference with MSE loss using continuous gradient descent (`get='ntk'`). Finite-time Bayesian inference (e.g. `t=1., get='nngp'`) is interpreted as gradient descent on the top layer only [[11]](#11-wide-neural-networks-of-any-depth-evolve-as-linear-models-under-gradient-descent), since it converges to exact Gaussian process inference with NNGP (`t=None, get='nngp'`). Computed in closed form.
 
   * `predict.gp_inference` - exact closed form Gaussian process inference using NNGP (`get='nngp'`), NTK (`get='ntk'`), or both (`get=('nngp', 'ntk')`). Equivalent to `predict.gradient_descent_mse_ensemble` with `t=None` (infinite training time), but has a slightly different API (accepting precomputed kernel matrix `k_train_train` instead of `kernel_fn` and `x_train`).
 
-* `monte_carlo_kernel_fn` - compute a Monte Carlo kernel estimate  of _any_ `(init_fn, apply_fn)`, not necessarily specified `nt.stax`, enabling the kernel computation of infinite networks without closed-form expressions.
+* `monte_carlo_kernel_fn` - compute a Monte Carlo kernel estimate  of _any_ `(init_fn, apply_fn)`, not necessarily specified via `nt.stax`, enabling the kernel computation of infinite networks without closed-form expressions.
 
 * Tools to investigate training dynamics of _wide but finite_ neural networks, like `linearize`, `taylor_expand`, `empirical_kernel_fn` and more. See [Training dynamics of wide but finite networks](#training-dynamics-of-wide-but-finite-networks) for details.
 
