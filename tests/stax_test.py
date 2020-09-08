@@ -31,9 +31,9 @@ from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.random as random
 from neural_tangents import stax
+from neural_tangents.utils import batch
 from neural_tangents.utils import monte_carlo
 from neural_tangents.utils import test_utils
-from neural_tangents.utils import batch
 import numpy as onp
 
 
@@ -485,7 +485,6 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
                    pool_type, layer_norm, parameterization, use_dropout)
     self._check_agreement_with_empirical(net, same_inputs, use_dropout, is_ntk,
                                          0.05)
-
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -948,7 +947,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
 
 class NumericalActivationTest(test_utils.NeuralTangentsTestCase):
 
-  def _test_activation(self, activation, fn, same_inputs, model, get):
+  def _test_activation(self, activation, same_inputs, model, get):
     platform = xla_bridge.get_backend().platform
     if platform == 'cpu' and 'conv' in model:
       raise absltest.SkipTest('Not running CNNs on CPU to save time.')
@@ -983,6 +982,7 @@ class NumericalActivationTest(test_utils.NeuralTangentsTestCase):
     _, _, kernel_fn = stax.serial(*[affine, activation]*depth, readout)
     analytic_kernel = kernel_fn(X0_1, X0_2, get)
 
+    fn = lambda x: activation[1]((), x)
     _, _, kernel_fn = stax.serial(
         *[affine, stax.NumericalActivation(fn, deg=deg)]*depth, readout)
     numerical_activation_kernel = kernel_fn(X0_1, X0_2, get)
@@ -1010,19 +1010,15 @@ class NumericalActivationTest(test_utils.NeuralTangentsTestCase):
   def test_numerical_activation(self, same_inputs, model, phi_name, get):
     if phi_name == 'Erf':
       activation = stax.Erf()
-      fn = functools.partial(stax._erf, a=1, b=1, c=0)
     elif phi_name == 'Gelu':
       activation = stax.Gelu()
-      fn = stax._gelu
     elif phi_name == 'Sin':
       activation = stax.Sin()
-      fn = np.sin
     elif phi_name == 'Cos':
       activation = stax.Sin(c=np.pi/2)
-      fn = np.cos
     else:
       raise NotImplementedError(f'Activation {phi_name} is not implemented.')
-    self._test_activation(activation, fn, same_inputs, model, get)
+    self._test_activation(activation, same_inputs, model, get)
 
 
 @jtu.parameterized.parameters([
@@ -1253,7 +1249,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
           for n_branches in [2, 3] for get in ['nngp', 'ntk']
           for branch_in in ['dense_before_branch_in',
                             'dense_after_branch_in']
-          for fan_in_mode in ['FanInSum', 'FanInConcate', 'FanInProd']))
+          for fan_in_mode in ['FanInSum', 'FanInConcat', 'FanInProd']))
   def test_fan_in_fc(self, same_inputs, axis, n_branches, get, branch_in,
                      fan_in_mode):
     if fan_in_mode in ['FanInSum', 'FanInProd']:
@@ -1363,7 +1359,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
           for n_branches in [2, 3] for get in ['nngp', 'ntk']
           for branch_in in ['dense_before_branch_in', 'dense_after_branch_in']
           for readout in ['pool', 'flatten']
-          for fan_in_mode in ['FanInSum', 'FanInConcate', 'FanInProd']))
+          for fan_in_mode in ['FanInSum', 'FanInConcat', 'FanInProd']))
   def test_fan_in_conv(self,
                        same_inputs,
                        axis,
@@ -1598,17 +1594,17 @@ class ConvNDTest(test_utils.NeuralTangentsTestCase):
     jtu.cases_from_list(
         {
             'testcase_name':
-              ' [{}_out={}_in={}]'.format(
+                ' [{}_out={}_in={}]'.format(
                   'same_inputs' if same_inputs else 'different_inputs',
                   readout[0].__name__,
                   readin[0].__name__
               ),
             'same_inputs':
-              same_inputs,
+                same_inputs,
             'readout':
-              readout,
+                readout,
             'readin':
-              readin
+                readin
         }
         for same_inputs in [False, True]
         for readout in [stax.Flatten(),

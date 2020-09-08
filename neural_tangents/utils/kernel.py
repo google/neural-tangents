@@ -207,7 +207,7 @@ class Kernel:
   def mask(self,
            mask1: Optional[np.ndarray],
            mask2: Optional[np.ndarray]) -> 'Kernel':
-    """Mask all covariance matrices according to `mask1`, `mask2`"""
+    """Mask all covariance matrices according to `mask1`, `mask2`."""
     mask11, mask12, mask22 = self._get_mask_prods(mask1, mask2)
 
     cov1 = utils.mask(self.cov1, mask11)
@@ -260,3 +260,28 @@ class Kernel:
               if mask2 is not None else mask11)
     mask12 = get_mask_prod(mask1, mask2, 2)
     return mask11, mask12, mask22
+
+  def __mul__(self, other: float) -> 'Kernel':
+    var = other**2
+    return self.replace(cov1=var * self.cov1,
+                        nngp=var * self.nngp,
+                        cov2=None if self.cov2 is None else var * self.cov2,
+                        ntk=None if self.ntk is None else var * self.ntk)
+
+  __rmul__ = __mul__
+
+  def __add__(self, other: float) -> 'Kernel':
+    var = other**2
+    return self.replace(cov1=var + self.cov1,
+                        nngp=var + self.nngp,
+                        cov2=None if self.cov2 is None else var + self.cov2)
+
+  __sub__ = __add__
+
+  def __truediv__(self, other: float) -> 'Kernel':
+    return self.__mul__(1. / other)
+
+  def __neg__(self) -> 'Kernel':
+    return self
+
+  __pos__ = __neg__

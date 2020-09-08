@@ -352,8 +352,9 @@ def parallel(*layers: Layer) -> InternalLayer:
 @layer
 @_supports_masking(remask_kernel=True)
 def Aggregate(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
-  r"""Layer constructor for aggregation operator (graphical neural network); see
-  e.g. arXiv: 1905.13192.
+  r"""Layer constructor for aggregation operator (graphical neural network).
+
+  See e.g. arXiv: 1905.13192.
 
   Specifically, each `input` (of shape (batch, nodes, channels)) is associated
   with a `pattern` (of shape (batch, nodes, nodes)) and the output tensor is
@@ -415,7 +416,7 @@ def Aggregate(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
   def kernel_fn(k: Kernels,
                 *,
                 pattern: Tuple[Optional[np.ndarray],
-                Optional[np.ndarray]] = (None, None),
+                               Optional[np.ndarray]] = (None, None),
                 **kwargs):
     """Compute the transformed kernels after an aggregation kernel layer.
 
@@ -1531,229 +1532,6 @@ def Identity() -> InternalLayer:
   return init_fn, apply_fn, kernel_fn
 
 
-def Sigmoid_like():
-  """A sigmoid like function `f(x) = .5 * erf(x / 2.4020563531719796) + .5`.
-
-  The constant `2.4020563531719796` is chosen so that the squared loss between
-  this function the ground true sigmoid is minimized in the interval [-5, 5];
-  see https://gist.github.com/SiuMath/679e8bb4bce13d5f2383a27eca649575.
-
-  Returns:
-    `(init_fn, apply_fn, kernel_fn)`.
-  """
-  return Erf(a=0.5, b=1/2.4020563531719796, c=0.5)
-
-
-@layer
-@_supports_masking(remask_kernel=True)
-def Erf(a: float = 1.,
-        b: float = 1.,
-        c: float = 0.,
-        do_backprop: bool = False) -> InternalLayer:
-  """Affine transform of `Erf` nonlinearity, i.e. `a * Erf(b * x) + c`.
-
-  Args:
-    a: output scale.
-    b: input scale.
-    c: output shift.
-    do_backprop: set to `True` if you want to backpropagate through the kernel.
-
-  Returns:
-    `(init_fn, apply_fn, kernel_fn)`.
-  """
-  return _elementwise(_erf,
-                      f'Erf({a}, {b}, {c})',
-                      a=a,
-                      b=b,
-                      c=c,
-                      do_backprop=do_backprop)
-
-
-@layer
-@_supports_masking(remask_kernel=False)
-def Gelu(do_backprop: bool = False) -> InternalLayer:
-  """Gelu function.
-
-  Args:
-    do_backprop: set to `True` if you want to backpropagate through the kernel.
-
-  Returns:
-    `(init_fn, apply_fn, kernel_fn)`.
-  """
-  return _elementwise(_gelu,
-                      'Gelu',
-                      do_backprop=do_backprop)
-
-
-@layer
-@_supports_masking(remask_kernel=True)
-def Sin(a: float = 1.,
-        b: float = 1.,
-        c: float = 0.) -> InternalLayer:
-  """Affine transform of `Sin` nonlinearity, i.e. `a sin(b*x + c)`.
-
-  Args:
-    a: output scale.
-    b: input scale.
-    c: input phase shift.
-  Returns:
-    `(init_fn, apply_fn, kernel_fn)`.
-  """
-  return _elementwise(_sin, f'Sin({a}, {b}, {c})', a=a, b=b, c=c)
-
-
-@layer
-@_supports_masking(remask_kernel=True)
-def Rbf(gamma: float = 1.0) -> InternalLayer:
-  """Dual activation function for normalized RBF or squared exponential kernel.
-
-  Dual activation function is `f(x) = sqrt(2)*sin(sqrt(2*gamma) x + pi/4)`.
-  NNGP kernel transformation correspond to (with input dimension `d`)
-  `k = exp(- gamma / d * ||x - x'||^2) = exp(- gamma*(q11 + q22 - 2 * q12))`.
-
-  Args:
-    gamma:
-      related to characteristic length-scale (l) that controls width of the
-      kernel, where `gamma = 1 / (2 l^2)`.
-
-  Returns:
-    `(init_fn, apply_fn, kernel_fn)`.
-  """
-  return _elementwise(_rbf, f'Rbf({gamma})', gamma=gamma)
-
-
-@layer
-@_supports_masking(remask_kernel=False)
-def Relu(
-    do_backprop: bool = False,
-    do_stabilize: bool = False) -> InternalLayer:
-  """ReLU nonlinearity.
-
-  Args:
-    do_backprop: set to `True` if you want to backpropagate through the kernel.
-    do_stabilize: set to `True` for very deep networks.
-
-  Returns:
-    `(init_fn, apply_fn, kernel_fn)`.
-  """
-  return _elementwise(_ab_relu,
-                      'ReLU',
-                      a=0,
-                      b=1,
-                      do_backprop=do_backprop,
-                      do_stabilize=do_stabilize)
-
-
-@layer
-@_supports_masking(remask_kernel=False)
-def ABRelu(
-    a: float,
-    b: float,
-    do_backprop: bool = False,
-    do_stabilize: bool = False) -> InternalLayer:
-  """ABReLU nonlinearity, i.e. `a * min(x, 0) + b * max(x, 0)`.
-
-  Args:
-    a: slope for `x < 0`.
-    b: slope for `x > 0`.
-    do_backprop: set to `True` if you want to backpropagate through the kernel.
-    do_stabilize: set to `True` for very deep networks.
-
-  Returns:
-    `(init_fn, apply_fn, kernel_fn)`.
-  """
-  return _elementwise(_ab_relu,
-                      f'ABReLU({a}, {b})',
-                      a=a,
-                      b=b,
-                      do_backprop=do_backprop,
-                      do_stabilize=do_stabilize)
-
-
-@layer
-@_supports_masking(remask_kernel=False)
-def LeakyRelu(
-    alpha: float,
-    do_backprop: bool = False,
-    do_stabilize: bool = False) -> InternalLayer:
-  """Leaky ReLU nonlinearity, i.e. `alpha * min(x, 0) + max(x, 0)`.
-
-  Args:
-    alpha: slope for `x < 0`.
-    do_backprop: set to `True` if you want to backpropagate through the kernel.
-    do_stabilize: set to `True` for very deep networks.
-
-  Returns:
-    `(init_fn, apply_fn, kernel_fn)`.
-  """
-  return _elementwise(_ab_relu,
-                      f'LeakyReLU({alpha})',
-                      a=alpha,
-                      b=1,
-                      do_backprop=do_backprop,
-                      do_stabilize=do_stabilize)
-
-
-@layer
-@_supports_masking(remask_kernel=False)
-def Abs(do_backprop: bool = False, do_stabilize: bool = False) -> InternalLayer:
-  """Absolute value nonlinearity.
-
-  Args:
-    do_backprop: set to `True` if you want to backpropagate through the kernel.
-    do_stabilize: set to `True` for very deep networks.
-
-  Returns:
-    `(init_fn, apply_fn, kernel_fn)`.
-  """
-  return _elementwise(_ab_relu,
-                      'Abs',
-                      a=-1,
-                      b=1,
-                      do_backprop=do_backprop,
-                      do_stabilize=do_stabilize)
-
-
-@layer
-@_supports_masking(remask_kernel=True)
-def NumericalActivation(fn: Callable[[float], float],
-                        deg: int,
-                        df: Callable[[float], float] = None,
-                        do_backprop: bool = False) -> InternalLayer:
-  """Activation function using numerical integration.
-
-  Supports general activation functions using Gauss-Hermite quadrature.
-
-  Args:
-    fn: activation function.
-    deg: number of sample points and weights for quadrature. It must be >= 1.
-      We observe for smooth activations deg=25 is a good place to start.
-      For non-smooth activation functions (e.g. ReLU, Abs) quadrature is not
-      recommended (for now use `nt.monte_carlo_kernel_fn`). Due to bivariate
-      integration, compute time and memory scale as O(deg**2) for more
-      precision. See eq (13) in
-      https://mathworld.wolfram.com/Hermite-GaussQuadrature.html
-      for error estimates in the case of 1d Gauss-Hermite qudarture.
-    df: optional, derivative of the activation funtion(`fn`). If not provided,
-      it is computed by `jax.grad`. Providing analytic derivative can speed up
-      the NTK computations.
-    do_backprop: set to `True` if you want to backpropagate through the kernel.
-
-  Returns:
-    `(init_fn, apply_fn, kernel_fn)`.
-  """
-  warnings.warn(
-      f'Numerical Activation Layer with fn={fn}, deg={deg} used!'
-      'Note that numerical error is  controlled by `deg` and for a given'
-      'tolerance level, required `deg` will highly be dependent on the choice'
-      'of `fn`.')
-  quad_points = osp.special.roots_hermite(deg)
-  if df is None:
-    df = np.vectorize(grad(fn))
-  return _elementwise(fn, f'NumericalActivation({fn},deg={deg})', df=df,
-                      quad_points=quad_points, do_backprop=do_backprop)
-
-
 class PositionalEmbedding(enum.Enum):
   """Type of positional embeddings to use in a `GlobalSelfAttention` layer."""
   NONE = 'NONE'
@@ -2073,11 +1851,11 @@ def GlobalSelfAttention(
       mask = mask.reshape((1, mask.shape[0], 1, -1))
 
       if attention_mechanism == AttentionMechanism.SOFTMAX:
-          G_mat = np.where(mask, _NEG_INF, G_mat)
+        G_mat = np.where(mask, _NEG_INF, G_mat)
       elif attention_mechanism in (AttentionMechanism.IDENTITY,
                                    AttentionMechanism.RELU,
                                    AttentionMechanism.ABS):
-          G_mat = np.where(mask, np.zeros((), G_mat.dtype), G_mat)
+        G_mat = np.where(mask, np.zeros((), G_mat.dtype), G_mat)
       else:
         raise NotImplementedError(attention_mechanism, mask)
 
@@ -2427,6 +2205,496 @@ def Dropout(rate: float, mode: str = 'train') -> InternalLayer:
   return init_fn, apply_fn, kernel_fn
 
 
+# NONLINEARITIES / ACTIVATION FUNCTIONS
+
+
+@layer
+@_supports_masking(remask_kernel=True)
+def Erf(
+    a: float = 1.,
+    b: float = 1.,
+    c: float = 0.,
+    do_backprop: bool = False) -> InternalLayer:
+  """Affine transform of `Erf` nonlinearity, i.e. `a * Erf(b * x) + c`.
+
+  Args:
+    a: output scale.
+    b: input scale.
+    c: output shift.
+    do_backprop: set to `True` if you want to backpropagate through the kernel.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  def fn(x):
+    return a * erf(b * x) + c
+
+  def kernel_fn(k: Kernel) -> Kernel:
+    k *= b
+
+    cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
+
+    cov1_denom = 1 + 2 * cov1
+    cov2_denom = None if cov2 is None else 1 + 2 * cov2
+
+    prod11, prod12, prod22 = _get_diagonal_outer_prods(cov1_denom,
+                                                       cov2_denom,
+                                                       k.diagonal_batch,
+                                                       k.diagonal_spatial,
+                                                       op.mul)
+
+    def nngp_ntk_fn(
+        nngp: np.ndarray,
+        prod: np.ndarray,
+        ntk: np.ndarray = None) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+      if ntk is not None:
+        dot_sigma = 4 / (np.pi * np.sqrt(prod - 4 * nngp ** 2))
+        ntk *= dot_sigma
+      nngp = _arcsin(2 * nngp / np.sqrt(prod), do_backprop) * 2 / np.pi
+      return nngp, ntk
+
+    def nngp_fn_diag(nngp: np.ndarray, denom: np.ndarray) -> np.ndarray:
+      return np.arcsin(2 * nngp / denom) * 2 / np.pi
+
+    nngp, ntk = nngp_ntk_fn(nngp, prod12, ntk)
+
+    if k.diagonal_batch and k.diagonal_spatial:
+      cov1 = nngp_fn_diag(cov1, cov1_denom)
+      if cov2 is not None:
+        cov2 = nngp_fn_diag(cov2, cov2_denom)
+    else:
+      cov1, _ = nngp_ntk_fn(cov1, prod11)
+      if cov2 is not None:
+        cov2, _ = nngp_ntk_fn(cov2, prod22)
+
+    k = k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
+    return a * k + c
+
+  return _elementwise(fn, f'Erf({a}, {b}, {c})', kernel_fn)
+
+
+def Sigmoid_like():
+  """A sigmoid like function `f(x) = .5 * erf(x / 2.4020563531719796) + .5`.
+
+  The constant `2.4020563531719796` is chosen so that the squared loss between
+  this function and the ground truth sigmoid is minimized on the interval
+  `[-5, 5]`; see
+  https://gist.github.com/SiuMath/679e8bb4bce13d5f2383a27eca649575.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  return Erf(a=0.5, b=1/2.4020563531719796, c=0.5)
+
+
+@layer
+@_supports_masking(remask_kernel=False)
+def Gelu(
+    do_backprop: bool = False) -> InternalLayer:
+  """Gelu function.
+
+  Args:
+    do_backprop: set to `True` if you want to backpropagate through the kernel.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  def fn(x):
+    return 0.5 * x * (1. + erf(x / np.sqrt(2.)))
+
+  def kernel_fn(k: Kernel) -> Kernel:
+    """Compute kernels after a `Gelu` layer; NNGP see `arXiv:2002.08517`."""
+    cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
+
+    cov1_plus_1 = cov1 + 1
+    cov2_plus_1 = None if cov2 is None else cov2 + 1
+
+    prod11_plus_1, prod12_plus_1, prod22_plus_1 = _get_diagonal_outer_prods(
+        cov1_plus_1, cov2_plus_1, k.diagonal_batch, k.diagonal_spatial, op.mul)
+    prod11, prod12, prod22 = _get_diagonal_outer_prods(
+        cov1, cov2, k.diagonal_batch, k.diagonal_spatial, op.mul)
+
+    def nngp_ntk_fn(nngp: np.ndarray,
+                    prod: np.ndarray,
+                    prod_plus_1: np.ndarray,
+                    ntk: np.ndarray = None
+                    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+      delta_squared = prod_plus_1 - nngp**2
+      delta = _safe_sqrt(delta_squared)
+      ratio = nngp / _safe_sqrt(prod_plus_1)
+      new_nngp = (nngp**2 + prod * delta_squared) / (prod_plus_1 * delta)
+      new_nngp += nngp * _arcsin(ratio, do_backprop)
+      new_nngp /= 2 * np.pi
+      new_nngp += 0.25 * nngp
+
+      if ntk is not None:
+        second_term = 0.25 + _arcsin(ratio, do_backprop) / (2 * np.pi)
+        first_term = 1 / delta_squared + (1 - prod) / prod_plus_1 + 1
+        first_term *= nngp / delta / (2. * np.pi)
+        dot_sigma = first_term + second_term
+        ntk *= dot_sigma
+      return new_nngp, ntk
+
+    def nngp_fn_diag(nngp: np.ndarray) -> np.ndarray:
+      new_nngp = nngp / ((nngp + 1.) * np.sqrt(1. + 2. * nngp))
+      new_nngp += _arcsin(nngp / (nngp + 1), do_backprop) / 2
+      new_nngp /= np.pi
+      new_nngp += 0.25
+      new_nngp *= nngp
+      return new_nngp
+
+    nngp, ntk = nngp_ntk_fn(nngp, prod12, prod12_plus_1, ntk)
+
+    if k.diagonal_batch and k.diagonal_spatial:
+      cov1 = nngp_fn_diag(cov1)
+      if cov2 is not None:
+        cov2 = nngp_fn_diag(cov2)
+    else:
+      cov1, _ = nngp_ntk_fn(cov1, prod11, prod11_plus_1)
+      if cov2 is not None:
+        cov2, _ = nngp_ntk_fn(cov2, prod22, prod22_plus_1)
+
+    return k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
+
+  return _elementwise(fn, 'Gelu', kernel_fn)
+
+
+@layer
+@_supports_masking(remask_kernel=True)
+def Sin(
+    a: float = 1.,
+    b: float = 1.,
+    c: float = 0.) -> InternalLayer:
+  """Affine transform of `Sin` nonlinearity, i.e. `a sin(b*x + c)`.
+
+  Args:
+    a: output scale.
+    b: input scale.
+    c: input phase shift.
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  def fn(x):
+    return a * np.sin(b * x + c)
+
+  def kernel_fn(k: Kernel) -> Kernel:
+    cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
+
+    sum11, sum12, sum22 = _get_diagonal_outer_prods(cov1,
+                                                    cov2,
+                                                    k.diagonal_batch,
+                                                    k.diagonal_spatial,
+                                                    op.add)
+    half_a_square = a**2 / 2.
+
+    def nngp_ntk_fn(nngp, sum_, ntk=None):
+      s1 = np.exp(b ** 2 * (-0.5 * sum_ + nngp))
+      s2 = np.exp(b ** 2 * (-0.5 * sum_ - nngp)) * np.cos(2 * c)
+      nngp = half_a_square * (s1 - s2)
+      if ntk is not None:
+        ntk *= half_a_square * b**2 * (s1 + s2)
+      return nngp, ntk
+
+    def nngp_fn_diag(nngp):
+      return half_a_square *(1. - np.exp(-b**2 * nngp) * np.cos(2 * c))
+
+    nngp, ntk = nngp_ntk_fn(nngp, sum12, ntk)
+
+    if k.diagonal_batch and k.diagonal_spatial:
+      cov1 = nngp_fn_diag(sum11)
+      if cov2 is not None:
+        cov2 = nngp_fn_diag(sum22)
+    else:
+      cov1, _ = nngp_ntk_fn(cov1, sum11)
+      if cov2 is not None:
+        cov2, _ = nngp_ntk_fn(cov2, sum22)
+
+    return k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
+
+  return _elementwise(fn, f'Sin({a}, {b}, {c})', kernel_fn)
+
+
+@layer
+@_supports_masking(remask_kernel=True)
+def Rbf(
+    gamma: float = 1.0) -> InternalLayer:
+  """Dual activation function for normalized RBF or squared exponential kernel.
+
+  Dual activation function is `f(x) = sqrt(2)*sin(sqrt(2*gamma) x + pi/4)`.
+  NNGP kernel transformation correspond to (with input dimension `d`)
+  `k = exp(- gamma / d * ||x - x'||^2) = exp(- gamma*(q11 + q22 - 2 * q12))`.
+
+  Args:
+    gamma:
+      related to characteristic length-scale (l) that controls width of the
+      kernel, where `gamma = 1 / (2 l^2)`.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  def fn(x):
+    return np.sqrt(2) * np.sin(np.sqrt(2 * gamma) * x + np.pi/4)
+
+  def kernel_fn(k: Kernel) -> Kernel:
+    """Compute new kernels after an `Rbf` layer."""
+    cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
+
+    sum11, sum12, sum22 = _get_diagonal_outer_prods(cov1,
+                                                    cov2,
+                                                    k.diagonal_batch,
+                                                    k.diagonal_spatial,
+                                                    op.add)
+
+    def nngp_ntk_fn(nngp, sum_, ntk):
+      s1 = np.exp(gamma * (-sum_ + 2 * nngp))
+      nngp = s1
+      if ntk is not None:
+        ntk *= 2 * gamma * s1
+      return nngp, ntk
+
+    def nngp_fn_diag(nngp):
+      return np.ones_like(nngp)
+
+    nngp, ntk = nngp_ntk_fn(nngp, sum12, ntk)
+
+    if k.diagonal_batch and k.diagonal_spatial:
+      cov1 = nngp_fn_diag(sum11)
+      if cov2 is not None:
+        cov2 = nngp_fn_diag(sum22)
+    else:
+      cov1, _ = nngp_ntk_fn(cov1, sum11, None)
+      if cov2 is not None:
+        cov2, _ = nngp_ntk_fn(cov2, sum22, None)
+
+    return k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
+
+  return _elementwise(fn, f'Rbf({gamma})', kernel_fn)
+
+
+@layer
+@_supports_masking(remask_kernel=False)
+def ABRelu(
+    a: float,
+    b: float,
+    do_backprop: bool = False,
+    do_stabilize: bool = False) -> InternalLayer:
+  """ABReLU nonlinearity, i.e. `a * min(x, 0) + b * max(x, 0)`.
+
+  Args:
+    a: slope for `x < 0`.
+    b: slope for `x > 0`.
+    do_backprop: set to `True` if you want to backpropagate through the kernel.
+    do_stabilize: set to `True` for very deep networks.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  def fn(x):
+    return a * np.minimum(x, 0) + b * np.maximum(x, 0)
+
+  def kernel_fn(k: Kernel) -> Kernel:
+    """Compute new kernels after an `ABRelu` layer.
+
+    See https://arxiv.org/pdf/1711.09090.pdf for the leaky ReLU derivation.
+    """
+    cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
+
+    if do_stabilize:
+      factor = np.max([np.max(np.abs(nngp)), 1e-12])
+      nngp /= factor
+      cov1 /= factor
+      if cov2 is not None:
+        cov2 /= factor
+
+    prod11, prod12, prod22 = _get_diagonal_outer_prods(cov1,
+                                                       cov2,
+                                                       k.diagonal_batch,
+                                                       k.diagonal_spatial,
+                                                       op.mul)
+
+    def nngp_ntk_fn(nngp, prod, ntk=None):
+      cosines = nngp / _safe_sqrt(prod)
+      angles = _arccos(cosines, do_backprop)
+
+      dot_sigma = (a**2 + b**2 - (a - b)**2 * angles / np.pi) / 2
+      nngp = ((a - b) ** 2 * _sqrt(prod - nngp ** 2, do_backprop) / (2 * np.pi)
+              + dot_sigma * nngp)
+
+      if ntk is not None:
+        ntk *= dot_sigma
+
+      return nngp, ntk
+
+    def nngp_fn_diag(nngp):
+      return (a**2 + b**2) / 2 * nngp
+
+    nngp, ntk = nngp_ntk_fn(nngp, prod12, ntk=ntk)
+
+    if k.diagonal_batch and k.diagonal_spatial:
+      cov1 = nngp_fn_diag(cov1)
+      if cov2 is not None:
+        cov2 = nngp_fn_diag(cov2)
+    else:
+      cov1, _ = nngp_ntk_fn(cov1, prod11)
+      if cov2 is not None:
+        cov2, _ = nngp_ntk_fn(cov2, prod22)
+
+    if do_stabilize:
+      nngp *= factor
+      cov1 *= factor
+      if cov2 is not None:
+        cov2 *= factor
+
+    return k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
+
+  return _elementwise(fn, f'ABReLU({a}, {b})', kernel_fn)
+
+
+def Relu(
+    do_backprop: bool = False,
+    do_stabilize: bool = False) -> InternalLayer:
+  """ReLU nonlinearity.
+
+  Args:
+    do_backprop: set to `True` if you want to backpropagate through the kernel.
+    do_stabilize: set to `True` for very deep networks.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  return ABRelu(0, 1, do_backprop, do_stabilize)
+
+
+def LeakyRelu(
+    alpha: float,
+    do_backprop: bool = False,
+    do_stabilize: bool = False) -> InternalLayer:
+  """Leaky ReLU nonlinearity, i.e. `alpha * min(x, 0) + max(x, 0)`.
+
+  Args:
+    alpha: slope for `x < 0`.
+    do_backprop: set to `True` if you want to backpropagate through the kernel.
+    do_stabilize: set to `True` for very deep networks.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  return ABRelu(alpha, 1, do_backprop, do_stabilize)
+
+
+def Abs(
+    do_backprop: bool = False,
+    do_stabilize: bool = False) -> InternalLayer:
+  """Absolute value nonlinearity.
+
+  Args:
+    do_backprop: set to `True` if you want to backpropagate through the kernel.
+    do_stabilize: set to `True` for very deep networks.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  return ABRelu(-1, 1, do_backprop, do_stabilize)
+
+
+@layer
+@_supports_masking(remask_kernel=True)
+def NumericalActivation(
+    fn: Callable[[float], float],
+    deg: int,
+    df: Callable[[float], float] = None,
+    do_backprop: bool = False) -> InternalLayer:
+  """Activation function using numerical integration.
+
+  Supports general activation functions using Gauss-Hermite quadrature.
+
+  Args:
+    fn: activation function.
+    deg: number of sample points and weights for quadrature. It must be >= 1.
+      We observe for smooth activations deg=25 is a good place to start.
+      For non-smooth activation functions (e.g. ReLU, Abs) quadrature is not
+      recommended (for now use `nt.monte_carlo_kernel_fn`). Due to bivariate
+      integration, compute time and memory scale as O(deg**2) for more
+      precision. See eq (13) in
+      https://mathworld.wolfram.com/Hermite-GaussQuadrature.html
+      for error estimates in the case of 1d Gauss-Hermite quadrature.
+    df: optional, derivative of the activation funtion(`fn`). If not provided,
+      it is computed by `jax.grad`. Providing analytic derivative can speed up
+      the NTK computations.
+    do_backprop: set to `True` if you want to backpropagate through the kernel.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  warnings.warn(
+      f'Numerical Activation Layer with fn={fn}, deg={deg} used!'
+      'Note that numerical error is controlled by `deg` and for a given'
+      'tolerance level, required `deg` will highly be dependent on the choice'
+      'of `fn`.')
+
+  quad_points = osp.special.roots_hermite(deg)
+
+  if df is None:
+    df = np.vectorize(grad(fn))
+
+  def kernel_fn(k: Kernel) -> Kernel:
+    """Kernel transformation of activation function using quadrature."""
+    cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
+
+    d1 = _get_diagonal(cov1, k.diagonal_batch, k.diagonal_spatial)
+    d2 = _get_diagonal(cov2, k.diagonal_batch, k.diagonal_spatial)
+
+    end_axis = 1 if k.diagonal_spatial else cov1.ndim
+    q11 = utils.interleave_ones(d1, 0, end_axis, True)
+    q22 = utils.interleave_ones(d1 if d2 is None else d2, 0, end_axis, False)
+
+    def nngp_ntk_fn(nngp, q11, q22, ntk=None):
+      """Simple Gauss-Hermite quadrature routine."""
+      xs, ws = quad_points
+      grid = np.outer(ws, ws)
+      x = xs.reshape((xs.shape[0],) + (1,) * (nngp.ndim + 1))
+      y = xs.reshape((1, xs.shape[0]) + (1,) * nngp.ndim)
+
+      def integrate(f):
+        fvals = f(_sqrt(2*q11, do_backprop) * x) * f(
+            nngp/_sqrt(q11/2, do_backprop) * x + _sqrt(
+                2*(q22 - nngp**2/q11), do_backprop)* y)
+        return np.tensordot(grid, fvals, ((0, 1), (0, 1))) / np.pi
+
+      if ntk is not None:
+        ntk *= integrate(df)
+      nngp = integrate(fn)
+      return nngp, ntk
+
+    def nngp_fn_diag(nngp):
+      xs, ws = quad_points
+      x = xs.reshape((xs.shape[0],) + (1,) * nngp.ndim)
+      fval = fn(_sqrt(2 * nngp, do_backprop) * x) ** 2
+      return np.tensordot(ws, fval, ((0,), (0,))) / np.sqrt(np.pi)
+
+    nngp, ntk = nngp_ntk_fn(nngp, q11, q22, ntk)
+
+    if k.diagonal_batch and k.diagonal_spatial:
+      cov1 = nngp_fn_diag(cov1)
+      if cov2 is not None:
+        cov2 = nngp_fn_diag(cov2)
+
+    else:
+      start_axis = 1 if k.diagonal_batch else 0
+      q11 = utils.interleave_ones(d1, start_axis, end_axis, True)
+      q22 = utils.interleave_ones(d1, start_axis, end_axis, False)
+      cov1, _ = nngp_ntk_fn(cov1, q11, q22)
+
+      if cov2 is not None:
+        q11 = utils.interleave_ones(d2, start_axis, end_axis, True)
+        q22 = utils.interleave_ones(d2, start_axis, end_axis, False)
+        cov2, _ = nngp_ntk_fn(cov2, q11, q22)
+
+    return k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
+
+  return _elementwise(fn, f'ElementwiseNumerical({fn},deg={deg})', kernel_fn)
+
+
 # INTERNAL UTILITIES
 
 
@@ -2664,6 +2932,7 @@ def _inputs_to_kernel(
       (`diagonal_spatial == False`,
        `nngp.shape == (batch_size_1, batch_size_2, height, height,
                        width, width, depth, depth, ...)`).
+    use_dropout: `True` if using dropout in the network.
     compute_ntk: `True` to compute both NTK and NNGP kernels,
       `False` to only compute NNGP.
     batch_axis: Specifies which axis is the batch axis.
@@ -2850,7 +3119,7 @@ def _preprocess_kernel_fn(
                     get: Get = None,
                     *,
                     pattern: Tuple[Optional[np.ndarray],
-                      Optional[np.ndarray]] = None,
+                                   Optional[np.ndarray]] = None,
                     mask_constant: float = None,
                     diagonal_batch: bool = None,
                     diagonal_spatial: bool = None,
@@ -2930,43 +3199,21 @@ def _preprocess_kernel_fn(
   return kernel_fn_any
 
 
-def _elementwise(fn, name, df=None, quad_points=None, **fn_kwargs):
-  init_fn, apply_fn = ostax.elementwise(fn, **fn_kwargs)
-  def kernel_fn(k: Kernel, **kwargs):
+def _elementwise(fn: Callable[[float], float],
+                 name: str,
+                 kernel_fn: LayerKernelFn) -> InternalLayer:
+  init_fn, apply_fn = ostax.elementwise(fn)
+
+  def new_kernel_fn(k: Kernel, **kwargs) -> Kernel:
     if not k.is_gaussian:
       raise ValueError('The input to the activation function must be Gaussian, '
                        'i.e. a random affine transform is required before the '
                        'activation function.')
+    k = kernel_fn(k)
+    return k.replace(is_gaussian=False)
 
-    if quad_points is not None:
-      do_backprop = fn_kwargs['do_backprop']
-      return _transform_kernels_quadrature(k, fn, df, quad_points, do_backprop)
-    if fn in _POINTWISE_KERNEL_TRANSFORMS:
-      return _POINTWISE_KERNEL_TRANSFORMS[fn](k, **fn_kwargs)
-    raise NotImplementedError(
-        f'Analaytic kernel for activiation {fn} is not implmented.')
-  init_fn.__name__ = apply_fn.__name__ = kernel_fn.__name__ = name
-  return init_fn, apply_fn, kernel_fn
-
-
-def _ab_relu(x, a, b, **kwargs):
-  return a * np.minimum(x, 0) + b * np.maximum(x, 0)
-
-
-def _erf(x, a, b, c, **kwargs):
-  return a * erf(b * x) + c
-
-
-def _gelu(x, **kwargs):
-  return 0.5 * x * (1. + erf(x / np.sqrt(2.)))
-
-
-def _sin(x, a, b, c, **kwargs):
-  return a * np.sin(b * x + c)
-
-
-def _rbf(x, gamma, **kwargs):
-  return np.sqrt(2) * np.sin(np.sqrt(2 * gamma) * x + np.pi/4)
+  init_fn.__name__ = apply_fn.__name__ = new_kernel_fn.__name__ = name
+  return init_fn, apply_fn, new_kernel_fn
 
 
 def _arccos(x, do_backprop):
@@ -3057,347 +3304,6 @@ def _get_diagonal_outer_prods(cov1: np.ndarray,
             if cov2 is not None else prod11)
 
   return prod11, prod12, prod22
-
-
-def _get_ab_relu_kernel(ker_mat, prod, a, b, do_backprop, ntk=None):
-  cosines = ker_mat / _safe_sqrt(prod)
-  angles = _arccos(cosines, do_backprop)
-
-  dot_sigma = (a**2 + b**2 - (a - b)**2 * angles / np.pi) / 2
-  ker_mat = ((a - b)**2 * _sqrt(prod - ker_mat**2, do_backprop) / (2 * np.pi) +
-             dot_sigma * ker_mat)
-
-  if ntk is not None:
-    ntk *= dot_sigma
-
-  return ker_mat, ntk
-
-
-def _transform_kernels_ab_relu(
-    k: Kernel,
-    a: float = 1.0,
-    b: float = 0.0,
-    do_backprop: bool = True,
-    do_stabilize: bool = True) -> Kernel:
-  """Compute new kernels after an `ABRelu` layer.
-
-  See https://arxiv.org/pdf/1711.09090.pdf for the leaky ReLU derivation.
-  """
-
-  cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
-
-  if do_stabilize:
-    factor = np.max([np.max(np.abs(nngp)), 1e-12])
-    nngp /= factor
-    cov1 /= factor
-    if cov2 is not None:
-      cov2 /= factor
-
-  prod11, prod12, prod22 = _get_diagonal_outer_prods(cov1,
-                                                     cov2,
-                                                     k.diagonal_batch,
-                                                     k.diagonal_spatial,
-                                                     op.mul)
-  nngp, ntk = _get_ab_relu_kernel(nngp, prod12, a, b, do_backprop, ntk=ntk)
-  if do_stabilize:
-    nngp *= factor
-
-  if k.diagonal_batch and k.diagonal_spatial:
-    cov1 *= (a**2 + b**2) / 2
-    if cov2 is not None:
-      cov2 *= (a**2 + b**2) / 2
-  else:
-    cov1, _ = _get_ab_relu_kernel(cov1, prod11, a, b, do_backprop)
-    if cov2 is not None:
-      cov2, _ = _get_ab_relu_kernel(cov2, prod22, a, b, do_backprop)
-
-  if do_stabilize:
-    cov1 *= factor
-    if cov2 is not None:
-      cov2 *= factor
-
-  return k.replace(cov1=cov1,
-                   nngp=nngp,
-                   cov2=cov2,
-                   ntk=ntk,
-                   is_gaussian=False
-                   )
-
-
-def _get_erf_kernel(
-    ker_mat: np.ndarray,
-    prod: np.ndarray,
-    do_backprop: bool,
-    ntk: np.ndarray = None) -> Tuple[np.ndarray, Optional[np.ndarray]]:
-  if ntk is not None:
-    dot_sigma = 4 / (np.pi * np.sqrt(prod - 4 * ker_mat**2))
-    ntk *= dot_sigma
-  ker_mat = _arcsin(2 * ker_mat / np.sqrt(prod), do_backprop) * 2 / np.pi
-
-  return ker_mat, ntk
-
-
-def _transform_kernels_erf_non_scaled(k: Kernel, do_backprop: bool) -> Kernel:
-  """Compute new kernels after an `Erf` layer."""
-  cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
-
-  _cov1_denom = 1 + 2 * cov1
-  _cov2_denom = None if cov2 is None else 1 + 2 * cov2
-
-  prod11, prod12, prod22 = _get_diagonal_outer_prods(_cov1_denom,
-                                                     _cov2_denom,
-                                                     k.diagonal_batch,
-                                                     k.diagonal_spatial,
-                                                     op.mul)
-  nngp, ntk = _get_erf_kernel(nngp, prod12, do_backprop, ntk=ntk)
-
-  if k.diagonal_batch and k.diagonal_spatial:
-    cov1 = np.arcsin(2 * cov1 / _cov1_denom) * 2 / np.pi
-    if cov2 is not None:
-      cov2 = np.arcsin(2 * cov2 / _cov2_denom) * 2 / np.pi
-  else:
-    cov1, _ = _get_erf_kernel(cov1, prod11, do_backprop)
-    if cov2 is not None:
-      cov2, _ = _get_erf_kernel(cov2, prod22, do_backprop)
-
-  return k.replace(cov1=cov1,
-                   nngp=nngp,
-                   cov2=cov2,
-                   ntk=ntk,
-                   is_gaussian=False)
-
-
-def _get_gelu_kernel(nngp: np.ndarray,
-                     prod: np.ndarray,
-                     prod_plus_1: np.ndarray,
-                     do_backprop: bool,
-                     ntk: np.ndarray = None
-                     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
-  delta_squared = prod_plus_1 - nngp**2
-  delta = _safe_sqrt(delta_squared)
-  ratio = nngp / _safe_sqrt(prod_plus_1)
-  new_nngp = (nngp**2 + prod * delta_squared) / (prod_plus_1 * delta)
-  new_nngp += nngp * _arcsin(ratio, do_backprop)
-  new_nngp /= 2 * np.pi
-  new_nngp += 0.25 * nngp
-
-  if ntk is not None:
-    second_term = 0.25 + _arcsin(ratio, do_backprop) / (2 * np.pi)
-    first_term = 1 / delta_squared + (1 - prod) / prod_plus_1 + 1
-    first_term *= nngp / delta / (2. * np.pi)
-    dot_sigma = first_term + second_term
-    ntk *= dot_sigma
-  return new_nngp, ntk
-
-
-def _get_gelu_nngp_diag(nngp_diag: np.ndarray, do_backprop: bool) -> np.ndarray:
-  new_diag = nngp_diag / ((nngp_diag + 1.) * np.sqrt(1. + 2.* nngp_diag))
-  new_diag += _arcsin(nngp_diag/(nngp_diag + 1), do_backprop) / 2
-  new_diag /= np.pi
-  new_diag += 0.25
-  new_diag *= nngp_diag
-  return new_diag
-
-
-def _transform_kernels_gelu(k: Kernel, do_backprop: bool) -> Kernel:
-  """Compute new kernels after an `Gelu` layer; NNGP see `arXiv:2002.08517`."""
-  cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
-
-  cov1_plus_1 = cov1 + 1
-  cov2_plus_1 = None if cov2 is None else cov2 + 1
-
-  prod11_plus_1, prod12_plus_1, prod22_plus_1 = _get_diagonal_outer_prods(
-      cov1_plus_1, cov2_plus_1, k.diagonal_batch, k.diagonal_spatial, op.mul)
-  prod11, prod12, prod22 = _get_diagonal_outer_prods(
-      cov1, cov2, k.diagonal_batch, k.diagonal_spatial, op.mul)
-
-  nngp, ntk = _get_gelu_kernel(nngp, prod12, prod12_plus_1, do_backprop,
-                               ntk=ntk)
-
-  if k.diagonal_batch and k.diagonal_spatial:
-    cov1 = _get_gelu_nngp_diag(cov1, do_backprop)
-    if cov2 is not None:
-      cov2 = _get_gelu_nngp_diag(cov2, do_backprop)
-  else:
-    cov1, _ = _get_gelu_kernel(cov1, prod11, prod11_plus_1, do_backprop)
-    if cov2 is not None:
-      cov2, _ = _get_gelu_kernel(cov2, prod22, prod22_plus_1, do_backprop)
-
-  return k.replace(cov1=cov1,
-                   nngp=nngp,
-                   cov2=cov2,
-                   ntk=ntk,
-                   is_gaussian=False)
-
-
-def _transform_kernels_affine_erf(
-    k: Kernel, do_backprop: bool, a: float, b: float, c: float) -> Kernel:
-  k = k.replace(cov1=b**2 * k.cov1,
-                nngp=b**2 * k.nngp,
-                cov2=None if k.cov2 is None else b**2 * k.cov2,
-                ntk=None if k.ntk is None else b**2 * k.ntk)
-  k = _transform_kernels_erf_non_scaled(k, do_backprop)
-  return k.replace(
-      cov1=_affine(k.cov1, a, c),
-      nngp=_affine(k.nngp, a, c),
-      cov2=_affine(k.cov2, a, c),
-      ntk=None if k.ntk is None else _affine(k.ntk, a, 0.),
-      is_gaussian=False)
-
-
-def _transform_kernels_sin(k: Kernel, a: float, b: float, c: float) -> Kernel:
-  """Compute new kernels after an `Sin` layer."""
-  cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
-
-  sum11, sum12, sum22 = _get_diagonal_outer_prods(cov1,
-                                                  cov2,
-                                                  k.diagonal_batch,
-                                                  k.diagonal_spatial,
-                                                  op.add)
-  half_a_square = a**2 / 2.
-  def _get_sin_kernel(sum_, cov, ntk):
-    s1 = np.exp(b**2 * (-0.5 * sum_ + cov))
-    s2 = np.exp(b**2 * (-0.5 * sum_ - cov)) * np.cos(2*c)
-    nngp = half_a_square * (s1 - s2)
-    if ntk is not None:
-      ntk *= half_a_square * b**2 * (s1 + s2)
-    return nngp, ntk
-  def _get_diag_sin_kernel(mat):
-    return half_a_square *(1. - np.exp(-b**2 * mat) *np.cos(2*c))
-  nngp, ntk = _get_sin_kernel(sum12, nngp, ntk)
-
-  if k.diagonal_batch and k.diagonal_spatial:
-    cov1 = _get_diag_sin_kernel(sum11)
-    if cov2 is not None:
-      cov2 = _get_diag_sin_kernel(sum22)
-  else:
-    cov1 = _get_sin_kernel(sum11, cov1, None)[0]
-    if cov2 is not None:
-      cov2 = _get_sin_kernel(sum22, cov2, None)[0]
-
-  return k.replace(cov1=cov1,
-                   nngp=nngp,
-                   cov2=cov2,
-                   ntk=ntk,
-                   is_gaussian=False)
-
-
-def _transform_kernels_rbf(k: Kernel, gamma: float) -> Kernel:
-  """Compute new kernels after an `Rbf` layer."""
-  cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
-
-  sum11, sum12, sum22 = _get_diagonal_outer_prods(cov1,
-                                                  cov2,
-                                                  k.diagonal_batch,
-                                                  k.diagonal_spatial,
-                                                  op.add)
-
-  def _get_rbf_kernel(sum_, cov, ntk):
-    s1 = np.exp(gamma * (-sum_ + 2 * cov))
-    nngp = s1
-    if ntk is not None:
-      ntk *= 2 * gamma * s1
-    return nngp, ntk
-
-  nngp, ntk = _get_rbf_kernel(sum12, nngp, ntk)
-
-  if k.diagonal_batch and k.diagonal_spatial:
-    cov1 = np.ones_like(sum11)
-    if cov2 is not None:
-      cov2 = np.ones_like(sum22)
-  else:
-    cov1 = _get_rbf_kernel(sum11, cov1, None)[0]
-    if cov2 is not None:
-      cov2 = _get_rbf_kernel(sum22, cov2, None)[0]
-
-  return k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk, is_gaussian=False)
-
-
-_POINTWISE_KERNEL_TRANSFORMS = {
-    _ab_relu: _transform_kernels_ab_relu,
-    _erf: _transform_kernels_affine_erf,
-    _sin: _transform_kernels_sin,
-    _rbf: _transform_kernels_rbf,
-    _gelu: _transform_kernels_gelu
-}
-
-
-def _gauss_hermite_quadrature(f, q11, q22, q12, quad_points, do_backprop):
-  """Simple Gauss-Hermite quadrature routine."""
-
-  xs, ws = quad_points
-  x = xs.reshape((xs.shape[0],) + (1,) * (q12.ndim + 1))
-  y = xs.reshape((1, xs.shape[0]) + (1,) * q12.ndim)
-
-  fvals = f(_sqrt(2*q11, do_backprop) * x) * f(
-      q12/_sqrt(q11/2, do_backprop) * x + _sqrt(
-          2*(q22 - q12**2/q11), do_backprop)* y)
-
-  return np.tensordot(np.outer(ws, ws), fvals, ((0, 1), (0, 1))) / np.pi
-
-
-def _gauss_hermite_quadrature_diag(f, q11, quad_points, do_backprop):
-  xs, ws = quad_points
-  x = xs.reshape((xs.shape[0],) + (1,) * q11.ndim)
-  fval = f(_sqrt(2*q11, do_backprop) * x) ** 2
-
-  return np.tensordot(ws, fval, ((0,), (0,))) / np.sqrt(np.pi)
-
-
-def _get_kernel_from_quad(q11, q22, q12, f, df, quad_points, ntk, do_backprop):
-  ker_mat = _gauss_hermite_quadrature(
-      f, q11, q22, q12, quad_points, do_backprop)
-  if ntk is not None:
-    dot_sigma = _gauss_hermite_quadrature(
-        df, q11, q22, q12, quad_points, do_backprop)
-    ntk *= dot_sigma
-
-  return ker_mat, ntk
-
-
-def _transform_kernels_quadrature(
-    k: Kernel,
-    f: Callable[[float], float],
-    df: Callable[[float], float],
-    quad_points: Tuple[np.ndarray, np.ndarray],
-    do_backprop: bool) -> Kernel:
-  """Kernel transformation of activation function using quadrature."""
-  cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
-
-  d1 = _get_diagonal(cov1, k.diagonal_batch, k.diagonal_spatial)
-  d2 = _get_diagonal(cov2, k.diagonal_batch, k.diagonal_spatial)
-
-  end_axis = 1 if k.diagonal_spatial else cov1.ndim
-  q11 = utils.interleave_ones(d1, 0, end_axis, True)
-  q22 = utils.interleave_ones(d2 if d2 is not None else d1, 0, end_axis, False)
-
-  nngp, ntk = _get_kernel_from_quad(
-      q11, q22, nngp, f, df, quad_points, ntk, do_backprop)
-
-  if k.diagonal_batch and k.diagonal_spatial:
-    cov1 = _gauss_hermite_quadrature_diag(f, cov1, quad_points, do_backprop)
-    if cov2 is not None:
-      cov2 = _gauss_hermite_quadrature_diag(f, cov2, quad_points, do_backprop)
-
-  else:
-    start_axis = 1 if k.diagonal_batch else 0
-    q11 = utils.interleave_ones(d1, start_axis, end_axis, True)
-    q22 = utils.interleave_ones(d1, start_axis, end_axis, False)
-
-    cov1, _ = _get_kernel_from_quad(
-        q11, q22, cov1, f, None, quad_points, None, do_backprop)
-
-    if cov2 is not None:
-      q11 = utils.interleave_ones(d2, start_axis, end_axis, True)
-      q22 = utils.interleave_ones(d2, start_axis, end_axis, False)
-      cov2, _ = _get_kernel_from_quad(
-          q11, q22, cov2, f, None, quad_points, None, do_backprop)
-
-  return k.replace(cov1=cov1,
-                   nngp=nngp,
-                   cov2=cov2,
-                   ntk=ntk,
-                   is_gaussian=False)
 
 
 def _affine(
