@@ -436,6 +436,7 @@ as an example. With `NVIDIA V100` 64-bit precision, `nt` took 316/330/508 GPU-ho
 
 Neural Tangents has been used in the following papers:
 
+* [Cold Posteriors and Aleatoric Uncertainty](https://arxiv.org/abs/2008.00029)
 * [Asymptotics of Wide Convolutional Neural Networks](https://arxiv.org/abs/2008.08675)
 * [Finite Versus Infinite Neural Networks: an Empirical Study](https://arxiv.org/abs/2007.15801)
 * [Bayesian Deep Ensembles via the Neural Tangent Kernel](https://arxiv.org/abs/2007.05864)
