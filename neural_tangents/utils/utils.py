@@ -163,6 +163,25 @@ def x1_is_x2(x1: np.ndarray,
   return np.all(np.abs(x1 - x2) < eps)
 
 
+def _get_ndim(x: Union[int, Sized, np.ndarray]) -> int:
+  if hasattr(x, 'ndim'):
+    n = x.ndim
+  elif hasattr(x, '__len__'):
+    n = len(x)
+  elif isinstance(x, int):
+    n = x
+  else:
+    raise TypeError(x, type(x))
+  return n
+
+
+def mod(axis: Axes, x: Union[int, Sized, np.ndarray]) -> List[int]:
+  n = _get_ndim(x)
+  if isinstance(axis, int):
+    axis = [axis]
+  return [i % n for i in axis]
+
+
 def canonicalize_axis(axis: Axes,
                       x: Union[int, Sized, np.ndarray]) -> List[int]:
   """Converts axis into a sorted non-negative list.
@@ -175,15 +194,8 @@ def canonicalize_axis(axis: Axes,
     A sorted list of integer axes.
   """
   axis = [axis] if isinstance(axis, int) else list(axis)
-  if hasattr(x, 'ndim'):
-    ndim = x.ndim
-  elif hasattr(x, '__len__'):
-    ndim = len(x)
-  elif isinstance(x, int):
-    ndim = x
-  else:
-    raise TypeError(x, type(x))
-  return list(set(onp.arange(ndim)[axis]))
+  n = _get_ndim(x)
+  return list(set(onp.arange(n)[axis]))
 
 
 def zip_axes(x: np.ndarray,
@@ -314,15 +326,20 @@ def outer_prod(x, y, start_axis, end_axis, prod_op):
   return prod_op(x, y)
 
 
-def reverse_zipped(mat: np.ndarray, start_axis: int = 0) -> np.ndarray:
+def reverse_zipped(
+    mat: Union[np.ndarray, Sequence[int]],
+    start_axis: int = 0) -> Union[np.ndarray, Sequence[int]]:
   if mat is not None:
+    ndim = _get_ndim(mat)
     source_axes = tuple(j
-                        for i in range(mat.ndim - 2, start_axis - 1, -2)
+                        for i in range(ndim - 2, start_axis - 1, -2)
                         for j in (i, i + 1))
 
-    target_axes = range(start_axis, mat.ndim)
-    mat = np.moveaxis(mat, source_axes, target_axes)
-
+    if isinstance(mat, np.ndarray):
+      target_axes = range(start_axis, ndim)
+      mat = np.moveaxis(mat, source_axes, target_axes)
+    else:
+      mat = mat[:start_axis] + type(mat)(mat[i] for i in source_axes)
   return mat
 
 
@@ -368,7 +385,7 @@ def get_masked_array(x: ArrayOrList,
       mask_mat = None
     else:
       mask_mat = lax.cond(np.isnan(mask_constant),
-                          lambda x: np.isnan(x),
+                          np.isnan,
                           lambda x: x == mask_constant,
                           x)
   else:
@@ -407,8 +424,8 @@ def shape_and_axes(
   return shape, axes
 
 
-def get_res_batch_dims(contracting_dims: List[int],
-                       batch_dims: List[int]) -> List[int]:
+def get_res_batch_dims(contracting_dims: Iterable[int],
+                       batch_dims: Iterable[int]) -> List[int]:
   res_batch_dims = [2 * b - i for i, b in enumerate(batch_dims)]
   for i, b in enumerate(batch_dims):
     for c in contracting_dims:

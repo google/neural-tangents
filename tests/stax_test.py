@@ -17,15 +17,15 @@
 
 import functools
 import itertools
-import logging
 import random as prandom
 import string
 from typing import Tuple
 
 from absl.testing import absltest
+from jax import lax
 from jax import ops
 from jax import test_util as jtu
-from jax.api import jit
+from jax.api import jit, vjp
 from jax.config import config as jax_config
 from jax.lib import xla_bridge
 import jax.numpy as np
@@ -53,7 +53,7 @@ WIDTHS = [2**10]
 
 N_SAMPLES = 100
 
-RTOL = 0.04
+RTOL = 0.041
 
 FILTER_SHAPES = [
     (2, 1),
@@ -164,8 +164,6 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
 
   if layer_norm:
     layer_norm = tuple(spec.index(c) for c in layer_norm)
-
-  logging.warning(f'DIMENSION NUMBERS: {dimension_numbers}')
 
   def fc(out_dim):
     return stax.Dense(
@@ -296,7 +294,33 @@ def _get_net_pool(width, is_ntk, pool_type, padding,
       fc(1 if is_ntk else width)), INPUT_SHAPE, -1, -1
 
 
+def _mask(x, mask_constant, mask_axis, key, p):
+  if mask_constant is not None:
+    mask_shape = [1 if i in mask_axis else s
+                  for i, s in enumerate(x.shape)]
+    mask = random.bernoulli(key, p=p, shape=mask_shape)
+    x = np.where(mask, mask_constant, x)
+    x = np.sort(x, 1)
+  return x
+
+
 class StaxTest(test_utils.NeuralTangentsTestCase):
+
+  def _skip_test(self, filter_shape, is_conv, is_res, padding, proj_into_2d,
+                 strides, use_pooling):
+    if is_conv:
+      if xla_bridge.get_backend().platform == 'cpu':
+        raise absltest.SkipTest('Not running CNN models on CPU to save time.')
+
+      if (is_res and is_conv and ((strides is not None and strides != (1, 1)) or
+                                  (padding == 'VALID' and filter_shape !=
+                                   (1, 1)))):
+        raise absltest.SkipTest('Different paths in a residual models need to '
+                                'return outputs of the same shape.')
+    elif (filter_shape != FILTER_SHAPES[0] or padding != PADDINGS[0] or
+          strides != STRIDES[0] or proj_into_2d != PROJECTIONS[0] or
+          use_pooling):
+      raise absltest.SkipTest('FC models do not have these parameters.')
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -346,19 +370,8 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     is_conv = 'conv' in model
 
     # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
-    if is_conv:
-      if xla_bridge.get_backend().platform == 'cpu':
-        raise absltest.SkipTest('Not running CNN models on CPU to save time.')
-
-      if (is_res and is_conv and ((strides is not None and strides != (1, 1)) or
-                                  (padding == 'VALID' and filter_shape !=
-                                   (1, 1)))):
-        raise absltest.SkipTest('Different paths in a residual models need to '
-                                'return outputs of the same shape.')
-    elif (filter_shape != FILTER_SHAPES[0] or padding != PADDINGS[0] or
-          strides != STRIDES[0] or proj_into_2d != PROJECTIONS[0] or
-          use_pooling):
-      raise absltest.SkipTest('FC models do not have these parameters.')
+    self._skip_test(filter_shape, is_conv, is_res, padding, proj_into_2d,
+                    strides, use_pooling)
 
     pool_type = 'AVG'
     W_std, b_std = 2.**0.5, 0.5**0.5
@@ -620,23 +633,12 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     use_dropout = True
     is_conv = 'conv' in model
     is_res = False
-    # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
     W_std, b_std = 2.**0.5, 0.5**0.5
     layer_norm = None
     parameterization = 'ntk'
-    if is_conv:
-      if xla_bridge.get_backend().platform == 'cpu':
-        raise absltest.SkipTest('Not running CNN models on CPU to save time.')
-
-      if (is_res and is_conv and ((strides is not None and strides != (1, 1)) or
-                                  (padding == 'VALID' and filter_shape !=
-                                   (1, 1)))):
-        raise absltest.SkipTest('Different paths in a residual models need to '
-                                'return outputs of the same shape.')
-    elif (filter_shape != FILTER_SHAPES[0] or padding != PADDINGS[0] or
-          strides != STRIDES[0] or proj_into_2d != PROJECTIONS[0] or
-          use_pooling):
-      raise absltest.SkipTest('FC models do not have these parameters.')
+    # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
+    self._skip_test(filter_shape, is_conv, is_res, padding, proj_into_2d,
+                    strides, use_pooling)
 
     net = _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res,
                    padding, phi, strides, width, is_ntk, proj_into_2d,
@@ -1246,7 +1248,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
           }
           for same_inputs in [False]
           for axis in [0, 1]
-          for n_branches in [2, 3] for get in ['nngp', 'ntk']
+          for n_branches in [2, 3] for get in ['ntk']
           for branch_in in ['dense_before_branch_in',
                             'dense_after_branch_in']
           for fan_in_mode in ['FanInSum', 'FanInConcat', 'FanInProd']))
@@ -1262,9 +1264,10 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
       raise absltest.SkipTest('`FanInSum` and `FanInConcat(0)` '
                               'require `is_gaussian`.')
 
-    if (axis == 1 or fan_in_mode == 'FanInProd') and branch_in == 'dense_before_branch_in':
+    if ((axis == 1 or fan_in_mode == 'FanInProd') and
+        branch_in == 'dense_before_branch_in'):
       raise absltest.SkipTest(
-          '`FanInConcat` or `FanInProd` on feature axis requires a dense layer'
+          '`FanInConcat` or `FanInProd` on feature axis requires a dense layer '
           'after concatenation or Hadamard product.')
     if fan_in_mode == 'FanInSum':
       fan_in_layer = stax.FanInSum()
@@ -1356,7 +1359,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
           }
           for same_inputs in [False]
           for axis in [0, 1, 2, 3]
-          for n_branches in [2, 3] for get in ['nngp', 'ntk']
+          for n_branches in [2, 3] for get in ['ntk']
           for branch_in in ['dense_before_branch_in', 'dense_after_branch_in']
           for readout in ['pool', 'flatten']
           for fan_in_mode in ['FanInSum', 'FanInConcat', 'FanInProd']))
@@ -1491,7 +1494,7 @@ class ConvNDTest(test_utils.NeuralTangentsTestCase):
       }
                           for same_inputs in [False]
                           for n in [0, 1, 2, 3]
-                          for get in ['nngp', 'ntk']
+                          for get in ['ntk']
                           for proj in ['flatten', 'pool']
                           for use_attn in [True]
                           for channels_first in [True, False]
@@ -1595,10 +1598,10 @@ class ConvNDTest(test_utils.NeuralTangentsTestCase):
         {
             'testcase_name':
                 ' [{}_out={}_in={}]'.format(
-                  'same_inputs' if same_inputs else 'different_inputs',
-                  readout[0].__name__,
-                  readin[0].__name__
-              ),
+                    'same_inputs' if same_inputs else 'different_inputs',
+                    readout[0].__name__,
+                    readin[0].__name__
+                ),
             'same_inputs':
                 same_inputs,
             'readout':
@@ -1792,12 +1795,11 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
               'p':
                   p,
           }
-          for same_inputs in [False] for get in ['ntk', 'nngp']
+          for same_inputs in [False] for get in ['ntk']
           for concat in [None, 0, 1] for p in [0.5]
           for mask_axis in [(),
                             (0,),
                             (1, 3),
-                            (0, 2, 3),
                             (0, 1, 2, 3)]
           for mask_constant in [10.]))
   def test_mask_fc(self, same_inputs, get, concat, p, mask_axis, mask_constant):
@@ -1806,22 +1808,14 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
     tol = 0.03
     key = random.PRNGKey(1)
 
-    def apply_mask(x):
-      if mask_constant is not None:
-        mask_shape = [1 if i in mask_axis else s
-                      for i, s in enumerate(x.shape)]
-        mask = random.bernoulli(key, p=p, shape=mask_shape)
-        x = np.where(mask, mask_constant, x)
-      return x
-
     x1 = random.normal(key, (4, 6, 5, 7))
-    x1 = apply_mask(x1)
+    x1 = _mask(x1, mask_constant, mask_axis, key, p)
 
     if same_inputs:
       x2 = None
     else:
       x2 = random.normal(key, (2, 6, 5, 7))
-      x2 = apply_mask(x2)
+      x2 = _mask(x2, mask_constant, mask_axis, key, p)
 
     nn = stax.serial(
         stax.Flatten(),
@@ -1867,7 +1861,8 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
-          ' [{}_get={}_axis={}_mask={}_concat={}_{}_p={}_attn={}_n={}]'.format(
+          ' [{}_get={}_axis={}_mask={}_concat={}_{}_p={}_n={}_{}]'
+          ''.format(
               'same_inputs' if same_inputs else 'different_inputs',
               get,
               mask_axis,
@@ -1875,8 +1870,8 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
               concat,
               proj,
               p,
-              use_attn,
-              n
+              n,
+              'transpose' if transpose else ''
           ),
           'same_inputs': same_inputs,
           'get': get,
@@ -1885,61 +1880,50 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
           'concat': concat,
           'proj': proj,
           'p': p,
-          'use_attn': use_attn,
-          'n': n
+          'n': n,
+          'transpose': transpose
       }
-                          for proj in ['avg']
-                          for use_attn in [True]
+                          for proj in ['flatten', 'avg']
                           for same_inputs in [False]
-                          for get in ['nngp', 'ntk']
-                          for n in [2]
+                          for get in ['ntk']
+                          for n in [0, 1, 2]
                           for concat in [None] + list(range(n + 1))
                           for mask_constant in [10.]
                           for p in [0.5]
+                          for transpose in [True, False]
                           for mask_axis in [(),
                                             (0,),
-                                            (1,),
-                                            (2, 3),
-                                            (0, 1, 3),
-                                            (0, 1, 2, 3)]
+                                            (0, 1, 2, 3)
+                                            ]
                           ))
   def test_mask_conv(self, same_inputs, get, mask_axis, mask_constant, concat,
-                     proj, p, use_attn, n):
+                     proj, p, n, transpose):
     if xla_bridge.get_backend().platform == 'cpu':
       raise absltest.SkipTest('Skipping CNN tests on CPU for speed.')
     elif xla_bridge.get_backend().platform == 'gpu' and n > 3:
       raise absltest.SkipTest('>=4D-CNN is not supported on GPUs.')
 
-    width = 1024
-    n_samples = 128
-    tol = 0.025
+    width = 128
+    n_samples = 256
+    tol = 0.05
     key = random.PRNGKey(1)
 
-    spatial_shape = (15, 8, 9)[:n]
-    filter_shape = (7, 2, 3)[:n]
-    strides = (2, 3, 1)[:n]
-    spatial_spec = 'HWD'[:n]
+    spatial_shape = ((1, 2, 3, 2, 1) if transpose else (15, 8, 9))[:n]
+    filter_shape = ((2, 3, 1, 2, 1) if transpose else (7, 2, 3))[:n]
+    strides = (2, 1, 3, 2, 3)[:n]
+    spatial_spec = 'HWDZX'[:n]
     dimension_numbers = ('N' + spatial_spec + 'C',
                          'OI' + spatial_spec,
                          'N' + spatial_spec + 'C')
 
-    def apply_mask(x):
-      if mask_constant is not None:
-        mask_shape = [1 if i in mask_axis else s
-                      for i, s in enumerate(x.shape)]
-        mask = random.bernoulli(key, p=p, shape=mask_shape)
-        x = np.where(mask, mask_constant, x)
-        x = np.sort(x, 1)
-      return x
-
-    x1 = random.normal(key, (4,) + spatial_shape + (3,))
-    x1 = apply_mask(x1)
+    x1 = np.cos(random.normal(key, (2,) + spatial_shape + (2,)))
+    x1 = _mask(x1, mask_constant, mask_axis, key, p)
 
     if same_inputs:
       x2 = None
     else:
-      x2 = random.normal(key, (2,) + spatial_shape + (3,))
-      x2 = apply_mask(x2)
+      x2 = np.cos(random.normal(key, (4,) + spatial_shape + (2,)))
+      x2 = _mask(x2, mask_constant, mask_axis, key, p)
 
     def get_attn():
       return stax.GlobalSelfAttention(
@@ -1947,23 +1931,25 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
           n_chan_key=width,
           n_chan_val=int(np.round(float(width) / int(np.sqrt(width)))),
           n_heads=int(np.sqrt(width)),
-      ) if use_attn else stax.Identity()
+      ) if proj == 'avg' else stax.Identity()
+
+    conv = stax.GeneralConvTranspose if transpose else stax.GeneralConv
 
     nn = stax.serial(
         stax.FanOut(3),
         stax.parallel(
             stax.serial(
-                stax.GeneralConv(
+                conv(
                     dimension_numbers=dimension_numbers,
                     out_chan=width,
                     strides=strides,
                     filter_shape=filter_shape,
-                    padding='SAME',
-                    W_std=1.1,
-                    b_std=0.1),
+                    padding='CIRCULAR',
+                    W_std=1.5,
+                    b_std=0.2),
                 stax.LayerNorm(axis=(1, -1)),
                 stax.Abs(),
-                stax.GeneralConv(
+                conv(
                     dimension_numbers=dimension_numbers,
                     out_chan=width,
                     strides=strides,
@@ -1973,7 +1959,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
                     b_std=0.1),
             ),
             stax.serial(
-                stax.GeneralConv(
+                conv(
                     dimension_numbers=dimension_numbers,
                     out_chan=width,
                     strides=strides,
@@ -1983,7 +1969,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
                     b_std=0.3),
                 stax.Relu(),
                 stax.Dropout(0.7),
-                stax.GeneralConv(
+                conv(
                     dimension_numbers=dimension_numbers,
                     out_chan=width,
                     strides=strides,
@@ -1994,17 +1980,17 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
             ),
             stax.serial(
                 get_attn(),
-                stax.GeneralConv(
+                conv(
                     dimension_numbers=dimension_numbers,
                     out_chan=width,
                     strides=strides,
                     filter_shape=filter_shape,
-                    padding='SAME',
+                    padding='CIRCULAR',
                     W_std=1.,
                     b_std=0.1),
                 stax.Erf(),
                 stax.Dropout(0.2),
-                stax.GeneralConv(
+                conv(
                     dimension_numbers=dimension_numbers,
                     out_chan=width,
                     strides=strides,
@@ -2075,7 +2061,6 @@ class AttentionTest(test_utils.NeuralTangentsTestCase):
                               False
                           ]
                           for get in [
-                              'nngp',
                               'ntk'
                           ]
                           for n in [
@@ -2137,12 +2122,7 @@ class AttentionTest(test_utils.NeuralTangentsTestCase):
 
     def get_x0(batch_size):
       x0 = random.normal(key, (batch_size,) + spatial_shape + (n_chan_in,))
-      if mask_constant is not None:
-        mask_shape = [1 if i in mask_axis else s
-                      for i, s in enumerate(x0.shape)]
-        mask = random.bernoulli(key, p=p, shape=mask_shape)
-        x0 = np.where(mask, mask_constant, x0)
-        x0 = np.sort(x0, 1)
+      x0 = _mask(x0, mask_constant, mask_axis, key, p)
       return x0
 
     X0_1 = get_x0(2)
@@ -2210,7 +2190,7 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
           'same_input': same_input,
           'activation': activation,
           'test_mask': test_mask,
-      } for get in ['ntk', 'nngp']
+      } for get in ['ntk']
                           for name, readout in [
                               ('Flattten', stax.Flatten()),
                               ('Pooling', stax.GlobalAvgPool())]
@@ -2263,6 +2243,155 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
                       pattern=(pattern1, pattern2))
     rtol = 0.03
     test_utils.assert_close_matrices(self, exact, empirical, rtol)
+
+
+class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              f'_same_inputs={same_inputs}_{padding}_size={size}_'
+              f'strides={strides}_filter={filter_shape}_'
+              f'diag_batch={diagonal_batch}_diag_spatial={diagonal_spatial}',
+          'padding': padding,
+          'size': size,
+          'same_inputs': same_inputs,
+          'filter_shape': filter_shape,
+          'strides': strides,
+          'diagonal_batch': diagonal_batch,
+          'diagonal_spatial': diagonal_spatial
+      }
+                          for padding in ['CIRCULAR', 'SAME', 'VALID']
+                          for same_inputs in [True, False]
+                          for filter_shape in range(2, 5)
+                          for strides in range(2, 5)
+                          for size in range(2, 5)
+                          for diagonal_batch in [True, False]
+                          for diagonal_spatial in [True, False]))
+  def test_conv_transpose(self, same_inputs, padding, filter_shape, strides,
+                          size, diagonal_batch, diagonal_spatial):
+    platform = xla_bridge.get_backend().platform
+    if platform == 'cpu' and size > 2:
+      raise absltest.SkipTest('Skipping large tests on CPU for speed.')
+
+    width = 512
+    tol = 0.01
+    n_samples = 512
+    filter_shape = (filter_shape,)
+    strides = (strides,)
+
+    init_fn, apply_fn, kernel_fn = stax.ConvTranspose(width,
+                                                      filter_shape,
+                                                      strides,
+                                                      padding,
+                                                      b_std=0.1)
+
+    key = random.PRNGKey(1)
+    shape = (size, 1)
+    x1 = random.normal(key, (2,) + shape)
+    x2 = random.normal(key, (3,) + shape) if not same_inputs else None
+
+    k = kernel_fn(x1, x2,
+                  diagonal_batch=diagonal_batch,
+                  diagonal_spatial=diagonal_spatial,
+                  get='cov1' if diagonal_batch else 'nngp')
+
+    diagonal_axes = ()
+    if diagonal_batch:
+      diagonal_axes += (0,)
+    if diagonal_spatial:
+      diagonal_axes += (1,)
+
+    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, key, n_samples, diagonal_axes=diagonal_axes,
+        device_count=0)
+    k_mc = kernel_fn_mc(x1, None if diagonal_batch else x2, 'nngp')
+
+    test_utils.assert_close_matrices(self, k_mc, k, tol)
+
+  @classmethod
+  def _conv_transpose_circular_via_grad(cls,
+                                        lhs,
+                                        params,
+                                        strides,
+                                        padding,
+                                        dimension_numbers):
+    """Helper method: calculates conv transpose via grad for testing.
+
+    Adapted from `jax.tests.lax_test`.
+    """
+    rhs = params[0]
+    rhs = np.swapaxes(rhs, dimension_numbers[1].index('O'),
+                      dimension_numbers[1].index('I'))
+    rhs = np.flip(rhs, dimension_numbers[1].index('H'))
+    assert len(lhs.shape) == len(rhs.shape)
+    nspatial = len(lhs.shape) - 2
+    dn = lax.conv_dimension_numbers(lhs.shape, rhs.shape, dimension_numbers)
+    in_shape = np.take(lhs.shape, dn.lhs_spec)
+    in_sdims = in_shape[2:]
+    k_shape = np.take(rhs.shape, dn.rhs_spec)
+    o_sdims = [in_sdims[i]*strides[i] for i in range(nspatial)]
+    o_shape = [in_shape[0], k_shape[1]] + o_sdims
+    out_spec_inv = [x[0] for x in
+                    sorted(enumerate(dn.out_spec), key=lambda x: x[1])]
+    o_layout = np.take(np.array(o_shape), out_spec_inv)
+    placeholder = np.ones(o_layout, lhs.dtype)
+
+    _, apply_fn, _ = stax.GeneralConv(
+        dimension_numbers=dimension_numbers,
+        out_chan=rhs.shape[dimension_numbers[1].index('I')],
+        filter_shape=(rhs.shape[dimension_numbers[1].index('H')],),
+        strides=strides,
+        padding=padding,
+        parameterization='standard')
+    conv = lambda x: apply_fn((rhs, 0.), x)
+    _, g = vjp(conv, placeholder)
+    return g(lhs)[0]
+
+  @classmethod
+  def _conv_transpose_circular(cls,
+                               lhs,
+                               params,
+                               strides,
+                               padding,
+                               dimension_numbers):
+    """Helper method: calculates conv transpose."""
+    _, apply_fn, _ = stax.GeneralConvTranspose(
+        dimension_numbers=dimension_numbers,
+        out_chan=params[0].shape[dimension_numbers[1].index('O')],
+        filter_shape=(params[0].shape[dimension_numbers[1].index('H')],),
+        strides=strides,
+        padding=padding,
+        parameterization='standard')
+    return apply_fn((params[0], 0.), lhs)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              f'size={size}_strides={strides}_filter={filter_shape}',
+          'size': size,
+          'filter_shape': filter_shape,
+          'strides': strides,
+      }
+                          for filter_shape in range(1, 5)
+                          for strides in range(1, 5)
+                          for size in range(1, 5)))
+  def test_conv_transpose_circular(self, size, filter_shape, strides):
+    if xla_bridge.get_backend().platform == 'cpu' and size > 2:
+      raise absltest.SkipTest('Skipping large tests on CPU for speed.')
+
+    x = random.normal(random.PRNGKey(1), (2, size, 3))
+    dn = ('NHC', 'HIO', 'NHC')
+    padding = 'CIRCULAR'
+    filter_shape = (filter_shape,)
+    strides = (strides,)
+
+    init_fn, _, _ = stax.ConvTranspose(4, filter_shape, strides, padding)
+    _, params = init_fn(random.PRNGKey(2), x.shape)
+    f_conv = self._conv_transpose_circular(x, params, strides, padding, dn)
+    f_adj = self._conv_transpose_circular_via_grad(x, params, strides, padding,
+                                                   dn)
+    self.assertAllClose(f_adj, f_conv)
 
 
 if __name__ == '__main__':

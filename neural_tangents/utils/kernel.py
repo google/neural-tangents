@@ -16,7 +16,7 @@
 
 
 import operator as op
-from typing import Dict, Tuple, Optional, Callable, Any
+from typing import Dict, Tuple, Optional, Callable, Any, Sequence
 
 import jax.numpy as np
 from neural_tangents.utils import dataclasses
@@ -171,7 +171,7 @@ class Kernel:
                         ntk=ntk,
                         is_reversed=not self.is_reversed)
 
-  def transpose(self, axes: Tuple[int, ...] = None) -> 'Kernel':
+  def transpose(self, axes: Sequence[int] = None) -> 'Kernel':
     """Permute spatial dimensions of the `Kernel` according to `axes`.
 
     Follows

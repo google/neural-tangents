@@ -37,7 +37,7 @@ from jax.tree_util import tree_map
 from neural_tangents.utils import utils, dataclasses
 import scipy as osp
 from neural_tangents.utils.typing import KernelFn, Axes, Get
-from typing import Union, Tuple, Callable, Iterable, Optional, Dict, NamedTuple, Generator
+from typing import Union, Tuple, Callable, Iterable, Optional, Dict, NamedTuple, Sequence, Generator
 from functools import lru_cache
 
 
@@ -741,7 +741,7 @@ def gradient_descent_mse_ensemble(
 
   k_dd_cache = {}
 
-  def get_k_train_train(get: Tuple[str, ...]) -> _Kernel:
+  def get_k_train_train(get: Sequence[str]) -> _Kernel:
     if len(get) == 1:
       get = get[0]
       if get not in k_dd_cache:
@@ -1000,7 +1000,11 @@ def _get_fns_in_eigenbasis(
 
   Args:
     k_train_train:
-      an n x n matrix
+      an n x n matrix.
+    diag_reg:
+      diagonal regularizer strength.
+    diag_reg_absolute_scale:
+      `True` to use absolute (vs relative to mean trace) regulatization.
     fns:
       a sequence of functions that add on the eigenvalues (evals, dt) ->
       modified_evals.

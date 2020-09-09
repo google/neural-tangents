@@ -68,7 +68,7 @@ import enum
 import functools
 import operator as op
 import string
-from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union, Sequence, TypeVar
 import warnings
 
 import frozendict
@@ -387,6 +387,8 @@ def Aggregate(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
       pattern:
         A 3D tensor of shape (batch, nodes, nodes), whose dimension order is
         fixed.
+      **kwargs:
+        unused.
 
     Returns:
       A 3D tensor of shape `(batch, nodes, channels)` which is equal to
@@ -434,7 +436,7 @@ def Aggregate(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
     pattern1, pattern2 = pattern
 
     def full_conjugate(p1, mat, p2):
-      if mat is None or mat.ndim ==0 or (p1 is None and p2 is None):
+      if mat is None or mat.ndim == 0 or (p1 is None and p2 is None):
         return mat
       elif p2 is None:
         return np.einsum('bli,bcij->bclj', p1, mat, optimize=True)
@@ -594,8 +596,8 @@ def Dense(
 def GeneralConv(
     dimension_numbers: Optional[Tuple[str, str, str]],
     out_chan: int,
-    filter_shape: Tuple[int, ...],
-    strides: Tuple[int, ...] = None,
+    filter_shape: Sequence[int],
+    strides: Sequence[int] = None,
     padding: str = Padding.VALID.name,
     W_std: float = 1.0,
     b_std: float = 0.0,
@@ -603,6 +605,54 @@ def GeneralConv(
   """Layer construction function for a general convolution layer.
 
   Based on `jax.experimental.stax.GeneralConv`.
+
+  Args:
+    dimension_numbers: Specifies which axes should be convolved over. Should
+      match the specification in `jax.lax.conv_general_dilated`.
+    out_chan: The number of output channels / features of the
+      convolution. This is ignored in by the `kernel_fn` in NTK
+      parameterization.
+    filter_shape: The shape of the filter. The shape of the tuple should agree
+      with the number of spatial dimensions in `dimension_numbers`.
+    strides: The stride of the convolution. The shape of the tuple should agree
+      with the number of spatial dimensions in `dimension_nubmers`.
+    padding: Specifies padding for the convolution. Can be one of `"VALID"`,
+      `"SAME"`, or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
+    W_std: The standard deviation of the weights.
+    b_std: The standard deviation of the biases.
+    parameterization: Either `"ntk"` or `"standard"`. These parameterizations
+      are the direct analogues for convolution of the corresponding
+      parameterizations for `Dense` layers.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  return _GeneralConv(dimension_numbers,
+                      out_chan,
+                      filter_shape,
+                      strides,
+                      padding,
+                      W_std,
+                      b_std,
+                      False,
+                      parameterization)
+
+
+@layer
+@_supports_masking(remask_kernel=True)
+def GeneralConvTranspose(
+    dimension_numbers: Optional[Tuple[str, str, str]],
+    out_chan: int,
+    filter_shape: Sequence[int],
+    strides: Sequence[int] = None,
+    padding: str = Padding.VALID.name,
+    W_std: float = 1.0,
+    b_std: float = 0.0,
+    parameterization: str = 'ntk'
+) -> InternalLayer:
+  """Layer construction function for a general transpose convolution layer.
+
+  Based on `jax.experimental.stax.GeneralConvTranspose`.
 
   Args:
     dimension_numbers:
@@ -639,6 +689,7 @@ def GeneralConv(
                       padding,
                       W_std,
                       b_std,
+                      True,
                       parameterization)
 
 
@@ -646,8 +697,8 @@ def GeneralConv(
 @_supports_masking(remask_kernel=True)
 def Conv(
     out_chan: int,
-    filter_shape: Tuple[int, ...],
-    strides: Optional[Tuple[int, ...]] = None,
+    filter_shape: Sequence[int],
+    strides: Sequence[int] = None,
     padding: str = Padding.VALID.name,
     W_std: float = 1.0,
     b_std: float = 0.0,
@@ -689,39 +740,102 @@ def Conv(
                       padding,
                       W_std,
                       b_std,
+                      False,
+                      parameterization)
+
+
+@layer
+@_supports_masking(remask_kernel=True)
+def ConvTranspose(
+    out_chan: int,
+    filter_shape: Sequence[int],
+    strides: Sequence[int] = None,
+    padding: str = Padding.VALID.name,
+    W_std: float = 1.0,
+    b_std: float = 0.0,
+    parameterization: str = 'ntk'
+) -> InternalLayer:
+  """Layer construction function for a general transpose convolution layer.
+
+  Based on `jax.experimental.stax.ConvTranspose`.
+
+  Args:
+    out_chan:
+      The number of output channels / features of the convolution. This is
+      ignored in by the `kernel_fn` in NTK parameterization.
+    filter_shape:
+      The shape of the filter. The shape of the tuple should agree with the
+      number of spatial dimensions in `dimension_numbers`.
+    strides:
+      The stride of the convolution. The shape of the tuple should agree with
+      the number of spatial dimensions in `dimension_nubmers`.
+    padding:
+      Specifies padding for the convolution. Can be one of `"VALID"`, `"SAME"`,
+      or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
+    W_std:
+      The standard deviation of the weights.
+    b_std:
+      The standard deviation of the biases.
+    parameterization:
+      Either `"ntk"` or `"standard"`. These parameterizations are the direct
+      analogues for convolution of the corresponding parameterizations for
+      `Dense` layers.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  return _GeneralConv(None,
+                      out_chan,
+                      filter_shape,
+                      strides,
+                      padding,
+                      W_std,
+                      b_std,
+                      True,
                       parameterization)
 
 
 def _GeneralConv(
     dimension_numbers: Optional[Tuple[str, str, str]],
     out_chan: int,
-    filter_shape: Tuple[int, ...],
-    strides: Optional[Tuple[int, ...]] = None,
-    padding: str = Padding.VALID.name,
-    W_std: float = 1.0,
-    b_std: float = 0.0,
-    parameterization: str = 'ntk') -> InternalLayer:
+    filter_shape: Sequence[int],
+    strides: Optional[Sequence[int]],
+    padding: str,
+    W_std: float,
+    b_std: float,
+    transpose: bool,
+    parameterization: str
+) -> InternalLayer:
   """Layer construction function for a general convolution layer.
 
   Based on `jax.experimental.stax.GeneralConv`.
 
   Args:
-    dimension_numbers: Specifies which axes should be convolved over. Should
-      match the specification in `jax.lax.conv_general_dilated`.
-    out_chan: The number of output channels / features of the
-      convolution. This is ignored in by the `kernel_fn` in NTK
-      parameterization.
-    filter_shape: The shape of the filter. The shape of the tuple should agree
-      with the number of spatial dimensions in `dimension_numbers`.
-    strides: The stride of the convolution. The shape of the tuple should agree
-      with the number of spatial dimensions in `dimension_nubmers`.
-    padding: Specifies padding for the convolution. Can be one of `"VALID"`,
-      `"SAME"`, or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
-    W_std: The standard deviation of the weights.
-    b_std: The standard deviation of the biases.
-    parameterization: Either `"ntk"` or `"standard"`. These parameterizations
-      are the direct analogues for convolution of the corresponding
-      parameterizations for `Dense` layers.
+    dimension_numbers:
+      Specifies which axes should be convolved over. Should match the
+      specification in `jax.lax.dot_general_dilated`.
+    out_chan:
+      The number of output channels / features of the convolution. This is
+      ignored in by the `kernel_fn` in NTK parameterization.
+    filter_shape: The shape of the filter.
+      The shape of the tuple should agree with the number of spatial dimensions
+      in `dimension_numbers`.
+    strides:
+      The stride of the convolution. The shape of the tuple should agree with
+      the number of spatial dimensions in `dimension_nubmers`.
+    padding:
+      Specifies padding for the convolution. Can be one of `"VALID"`, `"SAME"`,
+      or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
+    W_std:
+      The standard deviation of the weights.
+    b_std:
+      The standard deviation of the biases.
+    transpose:
+      `True` to use transpose convolution.
+    parameterization:
+      Either `"ntk"` or `"standard"`. These parameterizations are the direct
+      analogues for convolution of the corresponding parameterizations for
+      `Dense` layers.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -730,35 +844,41 @@ def _GeneralConv(
   parameterization = parameterization.lower()
 
   if dimension_numbers is None:
-    spatial_dims = ''.join(c for c in string.ascii_uppercase
-                           if c not in ('N', 'C', 'I', 'O'))[:len(filter_shape)]
-    lhs_spec = 'N' + spatial_dims + 'C'
-    dimension_numbers = (lhs_spec, spatial_dims + 'IO', lhs_spec)
+    dimension_numbers = _get_dimension_numbers(len(filter_shape), False)
 
-  lhs_spec = dimension_numbers[0]
+  lhs_spec, rhs_spec, out_spec = dimension_numbers
 
   one = (1,) * len(filter_shape)
   strides = strides or one
 
   padding = Padding(padding)
-  init_padding = padding
   if padding == Padding.CIRCULAR:
-    init_padding = Padding.SAME
+    apply_padding = Padding.VALID
+    init_padding = padding.SAME
+  else:
+    init_padding = apply_padding = padding
 
-  def input_total_dim(input_shape):
+  if transpose:
+    stax_conv = ostax.GeneralConvTranspose
+    lax_conv = lax.conv_transpose
+  else:
+    stax_conv = ostax.GeneralConv
+    lax_conv = lax.conv_general_dilated
+
+  ntk_init_fn, _ = stax_conv(dimension_numbers=dimension_numbers,
+                             out_chan=out_chan,
+                             filter_shape=filter_shape,
+                             strides=strides,
+                             padding=init_padding.name,
+                             W_init=random.normal,
+                             b_init=random.normal)
+
+  def get_fan_in(input_shape):
     return input_shape[lhs_spec.index('C')] * onp.prod(filter_shape)
-
-  ntk_init_fn, _ = ostax.GeneralConv(dimension_numbers,
-                                     out_chan,
-                                     filter_shape,
-                                     strides,
-                                     init_padding.name,
-                                     random.normal,
-                                     random.normal)
 
   def standard_init_fn(rng, input_shape):
     output_shape, (W, b) = ntk_init_fn(rng, input_shape)
-    norm = W_std / np.sqrt(input_total_dim(input_shape))
+    norm = W_std / np.sqrt(get_fan_in(input_shape))
     return output_shape, (W * norm, b * b_std)
 
   if parameterization == 'ntk':
@@ -766,43 +886,54 @@ def _GeneralConv(
   elif parameterization == 'standard':
     init_fn = standard_init_fn
   else:
-    raise ValueError('Parameterization not supported: %s' % parameterization)
+    raise ValueError(f'Parameterization not supported: {parameterization}.')
 
   def apply_fn(params, inputs, **kwargs):
     W, b = params
 
     if parameterization == 'ntk':
-      norm = W_std / np.sqrt(input_total_dim(inputs.shape))
+      norm = W_std / np.sqrt(get_fan_in(inputs.shape))
       b_rescale = b_std
     elif parameterization == 'standard':
       norm = 1.
       b_rescale = 1.
 
-    apply_padding = padding
-    if padding == Padding.CIRCULAR:
-      apply_padding = Padding.VALID
-      spatial_axes = tuple(dimension_numbers[0].index(c)
-                           for c in dimension_numbers[1]
-                           if c not in ('I', 'O'))
+    if padding == Padding.CIRCULAR and not transpose:
+      spatial_axes = tuple(lhs_spec.index(c)
+                           for c in rhs_spec if c not in ('I', 'O'))
       inputs = _same_pad_for_filter_shape(inputs, filter_shape, strides,
-                                          spatial_axes, 'wrap')
+                                          spatial_axes)
 
-    return norm * lax.conv_general_dilated(
+    res = norm * lax_conv(
         inputs,
         W,
         strides,
         apply_padding.name,
-        dimension_numbers=dimension_numbers) + b_rescale * b
+        dimension_numbers=dimension_numbers)
 
-  @_requires(batch_axis=dimension_numbers[0].index('N'),
-             channel_axis=dimension_numbers[0].index('C'))
+    if padding == Padding.CIRCULAR and transpose:
+      out_shape = eval_shape(lambda x: lax.conv_transpose(
+          lhs=x,
+          rhs=W,
+          strides=strides,
+          padding=Padding.SAME.name,
+          dimension_numbers=dimension_numbers
+      ), inputs).shape
+      spatial_axes = tuple(out_spec.index(c)
+                           for c in rhs_spec if c not in ('I', 'O'))
+      res = _same_pad_for_filter_shape_transpose(res, spatial_axes, out_shape)
+
+    return res + b_rescale * b
+
+  @_requires(batch_axis=lhs_spec.index('N'),
+             channel_axis=lhs_spec.index('C'))
   def kernel_fn(k: Kernel, **kwargs):
     """Compute the transformed kernels after a conv layer."""
     cov1, nngp, cov2, ntk, is_reversed = (k.cov1, k.nngp, k.cov2, k.ntk,
                                           k.is_reversed)
 
-    input_spec = tuple(c for c in dimension_numbers[0] if c not in ('N', 'C'))
-    conv_spec = tuple(c for c in dimension_numbers[1] if c not in ('I', 'O'))
+    input_spec = tuple(c for c in lhs_spec if c not in ('N', 'C'))
+    conv_spec = tuple(c for c in rhs_spec if c not in ('I', 'O'))
     input_to_filter_permutation = tuple(conv_spec.index(c) for c in input_spec)
 
     filter_shape_kernel = tuple(filter_shape[p] for p in
@@ -811,10 +942,8 @@ def _GeneralConv(
                            input_to_filter_permutation)
 
     if k.diagonal_spatial:
-      def conv_unscaled(x, batch_ndim):
-        x = _conv_kernel_diagonal_spatial(
-            x, filter_shape_kernel, strides_kernel, padding, batch_ndim)
-        return x
+      conv_kernel = (_conv_kernel_diagonal_spatial_transpose
+                     if transpose else _conv_kernel_diagonal_spatial)
 
     else:
       if is_reversed:
@@ -823,14 +952,20 @@ def _GeneralConv(
 
       is_reversed = not is_reversed
 
-      def conv_unscaled(x, batch_ndim):
-        x = _conv_kernel_full_spatial(
-            x, filter_shape_kernel, strides_kernel, padding, batch_ndim)
-        return x
+      conv_kernel = (_conv_kernel_full_spatial_transpose
+                     if transpose else _conv_kernel_full_spatial)
 
-    def conv(x, batch_ndim):
-      x = conv_unscaled(x, batch_ndim)
-      return _affine(x, W_std, b_std)
+    def conv_unscaled(lhs, batch_ndim):
+      lhs = conv_kernel(lhs,
+                        filter_shape_kernel,
+                        strides_kernel,
+                        padding,
+                        batch_ndim)
+      return lhs
+
+    def conv(lhs, batch_ndim):
+      lhs = conv_unscaled(lhs, batch_ndim)
+      return _affine(lhs, W_std, b_std)
 
     cov1 = conv(cov1, 1 if k.diagonal_batch else 2)
     cov2 = conv(cov2, 1 if k.diagonal_batch else 2)
@@ -843,7 +978,7 @@ def _GeneralConv(
       nngp_unscaled = conv_unscaled(nngp, 2)
       if ntk is not None:
         ntk = (
-            input_total_dim(k.shape1) * nngp_unscaled + 1. +
+            get_fan_in(k.shape1) * nngp_unscaled + 1. +
             W_std ** 2 * conv_unscaled(ntk, 2))
       nngp = _affine(nngp_unscaled, W_std, b_std)
 
@@ -853,28 +988,44 @@ def _GeneralConv(
                     ntk=ntk,
                     is_gaussian=True,
                     is_reversed=is_reversed,
-                    batch_axis=dimension_numbers[2].index('N'),
-                    channel_axis=dimension_numbers[2].index('C'),
+                    batch_axis=out_spec.index('N'),
+                    channel_axis=out_spec.index('C'),
                     is_input=False)
 
     # Reorder output spatial dimensions if the finite layer does so.
     # TODO(romann): make more efficient / lazy.
-    out_spec = tuple(c for c in dimension_numbers[2] if c not in ('N', 'C'))
-    in_to_out_permutation = tuple(out_spec.index(c) for c in input_spec)
+    out_spec_kernel = tuple(c for c in out_spec if c not in ('N', 'C'))
+    in_to_out_permutation = tuple(out_spec_kernel.index(c) for c in input_spec)
     res = res.transpose(in_to_out_permutation)
 
     return res
 
   def mask_fn(mask, input_shape):
-    batch_axis = dimension_numbers[0].index('N')
-    channel_axis = dimension_numbers[0].index('C')
+    batch_axis, channel_axis = lhs_spec.index('N'), lhs_spec.index('C')
 
     # Collapse channel dimension of masks, since an FC layer is applied at each
     # spatial location.
     mask = np.all(mask, axis=channel_axis, keepdims=True)
-    _check_is_implemented(mask, padding, channel_axis)
-    return _pool_mask(mask, filter_shape, strides, padding,
-                      batch_axis, channel_axis)
+
+    if transpose:
+      rhs_shape = list(filter_shape)
+      for c in ('O', 'I'):
+        rhs_shape.insert(rhs_spec.index(c), 1)
+      rhs = np.ones(rhs_shape)
+      # TODO(romann): revisit after https://github.com/google/jax/issues/4012.
+      mask = lax.conv_transpose(
+          mask.astype(rhs.dtype),
+          rhs,
+          strides,
+          init_padding.name,
+          dimension_numbers=dimension_numbers).astype(mask.dtype)
+
+    else:
+      mask = _pool_mask(mask, filter_shape, strides, init_padding,
+                        batch_axis, channel_axis)
+      mask = np.transpose(mask, (out_spec.index(c) for c in lhs_spec))
+
+    return mask
 
   return init_fn, apply_fn, kernel_fn, mask_fn
 
@@ -1090,7 +1241,8 @@ def FanInConcat(axis: int = -1) -> InternalLayer:
             channel_axis: -1,
         },
         **{
-            spatial_axis: idx + 1 for idx, spatial_axis in enumerate(spatial_axes)
+            spatial_axis: idx + 1
+            for idx, spatial_axis in enumerate(spatial_axes)
         }
     }
 
@@ -1131,8 +1283,8 @@ def FanInConcat(axis: int = -1) -> InternalLayer:
 @layer
 @_supports_masking(remask_kernel=True)
 def AvgPool(
-    window_shape: Tuple[int, ...],
-    strides: Tuple[int, ...] = None,
+    window_shape: Sequence[int],
+    strides: Sequence[int] = None,
     padding: str = Padding.VALID.name,
     normalize_edges: bool = True,
     batch_axis: int = 0,
@@ -1167,8 +1319,8 @@ def AvgPool(
 @layer
 @_supports_masking(remask_kernel=True)
 def SumPool(
-    window_shape: Tuple[int, ...],
-    strides: Tuple[int, ...] = None,
+    window_shape: Sequence[int],
+    strides: Sequence[int] = None,
     padding: str = Padding.VALID.name,
     batch_axis: int = 0,
     channel_axis: int = -1) -> InternalLayer:
@@ -1197,8 +1349,8 @@ def SumPool(
 
 def _Pool(
     pool_type: Pooling,
-    window_shape: Tuple[int, ...],
-    strides: Union[None, Tuple[int, ...]],
+    window_shape: Sequence[int],
+    strides: Optional[Sequence[int]],
     padding: str,
     normalize_edges: bool,
     batch_axis: int,
@@ -1256,7 +1408,7 @@ def _Pool(
       spatial_axes = tuple(i for i in range(inputs.ndim)
                            if i not in non_spatial_axes)
       inputs = _same_pad_for_filter_shape(inputs, window_shape, strides,
-                                          spatial_axes, 'wrap')
+                                          spatial_axes)
       res = apply_fn_0(params, inputs, **kwargs)
       return res
 
@@ -1295,7 +1447,7 @@ def _Pool(
     return k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
 
   def mask_fn(mask, input_shape):
-    _check_is_implemented(mask, padding, channel_axis)
+    _check_is_implemented(mask, channel_axis)
     return _pool_mask(mask, window_shape, strides, padding,
                       batch_axis, channel_axis)
 
@@ -1417,7 +1569,7 @@ def _GlobalPool(
                      is_reversed=False)
 
   def mask_fn(mask, input_shape):
-    _check_is_implemented(mask, None, channel_axis)
+    _check_is_implemented(mask, channel_axis)
     non_spatial_axes = (batch_axis % mask.ndim, channel_axis % mask.ndim)
     spatial_axes = tuple(i for i in range(mask.ndim)
                          if i not in non_spatial_axes)
@@ -2747,7 +2899,10 @@ def _get_input_req_attr(kernel_fns: List[LayerKernelFn]) -> Dict[str, bool]:
   return req
 
 
-def _double_tuple(x: tuple) -> tuple:
+_T = TypeVar('_T')
+
+
+def _double_tuple(x: Iterable[_T]) -> Tuple[_T, ...]:
   return tuple(v for v in x for _ in range(2))
 
 
@@ -3271,7 +3426,7 @@ def _get_diagonal_outer_prods(cov1: np.ndarray,
                               diagonal_batch: bool,
                               diagonal_spatial: bool,
                               operation: Callable[[float, float], float],
-                              axis: Tuple[int, ...] = (),
+                              axis: Sequence[int] = (),
                               mask1: Optional[np.ndarray] = None,
                               mask2: Optional[np.ndarray] = None
                              ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -3462,11 +3617,11 @@ def _fan_in_kernel_fn_concat(ks: List[Kernel], axis: int) -> Kernel:
 
 
 def _concat_kernels(
-    mats: List[Optional[np.ndarray]],
+    mats: Sequence[Optional[np.ndarray]],
     axis: int,
     diagonal_batch: bool,
     diagonal_spatial: bool,
-    widths: List[int]) -> Optional[np.ndarray]:
+    widths: Sequence[int]) -> Optional[np.ndarray]:
   """Compute the covariance of concatenated activations with given covariances.
 
   Args:
@@ -3528,10 +3683,11 @@ def _concat_kernels(
 
 def _same_pad_for_filter_shape(
     x: np.ndarray,
-    filter_shape: Tuple[int, ...],
-    strides: Tuple[int, ...],
-    axes: Tuple[int, ...],
-    mode: str) -> np.ndarray:
+    filter_shape: Sequence[int],
+    strides: Sequence[int],
+    axes: Sequence[int],
+    mode: str = 'wrap',
+) -> np.ndarray:
   """Pad an array to imitate `SAME` padding with `VALID`.
 
   See `Returns` section for details. This function is usually needed to
@@ -3549,81 +3705,176 @@ def _same_pad_for_filter_shape(
       https://docs.scipy.org/doc/numpy/reference/generated/numpy.pad.html.
   Returns:
     A `np.ndarray` of the same dimensionality as `x` padded to a potentially
-    larger shape such that a `VALID` convolution with `filter_shape` applied
+    larger shape such that a `"VALID"` convolution with `filter_shape` applied
     to `x` over `axes` outputs an array of the same shape as `x`.
   """
   axes_shape = tuple(np.size(x, axis) for axis in axes)
   axes_pads = lax.padtype_to_pads(axes_shape, filter_shape, strides,
                                   Padding.SAME.name)
-
-  pads = [(0, 0),] * x.ndim
+  pads = [(0, 0)] * x.ndim
   for i, axis in enumerate(axes):
     pads[axis] = axes_pads[i]
-
   x = np.pad(x, pads, mode)
   return x
 
 
+def _same_pad_for_filter_shape_transpose(
+    x: np.ndarray,
+    axes: Sequence[int],
+    out_shape: Sequence[int]
+) -> np.ndarray:
+  """Transpose of the `_same_pad_for_filter_shape` function.
+
+  Unpads (crops) the array and fills each coordinate with the sum of all
+  elements at positions where the current element would appear during
+  `CIRCULAR` padding.
+
+  Args:
+    x:
+      `np.ndarray` to pad, e.g. a 4D `NHWC` image.
+    axes:
+      non-negative integers, the spatial axes to apply convolution
+      over (e.g. `(1, 2)` for an `NHWC` image).
+    out_shape:
+      target shape after cropping.
+
+  Returns:
+    A `np.ndarray` of shape `output_shape`.
+  """
+  window_dimensions = tuple(
+      int(onp.ceil(x.shape[i] / out_shape[i])) // 2 * 2 + 1
+      if i in axes else 1 for i in range(x.ndim))
+
+  dilation = tuple(out_shape[i] if i in axes else 1 for i in range(x.ndim))
+
+  x = lax.reduce_window(
+      operand=x,
+      init_value=np.zeros((), x.dtype),
+      computation=lax.add,
+      window_dimensions=window_dimensions,
+      window_strides=(1,) * x.ndim,
+      padding=Padding.SAME.name,
+      window_dilation=dilation
+  )
+
+  if x.shape != out_shape:
+    pads = [((x.shape[i] - out_shape[i]) // 2,
+             (x.shape[i] - out_shape[i]) - (x.shape[i] - out_shape[i]) // 2)
+            for i in range(x.ndim)]
+    slices = []
+    for axis in range(x.ndim):
+      if axis in axes:
+        slices += [slice(pads[axis][0], x.shape[axis] - pads[axis][1])]
+      else:
+        slices += [slice(None)]
+    x = x[slices]
+  return x
+
+
+def _pool_transpose(
+    x: np.ndarray,
+    filter_shape: Sequence[int],
+    strides: Sequence[int],
+    axes: Sequence[int],
+    padding: Padding
+) -> np.ndarray:
+  """Transpose convolution with an all-ones filter."""
+  n_spatial = len(axes)
+  x = np.moveaxis(x, axes, range(-n_spatial, 0))
+  split = -n_spatial or x.ndim
+  x_preshape = x.shape[:split]
+  x = x.reshape((-1, 1) + x.shape[split:])
+  rhs = np.ones(tuple(filter_shape) + (1, 1), x.dtype)
+  x = lax.conv_transpose(x,
+                         rhs,
+                         strides,
+                         padding.name,
+                         dimension_numbers=_get_dimension_numbers(n_spatial))
+  x = x.reshape(x_preshape + x.shape[2:])
+  x = np.moveaxis(x, range(-n_spatial, 0), axes)
+  return x
+
+
+def _get_dimension_numbers(
+    n: int,
+    channels_first: bool = True
+) -> Tuple[str, str, str]:
+  spatial_dims = ''.join(c for c in string.ascii_uppercase
+                         if c not in ('N', 'C', 'I', 'O'))[:n]
+  if channels_first:
+    lhs_spec = 'NC' + spatial_dims
+  else:
+    lhs_spec = 'N' + spatial_dims + 'C'
+  dimension_numbers = (lhs_spec, spatial_dims + 'IO', lhs_spec)
+  return dimension_numbers
+
+
 def _conv_kernel_full_spatial(
-    mat: Optional[np.ndarray],
-    filter_shape: Tuple[int, ...],
-    strides: Tuple[int, ...],
+    lhs: Optional[np.ndarray],
+    filter_shape: Sequence[int],
+    strides: Sequence[int],
     padding: Padding,
     batch_ndim: int
 ) -> Optional[np.ndarray]:
-  """Compute covariance of the CNN outputs given inputs with covariance `mat`.
+  """Compute covariance of the CNN outputs given inputs with covariance `lhs`.
 
   Used when `kernel.diagonal_spatial == False`.
 
   Args:
-    mat: a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
+    lhs:
+      a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
       sample-[sample-]position-position covariances of CNN inputs, where `S` is
       the number of spatial dimensions (e.g. 2 for images). Has shape
-      `(batch_size_1, [batch_size_2,]
-        height, height, width, width, depth, depth, ...)`.
-    filter_shape: tuple of positive integers, the convolutional filters spatial
-      shape (e.g. `(3, 3)` for a 2D convolution).
-    strides: tuple of positive integers, the CNN strides (e.g. `(1, 1)` for a
-      2D convolution).
-    padding: a `Padding` enum, e.g. `Padding.CIRCULAR`.
-    batch_ndim: integer, number of batch dimensions, 1 or 2.
+      `(batch_size_1, [batch_size_2,] height, height, width, width, depth,
+      depth, ...)`.
+    filter_shape:
+      positive integers, the convolutional filters spatial shape
+      (e.g. `(3, 3)` for a 2D convolution).
+    strides:
+      positive integers, the CNN strides (e.g. `(1, 1)` for a 2D
+      convolution).
+    padding:
+      a `Padding` enum, e.g. `Padding.CIRCULAR`.
+    batch_ndim:
+      number of batch dimensions, 1 or 2.
 
   Returns:
     a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
     sample-[sample-]position-position covariances of CNN outputs, where `S` is
     the number of spatial dimensions (e.g. 2 for images). Has shape
-    `(batch_size_1, [batch_size_2,] new_width, new_width,
-      new_height, new_height, new_depth, new_depth, ...)`.
+    `(batch_size_1, [batch_size_2,] new_width, new_width, new_height,
+    new_height, new_depth, new_depth, ...)`.
   """
-  if mat is None or mat.ndim == 0:
-    return mat
+  if lhs is None or lhs.ndim == 0:
+    return lhs
 
   if padding == Padding.CIRCULAR:
-    spatial_axes = tuple(range(batch_ndim, mat.ndim))
-    mat = _same_pad_for_filter_shape(
-        mat,
-        _double_tuple(filter_shape),
-        _double_tuple(strides),
-        spatial_axes,
-        'wrap'
-    )
-    padding = Padding.VALID
+    spatial_axes = tuple(range(batch_ndim, lhs.ndim))
+    total_filter_shape = _double_tuple(filter_shape)
+    total_strides = _double_tuple(strides)
+    lhs = _same_pad_for_filter_shape(lhs,
+                                     total_filter_shape,
+                                     total_strides,
+                                     spatial_axes)
 
-  for i in range(mat.ndim - 1, batch_ndim, -2):
-    spatial_i = (i - batch_ndim) // 2
-    filter_i = filter_shape[spatial_i]
-    stride_i = strides[spatial_i]
-    size_i = mat.shape[i]
+  def lax_conv(lhs, rhs, strides, padding):
+    return lax.conv_general_dilated(
+        lhs, rhs, strides, padding,
+        dimension_numbers=_CONV_KERNEL_DIMENSION_NUMBERS,
+        feature_group_count=lhs.shape[
+            _CONV_KERNEL_DIMENSION_NUMBERS[0].index('C')])
 
-    mat = np.moveaxis(mat, (i - 1, i), (-2, -1))
-    mat_preshape = mat.shape[:-2]
+  def get_n_channels(batch_and_channels: int) -> int:
+    """Get the hardware-friendly channel size for depthwise convolution.
 
-    rhs = np.diag(np.full((filter_i,), 1. / filter_i, mat.dtype))
-    rhs_shape = ()
+    Args:
+      batch_and_channels: total size of non-spatial dimensions.
 
+    Returns:
+      Suggested number of channels for depthwise-separable convolution.
+    """
     platform = xla_bridge.get_backend().platform
     if platform in ['gpu', 'tpu']:
-      batch_and_channels = utils.size_at(mat_preshape)
       n_channels = batch_and_channels
 
       # Find smallest `n_channels > 1` that divides `batch_and_features`; use
@@ -3632,7 +3883,7 @@ def _conv_kernel_full_spatial(
       # in any other case (`conv2d_c1_k1_nchw_hw_packed_kernel`), and the latter
       # seems many-fold faster.
       # For TPU, start with `n_channels >= 128`. Beware of precision errors:
-      # TODO(romann): revisit based on b/154160868, b/154165148.
+      # TODO(romann): revisit based on b/154160868.
       n_channels_min = 2 if platform == 'gpu' else 128
 
       for n_c in range(n_channels_min, batch_and_channels):
@@ -3641,96 +3892,247 @@ def _conv_kernel_full_spatial(
           break
 
     elif platform == 'cpu':
-      # For CPU minimal channels seems best.
+      # For CPU minimal channels seems best. Transpose convolution does not
+      # support depthwise operations.
       n_channels = 1
 
     else:
       raise NotImplementedError(platform)
+    return n_channels
 
-    mat = mat.reshape((-1, n_channels, size_i, size_i))
+  lhs = _conv_kernel_full_spatial_loop(lhs, filter_shape, strides, padding,
+                                       lax_conv, get_n_channels)
+  return lhs
 
+
+def _conv_kernel_full_spatial_transpose(
+    lhs: Optional[np.ndarray],
+    filter_shape: Sequence[int],
+    strides: Sequence[int],
+    padding: Padding,
+    batch_ndim: int
+) -> Optional[np.ndarray]:
+  """Compute covariance of the CNN transpose given inputs with covariance `lhs`.
+
+  Used when `kernel.diagonal_spatial == False`.
+
+  Args:
+    lhs:
+      a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
+      sample-[sample-]position-position covariances of CNN inputs, where `S` is
+      the number of spatial dimensions (e.g. 2 for images). Has shape
+      `(batch_size_1, [batch_size_2,] height, height, width, width, depth,
+      depth, ...)`.
+    filter_shape:
+      positive integers, the convolutional filters spatial shape
+      (e.g. `(3, 3)` for a 2D convolution).
+    strides:
+      positive integers, the CNN strides (e.g. `(1, 1)` for a 2D
+      convolution).
+    padding:
+      a `Padding` enum, e.g. `Padding.CIRCULAR`.
+    batch_ndim:
+      number of batch dimensions, 1 or 2.
+
+  Returns:
+    a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
+    sample-[sample-]position-position covariances of CNN outputs, where `S` is
+    the number of spatial dimensions (e.g. 2 for images). Has shape
+    `(batch_size_1, [batch_size_2,] new_width, new_width, new_height,
+    new_height, new_depth, new_depth, ...)`.
+  """
+  if lhs is None or lhs.ndim == 0:
+    return lhs
+
+  def lax_conv(lhs, rhs, strides, padding):
+    return lax.conv_transpose(
+        lhs, rhs, strides, padding,
+        dimension_numbers=_CONV_KERNEL_DIMENSION_NUMBERS)
+
+  def get_n_channels(batch_and_channels: int) -> int:
+    """Transpose convolution does not support depthwise separable filters."""
+    return 1
+
+  out = _conv_kernel_full_spatial_loop(lhs, filter_shape, strides, padding,
+                                       lax_conv, get_n_channels)
+
+  if padding == Padding.CIRCULAR:
+    spatial_axes = tuple(range(batch_ndim, out.ndim))
+    total_filter_shape = _double_tuple(filter_shape)
+    total_strides = _double_tuple(strides)
+    out_shape = eval_shape(lambda x: _pool_transpose(x,
+                                                     total_filter_shape,
+                                                     total_strides,
+                                                     spatial_axes,
+                                                     Padding.SAME), lhs).shape
+    out = _same_pad_for_filter_shape_transpose(
+        x=out,
+        axes=spatial_axes,
+        out_shape=utils.reverse_zipped(out_shape, batch_ndim))
+  return out
+
+
+def _conv_kernel_full_spatial_loop(
+    lhs: np.ndarray,
+    filter_shape: Sequence[int],
+    strides: Sequence[int],
+    padding: Padding,
+    lax_conv: Callable,
+    get_n_channels: Callable[[int], int]
+) -> np.ndarray:
+  padding = Padding.VALID if padding == Padding.CIRCULAR else padding
+
+  def get_rhs(n_channels: int, filter_size: int) -> np.ndarray:
+    rhs = np.diag(np.full((filter_size,), 1. / filter_size, lhs.dtype))
+    rhs_shape = ()
     for c in _CONV_KERNEL_DIMENSION_NUMBERS[1]:
       if c == 'O':
         rhs_shape += (n_channels,)
       elif c == 'I':
         rhs_shape += (1,)
       else:
-        rhs_shape += (filter_i,)
-
+        rhs_shape += (filter_size,)
     rhs = np.broadcast_to(rhs, rhs_shape)
+    return rhs
 
-    mat = lax.conv_general_dilated(
-        lhs=mat,
-        rhs=rhs,
-        window_strides=(stride_i, stride_i),
-        padding=padding.name,
-        dimension_numbers=_CONV_KERNEL_DIMENSION_NUMBERS,
-        feature_group_count=n_channels)
-    mat = mat.reshape(mat_preshape + mat.shape[-2:])
+  batch_ndim = lhs.ndim - len(filter_shape) * 2
+  for i in range(lhs.ndim - 1, batch_ndim, -2):
+    spatial_i = (i - batch_ndim) // 2
 
-  return mat
+    lhs = np.moveaxis(lhs, (i - 1, i), (-2, -1))
+    preshape = lhs.shape[:-2]
+    n_channels = get_n_channels(utils.size_at(preshape))
+    lhs = lhs.reshape((-1, n_channels, lhs.shape[-2], lhs.shape[-1]))
+
+    rhs = get_rhs(n_channels, filter_shape[spatial_i])
+    lhs = lax_conv(lhs, rhs, (strides[spatial_i],) * 2, padding.name)
+    lhs = lhs.reshape(preshape + lhs.shape[-2:])
+
+  return lhs
 
 
 def _conv_kernel_diagonal_spatial(
-    mat: Optional[np.ndarray],
-    filter_shape: Tuple[int, ...],
-    strides: Tuple[int, ...],
+    lhs: Optional[np.ndarray],
+    filter_shape: Sequence[int],
+    strides: Sequence[int],
     padding: Padding,
     batch_ndim: int
-    ) -> Optional[np.ndarray]:
-  """Compute covariance of the CNN outputs given inputs with covariance `mat`.
+) -> Optional[np.ndarray]:
+  """Compute covariance of the CNN outputs given inputs with covariance `lhs`.
 
   Used when `kernel.diagonal_spatial == True`.
 
   Args:
-    mat: an `(S+batch_ndim)`-dimensional `np.ndarray` containing
+    lhs:
+      an `(S+batch_ndim)`-dimensional `np.ndarray` containing
       sample-sample-(same position) covariances of CNN inputs. Has `batch_ndim`
-      batch and `S` spatial dimensions with the shape of
-      `(batch_size_1, [batch_size_2,] height, width, depth, ...)`.
-    filter_shape: tuple of positive integers, the convolutional filters spatial
-      shape (e.g. `(3, 3)` for a 2D convolution).
-    strides: tuple of positive integers, the CNN strides (e.g. `(1, 1)` for a
-      2D convolution).
-    padding: a `Padding` enum, e.g. `Padding.CIRCULAR`.
-    batch_ndim: integer, number of leading batch dimensions, 1 or 2.
+      batch and `S` spatial dimensions with the shape of `(batch_size_1,
+      [batch_size_2,] height, width, depth, ...)`.
+    filter_shape:
+      tuple of positive integers, the convolutional filters spatial shape
+      (e.g. `(3, 3)` for a 2D convolution).
+    strides:
+      tuple of positive integers, the CNN strides (e.g. `(1, 1)` for a 2D
+      convolution).
+    padding:
+      a `Padding` enum, e.g. `Padding.CIRCULAR`.
+    batch_ndim:
+      number of leading batch dimensions, 1 or 2.
 
   Returns:
     an `(S+batch_ndim)`-dimensional `np.ndarray` containing
     sample-sample-(same position) covariances of CNN outputs. Has `batch_ndim`
-    batch and `S` spatial dimensions with the shape of
-    `(batch_size_1, [batch_size_2,] new_height, new_width, new_depth, ...)`.
+    batch and `S` spatial dimensions with the shape of `(batch_size_1,
+    [batch_size_2,] new_height, new_width, new_depth, ...)`.
   """
-  if mat is None or mat.ndim == 0:
-    return mat
+  if lhs is None or lhs.ndim == 0:
+    return lhs
+
+  spatial_axes = tuple(range(batch_ndim, lhs.ndim))
+  apply_padding = Padding.VALID if padding == Padding.CIRCULAR else padding
 
   if padding == Padding.CIRCULAR:
-    spatial_axes = tuple(range(mat.ndim)[batch_ndim:])
-    mat = _same_pad_for_filter_shape(mat, filter_shape, strides,
-                                     spatial_axes, 'wrap')
-    padding = Padding.VALID
+    lhs = _same_pad_for_filter_shape(lhs, filter_shape, strides, spatial_axes)
+
+  lhs = lax.reduce_window(
+      operand=lhs,
+      init_value=np.zeros((), lhs.dtype),
+      computation=lax.add,
+      window_dimensions=(1,) * batch_ndim + tuple(filter_shape),
+      window_strides=(1,) * batch_ndim + tuple(strides),
+      padding=apply_padding.name)
 
   filter_size = functools.reduce(op.mul, filter_shape, 1)
-  filter_shape = (1,) * batch_ndim + filter_shape
-  strides = (1,) * batch_ndim + strides
-  padding_vals = lax.padtype_to_pads(
-      mat.shape, filter_shape, strides, padding.name)
-  mat = lax._reduce_window_sum(mat, filter_shape, strides, padding_vals)
-  mat /= filter_size
-  return mat
+  return lhs / filter_size
+
+
+def _conv_kernel_diagonal_spatial_transpose(
+    lhs: Optional[np.ndarray],
+    filter_shape: Sequence[int],
+    strides: Sequence[int],
+    padding: Padding,
+    batch_ndim: int
+) -> Optional[np.ndarray]:
+  """Compute covariance of the CNN transpose given inputs with covariance `lhs`.
+
+  Used when `kernel.diagonal_spatial == True`.
+
+  Args:
+    lhs:
+      an `(S+batch_ndim)`-dimensional `np.ndarray` containing
+      sample-sample-(same position) covariances of CNN inputs. Has `batch_ndim`
+      batch and `S` spatial dimensions with the shape of `(batch_size_1,
+      [batch_size_2,] height, width, depth, ...)`.
+    filter_shape:
+      tuple of positive integers, the convolutional filters spatial shape
+      (e.g. `(3, 3)` for a 2D convolution).
+    strides:
+      tuple of positive integers, the CNN strides (e.g. `(1, 1)` for a 2D
+      convolution).
+    padding:
+      a `Padding` enum, e.g. `Padding.CIRCULAR`.
+    batch_ndim:
+      number of leading batch dimensions, 1 or 2.
+
+  Returns:
+    an `(S+batch_ndim)`-dimensional `np.ndarray` containing
+    sample-sample-(same position) covariances of CNN outputs. Has `batch_ndim`
+    batch and `S` spatial dimensions with the shape of `(batch_size_1,
+    [batch_size_2,] new_height, new_width, new_depth, ...)`.
+  """
+  if lhs is None or lhs.ndim == 0:
+    return lhs
+
+  spatial_axes = tuple(range(batch_ndim, lhs.ndim))
+  apply_padding = Padding.VALID if padding == Padding.CIRCULAR else padding
+
+  out = _pool_transpose(lhs, filter_shape, strides, spatial_axes, apply_padding)
+
+  if padding == Padding.CIRCULAR:
+    out_shape = eval_shape(lambda x: _pool_transpose(
+        x,
+        filter_shape,
+        strides,
+        spatial_axes,
+        padding.SAME), lhs).shape
+    out = _same_pad_for_filter_shape_transpose(out, spatial_axes, out_shape)
+
+  filter_size = functools.reduce(op.mul, filter_shape, 1)
+  return out / filter_size
 
 
 def _pool_kernel(
-    mat: Optional[np.ndarray],
+    lhs: Optional[np.ndarray],
     pool_type: Pooling,
-    window_shape: Tuple[int, ...],
-    strides: Tuple[int, ...],
+    window_shape: Sequence[int],
+    strides: Sequence[int],
     padding: Padding,
     normalize_edges: bool,
     batch_ndim: int) -> Optional[np.ndarray]:
-  """Get covariances of pooling outputs given inputs covariances `mat`.
+  """Get covariances of pooling outputs given inputs covariances `lhs`.
 
   Args:
-    mat: a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
+    lhs: a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
       sample-[sample-]position-position covariances of pooling inputs, where `S`
       is the number of spatial dimensions (e.g. 2 for images). Has shape
       `(batch_size_1, [batch_size_2,]
@@ -3753,34 +4155,33 @@ def _pool_kernel(
       `(batch_size_1, [batch_size_2,]
         height, height, width, width, depth, depth, ...)`.
   """
-  if mat is None or mat.ndim == 0:
-    return mat
+  if lhs is None or lhs.ndim == 0:
+    return lhs
 
   if padding == Padding.CIRCULAR:
-    spatial_axes = tuple(range(batch_ndim, mat.ndim))
-    mat = _same_pad_for_filter_shape(mat, _double_tuple(window_shape),
-                                     _double_tuple(strides), spatial_axes,
-                                     'wrap')
+    spatial_axes = tuple(range(batch_ndim, lhs.ndim))
+    lhs = _same_pad_for_filter_shape(lhs, _double_tuple(window_shape),
+                                     _double_tuple(strides), spatial_axes)
     padding = Padding.VALID
 
   window_shape = (1,) * batch_ndim + _double_tuple(window_shape)
   strides = (1,) * batch_ndim + _double_tuple(strides)
 
-  nngp_out = lax.reduce_window(mat, 0., lax.add, window_shape, strides,
-                               padding.name)
+  mat_out = lax.reduce_window(lhs, 0., lax.add, window_shape, strides,
+                              padding.name)
 
   if pool_type == Pooling.AVG:
     if padding == Padding.SAME and normalize_edges:
       # `SAME` padding in `jax.experimental.stax.AvgPool` normalizes by actual
       # window size, which is smaller at the edges.
-      one = np.ones_like(mat, mat.dtype)
+      one = np.ones_like(lhs, lhs.dtype)
       window_sizes = lax.reduce_window(one, 0., lax.add, window_shape, strides,
                                        padding.name)
-      nngp_out /= window_sizes
+      mat_out /= window_sizes
     else:
-      nngp_out /= onp.prod(window_shape)
+      mat_out /= onp.prod(window_shape)
 
-  return nngp_out
+  return mat_out
 
 
 def _diag_mul_full_spatial(
@@ -3843,14 +4244,7 @@ def _diag_mul(
 _NEG_INF = -1e20  # softmax raises an error if all entries are -np.inf
 
 
-def _check_is_implemented(
-    mask: np.ndarray,
-    padding: Optional[Padding],
-    channel_axis: int) -> None:
-  if padding == Padding.CIRCULAR:
-    raise NotImplementedError(f'{padding} padding is not implemented for '
-                              f'masked inputs.')
-
+def _check_is_implemented(mask: np.ndarray, channel_axis: int) -> None:
   if mask.shape[channel_axis] != 1:
     raise NotImplementedError(
         'Different channel-wise masks as inputs to '
@@ -3921,7 +4315,7 @@ def _map_tuples(fn: Callable, tuples: Iterable[Tuple]) -> Tuple:
 
 def _concat_masks(
     masks: List[Optional[np.ndarray]],
-    input_shapes: List[Tuple[int, ...]],
+    input_shapes: Sequence[Sequence[int]],
     axis: int) -> Optional[np.ndarray]:
   """Returns a mask which is a concatenation of `masks`.
 
@@ -3950,7 +4344,9 @@ def _concat_masks(
   # Expand the concatenation dimension of each mask.
   masks = [m if m is None else np.broadcast_to(
       m,
-      m.shape[:axis] + input_shapes[i][axis: axis + 1] + m.shape[axis + 1:])
+      (m.shape[:axis] +
+       tuple(input_shapes[i][axis: axis + 1]) +
+       m.shape[axis + 1:]))
            for i, m in enumerate(masks)]
 
   # Max shape to broadcast all masks to along non-concat dimension.
@@ -3973,8 +4369,8 @@ def _concat_masks(
 
 def _pool_mask(
     mask: np.ndarray,
-    window_shape: Union[List[int], Tuple[int, ...]],
-    strides: Union[List[int], Tuple[int, ...]],
+    window_shape: Sequence[int],
+    strides: Sequence[int],
     padding: Padding,
     batch_axis: int,
     channel_axis: int) -> np.ndarray:
@@ -3986,17 +4382,14 @@ def _pool_mask(
     window_shape.insert(i, 1)
     strides.insert(i, 1)
 
-  padding_vals = lax.padtype_to_pads(
-      mask.shape, window_shape, strides, padding.name)
-
   # Get the output shape.
   out_shape = eval_shape(lambda x: lax.reduce_window(
-      x,
-      False,
-      op.or_,
-      window_shape,
-      strides,
-      padding_vals
+      operand=x,
+      init_value=np.zeros((), x.dtype),
+      computation=op.or_,
+      window_dimensions=window_shape,
+      window_strides=strides,
+      padding=padding.name
   ), mask).shape
 
   # If shapes don't match, stride through the mask.
@@ -4019,14 +4412,14 @@ def _pool_mask(
 # POSITIONAL EMBEDDINGS
 
 
-def _pos_emb_identity(shape: Tuple[int, ...]) -> np.ndarray:
+def _pos_emb_identity(shape: Sequence[int]) -> np.ndarray:
   size = utils.size_at(shape)
-  R = np.eye(size).reshape(shape * 2)
+  R = np.eye(size).reshape(tuple(shape) * 2)
   R = utils.zip_axes(R)
   return R
 
 
-def _pos_emb_pdist(shape: Tuple[int, ...],
+def _pos_emb_pdist(shape: Sequence[int],
                    pos_emb_p_norm: Optional[float],
                    pos_emb_decay_fn: Optional[Callable[[float], float]]
                    ) -> np.ndarray:
