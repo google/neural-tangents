@@ -29,6 +29,7 @@ from neural_tangents.utils import utils
 
 
 jax_config.parse_flags_with_absl()
+jax_config.enable_omnistaging()
 
 
 TAYLOR_MATRIX_SHAPES = [(3, 3), (4, 4)]

@@ -26,6 +26,7 @@ from neural_tangents.utils import utils
 
 
 config.parse_flags_with_absl()
+config.enable_omnistaging()
 
 
 class UtilsTest(jtu.JaxTestCase):

@@ -22,6 +22,7 @@ from examples import function_space
 
 
 config.parse_flags_with_absl()
+config.enable_omnistaging()
 
 
 class FunctionSpaceTest(jtu.JaxTestCase):

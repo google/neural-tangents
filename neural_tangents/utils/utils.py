@@ -17,6 +17,8 @@
 from collections import namedtuple
 import functools
 import inspect
+import warnings
+
 import operator
 import types
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Sized, Tuple, Union
@@ -25,6 +27,7 @@ from . import dataclasses
 from jax import lax
 from jax.lib import xla_bridge
 import jax.numpy as np
+from jax import random
 from jax.tree_util import tree_all, tree_map
 from .kernel import Kernel
 import numpy as onp
@@ -506,3 +509,55 @@ def is_on_cpu(x: PyTree) -> bool:
     raise NotImplementedError(type(x))
 
   return tree_all(tree_map(_arr_is_on_cpu, x))
+
+
+def _read_keys(key, x1, x2):
+  """Read dropout key.
+
+     `key` might be a tuple of two rng keys or a single rng key or None. In
+     either case, `key` will be mapped into two rng keys `key1` and `key2` to
+     make sure `(x1==x2) == (key1==key2)`.
+  """
+
+  if key is None or x2 is None:
+    key1 = key2 = key
+  elif isinstance(key, tuple) and len(key) == 2:
+    key1, key2 = key
+    new_key = np.where(x1_is_x2(key1, key2),
+                       random.fold_in(key2, 1), key2)
+    key2 = np.where(x1_is_x2(x1, x2), key1, new_key)
+    warnings.warn('The value of `key[1]` might be replaced by a new value if '
+                  'key[0] == key[1] and x1 != x2 or key[0] != key[1] and '
+                  'x1 == x2.')
+  elif isinstance(key, np.ndarray):
+    key1 = key
+    key2 = np.where(x1_is_x2(x1, x2), key1, random.fold_in(key, 1))
+  else:
+    raise TypeError(type(key))
+  return key1, key2
+
+
+def split_kwargs(kwargs, x1=None, x2=None):
+  """Spliting `kwargs`.
+
+     Specifically,
+       1. if kwarg is an rng key, it will be split into two keys.
+       2. else if it is a tuple of length two, the tuple will be split into two
+          parts, one for kwargs1 and the other for kwargs2.
+       3. else it is copied to kwargs1 and kwargs2.
+
+  """
+  kwargs1 = {}
+  kwargs2 = {}
+  for k, v in kwargs.items():
+    if x1 is not None and k == 'rng':
+      key1, key2 = _read_keys(v, x1, x2)
+      kwargs1[k] = key1
+      kwargs2[k] = key2
+    elif isinstance(v, tuple) and len(v) == 2:
+      kwargs1[k] = v[0]
+      kwargs2[k] = v[1]
+    else:
+      kwargs1[k] = kwargs2[k] = v
+
+  return kwargs1, kwargs2

@@ -27,6 +27,8 @@ from neural_tangents.utils import monte_carlo
 from neural_tangents.utils import test_utils
 
 jax_config.parse_flags_with_absl()
+jax_config.enable_omnistaging()
+
 
 BATCH_SIZES = [
     1,

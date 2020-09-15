@@ -37,6 +37,8 @@ from neural_tangents.utils import utils
 
 
 config.parse_flags_with_absl()
+config.enable_omnistaging()
+
 
 MATRIX_SHAPES = [(3, 3), (4, 4)]
 OUTPUT_LOGITS = [1, 2]

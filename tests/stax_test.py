@@ -38,6 +38,7 @@ import numpy as onp
 
 
 jax_config.parse_flags_with_absl()
+jax_config.enable_omnistaging()
 
 
 MODELS = [

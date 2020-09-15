@@ -30,6 +30,7 @@ from neural_tangents.utils.kernel import Kernel
 
 
 jax_config.parse_flags_with_absl()
+jax_config.enable_omnistaging()
 
 FLAT = 'FLAT'
 POOLING = 'POOLING'

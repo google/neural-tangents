@@ -22,6 +22,7 @@ from examples import infinite_fcn
 
 
 config.parse_flags_with_absl()
+config.enable_omnistaging()
 
 
 class InfiniteFcnTest(jtu.JaxTestCase):

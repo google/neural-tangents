@@ -22,6 +22,7 @@ from examples import weight_space
 
 
 config.parse_flags_with_absl()
+config.enable_omnistaging()
 
 
 class WeightSpaceTest(jtu.JaxTestCase):

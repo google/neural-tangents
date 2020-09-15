@@ -83,13 +83,12 @@ from jax.api import eval_shape
 from jax.api import grad
 from jax.api_util import flatten_fun
 import jax.experimental.stax as ostax
-import jax.interpreters.partial_eval as pe
 from jax.lib import xla_bridge
 from jax.scipy.special import erf
 from jax.tree_util import tree_flatten, tree_map, tree_unflatten
 from neural_tangents.utils import utils
 from neural_tangents.utils.kernel import Kernel
-from neural_tangents.utils.typing import AnalyticKernelFn, Axes, Get, InitFn, InternalLayer, Kernels, Layer, LayerKernelFn, PyTree, Shapes
+from neural_tangents.utils.typing import AnalyticKernelFn, Axes, Get, InitFn, ApplyFn, InternalLayer, Kernels, Layer, LayerKernelFn, PyTree, Shapes
 import numpy as onp
 import scipy as osp
 
@@ -134,7 +133,7 @@ def layer(layer_fn: Callable[..., InternalLayer]) -> Callable[..., Layer]:
   @utils.wraps(layer_fn)
   def new_layer_fns(*args, **kwargs):
     init_fn, apply_fn, kernel_fn = layer_fn(*args, **kwargs)
-    kernel_fn = _preprocess_kernel_fn(init_fn, kernel_fn)
+    kernel_fn = _preprocess_kernel_fn(init_fn, apply_fn, kernel_fn)
     init_fn.__name__ = apply_fn.__name__ = kernel_fn.__name__ = name
     return init_fn, apply_fn, kernel_fn
 
@@ -3175,41 +3174,61 @@ def _inputs_to_kernel(
                 mask2)
 
 
-def _propagate_shape(init_fn: InitFn, shape: Shapes) -> Shapes:
+def _propagate_shape(init_fn: InitFn,
+                     apply_fn: ApplyFn,
+                     shaped: ShapedArray,
+                     **kwargs) -> ShapedArray:
   """Statically, abstractly, evaluate the init_fn to get shape information."""
+  def init_and_apply(rng, x):
+    _, params = init_fn(rng, tree_map(lambda x: x.shape, x))
+    return apply_fn(params, x, rng=rng, **kwargs)
   akey = ShapedArray((2,), np.uint32)
-  closed_init_fn = functools.partial(init_fn, input_shape=shape)
-  _, in_tree = tree_flatten(((akey,), {}))
-  fun, out_tree = flatten_fun(lu.wrap_init(closed_init_fn), in_tree)
-  out = pe.abstract_eval_fun(fun.call_wrapped, akey)
-  out_shape = tree_unflatten(out_tree(), out)[0]
-  out_shape = tree_map(lambda x: int(x.val), out_shape)
-  return out_shape
+  try:
+    shaped = eval_shape(init_and_apply, akey, shaped)
+  except NotImplementedError:
+    # Some layers do not implement an `apply_fn` and in this case we keep the
+    # shape constant.
+    pass
+
+  if isinstance(shaped, utils.MaskedArray):
+    shaped = shaped.masked_value  # pytype: disable=attribute-error
+
+  return shaped
 
 
 def _set_shapes(
     init_fn: InitFn,
+    apply_fn: ApplyFn,
     in_kernel: Kernels,
-    out_kernel: Kernels) -> Kernels:
+    out_kernel: Kernels,
+    **kwargs) -> Kernels:
   """Apply a kernel_fn to a Kernel propagating side information."""
-  if isinstance(in_kernel, Kernel):
-    shape1 = _propagate_shape(init_fn, in_kernel.shape1)
-    shape2 = _propagate_shape(init_fn, in_kernel.shape2)
-  elif isinstance(in_kernel, list):
-    shape1 = _propagate_shape(init_fn, [k.shape1 for k in in_kernel])
-    shape2 = _propagate_shape(init_fn, [k.shape2 for k in in_kernel])
+
+  if isinstance(in_kernel, list):
+    shape1 = [ShapedArray(k.shape1, k.nngp.dtype) for k in in_kernel]
+    shape2 = [ShapedArray(k.shape2, k.nngp.dtype) for k in in_kernel]
+  elif isinstance(in_kernel, Kernel):
+    shape1 = ShapedArray(in_kernel.shape1, in_kernel.nngp.dtype)
+    shape2 = ShapedArray(in_kernel.shape2, in_kernel.nngp.dtype)
   else:
     raise TypeError(f'Expected input kernel to be a `Kernel` or a list of '
-                    f'`Kernel`s. Found {type(out_kernel)}.')
+                    f'`Kernel`s. Found {type(in_kernel)}.')
 
-  if isinstance(out_kernel, Kernel):
-    return out_kernel.replace(shape1=shape1, shape2=shape2)
-  elif isinstance(out_kernel, list):
-    return [k.replace(shape1=s1, shape2=s2) for
-            k, s1, s2 in zip(out_kernel, shape1, shape2)]
+  kwargs1, kwargs2 = utils.split_kwargs(kwargs)
+
+  shaped1 = _propagate_shape(init_fn, apply_fn, shape1, **kwargs1)
+  shaped2 = _propagate_shape(init_fn, apply_fn, shape2, **kwargs2)
+
+  if isinstance(out_kernel, list):
+    out_kernel = [k.replace(shape1=s1.shape, shape2=s2.shape) for k, s1, s2 in
+                  zip(out_kernel, shaped1, shaped2)]
+  elif isinstance(out_kernel, Kernel):
+    out_kernel = out_kernel.replace(shape1=shaped1.shape, shape2=shaped2.shape)
   else:
     raise TypeError(f'Expected output kernel to be a `Kernel` or a list of '
                     f'`Kernel`s. Found {type(out_kernel)}.')
+
+  return out_kernel
 
 
 def _fuse_reqs(kernel_fn_reqs, default_reqs, **user_reqs):
@@ -3239,6 +3258,7 @@ def _fuse_reqs(kernel_fn_reqs, default_reqs, **user_reqs):
 
 def _preprocess_kernel_fn(
     init_fn: InitFn,
+    apply_fn: ApplyFn,
     kernel_fn: LayerKernelFn) -> AnalyticKernelFn:
   """Returns a `kernel_fn` with additional arguments.
 
@@ -3257,7 +3277,7 @@ def _preprocess_kernel_fn(
 
   def kernel_fn_kernel(kernel, **kwargs):
     out_kernel = kernel_fn(kernel, **kwargs)
-    return _set_shapes(init_fn, kernel, out_kernel)
+    return _set_shapes(init_fn, apply_fn, kernel, out_kernel, **kwargs)
 
   def kernel_fn_x1(x1, x2, get, **kwargs):
     # Get input requirements requested by network layers, user, or defaults.
@@ -3266,7 +3286,7 @@ def _preprocess_kernel_fn(
     compute_ntk = (get is None) or ('ntk' in get)
     kernel = _inputs_to_kernel(x1, x2, compute_ntk=compute_ntk, **reqs)
     out_kernel = kernel_fn(kernel, **kwargs)
-    return _set_shapes(init_fn, kernel, out_kernel)
+    return _set_shapes(init_fn, apply_fn, kernel, out_kernel, **kwargs)
 
   @utils.get_namedtuple('AnalyticKernel')
   def kernel_fn_any(x1_or_kernel: Union[np.ndarray, Kernels],
@@ -3749,7 +3769,7 @@ def _same_pad_for_filter_shape_transpose(
 
   x = lax.reduce_window(
       operand=x,
-      init_value=np.zeros((), x.dtype),
+      init_value=onp.zeros((), x.dtype),
       computation=lax.add,
       window_dimensions=window_dimensions,
       window_strides=(1,) * x.ndim,
@@ -4056,7 +4076,7 @@ def _conv_kernel_diagonal_spatial(
 
   lhs = lax.reduce_window(
       operand=lhs,
-      init_value=np.zeros((), lhs.dtype),
+      init_value=onp.zeros((), lhs.dtype),
       computation=lax.add,
       window_dimensions=(1,) * batch_ndim + tuple(filter_shape),
       window_strides=(1,) * batch_ndim + tuple(strides),
