@@ -10,13 +10,6 @@
 [![Readthedocs](https://readthedocs.org/projects/neural-tangents/badge/?version=latest)](https://neural-tangents.readthedocs.io/en/latest/?badge=latest)
 [![PyPI - License](https://img.shields.io/pypi/l/neural_tangents)](https://github.com/google/neural-tangents/blob/master/LICENSE)
 
-## News
-Until JAX 0.1.76 is released, please clone JAX from head:
-
-```
-pip install git+https://www.github.com/google/jax
-```
-
 
 ## Overview
 
@@ -62,8 +55,7 @@ An easy way to get started with Neural Tangents is by playing around with the fo
 To use GPU, first follow [JAX's](https://www.github.com/google/jax/) GPU installation instructions. Otherwise, install JAX on CPU by running
 
 ```
-pip install jaxlib --upgrade
-pip install git+https://www.github.com/google/jax
+pip install jax jaxlib --upgrade
 ```
 
 Once JAX is installed install Neural Tangents by running
