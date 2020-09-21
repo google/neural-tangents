@@ -37,7 +37,7 @@ from jax.tree_util import tree_multimap
 from neural_tangents.utils import batch
 from neural_tangents.utils import empirical
 from neural_tangents.utils import utils
-from neural_tangents.utils.typing import PRNGKey, InitFn, ApplyFn, MonteCarloKernelFn, Axes, Get, EmpiricalKernelFn, PyTree
+from neural_tangents.utils.typing import PRNGKey, InitFn, ApplyFn, MonteCarloKernelFn, Axes, Get, EmpiricalKernelFn, PyTree, NTTree
 
 
 def _sample_once_kernel_fn(kernel_fn: EmpiricalKernelFn,
@@ -50,13 +50,14 @@ def _sample_once_kernel_fn(kernel_fn: EmpiricalKernelFn,
            device_count=device_count,
            store_on_device=store_on_device)
   def kernel_fn_sample_once(
-      x1: np.ndarray,
-      x2: Optional[np.ndarray],
+      x1: NTTree[np.ndarray],
+      x2: Optional[NTTree[np.ndarray]],
       key: PRNGKey,
       get: Get,
       **apply_fn_kwargs):
     init_key, dropout_key = random.split(key, 2)
-    _, params = init_fn(init_key, x1.shape)
+    shape = tree_map(lambda x: x.shape, x1)
+    _, params = init_fn(init_key, shape)
     return kernel_fn(x1, x2, get, params, rng=dropout_key, **apply_fn_kwargs)
   return kernel_fn_sample_once
 
@@ -70,8 +71,8 @@ def _sample_many_kernel_fn(
     return tree_map(lambda sample: sample / n, sample)
 
   def get_samples(
-      x1: np.ndarray,
-      x2: Optional[np.ndarray],
+      x1: NTTree[np.ndarray],
+      x2: Optional[NTTree[np.ndarray]],
       get: Get,
       **apply_fn_kwargs):
     _key = key

@@ -61,10 +61,12 @@ def dataclass(clz):
   data_fields = []
   for name, field_info in data_clz.__dataclass_fields__.items():
     is_pytree_node = field_info.metadata.get('pytree_node', True)
-    if is_pytree_node:
-      data_fields.append(name)
-    else:
-      meta_fields.append(name)
+    init = field_info.metadata.get('init', True)
+    if init:
+      if is_pytree_node:
+        data_fields.append(name)
+      else:
+        meta_fields.append(name)
 
   def iterate_clz(x):
     meta = tuple(getattr(x, name) for name in meta_fields)
@@ -98,4 +100,7 @@ def dataclass(clz):
 
 
 def field(pytree_node: bool = True, **kwargs):
-  return dataclasses.field(metadata={'pytree_node': pytree_node}, **kwargs)
+  metadata = {'pytree_node': pytree_node}
+  if 'init' in kwargs:
+    metadata['init'] = kwargs['init']
+  return dataclasses.field(metadata=metadata, **kwargs)

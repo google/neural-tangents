@@ -42,7 +42,7 @@ Example:
 """
 
 
-from typing import Callable, Tuple, Union, Iterable, Dict, Any, TypeVar
+from typing import Callable, Tuple, Union, Dict, Any, TypeVar, Iterable, Optional
 from functools import partial
 import warnings
 from jax.api import device_put, devices
@@ -57,7 +57,8 @@ from jax.tree_util import tree_map
 from jax.tree_util import tree_multimap, tree_flatten, tree_unflatten
 from neural_tangents.utils.kernel import Kernel
 from neural_tangents.utils import utils
-from neural_tangents.utils.typing import KernelFn
+from neural_tangents.utils.typing import KernelFn, NTTree
+
 import numpy as onp
 
 
@@ -124,8 +125,7 @@ _Output = TypeVar('_Output')
 
 def _scan(f: Callable[[_Carry, _Input], Tuple[_Carry, _Output]],
           init: _Carry,
-          xs: Iterable[_Input],
-          ) -> Tuple[_Carry, _Output]:
+          xs: Iterable[_Input]) -> Tuple[_Carry, _Output]:
   """Implements an unrolled version of scan.
 
   Based on `jax.lax.scan` and has a similar API.
@@ -148,6 +148,7 @@ def _scan(f: Callable[[_Carry, _Input], Tuple[_Carry, _Output]],
 def _flatten_batch_dimensions(k: np.ndarray,
                               discard_axis: int = None) -> np.ndarray:
   """Takes a kernel that has been evaluated in batches and flattens."""
+
   if discard_axis is not None:
     if k.ndim % 2:
       k = np.take(k, 0, axis=discard_axis)
@@ -168,6 +169,7 @@ def _flatten_batch_dimensions(k: np.ndarray,
                        k.shape[2] * k.shape[3]) + k.shape[4:])
 
 
+@utils.nt_tree_fn(nargs=1)
 def _flatten_kernel_dict(k: Dict[str, Any],
                          x2_is_none: bool,
                          is_parallel: bool) -> Dict[str, Any]:
@@ -219,21 +221,20 @@ def _flatten_kernel_dict(k: Dict[str, Any],
   return k
 
 
-_KernelType = Union[np.ndarray, Tuple, Kernel]
-
-
-def _flatten_kernel(k: _KernelType,
+@utils.nt_tree_fn(nargs=1)
+def _flatten_kernel(k: Kernel,
                     x2_is_none: bool,
-                    is_parallel: bool) -> _KernelType:
+                    is_parallel: bool) -> Kernel:
   """Flattens a kernel array or a `Kernel` along the batch dimension."""
+
+  # pytype: disable=attribute-error
   if hasattr(k, '_asdict'):
     return k._replace(**_flatten_kernel_dict(k._asdict(), x2_is_none,
                                              is_parallel))
 
   elif isinstance(k, Kernel):
-    # pytype:disable=attribute-error
     return Kernel(**_flatten_kernel_dict(k.asdict(), x2_is_none, is_parallel))
-   # pytype:enable=attribute-error
+  # pytype:enable=attribute-error
 
   elif isinstance(k, np.ndarray):
     return _flatten_batch_dimensions(k)
@@ -242,9 +243,11 @@ def _flatten_kernel(k: _KernelType,
                   f'`np.ndarray`, got {type(k)}.')
 
 
+@utils.nt_tree_fn(nargs=1)
 def _reshape_kernel_for_pmap(k: Kernel,
                              device_count: int,
                              n1_per_device: int) -> Kernel:
+  # pytype: disable=attribute-error
   cov2 = k.cov2
   if cov2 is None:
     cov2 = k.cov1
@@ -270,6 +273,12 @@ def _reshape_kernel_for_pmap(k: Kernel,
       x1_is_x2=x1_is_x2,
       shape1=(n1_per_device,) + k.shape1[1:],
       mask2=mask2)
+
+
+@utils.nt_tree_fn()
+def _set_cov2_is_none(k: Kernel) -> Kernel:
+  return k.replace(cov2=None)
+  # pytype: enable=attribute-error
 
 
 def _serial(kernel_fn: KernelFn,
@@ -315,21 +324,33 @@ def _serial(kernel_fn: KernelFn,
 
   flatten = partial(_flatten_kernel, is_parallel=False)
 
-  def serial_fn_x1(x1: np.ndarray,
-                   x2: np.ndarray = None,
+  def serial_fn_x1(x1: NTTree[np.ndarray],
+                   x2: NTTree[Optional[np.ndarray]] = None,
                    *args,
-                   **kwargs) -> _KernelType:
+                   **kwargs) -> NTTree[Kernel]:
 
-    x2_is_none = x2 is None
+    x2_is_none = utils.all_none(x2)
     if x2_is_none:
       # TODO(schsam): Only compute the upper triangular part of the kernel.
       x2 = x1
 
-    n1, n2 = x1.shape[0], x2.shape[0]
-    (n1_batches, n1_batch_size,
-     n2_batches, n2_batch_size) = _get_n_batches_and_batch_sizes(n1, n2,
-                                                                 batch_size,
-                                                                 device_count)
+    @utils.nt_tree_fn(reduce=lambda x: x[0])
+    def get_n1_n2(x1, x2):
+      n1, n2 = x1.shape[0], x2.shape[0]
+      return n1, n2
+    n1, n2 = get_n1_n2(x1, x2)
+
+    (n1_batches, n1_batch_size, n2_batches, n2_batch_size) = \
+        _get_n_batches_and_batch_sizes(n1, n2, batch_size, device_count)
+
+    @utils.nt_tree_fn(nargs=1)
+    def batch_input(x, batch_count, batch_size):
+      input_shape = x.shape[1:]
+      return np.reshape(x, (batch_count, batch_size,) + input_shape)
+
+    x1s = batch_input(x1, n1_batches, n1_batch_size)
+    x2s = batch_input(x2, n2_batches, n2_batch_size)
+
     kwargs_np1 = {}
     kwargs_np2 = {}
     kwargs_other = {}
@@ -348,9 +369,6 @@ def _serial(kernel_fn: KernelFn,
         kwargs_np2[k] = v2
       else:
         kwargs_other[k] = v
-    input_shape = x1.shape[1:]
-    x1s = np.reshape(x1, (n1_batches, n1_batch_size,) + input_shape)
-    x2s = np.reshape(x2, (n2_batches, n2_batch_size,) + input_shape)
 
     def row_fn(_, x1):
       return _, _scan(col_fn, x1, (x2s, kwargs_np2))[1]
@@ -367,8 +385,17 @@ def _serial(kernel_fn: KernelFn,
     _, kernel = _scan(row_fn, 0, (x1s, kwargs_np1))
     return flatten(kernel, x2_is_none)
 
-  def serial_fn_kernel(k: Kernel, *args, **kwargs) -> Kernel:
-    n1, n2 = k.nngp.shape[:2]
+  def serial_fn_kernel(k: NTTree[Kernel], *args, **kwargs) -> NTTree[Kernel]:
+    # pytype: disable=attribute-error
+    def get_n1_n2(k):
+      if utils.is_list_or_tuple(k):
+        # TODO(schsam): We might want to check for consistency here, but I can't
+        # imagine a case where we could get inconsistent kernels.
+        return get_n1_n2(k[0])
+      return k.nngp.shape[:2]
+    # pytype: enable=attribute-error
+    n1, n2 = get_n1_n2(k)
+
     (n1_batches, n1_batch_size,
      n2_batches, n2_batch_size) = _get_n_batches_and_batch_sizes(n1, n2,
                                                                  batch_size,
@@ -376,6 +403,10 @@ def _serial(kernel_fn: KernelFn,
 
     n1s = np.arange(0, n1, n1_batch_size)
     n2s = np.arange(0, n2, n2_batch_size)
+
+    @utils.nt_tree_fn(nargs=1)
+    def slice_kernel(k, n1, n2):
+      return k.slice(n1, n2)
 
     kwargs_np1 = {}
     kwargs_np2 = {}
@@ -405,23 +436,24 @@ def _serial(kernel_fn: KernelFn,
       }
       n1_slice = slice(n1, n1 + n1_batch_size)
       n2_slice = slice(n2, n2 + n2_batch_size)
-      in_kernel = k.slice(n1_slice, n2_slice)
+      in_kernel = slice_kernel(k, n1_slice, n2_slice)
       return (n1, kwargs1), kernel_fn(in_kernel, *args, **kwargs_merge)
 
-    cov2_is_none = k.cov2 is None
+    cov2_is_none = utils.nt_tree_fn(reduce=lambda k: all(k))(lambda k:
+                                                             k.cov2 is None)(k)
     _, k = _scan(row_fn, 0, (n1s, kwargs_np1))
     if cov2_is_none:
-      k = k.replace(cov2=None)
+      k = _set_cov2_is_none(k)
     return flatten(k, cov2_is_none)
 
   @utils.wraps(kernel_fn)
-  def serial_fn(x1_or_kernel: Union[np.ndarray, Kernel],
-                x2: np.ndarray = None,
+  def serial_fn(x1_or_kernel: Union[NTTree[np.ndarray], NTTree[Kernel]],
+                x2: NTTree[Optional[np.ndarray]] = None,
                 *args,
-                **kwargs) -> _KernelType:
-    if isinstance(x1_or_kernel, np.ndarray):
+                **kwargs) -> NTTree[Kernel]:
+    if utils.is_nt_tree_of(x1_or_kernel, np.ndarray):
       return serial_fn_x1(x1_or_kernel, x2, *args, **kwargs)
-    elif isinstance(x1_or_kernel, Kernel):
+    elif utils.is_nt_tree_of(x1_or_kernel, Kernel):
       if x2 is not None:
         raise ValueError(f'`x2` must be `None`, got {x2}.')
       return serial_fn_kernel(x1_or_kernel, *args, **kwargs)
@@ -469,18 +501,11 @@ def _parallel(kernel_fn: KernelFn,
     A new function with the same signature as kernel_fn that computes the kernel
     by batching over the dataset in parallel over a specified number of cores.
   """
-  kernel_fn = _jit_or_pmap_broadcast(kernel_fn, device_count)
+
   if device_count == -1:
     device_count = xla_bridge.device_count()
 
-  def parallel_fn_x1(x1, x2=None, *args, **kwargs):
-    x2_is_none = x2 is None
-    if x2_is_none:
-      # TODO(schsam): Only compute the upper triangular part of the kernel.
-      x2 = x1
-
-    n1 = x1.shape[0]
-    n2 = n1 if x2_is_none else x2.shape[0]
+  def _check_dropout(n1, n2, kwargs):
     dropout_in_empirical_kernel = getattr(kwargs, 'rng', None) is not None
     if n1 == n2 and (dropout_in_empirical_kernel or
                      dropout_in_analytic_kernel) and not use_serial:
@@ -490,9 +515,7 @@ def _parallel(kernel_fn: KernelFn,
           'Using `serial` (i.e. use a non-zero batch_size in the '
           '`batch` function.) could enforce square batch size in each device.')
 
-    assert x1.shape[1:] == x2.shape[1:]
-    input_shape = x1.shape[1:]
-
+  def _get_n_per_device(n1, n2):
     _device_count = device_count
 
     n1_per_device, ragged = divmod(n1, device_count)
@@ -504,50 +527,70 @@ def _parallel(kernel_fn: KernelFn,
       _device_count = ragged
       n1_per_device = 1
 
-    for k, v in kwargs.items():
+    return n1_per_device, _device_count
 
+  def parallel_fn_x1(x1, x2=None, *args, **kwargs):
+    x2_is_none = utils.all_none(x2)
+    if x2_is_none:
+      # TODO(schsam): Only compute the upper triangular part of the kernel.
+      x2 = x1
+
+    def get_batch_size(x):
+      if utils.is_list_or_tuple(x):
+        return get_batch_size(x[0])
+      return x.shape[0]
+
+    n1 = get_batch_size(x1)
+    n2 = n1 if x2_is_none else get_batch_size(x2)
+
+    _check_dropout(n1, n2, kwargs)
+    n1_per_device, _device_count = _get_n_per_device(n1, n2)
+
+    _kernel_fn = _jit_or_pmap_broadcast(kernel_fn, _device_count)
+
+    @utils.nt_tree_fn()
+    def batch_data(x):
+      input_shape = x.shape[1:]
+      return np.reshape(x, (_device_count, n1_per_device,) + input_shape)
+
+    for k, v in kwargs.items():
       if _is_np_ndarray(v):
         assert isinstance(v, tuple) and len(v) == 2
         v0 = np.reshape(v[0], (_device_count, n1_per_device,) + v[0].shape[1:])
         kwargs[k] = (v0, v[1])
 
-    x1 = np.reshape(x1, (_device_count, n1_per_device,) + input_shape)
-    kernel = kernel_fn(x1, x2, *args, **kwargs)
+    x1 = batch_data(x1)
+
+    kernel = _kernel_fn(x1, x2, *args, **kwargs)
     return _flatten_kernel(kernel, x2_is_none, True)
 
   def parallel_fn_kernel(kernel, *args, **kwargs):
-    n1 = kernel.cov1.shape[0]
-    n2 = n1 if kernel.cov2 is None else kernel.cov2.shape[0]
-    if n1 == n2 and dropout_in_analytic_kernel and not use_serial:
-      raise NotImplementedError(
-          'Batching for analytic kernels with dropout'
-          ' is not implemented for non-square batch size. '
-          'Using `serial` (i.e. use a non-zero batch_size in '
-          '`batch` function.) could force square batch size in each device.')
+    @utils.nt_tree_fn(reduce=lambda shapes: shapes[0])
+    def get_batch_sizes(k):
+      n1 = n2 = k.cov1.shape[0]
+      if k.cov2 is not None:
+        n2 = k.cov2.shape[0]
+      return n1, n2
 
-    _device_count = device_count
+    n1, n2 = get_batch_sizes(kernel)
+    _check_dropout(n1, n2, kwargs)
+    n1_per_device, _device_count = _get_n_per_device(n1, n2)
 
-    n1_per_device, ragged = divmod(n1, device_count)
-    if n1_per_device and ragged:
-      raise ValueError(
-          ('Dataset size ({}) must divide number of '
-           'physical devices ({}).').format(n1, device_count))
-    elif not n1_per_device:
-      _device_count = ragged
-      n1_per_device = 1
+    _kernel_fn = _jit_or_pmap_broadcast(kernel_fn, _device_count)
 
-    cov2_is_none = kernel.cov2 is None
+    cov2_is_none = utils.nt_tree_fn(reduce=lambda k:
+                                    all(k))(lambda k: k.cov2 is None)(kernel)
     kernel = _reshape_kernel_for_pmap(kernel, _device_count, n1_per_device)
-    kernel = kernel_fn(kernel, *args, **kwargs)
+    kernel = _kernel_fn(kernel, *args, **kwargs)
     if cov2_is_none:
-      kernel = kernel.replace(cov2=None)
+      kernel = _set_cov2_is_none(kernel)
     return _flatten_kernel(kernel, cov2_is_none, True)
 
   @utils.wraps(kernel_fn)
   def parallel_fn(x1_or_kernel, x2=None, *args, **kwargs):
-    if isinstance(x1_or_kernel, np.ndarray):
+    if utils.is_nt_tree_of(x1_or_kernel, np.ndarray):
       return parallel_fn_x1(x1_or_kernel, x2, *args, **kwargs)
-    elif isinstance(x1_or_kernel, Kernel):
+    elif utils.is_nt_tree_of(x1_or_kernel, Kernel):
       assert not x2
       return parallel_fn_kernel(x1_or_kernel, *args, **kwargs)
     raise NotImplementedError()

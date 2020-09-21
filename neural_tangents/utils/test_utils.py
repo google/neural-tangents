@@ -24,6 +24,7 @@ from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.test_util as jtu
 from .kernel import Kernel
+from neural_tangents.utils import utils
 import numpy as onp
 
 
@@ -73,20 +74,25 @@ def _log(relative_error, expected, actual, did_pass):
 
 
 def assert_close_matrices(self, expected, actual, rtol):
-  self.assertEqual(expected.shape, actual.shape)
-  relative_error = (
-      np.linalg.norm(actual - expected) /
-      np.maximum(np.linalg.norm(expected), 1e-12))
-  if relative_error > rtol or np.isnan(relative_error):
-    _log(relative_error, expected, actual, False)
-    self.fail(self.failureException('Relative ERROR: ',
-                                    float(relative_error),
-                                    'EXPECTED:' + ' ' * 50,
-                                    expected,
-                                    'ACTUAL:' + ' ' * 50,
-                                    actual))
-  else:
-    _log(relative_error, expected, actual, True)
+  @utils.nt_tree_fn()
+  def assert_close(expected, actual):
+    self.assertEqual(expected.shape, actual.shape)
+    relative_error = (
+        np.linalg.norm(actual - expected) /
+        np.maximum(np.linalg.norm(expected), 1e-12))
+
+    if relative_error > rtol or np.isnan(relative_error):
+      _log(relative_error, expected, actual, False)
+      self.fail(self.failureException('Relative ERROR: ',
+                                      float(relative_error),
+                                      'EXPECTED:' + ' ' * 50,
+                                      expected,
+                                      'ACTUAL:' + ' ' * 50,
+                                      actual))
+    else:
+      _log(relative_error, expected, actual, True)
+
+  assert_close(expected, actual)
 
 
 class NeuralTangentsTestCase(jtu.JaxTestCase):

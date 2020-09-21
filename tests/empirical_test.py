@@ -43,8 +43,7 @@ TRAIN_SHAPES = [(4, 4), (4, 8), (8, 8), (6, 4, 4, 3), (4, 4, 4, 3),
                 (4, 4, 4, 3)]
 TEST_SHAPES = [(2, 4), (6, 8), (16, 8), (2, 4, 4, 3), (2, 4, 4, 3),
                (2, 4, 4, 3)]
-NETWORK = [FLAT, FLAT, FLAT, FLAT, POOLING,
-           CONV]
+NETWORK = [FLAT, FLAT, FLAT, FLAT, POOLING, CONV]
 OUTPUT_LOGITS = [1, 2, 3]
 
 CONVOLUTION_CHANNELS = 8
@@ -308,6 +307,77 @@ class EmpiricalTest(jtu.JaxTestCase):
 
       g = implicit(data_other, data_self)
       self.assertAllClose(g_direct, g)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name': '_same_inputs={}'.format(same_inputs),
+          'same_inputs': same_inputs
+      } for same_inputs in [True, False]))
+  def test_parallel_in_out(self, same_inputs):
+    rng = random.PRNGKey(0)
+    input_key1, input_key2, net_key = random.split(rng, 3)
+
+    x1_1, x1_2 = np.split(random.normal(input_key1, (3, 21)), (10,), axis=1)
+    x2_1, x2_2 = np.split(random.normal(input_key2, (4, 21)), (10,), axis=1)
+
+    x1 = (x1_1, x1_2)
+    x2 = (x2_1, x2_2)
+
+    def layer(N_out):
+      return stax.parallel(stax.Dense(N_out), stax.Dense(N_out + 1))
+
+    init_fn, apply_fn, _ = stax.serial(layer(1024), layer(1))
+
+    _, params = init_fn(net_key, (x1_1.shape, x1_2.shape))
+    implicit_kernel_fn = empirical.empirical_implicit_ntk_fn(apply_fn)
+    direct_kernel_fn = empirical.empirical_direct_ntk_fn(apply_fn)
+    nngp_kernel_fn = empirical.empirical_nngp_fn(apply_fn)
+
+    self.assertAllClose(direct_kernel_fn(x1, x2, params),
+                        implicit_kernel_fn(x1, x2, params))
+
+    nngp = nngp_kernel_fn(x1, x2, params)
+    self.assertEqual(len(nngp), 2)
+    self.assertEqual(nngp[0].shape, (3, 4))
+    self.assertEqual(nngp[1].shape, (3, 4))
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name': '_same_inputs={}'.format(same_inputs),
+          'same_inputs': same_inputs
+      } for same_inputs in [True, False]))
+  def test_parallel_nested(self, same_inputs):
+    rng = random.PRNGKey(0)
+    input_key1, input_key2, net_key = random.split(rng, 3)
+
+    x1_1, x1_2, x1_3 = np.split(random.normal(input_key1, (3, 33)),
+                                (10, 21), axis=1)
+    x2_1, x2_2, x2_3 = np.split(random.normal(input_key2, (4, 33)),
+                                (10, 21), axis=1)
+
+    x1 = ((x1_1, x1_2), x1_3)
+    x2 = ((x2_1, x2_2), x2_3)
+
+    def layer(N_out):
+      return stax.parallel(stax.parallel(stax.Dense(N_out),
+                                         stax.Dense(N_out + 1)),
+                           stax.Dense(N_out + 2))
+
+    init_fn, apply_fn, _ = stax.serial(layer(1024), layer(1))
+
+    _, params = init_fn(net_key, ((x1_1.shape, x1_2.shape), x1_3.shape))
+    implicit_kernel_fn = empirical.empirical_implicit_ntk_fn(apply_fn)
+    direct_kernel_fn = empirical.empirical_direct_ntk_fn(apply_fn)
+    nngp_kernel_fn = empirical.empirical_nngp_fn(apply_fn)
+
+    self.assertAllClose(direct_kernel_fn(x1, x2, params),
+                        implicit_kernel_fn(x1, x2, params))
+
+    nngp = nngp_kernel_fn(x1, x2, params)
+    self.assertEqual(len(nngp), 2)
+    self.assertEqual(nngp[0][0].shape, (3, 4))
+    self.assertEqual(nngp[0][1].shape, (3, 4))
+    self.assertEqual(nngp[1].shape, (3, 4))
 
 
 if __name__ == '__main__':

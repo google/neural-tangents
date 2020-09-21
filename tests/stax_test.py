@@ -48,7 +48,7 @@ MODELS = [
 
 BATCH_SIZE = 4
 
-INPUT_SHAPE = (BATCH_SIZE, 8, 6, 3)
+INPUT_SHAPE = (BATCH_SIZE, 8, 6, 2)
 
 WIDTHS = [2**10]
 
@@ -716,9 +716,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
                                                                 same_inputs),
           'avg_pool': avg_pool,
           'same_inputs': same_inputs
-      }
-                          for avg_pool in [True, False]
-                          for same_inputs in [True, False]))
+      } for avg_pool in [True, False] for same_inputs in [True, False]))
   def test_composition_conv(self, avg_pool, same_inputs):
     rng = random.PRNGKey(0)
     x1 = random.normal(rng, (5, 10, 10, 3))
@@ -909,6 +907,11 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
                               [1.5, 0.3],
                               [0., -np.pi/4., np.pi/2.])))
   def test_activation(self, same_inputs, model, phi_name, get, abc):
+    platform = xla_bridge.get_backend().platform
+    if platform == 'cpu':
+      if abc != [0.3, 1.5, -np.pi/4]:
+        raise absltest.SkipTest('Skipping Activation test on CPU to save time.')
+
     a, b, c = abc
     if phi_name == 'Sin':
       activation = stax.Sin(a=a, b=b, c=c)
@@ -1276,6 +1279,11 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
       fan_in_layer = stax.FanInProd()
     else:
       fan_in_layer = stax.FanInConcat(axis)
+
+    if xla_bridge.get_backend().platform == 'cpu':
+      if n_branches != 2:
+        raise absltest.SkipTest(
+            'Skipping FanInFC test if n_branches != 2 on CPU.')
 
     key = random.PRNGKey(1)
     X0_1 = np.cos(random.normal(key, (4, 3)))
@@ -2027,6 +2035,188 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
     exact = kernel_fn(x1, x2, get, mask_constant=mask_constant)
     empirical = kernel_fn_mc(x1, x2, get=get, mask_constant=mask_constant)
     test_utils.assert_close_matrices(self, empirical, exact, tol)
+
+
+class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              f'_same_inputs={same_inputs}_kernel_type={kernel_type}',
+          'same_inputs': same_inputs,
+          'kernel_type': kernel_type
+      } for same_inputs in [True, False] for kernel_type in ['nngp', 'ntk']))
+  def test_parallel_in(self, same_inputs, kernel_type):
+    platform = xla_bridge.get_backend().platform
+    rtol = RTOL if platform != 'tpu' else 0.05
+
+    rng = random.PRNGKey(0)
+    input_key1, input_key2, mc_key = random.split(rng, 3)
+
+    x1_1, x2_1 = _get_inputs(input_key1, same_inputs, (BATCH_SIZE, 2))
+    x1_2, x2_2 = _get_inputs(input_key2, same_inputs, (BATCH_SIZE, 3))
+
+    x1 = (x1_1, x1_2)
+    x2 = (x2_1, x2_2)
+
+    N = 2 ** 7
+
+    def net(logits):
+      return stax.serial(
+          stax.parallel(stax.Dense(N), stax.Dense(N)),
+          stax.serial(stax.FanInSum(), stax.Dense(logits)))
+
+    init_fn, apply_fn, kernel_fn = net(N if kernel_type == 'nngp' else 1)
+
+    kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, mc_key, N_SAMPLES, trace_axes=(-1,))
+    test_utils.assert_close_matrices(self,
+                                     kernel_fn(x1, x2, kernel_type),
+                                     kernel_fn_empirical(x1, x2, kernel_type),
+                                     rtol)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              f'_same_inputs={same_inputs}_kernel_type={kernel_type}',
+          'same_inputs': same_inputs,
+          'kernel_type': kernel_type
+      } for same_inputs in [True, False] for kernel_type in ['nngp', 'ntk']))
+  def test_parallel_out(self, same_inputs, kernel_type):
+    platform = xla_bridge.get_backend().platform
+    rtol = RTOL if platform != 'tpu' else 0.05
+
+    rng = random.PRNGKey(0)
+    input_key1, input_key2, mc_key = random.split(rng, 3)
+
+    x1, x2 = _get_inputs(input_key1, same_inputs, (BATCH_SIZE, 10))
+
+    N = 2 ** 10
+
+    def net(logits):
+      return stax.serial(
+          stax.Dense(N),
+          stax.FanOut(2),
+          stax.parallel(stax.Dense(logits), stax.Dense(logits)))
+
+    init_fn, apply_fn, kernel_fn = net(N if kernel_type == 'nngp' else 1)
+
+    kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, mc_key, N_SAMPLES, trace_axes=(-1,))
+
+    test_utils.assert_close_matrices(self,
+                                     kernel_fn(x1, x2, kernel_type),
+                                     kernel_fn_empirical(x1, x2, kernel_type),
+                                     rtol)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              f'_same_inputs={same_inputs}_kernel_type={kernel_type}',
+          'same_inputs': same_inputs,
+          'kernel_type': kernel_type,
+      } for same_inputs in [True, False] for kernel_type in ['nngp', 'ntk']))
+  def test_parallel_in_out(self, same_inputs, kernel_type):
+    platform = xla_bridge.get_backend().platform
+    rtol = RTOL if platform != 'tpu' else 0.05
+
+    rng = random.PRNGKey(0)
+    input_key1, input_key2, mc_key = random.split(rng, 3)
+
+    x1_1, x2_1 = _get_inputs(input_key1, same_inputs, (BATCH_SIZE, 10))
+    x1_2, x2_2 = _get_inputs(input_key2, same_inputs, (BATCH_SIZE, 20))
+
+    x1 = (x1_1, x1_2)
+    x2 = (x2_1, x2_2)
+
+    N_in = 2 ** 10
+    N_out = N_in if kernel_type == 'nngp' else 1
+
+    readin = stax.serial(stax.parallel(stax.Dense(N_in), stax.Dense(N_in)),
+                         stax.FanInSum())
+    readout = stax.serial(stax.FanOut(3),
+                          stax.parallel(stax.Dense(N_out),
+                                        stax.Dense(N_out + 1),
+                                        stax.Dense(N_out + 2)))
+    init_fn, apply_fn, _ = stax.serial(readin, readout)
+
+    K_readin_fn = jit(readin[2])
+    K_readout_fn = jit(functools.partial(readout[2], get=kernel_type))
+
+    kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, mc_key, N_SAMPLES, trace_axes=(-1,))
+
+    test_utils.assert_close_matrices(
+        self,
+        K_readout_fn(K_readin_fn(x1, x2)),
+        kernel_fn_empirical(x1, x2, get=kernel_type),
+        rtol)
+
+    # Check Both (here we just want to make sure we _can_ compute the output).
+    K_readin_fn = jit(readin[2])
+    K_readout_fn = jit(functools.partial(readout[2], get=('nngp', 'ntk')))
+
+    K_readout_fn(K_readin_fn(x1, x2))
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              f'_same_inputs={same_inputs}_kernel_type={kernel_type}',
+          'same_inputs': same_inputs,
+          'kernel_type': kernel_type,
+      } for same_inputs in [True, False] for kernel_type in ['nngp', 'ntk']))
+  def test_nested_parallel(self, same_inputs, kernel_type):
+    platform = xla_bridge.get_backend().platform
+    rtol = RTOL if platform != 'tpu' else 0.05
+
+    rng = random.PRNGKey(0)
+    (input_key1,
+     input_key2,
+     input_key3,
+     input_key4,
+     mask_key,
+     mc_key) = random.split(rng, 6)
+
+    x1_1, x2_1 = _get_inputs(input_key1, same_inputs, (BATCH_SIZE, 5))
+    x1_2, x2_2 = _get_inputs(input_key2, same_inputs, (BATCH_SIZE, 2, 2, 2))
+    x1_3, x2_3 = _get_inputs(input_key2, same_inputs, (BATCH_SIZE, 2, 2, 3))
+    x1_4, x2_4 = _get_inputs(input_key2, same_inputs, (BATCH_SIZE, 3, 4))
+
+    m1_key, m2_key, m3_key, m4_key = random.split(mask_key, 4)
+
+    x1_1 = _mask(x1_1, mask_constant=-1, mask_axis=(1,), key=m1_key, p=0.5)
+    x1_2 = _mask(x1_2, mask_constant=-1, mask_axis=(2, 3,), key=m2_key, p=0.5)
+    if not same_inputs:
+      x2_3 = _mask(x2_3, mask_constant=-1, mask_axis=(1, 3,), key=m3_key, p=0.5)
+      x2_4 = _mask(x2_4, mask_constant=-1, mask_axis=(2,), key=m4_key, p=0.5)
+
+    x1 = (((x1_1, x1_2), x1_3), x1_4)
+    x2 = (((x2_1, x2_2), x2_3), x2_4) if not same_inputs else None
+
+    N_in = 2 ** 8
+
+    # We only include dropout on non-TPU backends, because it takes large N to
+    # converge on TPU.
+    dropout_or_id = stax.Dropout(0.9) if platform != 'tpu' else stax.Identity()
+
+    init_fn, apply_fn, kernel_fn = \
+        stax.parallel(
+            stax.parallel(
+                stax.parallel(stax.Dense(N_in),
+                              stax.serial(stax.Conv(N_in + 1, (2, 2)),
+                                          stax.Flatten())),
+                stax.serial(stax.Conv(N_in + 2, (2, 2)),
+                            dropout_or_id,
+                            stax.GlobalAvgPool())),
+            stax.Conv(N_in + 3, (2,)))
+
+    kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, mc_key, N_SAMPLES)
+
+    test_utils.assert_close_matrices(
+        self,
+        kernel_fn(x1, x2, get=kernel_type, mask_constant=-1),
+        kernel_fn_empirical(x1, x2, get=kernel_type, mask_constant=-1),
+        rtol)
 
 
 class AttentionTest(test_utils.NeuralTangentsTestCase):

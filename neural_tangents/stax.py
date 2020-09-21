@@ -88,7 +88,7 @@ from jax.scipy.special import erf
 from jax.tree_util import tree_flatten, tree_map, tree_unflatten
 from neural_tangents.utils import utils
 from neural_tangents.utils.kernel import Kernel
-from neural_tangents.utils.typing import AnalyticKernelFn, Axes, Get, InitFn, ApplyFn, InternalLayer, Kernels, Layer, LayerKernelFn, PyTree, Shapes
+from neural_tangents.utils.typing import AnalyticKernelFn, Axes, Get, InitFn, ApplyFn, InternalLayer, Layer, LayerKernelFn, PyTree, NTTree, Shapes
 import numpy as onp
 import scipy as osp
 
@@ -150,13 +150,13 @@ def _requires(**static_reqs):
     """Returns `kernel_fn` with additional consistency checks."""
 
     @utils.wraps(kernel_fn)
-    def new_kernel_fn(k: Kernels, **kwargs) -> Kernels:
+    def new_kernel_fn(k: NTTree[Kernel], **kwargs) -> NTTree[Kernel]:
       """Executes `kernel_fn` on `kernels` after checking consistency."""
-      fused_reqs = _fuse_reqs(static_reqs, {}, **kwargs)
+      fused_reqs = _fuse_requirements(static_reqs, {}, **kwargs)
 
       # `FanInConcat / FanInSum` have no requirements and
       # execute custom consistency checks.
-      if not isinstance(k, list):
+      if isinstance(k, Kernel):
         for key, v in fused_reqs.items():
           if v is not None:  # `None` is treated as explicitly not having a req.
             if key in ('diagonal_batch', 'diagonal_spatial'):
@@ -247,8 +247,10 @@ def _supports_masking(remask_kernel: bool):
 
       def apply_fn_with_masking(params, inputs, *,
                                 mask_constant=None, **kwargs):
-        inputs = utils.get_masked_array(inputs, mask_constant)
-        inputs, mask = inputs.masked_value, inputs.mask
+        masked_inputs = utils.get_masked_array(inputs, mask_constant)
+        inputs = utils.nt_tree_fn()(lambda x: x.masked_value)(masked_inputs)
+        mask = utils.nt_tree_fn()(lambda x: x.mask)(masked_inputs)
+        # inputs, mask = inputs.masked_value, inputs.mask
         outputs = apply_fn(params, inputs, mask=mask, **kwargs)
         outputs_mask = mask_fn(mask,
                                inputs.shape if isinstance(inputs, np.ndarray)
@@ -257,22 +259,23 @@ def _supports_masking(remask_kernel: bool):
           return outputs
         return utils.MaskedArray(outputs, outputs_mask)
 
-      def kernel_fn_with_masking(k: Kernels, **user_reqs):
-        if isinstance(k, Kernel):
-          mask1 = mask_fn(k.mask1, k.shape1)
-          mask2 = mask_fn(k.mask2, k.shape2)
-        elif isinstance(k, list):
-          mask1 = mask_fn([k.mask1 for k in k], [k.shape1 for k in k])
-          mask2 = mask_fn([k.mask2 for k in k], [k.shape2 for k in k])
-        else:
-          raise TypeError(type(Kernel), Kernel)
+      def kernel_fn_with_masking(k: NTTree[Kernel], **user_reqs):
+        mask1 = utils.nt_tree_fn()(lambda k: k.mask1)(k)
+        shape1 = utils.nt_tree_fn()(lambda k: k.shape1)(k)
+        mask2 = utils.nt_tree_fn()(lambda k: k.mask2)(k)
+        shape2 = utils.nt_tree_fn()(lambda k: k.shape2)(k)
+
+        mask1, mask2 = mask_fn(mask1, shape1), mask_fn(mask2, shape2)
 
         k = kernel_fn(k, **user_reqs)  # type: Kernel
 
         if remask_kernel:
-          k = k.mask(mask1, mask2)
+          remask_fn = utils.nt_tree_fn()(lambda k, m1, m2: k.mask(m1, m2))
+          k = remask_fn(k, mask1, mask2)
         else:
-          k = k.replace(mask1=mask1, mask2=mask2)
+          replace_fn = utils.nt_tree_fn()(
+              lambda k, m1, m2: k.replace(mask1=m1, mask2=m2))
+          k = replace_fn(k, mask1, mask2)
         return k
 
       if hasattr(kernel_fn, _INPUT_REQ):
@@ -308,9 +311,9 @@ def serial(*layers: Layer) -> InternalLayer:
   init_fn, apply_fn = ostax.serial(*zip(init_fns, apply_fns))
 
   @_requires(**_get_input_req_attr(kernel_fns))
-  def kernel_fn(k: Kernels, **kwargs) -> Kernels:
-     # TODO(xlc): if we drop `x1_is_x2` and use `rng` instead, need split key
-     # inside kernel functions here and parallel below.
+  def kernel_fn(k: NTTree[Kernel], **kwargs) -> NTTree[Kernel]:
+    # TODO(xlc): if we drop `x1_is_x2` and use `rng` instead, need split key
+    # inside kernel functions here and parallel below.
     for f in kernel_fns:
       k = f(k, **kwargs)
     return k
@@ -414,7 +417,7 @@ def Aggregate(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
   @_requires(diagonal_spatial=False,
              batch_axis=batch_axis,
              channel_axis=channel_axis)
-  def kernel_fn(k: Kernels,
+  def kernel_fn(k: NTTree[Kernel],
                 *,
                 pattern: Tuple[Optional[np.ndarray],
                                Optional[np.ndarray]] = (None, None),
@@ -3006,13 +3009,13 @@ def _cov(
   return ret / x1.shape[channel_axis]
 
 
+@utils.nt_tree_fn(2)
 def _inputs_to_kernel(
     x1: np.ndarray,
     x2: Optional[np.ndarray],
     *,
     diagonal_batch: bool,
     diagonal_spatial: bool,
-    use_dropout: bool,
     compute_ntk: bool,
     batch_axis: int,
     channel_axis: Optional[int],
@@ -3086,7 +3089,6 @@ def _inputs_to_kernel(
       (`diagonal_spatial == False`,
        `nngp.shape == (batch_size_1, batch_size_2, height, height,
                        width, width, depth, depth, ...)`).
-    use_dropout: `True` if using dropout in the network.
     compute_ntk: `True` to compute both NTK and NNGP kernels,
       `False` to only compute NNGP.
     batch_axis: Specifies which axis is the batch axis.
@@ -3104,6 +3106,10 @@ def _inputs_to_kernel(
   Returns:
     The `Kernel` object containing inputs covariance[s].
   """
+  if not ((type(x1) is type(x2)) or x2 is None):
+    raise TypeError(('Inconsistent input types given. Found x1 of type '
+                      f'{type(x1)} and x2 of type {type(x2)}.'))
+
   batch_axis %= x1.ndim
 
   if batch_axis != 0:
@@ -3196,42 +3202,33 @@ def _propagate_shape(init_fn: InitFn,
   return shaped
 
 
-def _set_shapes(
-    init_fn: InitFn,
-    apply_fn: ApplyFn,
-    in_kernel: Kernels,
-    out_kernel: Kernels,
-    **kwargs) -> Kernels:
+def _set_shapes(init_fn: InitFn,
+                apply_fn: ApplyFn,
+                in_kernel: NTTree[Kernel],
+                out_kernel: NTTree[Kernel],
+                **kwargs
+                ) -> NTTree[Kernel]:
   """Apply a kernel_fn to a Kernel propagating side information."""
 
-  if isinstance(in_kernel, list):
-    shape1 = [ShapedArray(k.shape1, k.nngp.dtype) for k in in_kernel]
-    shape2 = [ShapedArray(k.shape2, k.nngp.dtype) for k in in_kernel]
-  elif isinstance(in_kernel, Kernel):
-    shape1 = ShapedArray(in_kernel.shape1, in_kernel.nngp.dtype)
-    shape2 = ShapedArray(in_kernel.shape2, in_kernel.nngp.dtype)
-  else:
-    raise TypeError(f'Expected input kernel to be a `Kernel` or a list of '
-                    f'`Kernel`s. Found {type(in_kernel)}.')
+  get_shape1_fn = utils.nt_tree_fn()(lambda k:
+                                     ShapedArray(k.shape1, k.nngp.dtype))
+  get_shape2_fn = utils.nt_tree_fn()(lambda k:
+                                     ShapedArray(k.shape2, k.nngp.dtype))
+  shape1 = get_shape1_fn(in_kernel)
+  shape2 = get_shape2_fn(in_kernel)
 
   kwargs1, kwargs2 = utils.split_kwargs(kwargs)
 
-  shaped1 = _propagate_shape(init_fn, apply_fn, shape1, **kwargs1)
-  shaped2 = _propagate_shape(init_fn, apply_fn, shape2, **kwargs2)
+  shape1 = _propagate_shape(init_fn, apply_fn, shape1, **kwargs1)
+  shape2 = _propagate_shape(init_fn, apply_fn, shape2, **kwargs2)
 
-  if isinstance(out_kernel, list):
-    out_kernel = [k.replace(shape1=s1.shape, shape2=s2.shape) for k, s1, s2 in
-                  zip(out_kernel, shaped1, shaped2)]
-  elif isinstance(out_kernel, Kernel):
-    out_kernel = out_kernel.replace(shape1=shaped1.shape, shape2=shaped2.shape)
-  else:
-    raise TypeError(f'Expected output kernel to be a `Kernel` or a list of '
-                    f'`Kernel`s. Found {type(out_kernel)}.')
+  set_shape_fn = utils.nt_tree_fn()(
+      lambda k, s1, s2: k.replace(shape1=s1.shape, shape2=s2.shape))
 
-  return out_kernel
+  return set_shape_fn(out_kernel, shape1, shape2)
 
 
-def _fuse_reqs(kernel_fn_reqs, default_reqs, **user_reqs):
+def _fuse_requirements(kernel_fn_reqs, default_reqs, **user_reqs):
   # Override static requirements with explicit user-specified requirements,
   # but only if they are less demanding, raise an error otherwise.
   kernel_fn_reqs = dict(kernel_fn_reqs)
@@ -3282,15 +3279,18 @@ def _preprocess_kernel_fn(
   def kernel_fn_x1(x1, x2, get, **kwargs):
     # Get input requirements requested by network layers, user, or defaults.
     kernel_fn_reqs = getattr(kernel_fn, _INPUT_REQ)
-    reqs = _fuse_reqs(kernel_fn_reqs, _DEFAULT_INPUT_REQ, **kwargs)
+    reqs = _fuse_requirements(kernel_fn_reqs, _DEFAULT_INPUT_REQ, **kwargs)
     compute_ntk = (get is None) or ('ntk' in get)
+
+    if x2 is None:
+      x2 = tree_map(lambda x: None, x1)
     kernel = _inputs_to_kernel(x1, x2, compute_ntk=compute_ntk, **reqs)
     out_kernel = kernel_fn(kernel, **kwargs)
     return _set_shapes(init_fn, apply_fn, kernel, out_kernel, **kwargs)
 
   @utils.get_namedtuple('AnalyticKernel')
-  def kernel_fn_any(x1_or_kernel: Union[np.ndarray, Kernels],
-                    x2: np.ndarray = None,
+  def kernel_fn_any(x1_or_kernel: Union[NTTree[np.ndarray], NTTree[Kernel]],
+                    x2: NTTree[np.ndarray] = None,
                     get: Get = None,
                     *,
                     pattern: Tuple[Optional[np.ndarray],
@@ -3303,10 +3303,10 @@ def _preprocess_kernel_fn(
 
     Args:
       x1_or_kernel:
-        either a `np.ndarray` with the first batch of inputs, or a `Kernel`.
+        either an NTTree of the first batch of inputs.
       x2:
-        an optional `np.ndarray` with the second batch of inputs. `None`  means
-        `x2 == x1` or `x1_or_kernel is Kernel`.
+        an optional NTTree of `np.ndarray` with the second batch of inputs.
+        `None` means `x2 == x1` or `x1_or_kernel is Kernel`.
       get:
         either `None`, a string, or a tuple of strings specifying which data
         should be returned by the kernel function. Can be "nngp", "ntk", "cov1",
@@ -3353,10 +3353,7 @@ def _preprocess_kernel_fn(
       requested information. If `get` is `None` then a `Kernel` object is
       returned containing all the data.
     """
-    if (isinstance(x1_or_kernel, Kernel) or
-        (isinstance(x1_or_kernel, list) and
-         all(isinstance(k, Kernel) for k in x1_or_kernel))):
-
+    if utils.is_nt_tree_of(x1_or_kernel, Kernel):
       return kernel_fn_kernel(x1_or_kernel,
                               pattern=pattern,
                               diagonal_batch=diagonal_batch,
@@ -3389,6 +3386,7 @@ def _elementwise(fn: Callable[[float], float],
 
   init_fn.__name__ = apply_fn.__name__ = new_kernel_fn.__name__ = name
   return init_fn, apply_fn, new_kernel_fn
+
 
 
 def _arccos(x, do_backprop):

@@ -27,10 +27,99 @@ from . import dataclasses
 from jax import lax
 from jax.lib import xla_bridge
 import jax.numpy as np
-from jax import random
 from jax.tree_util import tree_all, tree_map
+from jax import random
 from .kernel import Kernel
 import numpy as onp
+
+
+def is_list_or_tuple(x):
+  # We do not want to return True if x is a subclass of list or tuple since
+  # otherwise this will return true for namedtuples.
+  return type(x) == list or type(x) == tuple
+
+
+def is_nt_tree_of(x, dtype):
+  if isinstance(x, dtype):
+    return True
+  if not is_list_or_tuple(x):
+    return False
+  return all(is_nt_tree_of(_x, dtype) for _x in x)
+
+
+def nt_tree_fn(nargs: int = None,
+               tree_structure_argnum: int = None,
+               reduce: Callable = lambda x: x):
+  """Convert a function that acts on single inputs to one that acts on trees.
+
+  `nt_tree_fn` treats the first `nargs` arguments as NTTrees and the remaining
+  arguments as broadcasted over the tree structure. `nt_tree_fn` then calls the
+  function on each leaf of the tree. Each node of the tree optionally calls a
+  reduce function over the values of its children.
+
+  If `tree_structure_argnum` is None then each of the NTTrees must have the same
+  structure. If `tree_structure_argnum` is an integer then then a specific tree
+  is used to infer the structure.
+
+  Args:
+    nargs: The number of arguments to be treated as NTTrees. If `nargs` is None
+      then all of the arguments are used. `nargs` can also be negative which
+      follows numpy's semantics for array indexing.
+    tree_structure_argnum: The argument used to infer the tree structure to be
+      traversed. If `tree_structure_argnum` is None then a check is performed to
+      ensure that all trees have the same structure.
+    reduce: A callable that is applied recursively by each internal tree node
+      to its children.
+
+  Returns:
+    A decorator `tree_fn` that transforms a function, `fn`, from acting on
+    leaves to acting on NTTrees.
+  """
+
+  def check_tree_structure(args):
+    """Ensure the structure of the trees in each of the `nargs` is the same."""
+    if any(is_list_or_tuple(x) for x in args):
+      if not all(type(x) == type(args[0]) for x in args[1:]):
+        raise TypeError(f'Inconsistent NTTree structure found. '
+                        f'Node Types: {[type(x) for x in args]}.')
+
+      """
+        Regarding the use of zip, consider an example `x1 = x2 = (1, (1, 1))`.
+        We would like to determine whether these two trees have the same
+        structure.
+
+        On the first recurrence `x1` and `x2` are both tuples so the check
+        passes and `zip(*args) = [(1, 1), ((1, 1), (1, 1))]` so that
+        `(check_tree_structure(x) for x in zip(x1, x2))` will first check that
+        the first element of `x1` has the same tree structure as the first
+        element of `x2` and then the second element and so on.
+      """
+      for x in zip(*args):
+        check_tree_structure(x)
+
+  def tree_fn(fn):
+    @wraps(fn)
+    def wrapped_fn(*args, **kwargs):
+      _nargs = len(args) if nargs is None else nargs
+      recurse, norecurse = args[:_nargs], args[_nargs:]
+
+      structure_argnum = tree_structure_argnum
+      if structure_argnum is None:
+        check_tree_structure(recurse)
+        structure_argnum = 0
+
+      if is_list_or_tuple(args[structure_argnum]):
+        list_or_tuple = type(args[structure_argnum])
+        return reduce(list_or_tuple(
+            wrapped_fn(*(xs + norecurse), **kwargs) for xs in zip(*recurse)))
+      return fn(*args, **kwargs)
+    return wrapped_fn
+  return tree_fn
+
+
+def all_none(x: Any, attr: str = None) -> bool:
+  get_fn = (lambda x: x) if attr is None else lambda x: getattr(x, attr)
+  return tree_all(tree_map(lambda x: get_fn(x) is None, x))
 
 
 def canonicalize_get(get):
@@ -120,31 +209,36 @@ def get_namedtuple(name):
 
       fn_out = fn(*canonicalized_args, **kwargs)
 
-      if get is None:
-        if isinstance(fn_out, dict):
-          ReturnType = named_tuple_factory(name, tuple(fn_out.keys()))
-          fn_out = ReturnType(*fn_out.values())
-        return fn_out
+      @nt_tree_fn()
+      def canonicalize_output(out):
+        if get is None:
+          if isinstance(out, dict):
+            ReturnType = named_tuple_factory(name, tuple(out.keys()))
+            out = ReturnType(*out.values())
+          return out
 
-      fn_out = _output_to_dict(fn_out)
+        out = _output_to_dict(out)
 
-      if get_is_not_tuple:
-        if isinstance(fn_out, types.GeneratorType):
-          return (output[get[0]] for output in fn_out)
+        if get_is_not_tuple:
+          if isinstance(out, types.GeneratorType):
+            return (output[get[0]] for output in out)
+          else:
+            return out[get[0]]
+
+        ReturnType = named_tuple_factory(name, get)
+        if isinstance(out, types.GeneratorType):
+          return (ReturnType(*tuple(output[g] for g in get)) for output in out)
         else:
-          return fn_out[get[0]]
+          return ReturnType(*tuple(out[g] for g in get))
 
-      ReturnType = named_tuple_factory(name, get)
-      if isinstance(fn_out, types.GeneratorType):
-        return (ReturnType(*tuple(output[g] for g in get)) for output in fn_out)
-      else:
-        return ReturnType(*tuple(fn_out[g] for g in get))
+      return canonicalize_output(fn_out)
 
     return getter_fn
 
   return getter_decorator
 
 
+@nt_tree_fn(nargs=2, reduce=lambda x: np.all(np.array(x)))
 def x1_is_x2(x1: np.ndarray,
              x2: np.ndarray = None,
              eps: float = 1e-12) -> Union[bool, np.ndarray]:
@@ -346,18 +440,22 @@ def reverse_zipped(
   return mat
 
 
-ArrayOrList = Union[Optional[np.ndarray], List[Optional[np.ndarray]]]
-
-
 @dataclasses.dataclass
 class MaskedArray:
-  masked_value: ArrayOrList
-  mask: ArrayOrList
+  masked_value: np.ndarray
+  mask: np.ndarray
+  shape: Tuple[int, ...] = dataclasses.field(init=False, pytree_node=False)
+  ndim: int = dataclasses.field(init=False, pytree_node=False)
 
-  astuple = ...  # type: Callable[[], Tuple[ArrayOrList, ArrayOrList]]
+  def __post_init__(self):
+    super().__setattr__('shape', self.masked_value.shape)
+    super().__setattr__('ndim', self.masked_value.ndim)
+
+  astuple = ...  # type: Callable[[], Tuple[np.ndarray, np.ndarray, Tuple[int, ...], int]]
 
 
-def get_masked_array(x: ArrayOrList,
+@nt_tree_fn(nargs=1)
+def get_masked_array(x: np.ndarray,
                      mask_constant: float = None) -> MaskedArray:
   """Return `x` with entries equal to `mask_constant` zeroed-out, and the mask.
 
@@ -373,15 +471,12 @@ def get_masked_array(x: ArrayOrList,
   Returns:
     A `MaskedArray` of `(masked_x, boolean_mask)`.
   """
-  if isinstance(x, list):
-    fields = zip(*(get_masked_array(_x, mask_constant).astuple() for _x in x))
-    return MaskedArray(*(list(f) for f in fields))
 
   if x is None:
     mask_mat = None
 
   elif isinstance(x, MaskedArray):
-    x, mask_mat = x.astuple()
+    x, mask_mat, _, _ = x.astuple()
 
   elif isinstance(x, np.ndarray):
     if mask_constant is None:
@@ -514,12 +609,12 @@ def is_on_cpu(x: PyTree) -> bool:
 def _read_keys(key, x1, x2):
   """Read dropout key.
 
-     `key` might be a tuple of two rng keys or a single rng key or None. In
-     either case, `key` will be mapped into two rng keys `key1` and `key2` to
-     make sure `(x1==x2) == (key1==key2)`.
+  `key` might be a tuple of two rng keys or a single rng key or None. In
+  either case, `key` will be mapped into two rng keys `key1` and `key2` to
+  make sure `(x1==x2) == (key1==key2)`.
   """
 
-  if key is None or x2 is None:
+  if key is None or all_none(x2):
     key1 = key2 = key
   elif isinstance(key, tuple) and len(key) == 2:
     key1, key2 = key
@@ -538,7 +633,7 @@ def _read_keys(key, x1, x2):
 
 
 def split_kwargs(kwargs, x1=None, x2=None):
-  """Spliting `kwargs`.
+  """Splitting `kwargs`.
 
      Specifically,
        1. if kwarg is an rng key, it will be split into two keys.

@@ -26,6 +26,7 @@ from neural_tangents import stax
 from neural_tangents.utils import batch
 from neural_tangents.utils import empirical
 from neural_tangents.utils import test_utils
+from neural_tangents.utils import utils
 from neural_tangents.utils.kernel import Kernel
 
 
@@ -426,6 +427,108 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
           self.assertAllClose(res_1[0][0], res_2[0][0])
           self.assertAllClose(res_1[0][1], res_2[0][1])
           self.assertAllClose(tree_map(broadcast, res_1[1]), res_2[1])
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name': '_same_inputs={}'.format(same_inputs),
+          'same_inputs': same_inputs
+      } for same_inputs in [True, False]))
+  def test_parallel_in_out(self, same_inputs):
+    test_utils.stub_out_pmap(batch, 2)
+    rng = random.PRNGKey(0)
+    input_key1, input_key2, mc_key = random.split(rng, 3)
+
+    x1_1, x1_2, x1_3 = random.normal(input_key1, (3, 4, 10))
+    x2_1, x2_2, x2_3 = random.normal(input_key2, (3, 8, 10))
+
+    x1 = (x1_1, (x1_2, x1_3))
+    x2 = (x2_1, (x2_2, x2_3))
+
+    N = WIDTH
+
+    def net(N_out):
+      return stax.parallel(stax.Dense(N_out),
+                           stax.parallel(stax.Dense(N_out + 1),
+                                         stax.Dense(N_out + 2)))
+
+    # Check NNGP.
+
+    readin = net(N)
+    readout = net(1)
+
+    K_readin_fn = jit(readin[2])
+    K_readout_fn = jit(partial(readout[2], get='nngp'))
+
+    batch_K_readin_fn = batch.batch(K_readin_fn, 2)
+    batch_K_readout_fn = batch.batch(K_readout_fn, 2)
+
+    test_utils.assert_close_matrices(
+        self,
+        K_readout_fn(K_readin_fn(x1, x2)),
+        batch_K_readout_fn(batch_K_readin_fn(x1, x2)),
+        RTOL)
+
+    # Check Both.
+    K_readin_fn = jit(readin[2])
+    K_readout_fn = jit(partial(readout[2], get=('nngp', 'ntk')))
+
+    batch_K_readin_fn = batch.batch(K_readin_fn, 2)
+    batch_K_readout_fn = batch.batch(K_readout_fn, 2)
+
+    get_ntk = utils.nt_tree_fn()(lambda k: k.ntk)
+
+    test_utils.assert_close_matrices(
+        self,
+        get_ntk(K_readout_fn(K_readin_fn(x1, x2))),
+        get_ntk(batch_K_readout_fn(batch_K_readin_fn(x1, x2))),
+        RTOL)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name': '_same_inputs={}'.format(same_inputs),
+          'same_inputs': same_inputs
+      } for same_inputs in [True, False]))
+  def test_parallel_in_out_empirical(self, same_inputs):
+    test_utils.stub_out_pmap(batch, 2)
+    rng = random.PRNGKey(0)
+    input_key1, input_key2, net_key = random.split(rng, 3)
+
+    x1_1, x1_2, x1_3 = random.normal(input_key1, (3, 4, 10))
+    x2_1, x2_2, x2_3 = random.normal(input_key2, (3, 8, 10))
+
+    x1 = (x1_1, (x1_2, x1_3))
+    x2 = (x2_1, (x2_2, x2_3))
+
+    def net(N_out):
+      return stax.parallel(stax.Dense(N_out),
+                           stax.parallel(stax.Dense(N_out + 1),
+                                        stax.Dense(N_out + 2)))
+
+    # Check NNGP.
+    init_fn, apply_fn, _ = net(WIDTH)
+    _, params = init_fn(net_key, ((-1, 10), ((-1, 10), (-1, 10))))
+
+    kernel_fn = jit(empirical.empirical_nngp_fn(apply_fn))
+    batch_kernel_fn = jit(batch.batch(kernel_fn, 2))
+
+    test_utils.assert_close_matrices(
+        self,
+        kernel_fn(x1, x2, params),
+        batch_kernel_fn(x1, x2, params),
+        RTOL)
+
+    # Check NTK.
+    init_fn, apply_fn, _ = stax.serial(net(WIDTH), net(1))
+    _, params = init_fn(net_key, ((-1, 10), ((-1, 10), (-1, 10))))
+
+    kernel_fn = jit(empirical.empirical_ntk_fn(apply_fn))
+    batch_kernel_fn = jit(batch.batch(kernel_fn, 2))
+
+    test_utils.assert_close_matrices(
+        self,
+        kernel_fn(x1, x2, params),
+        batch_kernel_fn(x1, x2, params),
+        RTOL)
 
 
 if __name__ == '__main__':

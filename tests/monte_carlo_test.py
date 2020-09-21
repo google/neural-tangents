@@ -36,6 +36,8 @@ BATCH_SIZES = [
     4,
 ]
 
+WIDTH = 1024
+
 DEVICE_COUNTS = [0, 1, 2]
 
 STORE_ON_DEVICE = [True, False]
@@ -143,7 +145,7 @@ class MonteCarloTest(jtu.JaxTestCase):
     test_utils.stub_out_pmap(batch, device_count)
 
     x1, x2, init_fn, apply_fn, stax_kernel_fn, key = _get_inputs_and_model(
-        1024, 256, xla_bridge.get_backend().platform == 'tpu')
+        WIDTH, 256, xla_bridge.get_backend().platform == 'tpu')
 
     sample = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn, key, 200,
                                                batch_size, device_count,
@@ -256,6 +258,45 @@ class MonteCarloTest(jtu.JaxTestCase):
     self.assertAllClose(ker_analytic_12, s_12, atol=2., rtol=2.)
     self.assertAllClose(ker_analytic_12, ker_analytic_34)
 
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              f'_same_inputs={same_inputs}_batch_size={batch_size}',
+          'same_inputs': same_inputs,
+          'batch_size': batch_size
+      } for same_inputs in [True, False] for batch_size in [1, 2]))
+  def test_parallel_in_out_mc(self, same_inputs, batch_size):
+    rng = random.PRNGKey(0)
+    input_key1, input_key2, net_key = random.split(rng, 3)
+
+    x1_1, x1_2, x1_3 = random.normal(input_key1, (3, 2, 10))
+    x2_1, x2_2, x2_3 = random.normal(input_key2, (3, 4, 10))
+
+    x1 = (x1_1, (x1_2, x1_2))
+    x2 = (x2_1, (x2_2, x2_3))
+
+    def net(N_out):
+      return stax.parallel(stax.Dense(N_out),
+                           stax.parallel(stax.Dense(N_out + 1),
+                                         stax.Dense(N_out + 2)))
+
+    # Check NNGP.
+    init_fn, apply_fn, _ = net(WIDTH)
+
+    nb_kernel_fn = monte_carlo.monte_carlo_kernel_fn(init_fn,
+                                                     apply_fn,
+                                                     net_key,
+                                                     n_samples=10,
+                                                     trace_axes=(-1,))
+
+    kernel_fn = monte_carlo.monte_carlo_kernel_fn(init_fn,
+                                                  apply_fn,
+                                                  net_key,
+                                                  n_samples=10,
+                                                  batch_size=batch_size,
+                                                  trace_axes=(-1,))
+
+    self.assertAllClose(kernel_fn(x1, x2, 'nngp'), nb_kernel_fn(x1, x2, 'nngp'))
 
 if __name__ == '__main__':
   absltest.main()
