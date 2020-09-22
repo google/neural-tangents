@@ -26,7 +26,7 @@ from neural_tangents.utils import utils
 
 
 config.parse_flags_with_absl()
-config.enable_omnistaging()
+config.update('jax_numpy_rank_promotion', 'raise')
 
 
 class UtilsTest(jtu.JaxTestCase):

@@ -37,7 +37,7 @@ from neural_tangents.utils import utils
 
 
 config.parse_flags_with_absl()
-config.enable_omnistaging()
+config.update('jax_numpy_rank_promotion', 'raise')
 
 
 MATRIX_SHAPES = [(3, 3), (4, 4)]
@@ -338,8 +338,8 @@ class PredictTest(jtu.JaxTestCase):
     def predict_mc(count, key):
       key = random.split(key, count)
       fx_train, fx_test = vmap(predict_empirical)(key)
-      fx_train_mean = np.mean(fx_train, axis=0)
-      fx_test_mean = np.mean(fx_test, axis=0)
+      fx_train_mean = np.mean(fx_train, axis=0, keepdims=True)
+      fx_test_mean = np.mean(fx_test, axis=0, keepdims=True)
 
       fx_train_centered = fx_train - fx_train_mean
       fx_test_centered = fx_test - fx_test_mean
@@ -695,7 +695,7 @@ class PredictTest(jtu.JaxTestCase):
         x_fin = x_train if x is None else x_test
         ensemble_fx = vmap(apply_fn, (0, None))(params, x_fin)
 
-        mean_emp = np.mean(ensemble_fx, axis=0)
+        mean_emp = np.mean(ensemble_fx, axis=0, keepdims=True)
         mean_subtracted = ensemble_fx - mean_emp
         cov_emp = np.einsum(
             'ijk,ilk->jl', mean_subtracted, mean_subtracted, optimize=True) / (

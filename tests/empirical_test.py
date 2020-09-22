@@ -19,7 +19,7 @@ from functools import partial
 from absl.testing import absltest
 from jax import test_util as jtu
 from jax.api import jit
-from jax.config import config as jax_config
+from jax.config import config
 import jax.numpy as np
 import jax.random as random
 from neural_tangents import stax
@@ -28,8 +28,8 @@ from neural_tangents.utils import test_utils
 from neural_tangents.utils import utils
 
 
-jax_config.parse_flags_with_absl()
-jax_config.enable_omnistaging()
+config.parse_flags_with_absl()
+config.update('jax_numpy_rank_promotion', 'raise')
 
 
 TAYLOR_MATRIX_SHAPES = [(3, 3), (4, 4)]
@@ -142,11 +142,11 @@ class EmpiricalTest(jtu.JaxTestCase):
     w1 = random.normal(s1, shape)
     w1 = 0.5 * (w1 + w1.T)
     w2 = random.normal(s2, shape)
-    b = random.normal(s3, (shape[-1],))
+    b = random.normal(s3, (1,) * (len(shape) - 1) + (shape[-1],))
     params = (w1, w2, b)
 
     key, split = random.split(key)
-    x0 = random.normal(split, (shape[-1],))
+    x0 = random.normal(split, (shape[-1], 1))
 
     f_lin = empirical.linearize(EmpiricalTest.f, x0)
 
@@ -154,7 +154,7 @@ class EmpiricalTest(jtu.JaxTestCase):
       for do_alter in [True, False]:
         for do_shift_x in [True, False]:
           key, split = random.split(key)
-          x = random.normal(split, (shape[-1],))
+          x = random.normal(split, (shape[-1], 1))
           self.assertAllClose(EmpiricalTest.f_lin_exact(x0, x, params, do_alter,
                                                         do_shift_x=do_shift_x),
                               f_lin(x, params, do_alter, do_shift_x=do_shift_x))
@@ -184,11 +184,11 @@ class EmpiricalTest(jtu.JaxTestCase):
     w1 = random.normal(s1, shape)
     w1 = 0.5 * (w1 + w1.T)
     w2 = random.normal(s2, shape)
-    b = random.normal(s3, (shape[-1],))
+    b = random.normal(s3, (1,) * (len(shape) - 1) + (shape[-1],))
     params = (w1, w2, b)
 
     key, split = random.split(key)
-    x0 = random.normal(split, (shape[-1],))
+    x0 = random.normal(split, (shape[-1], 1))
 
     f_lin = empirical.taylor_expand(EmpiricalTest.f, x0, 1)
     f_2 = empirical.taylor_expand(EmpiricalTest.f, x0, 2)
@@ -197,7 +197,7 @@ class EmpiricalTest(jtu.JaxTestCase):
       for do_alter in [True, False]:
         for do_shift_x in [True, False]:
           key, split = random.split(key)
-          x = random.normal(split, (shape[-1],))
+          x = random.normal(split, (shape[-1], 1))
           self.assertAllClose(EmpiricalTest.f_lin_exact(x0, x, params, do_alter,
                                                         do_shift_x=do_shift_x),
                               f_lin(x, params, do_alter, do_shift_x=do_shift_x))

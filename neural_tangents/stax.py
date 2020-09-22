@@ -2808,12 +2808,16 @@ def NumericalActivation(
       grid = np.outer(ws, ws)
       x = xs.reshape((xs.shape[0],) + (1,) * (nngp.ndim + 1))
       y = xs.reshape((1, xs.shape[0]) + (1,) * nngp.ndim)
+      xy_axes = (0, 1)
+
+      nngp = np.expand_dims(nngp, xy_axes)
+      q11, q22 = np.expand_dims(q11, xy_axes), np.expand_dims(q22, xy_axes)
 
       def integrate(f):
         fvals = f(_sqrt(2*q11, do_backprop) * x) * f(
             nngp/_sqrt(q11/2, do_backprop) * x + _sqrt(
                 2*(q22 - nngp**2/q11), do_backprop)* y)
-        return np.tensordot(grid, fvals, ((0, 1), (0, 1))) / np.pi
+        return np.tensordot(grid, fvals, (xy_axes, xy_axes)) / np.pi
 
       if ntk is not None:
         ntk *= integrate(df)
@@ -2823,8 +2827,10 @@ def NumericalActivation(
     def nngp_fn_diag(nngp):
       xs, ws = quad_points
       x = xs.reshape((xs.shape[0],) + (1,) * nngp.ndim)
+      x_axes = (0,)
+      nngp = np.expand_dims(nngp, x_axes)
       fval = fn(_sqrt(2 * nngp, do_backprop) * x) ** 2
-      return np.tensordot(ws, fval, ((0,), (0,))) / np.sqrt(np.pi)
+      return np.tensordot(ws, fval, (x_axes, x_axes)) / np.sqrt(np.pi)
 
     nngp, ntk = nngp_ntk_fn(nngp, q11, q22, ntk)
 

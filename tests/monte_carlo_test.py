@@ -16,7 +16,7 @@
 
 from absl.testing import absltest
 from jax import test_util as jtu
-from jax.config import config as jax_config
+from jax.config import config
 from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.random as random
@@ -26,8 +26,8 @@ from neural_tangents.utils import empirical
 from neural_tangents.utils import monte_carlo
 from neural_tangents.utils import test_utils
 
-jax_config.parse_flags_with_absl()
-jax_config.enable_omnistaging()
+config.parse_flags_with_absl()
+config.update('jax_numpy_rank_promotion', 'raise')
 
 
 BATCH_SIZES = [

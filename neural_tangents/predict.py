@@ -174,6 +174,7 @@ def gradient_descent_mse(
     def predict_fn_finite(t, fx_train_0, fx_test_0, k_test_train):
       t = np.array(t) * learning_rate
       t_shape, t_ndim = t.shape, t.ndim
+      first_t_axes = tuple(range(t_ndim))
       t = t.reshape((-1, 1))
 
       rhs = -y_train if fx_train_0 is None else fx_train_0 - y_train
@@ -184,7 +185,7 @@ def gradient_descent_mse(
       if fx_train_0 is not None:
         dfx_train = expm1_fn(rhs, t).reshape(shape)
         dfx_train = np.moveaxis(dfx_train, last_t_axes, trace_axes)
-        fx_train_t = fx_train_0 + dfx_train
+        fx_train_t = np.expand_dims(fx_train_0, first_t_axes) + dfx_train
 
       if fx_test_0 is not None:
         dfx_test = inv_expm1_fn(rhs, t).reshape(shape)
@@ -193,7 +194,7 @@ def gradient_descent_mse(
             dfx_test,
             tuple(range(n_non_t_axes, n_non_t_axes + t_ndim)) + last_t_axes,
             tuple(range(t_ndim)) + trace_axes)
-        fx_test_t = fx_test_0 + dfx_test
+        fx_test_t = np.expand_dims(fx_test_0, first_t_axes) + dfx_test
 
       if fx_train_0 is not None and fx_test_0 is not None:
         return fx_train_t, fx_test_t
@@ -765,7 +766,9 @@ def gradient_descent_mse_ensemble(
     k_dd = getattr(get_k_train_train((get,)), get)
     k_dd = _add_diagonal_regularizer(utils.make_2d(k_dd), diag_reg,
                                      diag_reg_absolute_scale)
-    return np.linalg.eigh(k_dd)
+    evals, evecs = np.linalg.eigh(k_dd)
+    evals = np.expand_dims(evals, 0)
+    return evals, evecs
 
   @lru_cache(4)
   def predict_inf(get: Get):
@@ -899,7 +902,7 @@ def gradient_descent_mse_ensemble(
 
         # Test set.
         else:
-          _nngp_tt = utils.make_2d(nngp_tt)
+          _nngp_tt = np.expand_dims(utils.make_2d(nngp_tt), 0)
 
           if g == 'nngp':
             cov = _nngp_tt - np.einsum(
@@ -1017,6 +1020,7 @@ def _get_fns_in_eigenbasis(
   k_train_train = _add_diagonal_regularizer(k_train_train, diag_reg,
                                             diag_reg_absolute_scale)
   evals, evecs = np.linalg.eigh(k_train_train)
+  evals = np.expand_dims(evals, 0)
 
   def to_eigenbasis(fn):
     """Generates a transform given a function on the eigenvalues."""

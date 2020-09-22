@@ -22,7 +22,7 @@ from examples import function_space
 
 
 config.parse_flags_with_absl()
-config.enable_omnistaging()
+config.update('jax_numpy_rank_promotion', 'raise')
 
 
 class FunctionSpaceTest(jtu.JaxTestCase):

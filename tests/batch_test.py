@@ -18,7 +18,7 @@ from absl.testing import absltest
 from functools import partial
 from jax import test_util as jtu
 from jax.api import jit
-from jax.config import config as jax_config
+from jax.config import config
 import jax.numpy as np
 import jax.random as random
 from jax.tree_util import tree_map
@@ -30,8 +30,9 @@ from neural_tangents.utils import utils
 from neural_tangents.utils.kernel import Kernel
 
 
-jax_config.parse_flags_with_absl()
-jax_config.enable_omnistaging()
+config.parse_flags_with_absl()
+config.update('jax_numpy_rank_promotion', 'raise')
+
 
 FLAT = 'FLAT'
 POOLING = 'POOLING'
