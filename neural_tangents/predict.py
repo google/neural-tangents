@@ -619,7 +619,7 @@ def gp_inference(
                 'If `"ntk" in get`, and `nngp_test_test is not None`, '
                 'and `k_test_train is not None`, i.e. you request the '
                 'NTK posterior covariance on the test set, you need '
-                'both NTK and NNGP train-train and test-train matrices'
+                'both NTK and NNGP train-train and test-train matrices '
                 'contained in `k_test_train` and `k_train_train`. '
                 'Hence they must be `namedtuple`s with `nngp` and '
                 '`ntk` attributes.')
@@ -1107,7 +1107,7 @@ def _check_inputs(fx_train_or_state_0: Union[ArrayOrScalar, ODEState],
                   k_test_train: Optional[np.ndarray]):
   if isinstance(fx_train_or_state_0, ODEState):
     if fx_test_0 is not None:
-      raise ValueError('`fx_test_0` is included in `ODEState` and must be set'
+      raise ValueError('`fx_test_0` is included in `ODEState` and must be set '
                        'to `None`.')
 
     fx_train_0 = fx_train_or_state_0.fx_train
@@ -1117,10 +1117,10 @@ def _check_inputs(fx_train_or_state_0: Union[ArrayOrScalar, ODEState],
     fx_train_0 = fx_train_or_state_0
 
   if fx_train_0 is None and fx_test_0 is None:
-    raise ValueError('Both `fx_train_0` and `fx_test_0` are `None`, i.e. no'
+    raise ValueError('Both `fx_train_0` and `fx_test_0` are `None`, i.e. no '
                      'predictions will be computed.')
   if fx_test_0 is not None and k_test_train is None:
-    raise ValueError('To get predictions on the test set, please provide'
+    raise ValueError('To get predictions on the test set, please provide '
                      '`k_test_train` kernel to the parent function.')
 
 
