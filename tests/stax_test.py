@@ -177,16 +177,10 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
     )
 
   def conv(out_chan):
-    return stax.GeneralConv(
-        dimension_numbers=dimension_numbers,
-        out_chan=out_chan,
-        filter_shape=filter_shape,
-        strides=strides,
-        padding=padding,
-        W_std=W_std,
-        b_std=b_std,
-        parameterization=parameterization
-    )
+    return stax.Conv(out_chan=out_chan, filter_shape=filter_shape,
+                     strides=strides, padding=padding, W_std=W_std,
+                     b_std=b_std, dimension_numbers=dimension_numbers,
+                     parameterization=parameterization)
 
   affine = conv(width) if is_conv else fc(width)
 
@@ -1575,14 +1569,15 @@ class ConvNDTest(test_utils.NeuralTangentsTestCase):
           channel_axis=channel_axis), proj)
 
     nn = stax.serial(
-        stax.GeneralConv(dimension_numbers, width, filter_shape, None, 'SAME'),
+        stax.Conv(width, filter_shape, None, 'SAME',
+                  dimension_numbers=dimension_numbers),
         (stax.LayerNorm(layernorm_axes,
                         channel_axis=channel_axis)
          if use_layernorm else stax.Identity()),
         stax.Relu(),
         (stax.Dropout(0.8) if use_dropout else stax.Identity()),
-        stax.GeneralConv(dimension_numbers, width, filter_shape, strides,
-                         'CIRCULAR'),
+        stax.Conv(width, filter_shape, strides, 'CIRCULAR',
+                  dimension_numbers=dimension_numbers),
         stax.Abs(),
         proj
     )
@@ -1702,21 +1697,21 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
     x2 = None if same_inputs else random.normal(key, (4, 7, 8, 4, 3))
 
     _, _, wrong_conv_fn = stax.serial(
-        stax.GeneralConv(dimension_numbers=('NDHWC', 'HDWIO', 'NCDWH'),
-                         out_chan=1, filter_shape=(1, 2, 3)),
+        stax.Conv(out_chan=1, filter_shape=(1, 2, 3),
+                  dimension_numbers=('NDHWC', 'HDWIO', 'NCDWH')),
         stax.Relu(),
-        stax.GeneralConv(dimension_numbers=('NHDWC', 'HWDIO', 'NCWHD'),
-                         out_chan=1, filter_shape=(1, 2, 3))
+        stax.Conv(out_chan=1, filter_shape=(1, 2, 3),
+                  dimension_numbers=('NHDWC', 'HWDIO', 'NCWHD'))
     )
     with self.assertRaises(ValueError):
       wrong_conv_fn(x1, x2)
 
     init_fn, apply_fn, correct_conv_fn = stax.serial(
-        stax.GeneralConv(dimension_numbers=('NHWDC', 'DHWIO', 'NCWDH'),
-                         out_chan=2048, filter_shape=(1, 2, 3)),
+        stax.Conv(out_chan=2048, filter_shape=(1, 2, 3),
+                  dimension_numbers=('NHWDC', 'DHWIO', 'NCWDH')),
         stax.Relu(),
-        stax.GeneralConv(dimension_numbers=('NCHDW', 'WHDIO', 'NCDWH'),
-                         out_chan=2048, filter_shape=(1, 2, 3)),
+        stax.Conv(out_chan=2048, filter_shape=(1, 2, 3),
+                  dimension_numbers=('NCHDW', 'WHDIO', 'NCDWH')),
         stax.Flatten(),
         stax.Dense(2048)
     )
@@ -1728,20 +1723,20 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
     self.assertAllClose(K, K_mc, atol=0.01, rtol=0.05)
 
     _, _, wrong_conv_fn = stax.serial(
-        stax.GeneralConv(dimension_numbers=('NDHWC', 'HDWIO', 'NCDWH'),
-                         out_chan=1, filter_shape=(1, 2, 3)),
+        stax.Conv(out_chan=1, filter_shape=(1, 2, 3),
+                  dimension_numbers=('NDHWC', 'HDWIO', 'NCDWH')),
         stax.GlobalAvgPool(channel_axis=2)
     )
     with self.assertRaises(ValueError):
       wrong_conv_fn(x1, x2)
 
     init_fn, apply_fn, correct_conv_fn = stax.serial(
-        stax.GeneralConv(dimension_numbers=('NHDWC', 'DHWIO', 'NDWCH'),
-                         out_chan=1024, filter_shape=(1, 2, 3)),
+        stax.Conv(out_chan=1024, filter_shape=(1, 2, 3),
+                  dimension_numbers=('NHDWC', 'DHWIO', 'NDWCH')),
         stax.Relu(),
         stax.AvgPool((2, 1, 3), batch_axis=0, channel_axis=-2),
-        stax.GeneralConv(dimension_numbers=('NDHCW', 'IHWDO', 'NDCHW'),
-                         out_chan=1024, filter_shape=(1, 2, 3)),
+        stax.Conv(out_chan=1024, filter_shape=(1, 2, 3),
+                  dimension_numbers=('NDHCW', 'IHWDO', 'NDCHW')),
         stax.Relu(),
         stax.GlobalAvgPool(channel_axis=2),
         stax.Dense(1024)
@@ -1757,8 +1752,8 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
         stax.Flatten(),
         stax.Dense(1),
         stax.Erf(),
-        stax.GeneralConv(dimension_numbers=('CN', 'IO', 'NC'),
-                         out_chan=1, filter_shape=(1, 2)),
+        stax.Conv(out_chan=1, filter_shape=(1, 2),
+                  dimension_numbers=('CN', 'IO', 'NC')),
     )
     with self.assertRaises(ValueError):
       wrong_conv_fn(x1, x2)
@@ -1942,7 +1937,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
           n_heads=int(np.sqrt(width)),
       ) if proj == 'avg' else stax.Identity()
 
-    conv = stax.GeneralConvTranspose if transpose else stax.GeneralConv
+    conv = stax.ConvTranspose if transpose else stax.Conv
 
     nn = stax.serial(
         stax.FanOut(3),
@@ -2471,10 +2466,8 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
     filter_shape = (filter_shape,)
     strides = (strides,)
 
-    init_fn, apply_fn, kernel_fn = stax.ConvTranspose(width,
-                                                      filter_shape,
-                                                      strides,
-                                                      padding,
+    init_fn, apply_fn, kernel_fn = stax.ConvTranspose(width, filter_shape,
+                                                      strides, padding,
                                                       b_std=0.1)
 
     key = random.PRNGKey(1)
@@ -2528,13 +2521,11 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
     o_layout = np.take(np.array(o_shape), out_spec_inv)
     placeholder = np.ones(o_layout, lhs.dtype)
 
-    _, apply_fn, _ = stax.GeneralConv(
-        dimension_numbers=dimension_numbers,
-        out_chan=rhs.shape[dimension_numbers[1].index('I')],
-        filter_shape=(rhs.shape[dimension_numbers[1].index('H')],),
-        strides=strides,
-        padding=padding,
-        parameterization='standard')
+    _, apply_fn, _ = stax.Conv(
+      out_chan=rhs.shape[dimension_numbers[1].index('I')],
+      filter_shape=(rhs.shape[dimension_numbers[1].index('H')],),
+      strides=strides, padding=padding, dimension_numbers=dimension_numbers,
+      parameterization='standard')
     conv = lambda x: apply_fn((rhs, 0.), x)
     _, g = vjp(conv, placeholder)
     return g(lhs)[0]
@@ -2547,13 +2538,11 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
                                padding,
                                dimension_numbers):
     """Helper method: calculates conv transpose."""
-    _, apply_fn, _ = stax.GeneralConvTranspose(
-        dimension_numbers=dimension_numbers,
-        out_chan=params[0].shape[dimension_numbers[1].index('O')],
-        filter_shape=(params[0].shape[dimension_numbers[1].index('H')],),
-        strides=strides,
-        padding=padding,
-        parameterization='standard')
+    _, apply_fn, _ = stax.ConvTranspose(
+      out_chan=params[0].shape[dimension_numbers[1].index('O')],
+      filter_shape=(params[0].shape[dimension_numbers[1].index('H')],),
+      strides=strides, padding=padding, dimension_numbers=dimension_numbers,
+      parameterization='standard')
     return apply_fn((params[0], 0.), lhs)
 
   @jtu.parameterized.named_parameters(

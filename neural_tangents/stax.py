@@ -595,61 +595,62 @@ def Dense(
 
 @layer
 @_supports_masking(remask_kernel=True)
-def GeneralConv(
-    dimension_numbers: Optional[Tuple[str, str, str]],
+def Conv(
     out_chan: int,
     filter_shape: Sequence[int],
     strides: Sequence[int] = None,
     padding: str = Padding.VALID.name,
     W_std: float = 1.0,
     b_std: float = 0.0,
-    parameterization: str = 'ntk') -> InternalLayer:
+    dimension_numbers: lax.ConvDimensionNumbers = None,
+    parameterization: str = 'ntk'
+) -> InternalLayer:
   """Layer construction function for a general convolution layer.
 
   Based on `jax.experimental.stax.GeneralConv`.
 
   Args:
-    dimension_numbers: Specifies which axes should be convolved over. Should
-      match the specification in `jax.lax.conv_general_dilated`.
-    out_chan: The number of output channels / features of the
-      convolution. This is ignored in by the `kernel_fn` in NTK
-      parameterization.
-    filter_shape: The shape of the filter. The shape of the tuple should agree
-      with the number of spatial dimensions in `dimension_numbers`.
-    strides: The stride of the convolution. The shape of the tuple should agree
-      with the number of spatial dimensions in `dimension_nubmers`.
-    padding: Specifies padding for the convolution. Can be one of `"VALID"`,
-      `"SAME"`, or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
-    W_std: The standard deviation of the weights.
-    b_std: The standard deviation of the biases.
-    parameterization: Either `"ntk"` or `"standard"`. These parameterizations
-      are the direct analogues for convolution of the corresponding
-      parameterizations for `Dense` layers.
+    out_chan:
+      The number of output channels / features of the convolution. This is
+      ignored in by the `kernel_fn` in NTK parameterization.
+    filter_shape:
+      The shape of the filter. The shape of the tuple should agree with the
+      number of spatial dimensions in `dimension_numbers`.
+    strides:
+      The stride of the convolution. The shape of the tuple should agree with
+      the number of spatial dimensions in `dimension_nubmers`.
+    padding:
+      Specifies padding for the convolution. Can be one of `"VALID"`, `"SAME"`,
+      or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
+    W_std:
+      The standard deviation of the weights.
+    b_std:
+      The standard deviation of the biases.
+    dimension_numbers:
+      Specifies which axes should be convolved over. Should match the
+      specification in `jax.lax.conv_general_dilated`.
+    parameterization:
+      Either `"ntk"` or `"standard"`. These parameterizations are the direct
+      analogues for convolution of the corresponding parameterizations for
+      `Dense` layers.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
-  return _GeneralConv(dimension_numbers,
-                      out_chan,
-                      filter_shape,
-                      strides,
-                      padding,
-                      W_std,
-                      b_std,
-                      False,
-                      parameterization)
+  return _Conv(out_chan, filter_shape, strides, padding, W_std, b_std,
+               dimension_numbers, parameterization, False)
 
 
 @layer
 @_supports_masking(remask_kernel=True)
-def GeneralConvTranspose(
-    dimension_numbers: Optional[Tuple[str, str, str]],
+def ConvTranspose(
     out_chan: int,
     filter_shape: Sequence[int],
     strides: Sequence[int] = None,
     padding: str = Padding.VALID.name,
     W_std: float = 1.0,
     b_std: float = 0.0,
+    dimension_numbers: lax.DotDimensionNumbers = None,
     parameterization: str = 'ntk'
 ) -> InternalLayer:
   """Layer construction function for a general transpose convolution layer.
@@ -657,9 +658,6 @@ def GeneralConvTranspose(
   Based on `jax.experimental.stax.GeneralConvTranspose`.
 
   Args:
-    dimension_numbers:
-      Specifies which axes should be convolved over. Should match the
-      specification in `jax.lax.conv_general_dilated`.
     out_chan:
       The number of output channels / features of the convolution. This is
       ignored in by the `kernel_fn` in `"ntk"` parameterization.
@@ -676,6 +674,9 @@ def GeneralConvTranspose(
       standard deviation of the weights.
     b_std:
       standard deviation of the biases.
+    dimension_numbers:
+      Specifies which axes should be convolved over. Should match the
+      specification in `jax.lax.conv_general_dilated`.
     parameterization:
       Either `"ntk"` or `"standard"`. These parameterizations are the direct
       analogues for convolution of the corresponding parameterizations for
@@ -684,138 +685,26 @@ def GeneralConvTranspose(
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
-  return _GeneralConv(dimension_numbers,
-                      out_chan,
-                      filter_shape,
-                      strides,
-                      padding,
-                      W_std,
-                      b_std,
-                      True,
-                      parameterization)
+  return _Conv(out_chan, filter_shape, strides, padding, W_std, b_std,
+               dimension_numbers, parameterization, True)
 
 
-@layer
-@_supports_masking(remask_kernel=True)
-def Conv(
-    out_chan: int,
-    filter_shape: Sequence[int],
-    strides: Sequence[int] = None,
-    padding: str = Padding.VALID.name,
-    W_std: float = 1.0,
-    b_std: float = 0.0,
-    parameterization: str = 'ntk') -> InternalLayer:
-  """Layer construction function for a general convolution layer.
-
-  Based on `jax.experimental.stax.Conv`.
-
-  Args:
-    out_chan:
-      The number of output channels / features of the
-      convolution. This is ignored in by the `kernel_fn` in `"ntk"`
-      parameterization.
-    filter_shape:
-      The shape of the filter. The shape of the tuple should agree with the
-      number of spatial dimensions in `dimension_numbers`.
-    strides:
-      The stride of the convolution. The shape of the tuple should agree
-      with the number of spatial dimensions in `dimension_nubmers`.
-    padding:
-      Specifies padding for the convolution. Can be one of `"VALID"`, `"SAME"`,
-      or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
-    W_std:
-      standard deviation of the weights.
-    b_std:
-      standard deviation of the biases.
-    parameterization:
-      Either `"ntk"` or `"standard"`. These parameterizations are the direct
-      analogues for convolution of the corresponding parameterizations for
-      `Dense` layers.
-
-  Returns:
-    `(init_fn, apply_fn, kernel_fn)`.
-  """
-  return _GeneralConv(None,
-                      out_chan,
-                      filter_shape,
-                      strides,
-                      padding,
-                      W_std,
-                      b_std,
-                      False,
-                      parameterization)
-
-
-@layer
-@_supports_masking(remask_kernel=True)
-def ConvTranspose(
-    out_chan: int,
-    filter_shape: Sequence[int],
-    strides: Sequence[int] = None,
-    padding: str = Padding.VALID.name,
-    W_std: float = 1.0,
-    b_std: float = 0.0,
-    parameterization: str = 'ntk'
-) -> InternalLayer:
-  """Layer construction function for a general transpose convolution layer.
-
-  Based on `jax.experimental.stax.ConvTranspose`.
-
-  Args:
-    out_chan:
-      The number of output channels / features of the convolution. This is
-      ignored in by the `kernel_fn` in NTK parameterization.
-    filter_shape:
-      The shape of the filter. The shape of the tuple should agree with the
-      number of spatial dimensions in `dimension_numbers`.
-    strides:
-      The stride of the convolution. The shape of the tuple should agree with
-      the number of spatial dimensions in `dimension_nubmers`.
-    padding:
-      Specifies padding for the convolution. Can be one of `"VALID"`, `"SAME"`,
-      or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
-    W_std:
-      The standard deviation of the weights.
-    b_std:
-      The standard deviation of the biases.
-    parameterization:
-      Either `"ntk"` or `"standard"`. These parameterizations are the direct
-      analogues for convolution of the corresponding parameterizations for
-      `Dense` layers.
-
-  Returns:
-    `(init_fn, apply_fn, kernel_fn)`.
-  """
-  return _GeneralConv(None,
-                      out_chan,
-                      filter_shape,
-                      strides,
-                      padding,
-                      W_std,
-                      b_std,
-                      True,
-                      parameterization)
-
-
-def _GeneralConv(
-    dimension_numbers: Optional[Tuple[str, str, str]],
+def _Conv(
     out_chan: int,
     filter_shape: Sequence[int],
     strides: Optional[Sequence[int]],
     padding: str,
     W_std: float,
     b_std: float,
-    transpose: bool,
-    parameterization: str
+    dimension_numbers: Optional[lax.ConvDimensionNumbers],
+    parameterization: str,
+    transpose: bool
 ) -> InternalLayer:
   """Layer construction function for a general convolution layer.
 
   Based on `jax.experimental.stax.GeneralConv`.
 
   Args:
-    dimension_numbers:
-      Specifies which axes should be convolved over. Should match the
-      specification in `jax.lax.dot_general_dilated`.
     out_chan:
       The number of output channels / features of the convolution. This is
       ignored in by the `kernel_fn` in NTK parameterization.
@@ -832,12 +721,15 @@ def _GeneralConv(
       The standard deviation of the weights.
     b_std:
       The standard deviation of the biases.
-    transpose:
-      `True` to use transpose convolution.
+    dimension_numbers:
+      Specifies which axes should be convolved over. Should match the
+      specification in `jax.lax.dot_general_dilated`.
     parameterization:
       Either `"ntk"` or `"standard"`. These parameterizations are the direct
       analogues for convolution of the corresponding parameterizations for
       `Dense` layers.
+    transpose:
+      `True` to use transpose convolution.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
