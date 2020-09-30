@@ -428,6 +428,9 @@ as an example. With `NVIDIA V100` 64-bit precision, `nt` took 316/330/508 GPU-ho
 
 Neural Tangents has been used in the following papers:
 
+* [Experimental Design for Overparameterized Learning with Application to Single Shot Deep Active Learning](https://arxiv.org/abs/2009.12820)
+* [How Neural Networks Extrapolate: From Feedforward to Graph Neural Networks](https://arxiv.org/abs/2009.11848)
+* [Exploring the Uncertainty Properties of Neural Networks’ Implicit Priors in the Infinite-Width Limit](http://www.gatsby.ucl.ac.uk/~balaji/udl2020/accepted-papers/UDL2020-paper-115.pdf)
 * [Cold Posteriors and Aleatoric Uncertainty](https://arxiv.org/abs/2008.00029)
 * [Asymptotics of Wide Convolutional Neural Networks](https://arxiv.org/abs/2008.08675)
 * [Finite Versus Infinite Neural Networks: an Empirical Study](https://arxiv.org/abs/2007.15801)
