@@ -1231,7 +1231,7 @@ def FanInProd() -> InternalLayer:
                 k.shape2 == ks[0].shape2 for k in ks[1:]]):
       raise ValueError('All shapes should be equal in `FanInProd`.')
 
-    is_gaussian = len(ks) == 1 and ks[0].is_gaussan
+    is_gaussian = len(ks) == 1 and ks[0].is_gaussian
 
     def _mats_prod(nngps, ntks):
       if None in ntks:
