@@ -30,10 +30,9 @@ from jax.config import config
 from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.random as random
+import more_itertools
 from neural_tangents import stax
-from neural_tangents.utils import batch
-from neural_tangents.utils import monte_carlo
-from neural_tangents.utils import test_utils
+from neural_tangents.utils import monte_carlo, test_utils, utils, batch
 import numpy as onp
 
 
@@ -1809,7 +1808,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
   def test_mask_fc(self, same_inputs, get, concat, p, mask_axis, mask_constant):
     width = 512
     n_samples = 128
-    tol = 0.03
+    tol = 0.04
     key = random.PRNGKey(1)
 
     x1 = random.normal(key, (4, 6, 5, 7))
@@ -1828,14 +1827,17 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
             stax.serial(
                 stax.Dense(width, 1.5, 0.1),
                 stax.Abs(),
+                stax.DotGeneral(lhs=2.),
                 stax.Dense(width, 1.5, 0.1),
             ),
             stax.serial(
                 stax.Dense(width, 1.5, 0.1),
+                stax.DotGeneral(rhs=3.),
                 stax.Erf(),
                 stax.Dense(width if concat != 1 else 512, 1.5, 0.1),
             ),
             stax.serial(
+                stax.DotGeneral(rhs=0.5),
                 stax.Dense(width, 1.5, 0.1),
                 stax.ABRelu(-0.2, 0.4),
                 stax.Dense(width if concat != 1 else 1024, 3, 0.5),
@@ -1907,9 +1909,9 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
     elif xla_bridge.get_backend().platform == 'gpu' and n > 3:
       raise absltest.SkipTest('>=4D-CNN is not supported on GPUs.')
 
-    width = 128
+    width = 256
     n_samples = 256
-    tol = 0.05
+    tol = 0.03
     key = random.PRNGKey(1)
 
     spatial_shape = ((1, 2, 3, 2, 1) if transpose else (15, 8, 9))[:n]
@@ -1953,6 +1955,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
                     b_std=0.2),
                 stax.LayerNorm(axis=(1, -1)),
                 stax.Abs(),
+                stax.DotGeneral(rhs=1.5),
                 conv(
                     dimension_numbers=dimension_numbers,
                     out_chan=width,
@@ -1994,6 +1997,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
                     b_std=0.1),
                 stax.Erf(),
                 stax.Dropout(0.2),
+                stax.DotGeneral(rhs=0.7),
                 conv(
                     dimension_numbers=dimension_numbers,
                     out_chan=width,
@@ -2033,6 +2037,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
 
 
 class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
+
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
@@ -2367,15 +2372,19 @@ class AttentionTest(test_utils.NeuralTangentsTestCase):
 
 
 class AggregateTest(test_utils.NeuralTangentsTestCase):
+
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
-              f'{get}-{name}-{same_input}-{act_name}-{test_mask}',
+              f'{get}-{name}-{same_input}-{act_name}-{test_mask}-{shape}'
+              f'-{do_batch}',
           'get': get,
           'readout': readout,
           'same_input': same_input,
           'activation': activation,
           'test_mask': test_mask,
+          'shape': shape,
+          'do_batch': do_batch
       } for get in ['ntk']
                           for name, readout in [
                               ('Flattten', stax.Flatten()),
@@ -2383,31 +2392,33 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
                           for same_input in [True, False]
                           for act_name, activation in [('Relu', stax.Relu())]
                           for test_mask in [True]
+                          for shape in [(), (8,), (2, 3), (3, 1, 2)]
+                          for do_batch in [True, False]
                           ))
-
-  def test_aggregate(self, get, readout, same_input, activation, test_mask):
+  def test_aggregate(self, get, readout, same_input, activation, test_mask,
+                     shape, do_batch):
     batch1, batch2 = 8, 6
-    num_nodes, num_channels = 4, 2
+    num_channels = 12
     output_dims = 1 if get == 'ntk' else 1024
     key = random.PRNGKey(1)
     key, split1, split2 = random.split(key, 3)
-    x1 = random.normal(split1, (batch1, num_nodes, num_channels))
-    x2 = x1 if same_input else random.normal(split2,
-                                             (batch2, num_nodes, num_channels))
+    x1 = random.normal(split1, (batch1,) + shape + (num_channels,))
+    x2 = x1 if same_input else random.normal(
+        split2, (batch2,) + shape + (num_channels,))
     if test_mask:
       mask_constant = 10.
       key, split1, split2 = random.split(key, 3)
-      mask1 = random.bernoulli(split1, p=0.5, shape=(batch1, num_nodes, 1))
+      mask1 = random.bernoulli(split1, p=0.5, shape=(batch1,) + shape + (1,))
       x1 = np.where(mask1, mask_constant, x1)
       if same_input:
         x2 = x1
       else:
-        mask2 = random.bernoulli(split2, p=0.5, shape=(batch2, num_nodes, 1))
+        mask2 = random.bernoulli(split2, p=0.5, shape=(batch2,) + shape + (1,))
         x2 = np.where(mask2, mask_constant, x2)
     key, split1, split2 = random.split(key, 3)
-    pattern1 = random.uniform(split1, (batch1, num_nodes, num_nodes))
-    pattern2 = pattern1 if same_input else np.abs(
-        random.uniform(split2, (batch2, num_nodes, num_nodes)))
+    pattern1 = random.uniform(split1, (batch1,) + shape * 2)
+    pattern2 = pattern1 if same_input else random.uniform(
+        split2, (batch2,) + shape * 2)
 
     # Build the infinite network.
     init_fn, apply_fn, kernel_fn = stax.serial(
@@ -2417,7 +2428,10 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
         stax.Aggregate(),
         readout,
         stax.Dense(output_dims))
-    kernel_fn = batch.batch(kernel_fn, batch_size=4)
+
+    if do_batch:
+      kernel_fn = batch.batch(kernel_fn, batch_size=4)
+
     kernel_mc_fn = monte_carlo.monte_carlo_kernel_fn(
         init_fn, apply_fn, random.PRNGKey(10), 128,
         batch_size=2 if xla_bridge.get_backend().platform == 'tpu' else 0)
@@ -2522,10 +2536,10 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
     placeholder = np.ones(o_layout, lhs.dtype)
 
     _, apply_fn, _ = stax.Conv(
-      out_chan=rhs.shape[dimension_numbers[1].index('I')],
-      filter_shape=(rhs.shape[dimension_numbers[1].index('H')],),
-      strides=strides, padding=padding, dimension_numbers=dimension_numbers,
-      parameterization='standard')
+        out_chan=rhs.shape[dimension_numbers[1].index('I')],
+        filter_shape=(rhs.shape[dimension_numbers[1].index('H')],),
+        strides=strides, padding=padding, dimension_numbers=dimension_numbers,
+        parameterization='standard')
     conv = lambda x: apply_fn((rhs, 0.), x)
     _, g = vjp(conv, placeholder)
     return g(lhs)[0]
@@ -2539,10 +2553,12 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
                                dimension_numbers):
     """Helper method: calculates conv transpose."""
     _, apply_fn, _ = stax.ConvTranspose(
-      out_chan=params[0].shape[dimension_numbers[1].index('O')],
-      filter_shape=(params[0].shape[dimension_numbers[1].index('H')],),
-      strides=strides, padding=padding, dimension_numbers=dimension_numbers,
-      parameterization='standard')
+        out_chan=params[0].shape[dimension_numbers[1].index('O')],
+        filter_shape=(params[0].shape[dimension_numbers[1].index('H')],),
+        strides=strides,
+        padding=padding,
+        dimension_numbers=dimension_numbers,
+        parameterization='standard')
     return apply_fn((params[0], 0.), lhs)
 
   @jtu.parameterized.named_parameters(
@@ -2572,6 +2588,322 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
     f_adj = self._conv_transpose_circular_via_grad(x, params, strides, padding,
                                                    dn)
     self.assertAllClose(f_adj, f_conv)
+
+
+class DotGeneralTest(test_utils.NeuralTangentsTestCase):
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list(
+          {
+              'testcase_name':
+                  ' [{}_n={}_dn=(({}, {}), ({}, {}))_channel_axis={}_'
+                  'batch_axis={}_{}_{}_batch={}_spatial={}]'.format(
+                      'same_inputs' if same_inputs else 'different_inputs',
+                      n,
+                      contracting_dims,
+                      c_dims,
+                      batch_dims,
+                      b_dims,
+                      channel_axis,
+                      batch_axis,
+                      'rhs' if is_rhs else 'lhs',
+                      r_permutation,
+                      diagonal_batch,
+                      diagonal_spatial
+                  ),
+              'same_inputs': same_inputs,
+              'n': n,
+              'batch_dims': batch_dims,
+              'contracting_dims': contracting_dims,
+              'b_dims': b_dims,
+              'c_dims': c_dims,
+              'r_permutation': r_permutation,
+              'channel_axis': channel_axis,
+              'batch_axis': batch_axis,
+              'is_rhs': is_rhs,
+              'diagonal_spatial': diagonal_spatial,
+              'diagonal_batch': diagonal_batch
+          }
+          for same_inputs in [True, False]
+          for n in [2, 3]
+          for is_rhs in [False, True]
+          for batch_axis in range(n)
+          for channel_axis in [i for i in range(n) if i != batch_axis]
+          for diagonal_spatial in [True, False]
+          for diagonal_batch in [True, False]
+          for batch_dims in more_itertools.powerset(
+              i for i in range(n)
+              if i != channel_axis)
+          for contracting_dims in more_itertools.powerset(
+              i for i in range(n)
+              if i not in batch_dims + (channel_axis,))
+          for c_dims in itertools.permutations(contracting_dims)
+          for b_dims in itertools.permutations(batch_dims)
+          for r_permutation in itertools.permutations(range(n))
+      )
+  )
+  def test_dot_general(self, same_inputs, n, batch_dims, contracting_dims,
+                       c_dims, b_dims, r_permutation, channel_axis, is_rhs,
+                       diagonal_spatial, diagonal_batch, batch_axis):
+    if xla_bridge.get_backend().platform == 'cpu' and n != 2:
+      raise absltest.SkipTest(f'Skipping n = {n} on CPU.')
+
+    n_b = 2
+    n_c = 1
+    key1, key2, key3 = random.split(random.PRNGKey(1), 3)
+
+    x_shape_n_c = [2, 4, 6, 8, 10, 12, 14][:n - 2]
+    x_shape = list(x_shape_n_c)
+
+    for a in sorted((batch_axis, channel_axis)):
+      x_shape.insert(a, n_b if a == batch_axis else n_c)
+
+    mask_constant = 10.
+
+    x1 = np.cos(random.normal(key1, x_shape))
+    mask1 = random.bernoulli(key1, p=0.8, shape=x1.shape)
+    x1 = np.where(mask1, mask_constant, x1)
+
+    if same_inputs:
+      x2 = None
+    else:
+      x2_shape = (x_shape[:batch_axis] +
+                  [4 if (batch_axis not in contracting_dims + batch_dims)
+                   else x_shape[batch_axis]] +
+                  x_shape[batch_axis + 1:])
+      x2 = np.cos(random.normal(key2, x2_shape))
+      mask2 = random.bernoulli(key2, p=0.4, shape=x2.shape)
+      x2 = np.where(mask2, mask_constant, x2)
+
+    other_shape = [1, 3, 5, 7, 9, 11, 13, 15][:n]
+    for i in contracting_dims + batch_dims:
+      other_shape[i] = x_shape[i]
+    other = random.normal(key3, other_shape)
+    other = np.arange(np.size(other)).reshape(other_shape)
+
+    other_t = np.transpose(other, r_permutation)
+    r_c_dims = tuple(r_permutation.index(c) for c in c_dims)
+    r_b_dims = tuple(r_permutation.index(b) for b in b_dims)
+
+    if is_rhs:
+      lhs, rhs = None, other_t
+      dn = ((c_dims, r_c_dims), (b_dims, r_b_dims))
+    else:
+      lhs, rhs = other_t, None
+      dn = ((r_c_dims, c_dims), (r_b_dims, b_dims))
+
+    lhs_ndim = None if lhs is None else lhs.ndim
+    init_fn, apply_fn, kernel_fn = stax.DotGeneral(lhs=lhs,
+                                                   rhs=rhs,
+                                                   dimension_numbers=dn,
+                                                   batch_axis=batch_axis)
+    def get_exact():
+      return kernel_fn(x1, x2,
+                       diagonal_spatial=diagonal_spatial,
+                       diagonal_batch=diagonal_batch,
+                       batch_axis=batch_axis,
+                       channel_axis=channel_axis,
+                       mask_constant=mask_constant)
+
+    if (([i for i in c_dims if i not in (batch_axis, channel_axis)] and
+         diagonal_spatial) or
+        (batch_axis in c_dims and diagonal_batch)):
+      self.assertRaises(ValueError, get_exact)
+
+    else:
+      exact = get_exact()
+
+      out_c_axis = utils.axis_after_dot(channel_axis, c_dims, b_dims, lhs_ndim)
+      out_b_axis = utils.axis_after_dot(batch_axis, c_dims, b_dims, lhs_ndim)
+
+      def get_empirical(get):
+        def get_diagonal_axes():
+          axes = ()
+          if (get in ('cov1', 'cov2') and
+              diagonal_batch and
+              batch_axis not in c_dims):
+            axes += (out_b_axis,)
+
+          if diagonal_spatial:
+            axes += tuple(
+                utils.axis_after_dot(i, c_dims, b_dims, lhs_ndim)
+                for i in range(n)
+                if i not in c_dims + (batch_axis, channel_axis))
+            rhs_ndim = None if rhs is None else rhs.ndim
+            axes += tuple(
+                utils.axis_after_dot(i, r_c_dims, r_b_dims, rhs_ndim)
+                for i in range(n)
+                if i not in r_c_dims and
+                not (i in r_b_dims and b_dims[r_b_dims.index(i)] == batch_axis))
+          return axes
+
+        def batch_axes():
+          if batch_axis in contracting_dims:
+            return (), ()
+
+          axis = out_b_axis
+          if out_c_axis < axis:
+            axis -= 1
+          if not diagonal_spatial:
+            axis *= 2
+
+          if get in ('cov1', 'cov2') and diagonal_batch:
+            return (axis,), (0,)
+          return (axis, axis + 1), (0, 1)
+
+        kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+            init_fn=init_fn,
+            apply_fn=apply_fn,
+            key=key1,
+            n_samples=1,
+            trace_axes=(out_c_axis,),
+            diagonal_axes=get_diagonal_axes(),
+            device_count=-1 if (get == 'nngp' and
+                                batch_axis == out_b_axis == 0 and
+                                0 not in c_dims + b_dims) else 0)
+
+        empirical = kernel_fn_mc(x1=x2 if get == 'cov2' else x1,
+                                 x2=x2 if get == 'nngp' else None,
+                                 get='nngp',
+                                 batch_axis=batch_axis,
+                                 channel_axis=channel_axis,
+                                 mask_constant=mask_constant)
+        empirical = np.moveaxis(empirical, *batch_axes())
+        return empirical
+
+      for get in ('nngp', 'cov1', 'cov2'):
+        if get == 'cov2' and same_inputs:
+          continue
+
+        with self.subTest(get=get):
+          test_utils.assert_close_matrices(
+              self, get_empirical(get), getattr(exact, get), 0.01)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list(
+          {
+              'testcase_name': ' [{}_get={}_n={}_{}_{}_{}]'.format(
+                  'same_inputs' if same_inputs else 'different_inputs',
+                  get,
+                  n,
+                  'pool' if do_pool else 'flat',
+                  'rhs' if is_rhs else 'lhs',
+                  'dot_first' if dot_first else 'conv_first'
+              ),
+              'same_inputs': same_inputs,
+              'get': get,
+              'n': n,
+              'do_pool': do_pool,
+              'is_rhs': is_rhs,
+              'dot_first': dot_first
+          }
+          for same_inputs in [False, True]
+          for get in ['ntk']
+          for do_pool in [True, False]
+          for n in [3, 4]
+          for is_rhs in [False, True]
+          for dot_first in [True, False]
+      )
+  )
+  def test_dot_general_nn(self, same_inputs, get, n, is_rhs, do_pool,
+                          dot_first):
+    if xla_bridge.get_backend().platform == 'cpu' and n != 2:
+      raise absltest.SkipTest(f'Skipping n = {n} on CPU.')
+
+    width = 2**8
+    n_samples = 2**8
+    tol = 0.03
+    key1, key2, key3 = random.split(random.PRNGKey(1), 3)
+
+    mask_constant = 10.
+
+    x_shape = [6, 3, 4, 5][:n - 1] + [1]
+    x1 = np.cos(random.normal(key1, x_shape))
+    mask1 = random.bernoulli(key1, p=0.8, shape=x1.shape)
+    x1 = np.where(mask1, mask_constant, x1)
+
+    if same_inputs:
+      x2 = None
+    else:
+      x2 = np.cos(random.normal(key2, x_shape))
+      mask2 = random.bernoulli(key2, p=0.4, shape=x2.shape)
+      x2 = np.where(mask2, mask_constant, x2)
+
+    other = random.normal(key3, [3, 4, 6, 2])
+
+    c_dims, b_dims = (1,), (0,)
+    o_c_dims, o_b_dims = (0,), (2,)
+
+    if is_rhs:
+      lhs, rhs = None, other
+      dn = ((c_dims, o_c_dims), (b_dims, o_b_dims))
+    else:
+      lhs, rhs = other, None
+      dn = ((o_c_dims, c_dims), (o_b_dims, b_dims))
+
+    lhs_ndim = None if lhs is None else lhs.ndim
+    out_c_axis = utils.axis_after_dot(n - 1, c_dims, b_dims, lhs_ndim)
+    out_b_axis = utils.axis_after_dot(0, c_dims, b_dims, lhs_ndim)
+
+    top_b_axis = int(out_b_axis > out_c_axis and do_pool)
+    init_fn, apply_fn, kernel_fn = stax.serial(
+        stax.Identity() if dot_first else stax.Conv(
+            width, (3,) * (n - 2), padding='SAME'),
+        stax.DotGeneral(lhs=lhs,
+                        rhs=rhs,
+                        dimension_numbers=dn),
+        stax.Dense(width, batch_axis=out_b_axis, channel_axis=out_c_axis),
+        stax.Relu(),
+        (stax.GlobalAvgPool(channel_axis=out_c_axis,
+                            batch_axis=out_b_axis) if do_pool else
+         stax.Flatten(batch_axis=out_b_axis)),
+        stax.Dense(
+            width if get == 'nngp' else 1, 0.9, 0.1,
+            batch_axis=top_b_axis,
+            channel_axis=int(out_c_axis > out_b_axis or not do_pool))
+    )
+
+    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, key1, n_samples,
+        trace_axes=(int(out_c_axis > out_b_axis) if do_pool else 1,),
+        device_count=0
+    )
+
+    empirical = kernel_fn_mc(x1, x2, get, mask_constant=mask_constant)
+    exact = kernel_fn(x1, x2, get, mask_constant=mask_constant)
+    test_utils.assert_close_matrices(self, empirical, exact, tol)
+
+  def test_dot_general_mask(self):
+    x1, x2 = np.ones((4, 2, 3, 1)), np.ones((4, 2, 3, 1))
+
+    mask_constant = 10.
+
+    def get_k(x1, x2, m1, m2):
+      x1, x2 = np.where(m1, mask_constant, x1), np.where(m2, mask_constant, x2)
+      k_fn = stax.DotGeneral(
+          rhs=np.ones(x1.shape[:-1]),
+          dimension_numbers=(((1,), (1,)), ((2,), (2,))))[2]
+      k = k_fn(x1, x2, 'nngp', mask_constant=mask_constant)
+      return k
+
+    m1, m2 = np.zeros_like(x1, np.bool_), np.zeros_like(x2, np.bool_)
+    k = get_k(x1, x2, m1, m2)
+    self.assertAllClose(np.ones_like(k) * 4, k)
+
+    m1, m2 = np.ones_like(x1, np.bool_), np.zeros_like(x2, np.bool_)
+    k = get_k(x1, x2, m1, m2)
+    self.assertAllClose(np.zeros_like(k), k)
+
+    m1, m2 = np.ones_like(x1, np.bool_), np.ones_like(x2, np.bool_)
+    k = get_k(x1, x2, m1, m2)
+    self.assertAllClose(np.zeros_like(k), k)
+
+    m1 = np.concatenate([np.ones_like(x1[:2], np.bool_),
+                         np.zeros_like(x1[2:], np.bool_)])
+    m2 = np.zeros_like(x2, np.bool_)
+    k = get_k(x1, x2, m1, m2)
+    self.assertAllClose(np.zeros_like(k[:2]), k[:2])
+    self.assertAllClose(np.full_like(k[2:], 4.), k[2:])
 
 
 if __name__ == '__main__':

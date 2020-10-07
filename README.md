@@ -74,7 +74,7 @@ You can now run the examples (using [`tensorflow_datasets`](https://github.com/t
 and tests by calling:
 
 ```
-pip install tensorflow tensorflow-datasets --upgrade
+pip install tensorflow tensorflow-datasets more-itertools --upgrade
 
 python examples/infinite_fcn.py
 python examples/weight_space.py

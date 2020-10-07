@@ -78,9 +78,7 @@ from jax import linear_util as lu
 from jax import numpy as np
 from jax import ops
 from jax import random
-from jax.abstract_arrays import ShapedArray
-from jax.api import eval_shape
-from jax.api import grad
+from jax.api import ShapeDtypeStruct, eval_shape, grad, ShapedArray
 from jax.api_util import flatten_fun
 import jax.experimental.stax as ostax
 from jax.lib import xla_bridge
@@ -352,67 +350,297 @@ def parallel(*layers: Layer) -> InternalLayer:
 
 
 @layer
+@_supports_masking(remask_kernel=False)
+def DotGeneral(
+    *,
+    lhs: Union[np.ndarray, float] = None,
+    rhs: Union[np.ndarray, float] = None,
+    dimension_numbers: lax.DotDimensionNumbers = (((), ()), ((), ())),
+    precision: Optional[lax.Precision] = None,
+    batch_axis: int = 0,
+    channel_axis: int = -1
+) -> InternalLayer:
+  r"""Layer constructor for a constant (non-trainable) rhs/lhs Dot General.
+
+  Dot General allows to express any linear transformation on the inputs,
+  including but not limited to matrix multiplication, pooling, convolutions,
+  permutations, striding, masking etc (but specialized implementations are
+  typically much more efficient).
+
+  Returned `apply_fn` is calling
+  `jax.lax.dot_general(inputs, rhs, dimension_numbers, precision)` or
+  `jax.lax.dot_general(lhs, inputs, dimension_numbers, precision)`, depending
+  on whether `lhs` or `rhs` is specified (not `None`).
+
+  Example:
+    >>>  from jax import random
+    >>>  import jax.numpy as np
+    >>>  from neural_tangents import stax
+    >>>
+    >>>  # Two time series stacked along the second (H) dimension.
+    >>>  x = random.normal(random.PRNGKey(1), (5, 2, 32, 3))  # NHWC
+    >>>
+    >>>  # Multiply all outputs by a scalar:
+    >>>  nn = stax.serial(
+    >>>      stax.Conv(128, (1, 3)),
+    >>>      stax.Relu(),
+    >>>      stax.DotGeneral(rhs=2.),  # output shape is (5, 2, 30, 128)
+    >>>      stax.GlobalAvgPool()      # (5, 128)
+    >>>  )
+    >>>
+    >>>  # Subtract second time series from the first one:
+    >>>  nn = stax.serial(
+    >>>      stax.Conv(128, (1, 3)),
+    >>>      stax.Relu(),
+    >>>      stax.DotGeneral(
+    >>>          rhs=np.array([1., -1.]),
+    >>>          dimension_numbers=(((1,), (0,)), ((), ()))),  # (5, 30, 128)
+    >>>      stax.GlobalAvgPool()                              # (5, 128)
+    >>>  )
+    >>>
+    >>>  # Flip outputs with each other
+    >>>  nn = stax.serial(
+    >>>      stax.Conv(128, (1, 3)),
+    >>>      stax.Relu(),
+    >>>      stax.DotGeneral(
+    >>>          lhs=np.array([[0., 1.], [1., 0.]]),
+    >>>          dimension_numbers=(((1,), (1,)), ((), ()))),  # (5, 2, 30, 128)
+    >>>      stax.GlobalAvgPool()                              # (5, 128)
+    >>>  )
+
+  See Also:
+    https://www.tensorflow.org/xla/operation_semantics#dotgeneral
+
+  Args:
+    lhs:
+      a constant array to dot with. `None` means layer `inputs` are the
+      left-hand side.
+    rhs:
+      a constant array to dot with. `None` means layer `inputs` are the
+      right-hand side. If both `lhs` and `rhs` are `None` the layer is the same
+      as `Identity`.
+    dimension_numbers:
+      a tuple of tuples of the form
+      `((lhs_contracting_dims, rhs_contracting_dims),
+        (lhs_batch_dims, rhs_batch_dims))`.
+    precision:
+      Optional. Either `None`, which means the default precision for the
+      backend, or a `lax.Precision` enum value (`Precision.DEFAULT`,
+      `Precision.HIGH` or `Precision.HIGHEST`).
+    batch_axis:
+      batch axis for `inputs`. Defaults to `0`, the leading axis. Can be present
+      in `dimension_numbers`, but contraction along `batch_axis` will not allow
+      for further layers to be applied afterwards.
+    channel_axis:
+      channel axis for `inputs`. Defaults to `-1`, the trailing axis. For
+      `kernel_fn`, channel size is considered to be infinite. Cannot be present
+      in `dimension_numbers`.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  if rhs is not None and lhs is not None:
+    raise ValueError('At most one of constant `rhs` and `lhs` can be non-`None`'
+                     ', since the other factor is considered to be the layer '
+                     '`inputs`.')
+  is_lhs = rhs is None
+  other = np.array(lhs if is_lhs else rhs)
+
+  def dot_fn(x):
+    args = (x, other.astype(x.dtype))[::(-1 if is_lhs else 1)]
+    return lax.dot_general(*args, dimension_numbers, precision)
+
+  def init_fn(rng, input_shape):
+    out = eval_shape(dot_fn, ShapeDtypeStruct(input_shape, other.dtype))
+    return out.shape, ()
+
+  def apply_fn(params, inputs, **kwargs):
+    return dot_fn(inputs)
+
+  # If a dimension is contracted, respective pairwise covariances are needed to
+  # compute the covariance of contractions.
+  input_cs = dimension_numbers[0][1 if is_lhs else 0]
+  diagonal_batch = (batch_axis not in input_cs) or (rhs is None and lhs is None)
+  diagonal_spatial = (input_cs in ((), (batch_axis,)) or
+                      (rhs is None and lhs is None))
+
+  @_requires(diagonal_batch=diagonal_batch,
+             diagonal_spatial=diagonal_spatial,
+             batch_axis=batch_axis,
+             channel_axis=channel_axis)
+  def kernel_fn(k: Kernel, **kwargs) -> Kernel:
+    return k.dot_general(other, other, is_lhs, dimension_numbers)
+
+  def mask_fn(mask, input_shape):
+    mask_shape = list(input_shape)
+    mask_shape[channel_axis] = mask.shape[channel_axis]
+    return ~dot_fn(~np.broadcast_to(mask, mask_shape))
+
+  return init_fn, apply_fn, kernel_fn, mask_fn
+
+
+@layer
 @_supports_masking(remask_kernel=True)
-def Aggregate(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
+def Aggregate(
+    aggregate_axis: Axes = None,
+    batch_axis: int = 0,
+    channel_axis: int = -1) -> InternalLayer:
   r"""Layer constructor for aggregation operator (graphical neural network).
 
   See e.g. arXiv: 1905.13192.
 
-  Specifically, each `input` (of shape (batch, nodes, channels)) is associated
-  with a `pattern` (of shape (batch, nodes, nodes)) and the output tensor is
-  equal to `np.matmul(pattern, input)`.
+  Specifically, each `N+2`-D `input` of shape `(batch, X_1, ..., X_N, channels)`
+  (subject to `batch_axis` and `channel_axis`) is accompanied by a [weighted]
+  2-adjacency `2K+1`-D tensor `pattern` of shape
+  `(batch, X_i1, ..., X_iK, X_i1, ..., X_iK)` (i.e. leading batch dimensions,
+  repeated spatial dimensions, no channel dimension) and the output tensor is
+  `lax.dot_general(inputs, pattern, ((aggregate_axes, range(1, K + 1)),
+                                     (batch_axis,), (0,)))`
+  with the `batch_axis` and `channel_axis` preserved. `K = len(aggregate_axes)`.
+
+  Qualitatively, having `pattern[n, i1, ..., iK, j1, ..., jK] == w` represents
+  a directed edge from pixel / token (i1, ..., iK)` to `(j1, ..., jK)` with
+  weight `w` in an individual input sample `n`. The `apply_fn` of this
+  layer replaces all nodes with the (weighted) sum of (incoming) adjacent nodes
+  to the given node.
+
+  Note that individual inputs can have more than `K` dimensions (e.g. channels,
+  other coordinates), in which case slices along these coordinates are
+  processed in the same way independently.
+
+  Example:
+    >>>  # 1D inputs
+    >>>  x = random.normal(random.PRNGKey(1), (5, 3, 32))  # NCH
+    >>>
+    >>>  # 1) NHH binary adjacency matrix
+    >>>  A = random.bernoulli(random.PRNGKey(2), 0.5, (5, 32, 32))
+    >>>  # `A[n, h1, h2] == True`
+    >>>  # means an edge between tokens `h1` and `h2` in sample `n`.
+    >>>
+    >>>  init_fn, apply_fn, kernel_fn = stax.Aggregate(aggregate_axis=2,
+    >>>                                                batch_axis=0,
+    >>>                                                channel_axis=1)
+    >>>
+    >>>  out = apply_fn((), x, pattern=A)
+    >>>  # output is the same as `x @ A` of shape (5, 3, 32)
+    >>>
+    >>>
+    >>>  # 2D inputs
+    >>>  x = random.normal(random.PRNGKey(1), (5, 3, 32, 16))  # NCHW
+    >>>
+    >>>  # 2) NHWHW binary adjacency matrix
+    >>>  A = random.bernoulli(random.PRNGKey(2), 0.5, (5, 32, 16, 32, 16))
+    >>>  # `A[n, h1, w1, h2, w2] == True`
+    >>>  # means an edge between pixels `(h1, w1)` and `(h2, w2)` in image `n`.
+    >>>
+    >>>  init_fn, apply_fn, kernel_fn = stax.Aggregate(aggregate_axis=(2, 3),
+    >>>                                                batch_axis=0,
+    >>>                                                channel_axis=1)
+    >>>
+    >>>  out = apply_fn((), x, pattern=A)
+    >>>  # output is of shape (5, 3, 32, 16), the same as
+    >>>  # `(x.reshape((5, 3, 32 * 16)) @ A.reshape((5, 32 * 16, 32 * 16))
+    >>>  #  ).reshape(x.shape)`
+    >>>
+    >>>
+    >>>  # 3) NWW binary adjacency matrix
+    >>>  A = random.bernoulli(random.PRNGKey(2), 0.5, (5, 16, 16))
+    >>>  # `A[n, w1, w2] == True`
+    >>>  # means an edge between rows `w1` and `w2` in image `n`.
+    >>>
+    >>>  init_fn, apply_fn, kernel_fn = stax.Aggregate(aggregate_axis=(3,),
+    >>>                                                batch_axis=0,
+    >>>                                                channel_axis=1)
+    >>>
+    >>>  out = apply_fn((), x, pattern=A)
+    >>>  # output is of shape (5, 3, 32, 16), the same as
+    >>>  # `(x.reshape((5, 3 * 32, 16)) @ A).reshape(x.shape)`
+    >>>
+    >>>
+    >>>  # 4) Infinite width example
+    >>>  x1 = random.normal(random.PRNGKey(1), (5, 3, 32))  # NCH
+    >>>  x2 = random.normal(random.PRNGKey(2), (2, 3, 32))  # NCH
+    >>>
+    >>>  # 1) NHH binary adjacency matrices
+    >>>  A1 = random.bernoulli(random.PRNGKey(2), 0.5, (5, 32, 32))
+    >>>  A2 = random.bernoulli(random.PRNGKey(2), 0.5, (2, 32, 32))
+    >>>
+    >>>  _, _, kernel_fn_id = stax.Identity()
+    >>>
+    >>>  _, _, kernel_fn_agg = stax.Aggregate(aggregate_axis=2,
+    >>>                                       batch_axis=0,
+    >>>                                       channel_axis=1)
+    >>>
+    >>>  nngp = kernel_fn_id(x1, x2, get='nngp', channel_axis=1)
+    >>>  # initial NNGP of shape (5, 2, 32, 32)
+    >>>  K_agg = kernel_fn_agg(x1, x2, get='nngp', pattern=(A1, A2))
+    >>>  # output NNGP of same shape (5, 2, 32, 32):
+    >>>  # `K_agg[n1, n2] == A1[n1].T @ nngp[n1, n2] @ A2[n2]`
 
   Args:
+    aggregate_axis:
+      axes (non-batch and non-channel) to aggregate adjacent vertices over.
     batch_axis:
-      integer, batch axis for `inputs`. Defaults to `0`, the leading axis.
+      batch axis for `inputs`. Defaults to `0`, the leading axis.
     channel_axis:
-      integer, channel axis for `inputs`. Defaults to `-1`, the trailing
-      axis. For `kernel_fn`, channel size is considered to be infinite.
+      channel axis for `inputs`. Defaults to `-1`, the trailing axis. For
+      `kernel_fn`, channel size is considered to be infinite.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
   init_fn = lambda rng, input_shape: (input_shape, ())
 
+  def get_agg_axes(ndim: int) -> List[int]:
+    if aggregate_axis is None:
+      _batch_axis, _channel_axis = utils.mod((batch_axis, channel_axis), ndim)
+      agg_axes = [i for i in range(ndim)
+                  if i not in (_batch_axis, _channel_axis)]
+    else:
+      agg_axes = utils.canonicalize_axis(aggregate_axis, ndim)
+    return agg_axes
+
+  def get_dimension_numbers(ndim: int) -> lax.DotDimensionNumbers:
+    agg_axes = get_agg_axes(ndim)
+    return (agg_axes, (range(1, len(agg_axes) + 1))), ((batch_axis,), (0,))
+
   def apply_fn(params,
                inputs: np.ndarray, *,
-               pattern: Optional[np.ndarray] = None, **kwargs):
+               pattern: np.ndarray = None,
+               **kwargs):
     """Compute the transformed tensors after an aggregation layer.
 
     Args:
       params:
         Not used.
       inputs:
-        A 3D tensor of shape (batch, nodes, channels). Note that the
-        `batch_axis` and ` channel_axis` are usef only for `inputs` not for
-        `pattern` below.
+        An input `N+2`-D tensor of shape `(batch, X_1, ..., X_N, channels)`
+        (subject to `batch_axis` and `channel_axis`).
       pattern:
-        A 3D tensor of shape (batch, nodes, nodes), whose dimension order is
-        fixed.
+        An `2K+1`-D tensor of shape `(batch, X_i1, ..., X_iK, X_i1, ..., X_iK)`,
+        with the batch leading dimension, and no channel dimension, where
+        `K = len(aggregate_axes)`.
       **kwargs:
         unused.
 
     Returns:
-      A 3D tensor of shape `(batch, nodes, channels)` which is equal to
-      np.matmul(pattern, inputs).
+      An `N+2`-D tensor of shape of the same shape as `inputs`.
     """
+    if pattern is None:
+      return inputs
+
     del params
-    if inputs.ndim != 3:
-      raise ValueError('Currently only support 3D tensor. Abitrary input '
-                       'dimensions will be supported in coming CLs.')
-    if pattern is not None and pattern.ndim != 3:
-      raise ValueError(f'`pattern` must be a 3D tensor. A {pattern.ndim} tensor'
-                       'is found.')
-    _batch_axis = batch_axis % inputs.ndim
-    _channel_axis = channel_axis % inputs.ndim
-    i = [k for k in range(inputs.ndim) if k != _batch_axis and
-         k != _channel_axis]
-    if len(i) != 1:
-      raise ValueError('Currently, only support inputs with node '
-                       'dimension = 1.')
-    i = i[0]
-    ret = lax.dot_general(pattern, inputs, (((2,), (i,)), ((0,), (0,))))
-    return ret
+    ndim = inputs.ndim
+    dn = get_dimension_numbers(ndim)
+    out = lax.dot_general(inputs, pattern.astype(inputs.dtype), dn)
+
+    out_c_axis = utils.axis_after_dot(channel_axis % ndim, dn[0][0], dn[1][0])
+    out_b_axis = utils.axis_after_dot(batch_axis % ndim, dn[0][0], dn[1][0])
+    agg_axes = get_agg_axes(ndim)
+    out = np.moveaxis(out,
+                      [out_b_axis, out_c_axis] + list(range(-len(agg_axes), 0)),
+                      [batch_axis, channel_axis] + agg_axes)
+    return out
 
   @_requires(diagonal_spatial=False,
              batch_axis=batch_axis,
@@ -424,44 +652,25 @@ def Aggregate(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
                 **kwargs):
     """Compute the transformed kernels after an aggregation kernel layer.
 
-      Specifically, the `nngp`/`ntk` is a 4d tensor of shape
-      `(batch1, batch2, node1, node2)`, where node1 == node2. This tensor will
+      Specifically, the `nngp`/`ntk` is a `2N+2`-D tensor of shape
+      `(B_1, B_2, X_1, X_1, ..., X_N, X_N)`. This tensor will
       be aggregated (via matrix multiplication) on the left by `pattern[0]` of
-      shape `(batch1, node1, node1)` and on the right by `pattern[1]` of shape
-      `(batch2, node2, node2)`. Ignoring the batch dimensions, the return
-      `nngp/ntk` is `pattern[0] @ nngp/ntk @ pattern[1].T`
+      shape `(B_1, X_i1, ..., X_iK)` and on the right by `pattern[1]` of shape
+      `(B_2, X_i1, ..., X_iK)`. Ignoring the batch dimensions, the return
+      `nngp/ntk` is `pattern[0].T @ nngp/ntk @ pattern[1]`
 
     """
-
-    cov1, nngp, cov2, ntk = \
-      k.cov1, k.nngp, k.cov2, k.ntk
     pattern1, pattern2 = pattern
-
-    def full_conjugate(p1, mat, p2):
-      if mat is None or mat.ndim == 0 or (p1 is None and p2 is None):
-        return mat
-      elif p2 is None:
-        return np.einsum('bli,bcij->bclj', p1, mat, optimize=True)
-      elif p1 is None:
-        np.einsum('bcij,ckj->bcik', mat, p2, optimize=True)
-      else:
-        return np.einsum('bli,bcij,ckj->bclk', p1, mat, p2, optimize=True)
-
-    def diagonal_batch_conjugate(p, mat):
-      if p is None or mat is None or mat.ndim == 0:
-        return mat
-      if k.diagonal_batch:
-        mat = np.einsum('bti, bij, blj->btl', p, mat, p)
-        return mat
-      else:
-        return full_conjugate(p, mat, p)
-
-    cov1 = diagonal_batch_conjugate(pattern1, cov1)
-    cov2 = diagonal_batch_conjugate(pattern2, cov2)
-    nngp = full_conjugate(pattern1, nngp, pattern2)
-    ntk = full_conjugate(pattern1, ntk, pattern2)
-
-    return k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
+    ndim = len(k.shape1)
+    return k.dot_general(
+        other1=pattern1,
+        other2=pattern2,
+        is_lhs=False,
+        dimension_numbers=get_dimension_numbers(ndim)
+    ).replace(
+        batch_axis=batch_axis % ndim,
+        channel_axis=channel_axis % ndim
+    )
 
   return init_fn, apply_fn, kernel_fn
 
@@ -965,7 +1174,7 @@ def FanInSum() -> InternalLayer:
     is_gaussian = all(k.is_gaussian for k in ks)
     if not is_gaussian and len(ks) != 1:
       # TODO(xlc): FanInSum/FanInConcat could allow non-Gaussian inputs, but
-      # we need to propogate the mean of the random variables as well.
+      # we need to propagate the mean of the random variables as well.
       raise NotImplementedError('`FanInSum` layer along the non-channel axis is'
                                 ' only implemented for the case if all input'
                                 ' layers guaranteed to be mean-zero Gaussian,'
@@ -1106,7 +1315,7 @@ def FanInConcat(axis: int = -1) -> InternalLayer:
       is_gaussian = all(k.is_gaussian for k in ks)
       if not is_gaussian:
         # TODO(xlc): FanInSum/FanInConcat could allow non-Gaussian inputs, but
-        # we need to propogate the mean of the random variables as well.
+        # we need to propagate the mean of the random variables as well.
         raise NotImplementedError(
             '`FanInConcat` layer along the non-channel axis is only implemented'
             'for the case if all input layers guaranteed to be mean-zero '
@@ -1439,11 +1648,11 @@ def _GlobalPool(
   def kernel_fn(k: Kernel, **kwargs):
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
-    def _pool(ker_mat, batch_ndim, mask=None):
-      if ker_mat is None:
-        return ker_mat
-      spatial_axes = tuple(range(batch_ndim, ker_mat.ndim))
-      return pool_fn(ker_mat, axis=spatial_axes, mask=mask)
+    def _pool(mat, batch_ndim, mask=None):
+      if mat is None or mat.ndim == 0:
+        return mat
+      spatial_axes = tuple(range(batch_ndim, mat.ndim))
+      return pool_fn(mat, axis=spatial_axes, mask=mask)
 
     mask11, mask12, mask22 = k._get_mask_prods(k.mask1, k.mask2)
 
@@ -2230,10 +2439,8 @@ def Dropout(rate: float, mode: str = 'train') -> InternalLayer:
 
     factor = 1./rate
 
-    cov1 = _diag_mul(cov1, factor, k.diagonal_batch,
-                     k.diagonal_spatial)
-    cov2 = _diag_mul(cov2, factor, k.diagonal_batch,
-                     k.diagonal_spatial)
+    cov1 = _diag_mul(cov1, factor, k.diagonal_batch, k.diagonal_spatial)
+    cov2 = _diag_mul(cov2, factor, k.diagonal_batch, k.diagonal_spatial)
 
     new_factor = np.where(k.x1_is_x2, factor, 1.)
     nngp = _diag_mul(nngp, new_factor, False, k.diagonal_spatial)
@@ -3470,7 +3677,7 @@ def _fan_in_kernel_fn_concat(ks: List[Kernel], axis: int) -> Kernel:
     is_gaussian = all(k.is_gaussian for k in ks)
     if not is_gaussian:
       # TODO(xlc): FanInSum/FanInConcat could allow non-Gaussian inputs, but
-      # we need to propogate the mean of the random variables as well.
+      # we need to propagate the mean of the random variables as well.
       raise NotImplementedError('`FanInConcat` layer along the '
                                 'non-channel axis is only implemented for the '
                                 'case if all input layers guaranteed to be mean'
@@ -4165,7 +4372,7 @@ def _check_is_implemented(mask: np.ndarray, channel_axis: int) -> None:
     raise NotImplementedError(
         'Different channel-wise masks as inputs to '
         'pooling layers are not yet supported. Please '
-        'let us know about your use case at'
+        'let us know about your use case at '
         'https://github.com/google/neural-tangents/issues/new')
 
 

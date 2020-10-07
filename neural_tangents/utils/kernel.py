@@ -16,8 +16,9 @@
 
 
 import operator as op
-from typing import Dict, Tuple, Optional, Callable, Any, Sequence
+from typing import Dict, Tuple, Optional, Callable, Any, Sequence, List
 
+from jax import lax
 import jax.numpy as np
 from neural_tangents.utils import dataclasses
 from neural_tangents.utils import utils
@@ -260,6 +261,138 @@ class Kernel:
               if mask2 is not None else mask11)
     mask12 = get_mask_prod(mask1, mask2, 2)
     return mask11, mask12, mask22
+
+  def dot_general(
+      self,
+      other1: Optional[np.ndarray],
+      other2: Optional[np.ndarray],
+      is_lhs: bool,
+      dimension_numbers: lax.DotDimensionNumbers
+  ) -> 'Kernel':
+    """Return covariances of `lax.dot_general` of `x1/2` with `other1/2`."""
+    if other1 is None and other2 is None:
+      return self
+
+    if other1 is not None and other2 is not None:
+      if other1.ndim != other2.ndim:
+        raise NotImplementedError(
+            f'Factors 1/2 with different dimensionality not implemented, got '
+            f'{other1.ndim} and {other2.ndim}.')
+
+    if is_lhs:
+      (other_cs, input_cs), (other_bs, input_bs) = dimension_numbers
+    else:
+      (input_cs, other_cs), (input_bs, other_bs) = dimension_numbers
+
+    n_input = len(self.shape1)
+    n_other = other1.ndim if other1 is not None else other2.ndim  # pytype:disable=attribute-error
+
+    input_cs = utils.mod(input_cs, n_input)
+    input_bs = utils.mod(input_bs, n_input)
+
+    other_cs = utils.mod(other_cs, n_other)
+    other_bs = utils.mod(other_bs, n_other)
+
+    other_dims = other_bs + other_cs
+    input_dims = input_bs + input_cs
+
+    def to_kernel_dim(i: int, batch_ndim: int, is_left: bool) -> int:
+      if i == self.batch_axis:
+        i = 0 if (is_left or batch_ndim == 1) else 1
+      elif i == self.channel_axis:
+        raise ValueError(f'Batch or contracting dimension {i} cannot be equal '
+                         f'to `channel_axis`.')
+      else:
+        i -= int(i > self.batch_axis) + int(i > self.channel_axis)
+        i = batch_ndim + (1 if self.diagonal_spatial else 2) * i
+        i += not is_left and not self.diagonal_spatial
+      return i
+
+    def get_other_dims(batch_ndim: int, is_left: bool) -> List[int]:
+      dims = [-i - 1 - (0 if is_left or self.diagonal_spatial else n_other)
+              for i in range(n_other)]
+      for i_inputs, i_other in zip(input_dims, other_dims):
+        dims[i_other] = to_kernel_dim(i_inputs, batch_ndim, is_left)
+      return dims
+
+    def get_mat_non_c_dims(batch_ndim: int) -> List[int]:
+      input_non_c_dims = input_bs + [
+          i for i in range(n_input)
+          if i not in input_cs + input_bs + [self.channel_axis]
+      ]
+
+      # Batch axes are always leading in `mat`.
+      if self.batch_axis in input_non_c_dims:
+        input_non_c_dims.remove(self.batch_axis)
+        input_non_c_dims.insert(0, self.batch_axis)
+
+      mat_non_c_dims = []
+      for i in input_non_c_dims:
+        left = to_kernel_dim(i, batch_ndim, True)
+        right = to_kernel_dim(i, batch_ndim, False)
+        mat_non_c_dims += [left] if left == right else [left, right]
+      return mat_non_c_dims
+
+    def get_other_non_c_dims() -> List[int]:
+      other_non_c_dims = [-i - 1 for i in range(n_other) if i not in other_dims]
+      if not self.diagonal_spatial:
+        other_non_c_dims = list(utils.zip_flat(
+            other_non_c_dims,
+            [-i - 1 - n_other for i in range(n_other) if i not in other_dims]))
+      return other_non_c_dims
+
+    def get_out_dims(batch_ndim: int) -> List[int]:
+      mat_non_c_dims = get_mat_non_c_dims(batch_ndim)
+      other_non_c_dims = get_other_non_c_dims()
+
+      n_b_spatial = len(input_bs) - (1 if self.batch_axis in input_bs else 0)
+      n_b = (len(mat_non_c_dims) if not is_lhs else
+             (((0 if self.batch_axis in input_cs else batch_ndim) +
+               (1 if self.diagonal_spatial else 2) * n_b_spatial)))
+
+      return mat_non_c_dims[:n_b] + other_non_c_dims + mat_non_c_dims[n_b:]
+
+    def dot(mat: Optional[np.ndarray],
+            batch_ndim: int,
+            other1: np.ndarray = None,
+            other2: np.ndarray = None) -> Optional[np.ndarray]:
+      if mat is None or mat.ndim == 0 or other1 is None and other2 is None:
+        return mat
+
+      operands = ()
+
+      if other1 is not None:
+        other1_dims = get_other_dims(batch_ndim, True)
+        operands += (other1, other1_dims)
+
+      mat_dims = list(range(mat.ndim))
+      if self.is_reversed:
+        mat_dims = utils.reverse_zipped(mat_dims, batch_ndim)
+      operands += (mat, mat_dims)
+
+      if other2 is not None:
+        other2_dims = get_other_dims(batch_ndim, False)
+        operands += (other2, other2_dims)
+
+      return np.einsum(*operands, get_out_dims(batch_ndim), optimize=True)
+
+    cov1 = dot(self.cov1, 1 if self.diagonal_batch else 2, other1, other1)
+    cov2 = dot(self.cov2, 1 if self.diagonal_batch else 2, other2, other2)
+    nngp = dot(self.nngp, 2, other1, other2)
+    ntk = dot(self.ntk, 2, other1, other2)
+
+    lhs_ndim = n_other if is_lhs else None
+    return self.replace(
+        cov1=cov1,
+        nngp=nngp,
+        cov2=cov2,
+        ntk=ntk,
+        is_reversed=False,
+        batch_axis=utils.axis_after_dot(self.batch_axis, input_cs,
+                                        input_bs, lhs_ndim),
+        channel_axis=utils.axis_after_dot(self.channel_axis, input_cs,
+                                          input_bs, lhs_ndim)
+    )
 
   def __mul__(self, other: float) -> 'Kernel':
     var = other**2

@@ -261,6 +261,7 @@ def x1_is_x2(x1: np.ndarray,
 
 
 def _get_ndim(x: Union[int, Sized, np.ndarray]) -> int:
+  """Get number of dimensions given number of dimensions / shape / array."""
   if hasattr(x, 'ndim'):
     n = x.ndim
   elif hasattr(x, '__len__'):
@@ -273,6 +274,7 @@ def _get_ndim(x: Union[int, Sized, np.ndarray]) -> int:
 
 
 def mod(axis: Axes, x: Union[int, Sized, np.ndarray]) -> List[int]:
+  """Makes `axis` non-negative given number of dimensions / shape / array."""
   n = _get_ndim(x)
   if isinstance(axis, int):
     axis = [axis]
@@ -575,6 +577,22 @@ def dot_general(lhs: np.ndarray,
   res_batch_dims = get_res_batch_dims(contracting_dims, batch_dims)
   prod = np.moveaxis(prod, leading_batch_dims, res_batch_dims)
   return prod
+
+
+def axis_after_dot(axis: int,
+                   contracting_dims: Sequence[int],
+                   batch_dims: Sequence[int],
+                   lhs_ndim: int = None) -> int:
+  if axis in batch_dims:
+    return batch_dims.index(axis)
+
+  return (
+      axis -
+      sum(1 for i in contracting_dims if i < axis) +
+      sum(1 for i in batch_dims if i > axis) +
+      (0 if lhs_ndim is None
+       else lhs_ndim - len(batch_dims) - len(contracting_dims))
+  )
 
 
 def make_2d(mat: Optional[np.ndarray]) -> Optional[np.ndarray]:
