@@ -68,25 +68,24 @@ import enum
 import functools
 import operator as op
 import string
-from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union, Sequence, TypeVar
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union, Sequence, TypeVar, Any
 import warnings
 
 import frozendict
 import jax
 from jax import lax
-from jax import linear_util as lu
 from jax import numpy as np
 from jax import ops
 from jax import random
-from jax.api import ShapeDtypeStruct, eval_shape, grad, ShapedArray
+from jax.api import ShapeDtypeStruct, eval_shape, grad, ShapedArray, vmap
 from jax.api_util import flatten_fun
 import jax.experimental.stax as ostax
 from jax.lib import xla_bridge
 from jax.scipy.special import erf
-from jax.tree_util import tree_flatten, tree_map, tree_unflatten
-from neural_tangents.utils import utils
+from jax.tree_util import tree_map
+from neural_tangents.utils import utils, dataclasses
 from neural_tangents.utils.kernel import Kernel
-from neural_tangents.utils.typing import AnalyticKernelFn, Axes, Get, InitFn, ApplyFn, InternalLayer, Layer, LayerKernelFn, PyTree, NTTree, Shapes
+from neural_tangents.utils.typing import AnalyticKernelFn, Axes, Get, InitFn, ApplyFn, InternalLayer, Layer, LayerKernelFn, PyTree, NTTree
 import numpy as onp
 import scipy as osp
 
@@ -142,6 +141,10 @@ def _requires(**static_reqs):
   """Returns a decorator that augments `kernel_fn` with consistency checks.
 
   Use this to specify your `kernel_fn` input kernel requirements.
+
+  See Also:
+    `stax.Diagonal`, `stax.Input`, `stax.Output`.
+
   """
 
   def req(kernel_fn: LayerKernelFn):
@@ -158,12 +161,15 @@ def _requires(**static_reqs):
         for key, v in fused_reqs.items():
           if v is not None:  # `None` is treated as explicitly not having a req.
             if key in ('diagonal_batch', 'diagonal_spatial'):
-              if getattr(k, key) and not v:
+              if (getattr(k, key) is True and
+                  (v is False or
+                   (isinstance(v, _Diagonal) and v.input == _Bool.NO))):
                 raise ValueError(f'{kernel_fn} requires `{key} == {v}`, but '
                                  f'input kernel has `{key} == True`, hence '
                                  f'does not contain sufficient information. '
                                  f'Please recompute the input kernel with '
                                  f'`{key} == {v}`.')
+
             elif key in ('batch_axis', 'channel_axis'):
               ndim = len(k.shape1)
               v_kernel = getattr(k, key)
@@ -308,7 +314,7 @@ def serial(*layers: Layer) -> InternalLayer:
   init_fns, apply_fns, kernel_fns = zip(*layers)
   init_fn, apply_fn = ostax.serial(*zip(init_fns, apply_fns))
 
-  @_requires(**_get_input_req_attr(kernel_fns))
+  @_requires(**_get_input_req_attr(kernel_fns, fold=op.rshift))
   def kernel_fn(k: NTTree[Kernel], **kwargs) -> NTTree[Kernel]:
     # TODO(xlc): if we drop `x1_is_x2` and use `rng` instead, need split key
     # inside kernel functions here and parallel below.
@@ -342,7 +348,7 @@ def parallel(*layers: Layer) -> InternalLayer:
   def init_fn(rng, input_shape):
     return list(init_fn_stax(rng, input_shape))
 
-  @_requires(**_get_input_req_attr(kernel_fns))
+  @_requires(**_get_input_req_attr(kernel_fns, fold=op.and_))
   def kernel_fn(ks: List[Kernel], **kwargs) -> List[Kernel]:
     return [f(k, **kwargs) for k, f in zip(ks, kernel_fns)]
 
@@ -461,8 +467,10 @@ def DotGeneral(
   # compute the covariance of contractions.
   input_cs = dimension_numbers[0][1 if is_lhs else 0]
   diagonal_batch = (batch_axis not in input_cs) or (rhs is None and lhs is None)
-  diagonal_spatial = (input_cs in ((), (batch_axis,)) or
-                      (rhs is None and lhs is None))
+  diagonal_spatial = _Diagonal(
+      input=_Bool.YES
+      if (input_cs in ((), (batch_axis,)) or (rhs is None and lhs is None))
+      else _Bool.NO)  # pytype:disable=wrong-keyword-args
 
   @_requires(diagonal_batch=diagonal_batch,
              diagonal_spatial=diagonal_spatial,
@@ -499,7 +507,7 @@ def Aggregate(
   with the `batch_axis` and `channel_axis` preserved. `K = len(aggregate_axes)`.
 
   Qualitatively, having `pattern[n, i1, ..., iK, j1, ..., jK] == w` represents
-  a directed edge from pixel / token (i1, ..., iK)` to `(j1, ..., jK)` with
+  a directed edge from pixel / token `(i1, ..., iK)` to `(j1, ..., jK)` with
   weight `w` in an individual input sample `n`. The `apply_fn` of this
   layer replaces all nodes with the (weighted) sum of (incoming) adjacent nodes
   to the given node.
@@ -642,9 +650,9 @@ def Aggregate(
                       [batch_axis, channel_axis] + agg_axes)
     return out
 
-  @_requires(diagonal_spatial=False,
-             batch_axis=batch_axis,
-             channel_axis=channel_axis)
+  @_requires(batch_axis=batch_axis,
+             channel_axis=channel_axis,
+             diagonal_spatial=_Diagonal(input=_Bool.NO, output=_Bool.NO))  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: NTTree[Kernel],
                 *,
                 pattern: Tuple[Optional[np.ndarray],
@@ -771,7 +779,9 @@ def Dense(
 
     return outputs
 
-  @_requires(batch_axis=batch_axis, channel_axis=channel_axis)
+  @_requires(batch_axis=batch_axis,
+             channel_axis=channel_axis,
+             diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel, **kwargs):
     """Compute the transformed kernels after a `Dense` layer."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -847,7 +857,7 @@ def Conv(
     `(init_fn, apply_fn, kernel_fn)`.
   """
   return _Conv(out_chan, filter_shape, strides, padding, W_std, b_std,
-               dimension_numbers, parameterization, False)
+               dimension_numbers, parameterization, False, True)
 
 
 @layer
@@ -895,7 +905,57 @@ def ConvTranspose(
     `(init_fn, apply_fn, kernel_fn)`.
   """
   return _Conv(out_chan, filter_shape, strides, padding, W_std, b_std,
-               dimension_numbers, parameterization, True)
+               dimension_numbers, parameterization, True, True)
+
+
+@layer
+@_supports_masking(remask_kernel=True)
+def ConvLocal(
+    out_chan: int,
+    filter_shape: Sequence[int],
+    strides: Sequence[int] = None,
+    padding: str = Padding.VALID.name,
+    W_std: float = 1.0,
+    b_std: float = 0.0,
+    dimension_numbers: lax.DotDimensionNumbers = None,
+    parameterization: str = 'ntk'
+) -> InternalLayer:
+  """Layer construction function for a general unshared convolution layer.
+
+  Also known and "Locally connected networks" or LCNs, these are equivalent to
+  convolutions except for having separate (unshared) kernels at different
+  spatial locations.
+
+  Args:
+    out_chan:
+      The number of output channels / features of the convolution. This is
+      ignored in by the `kernel_fn` in `"ntk"` parameterization.
+    filter_shape:
+      The shape of the filter. The shape of the tuple should agree with the
+      number of spatial dimensions in `dimension_numbers`.
+    strides:
+      The stride of the convolution. The shape of the tuple should agree with
+      the number of spatial dimensions in `dimension_nubmers`.
+    padding:
+      Specifies padding for the convolution. Can be one of `"VALID"`, `"SAME"`,
+      or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
+    W_std:
+      standard deviation of the weights.
+    b_std:
+      standard deviation of the biases.
+    dimension_numbers:
+      Specifies which axes should be convolved over. Should match the
+      specification in `jax.lax.conv_general_dilated`.
+    parameterization:
+      Either `"ntk"` or `"standard"`. These parameterizations are the direct
+      analogues for convolution of the corresponding parameterizations for
+      `Dense` layers.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  return _Conv(out_chan, filter_shape, strides, padding, W_std, b_std,
+               dimension_numbers, parameterization, False, False)
 
 
 def _Conv(
@@ -907,7 +967,8 @@ def _Conv(
     b_std: float,
     dimension_numbers: Optional[lax.ConvDimensionNumbers],
     parameterization: str,
-    transpose: bool
+    transpose: bool,
+    shared_weights: bool
 ) -> InternalLayer:
   """Layer construction function for a general convolution layer.
 
@@ -939,6 +1000,9 @@ def _Conv(
       `Dense` layers.
     transpose:
       `True` to use transpose convolution.
+    shared_weights:
+      `True` to share weights (regular CNNs); otherwise different weights at
+      different spatial locations (locally connected networks, LCNs).
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -961,20 +1025,53 @@ def _Conv(
   else:
     init_padding = apply_padding = padding
 
+  init_args = dict(dimension_numbers=dimension_numbers,
+                   out_chan=out_chan,
+                   filter_shape=filter_shape,
+                   strides=strides,
+                   padding=init_padding.name,
+                   W_init=random.normal,
+                   b_init=random.normal)
   if transpose:
-    stax_conv = ostax.GeneralConvTranspose
-    lax_conv = lax.conv_transpose
-  else:
-    stax_conv = ostax.GeneralConv
-    lax_conv = lax.conv_general_dilated
+    if not shared_weights:
+      raise NotImplementedError('Unshared transpose CNN not implemented.')
 
-  ntk_init_fn, _ = stax_conv(dimension_numbers=dimension_numbers,
-                             out_chan=out_chan,
-                             filter_shape=filter_shape,
-                             strides=strides,
-                             padding=init_padding.name,
-                             W_init=random.normal,
-                             b_init=random.normal)
+    lax_conv = lax.conv_transpose
+    ntk_init_fn, _ = ostax.GeneralConvTranspose(**init_args)
+  else:
+    if shared_weights:
+      lax_conv = lax.conv_general_dilated
+      ntk_init_fn, _ = ostax.GeneralConv(**init_args)
+    else:
+      lax_conv = functools.partial(utils.conv_local_general_dilated,
+                                   filter_shape=filter_shape)
+      def ntk_init_fn(rng, input_shape):
+        """Adapted from `jax.experimental.GeneralConv`."""
+        filter_shape_iter = iter(filter_shape)
+        conv_kernel_shape = [out_chan if c == 'O' else
+                             input_shape[lhs_spec.index('C')] if c == 'I' else
+                             next(filter_shape_iter) for c in rhs_spec]
+
+        output_shape = eval_shape(
+            lambda lhs, rhs: lax.conv_general_dilated(
+                lhs=lhs,
+                rhs=rhs,
+                window_strides=strides,
+                padding=init_padding.name,
+                dimension_numbers=dimension_numbers
+            ),
+            ShapedArray(input_shape, np.float32),
+            ShapedArray(conv_kernel_shape, np.float32)
+        ).shape
+
+        kernel_shape = [out_chan if c == 'O' else
+                        onp.prod(conv_kernel_shape) // out_chan if c == 'I' else
+                        output_shape[out_spec.index(c)] for c in rhs_spec]
+        bias_shape = [output_shape[i] if c != 'N' else 1
+                      for i, c in enumerate(out_spec)]
+        k1, k2 = random.split(rng)
+        W, b = random.normal(k1, kernel_shape), random.normal(k2, bias_shape)
+        return output_shape, (W, b)
 
   def get_fan_in(input_shape):
     return input_shape[lhs_spec.index('C')] * onp.prod(filter_shape)
@@ -1029,7 +1126,9 @@ def _Conv(
     return res + b_rescale * b
 
   @_requires(batch_axis=lhs_spec.index('N'),
-             channel_axis=lhs_spec.index('C'))
+             channel_axis=lhs_spec.index('C'),
+             diagonal_spatial=_Diagonal(
+                 output=_Bool.NO if shared_weights else _Bool.MAYBE))  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel, **kwargs):
     """Compute the transformed kernels after a conv layer."""
     cov1, nngp, cov2, ntk, is_reversed = (k.cov1, k.nngp, k.cov2, k.ntk,
@@ -1049,14 +1148,20 @@ def _Conv(
                      if transpose else _conv_kernel_diagonal_spatial)
 
     else:
-      if is_reversed:
-        filter_shape_kernel = filter_shape_kernel[::-1]
-        strides_kernel = strides_kernel[::-1]
+      if shared_weights:
+        if is_reversed:
+          filter_shape_kernel = filter_shape_kernel[::-1]
+          strides_kernel = strides_kernel[::-1]
 
-      is_reversed = not is_reversed
+        is_reversed = not is_reversed
 
-      conv_kernel = (_conv_kernel_full_spatial_transpose
-                     if transpose else _conv_kernel_full_spatial)
+      if transpose:
+        conv_kernel = _conv_kernel_full_spatial_transpose
+      else:
+        if shared_weights:
+          conv_kernel = _conv_kernel_full_spatial_shared
+        else:
+          conv_kernel = _conv_kernel_full_spatial_unshared
 
     def conv_unscaled(lhs, batch_ndim):
       lhs = conv_kernel(lhs,
@@ -1066,24 +1171,43 @@ def _Conv(
                         batch_ndim)
       return lhs
 
+    def affine(out, scale, shift, batch_ndim):
+      if out is not None:
+        out *= scale
+        if k.diagonal_spatial or shared_weights:
+          out += shift
+
+        else:
+          idx = (Ellipsis,)
+          for i in range(batch_ndim, out.ndim, 2):
+            shape = [1] * out.ndim
+            size = out.shape[i]
+            shape[i] = size
+            idx += (np.arange(size).reshape(shape),) * 2
+          out = ops.index_add(out, idx, shift)
+
+      return out
+
     def conv(lhs, batch_ndim):
-      lhs = conv_unscaled(lhs, batch_ndim)
-      return _affine(lhs, W_std, b_std)
+      out = conv_unscaled(lhs, batch_ndim)
+      out = affine(out, W_std**2, b_std**2, batch_ndim)
+      return out
 
     cov1 = conv(cov1, 1 if k.diagonal_batch else 2)
     cov2 = conv(cov2, 1 if k.diagonal_batch else 2)
 
     if parameterization == 'ntk':
       nngp = conv(nngp, 2)
-      ntk = conv(ntk, 2) + nngp - b_std**2 if ntk is not None else ntk
+      if ntk is not None:
+        ntk = W_std**2 * conv_unscaled(ntk, 2) + nngp
 
     elif parameterization == 'standard':
       nngp_unscaled = conv_unscaled(nngp, 2)
       if ntk is not None:
-        ntk = (
-            get_fan_in(k.shape1) * nngp_unscaled + 1. +
-            W_std ** 2 * conv_unscaled(ntk, 2))
-      nngp = _affine(nngp_unscaled, W_std, b_std)
+        ntk = (get_fan_in(k.shape1) * nngp_unscaled +
+               W_std ** 2 * conv_unscaled(ntk, 2))
+        ntk = affine(ntk, 1, 1., 2)
+      nngp = affine(nngp_unscaled, W_std**2, b_std**2, 2)
 
     res = k.replace(cov1=cov1,
                     nngp=nngp,
@@ -1187,21 +1311,23 @@ def FanInSum() -> InternalLayer:
     nngps = [k.nngp for k in ks]
     ntks = [k.ntk for k in ks]
     cov1, cov2, nngp, ntk = map(_mats_sum, (cov1s, cov2s, nngps, ntks))
-    kers = (nngp, ntk, cov1, cov2)
 
-    return Kernel(*(
-        kers + (ks[0].x1_is_x2,
-                is_gaussian,
-                is_reversed,
-                ks[0].is_input,
-                ks[0].diagonal_batch,
-                ks[0].diagonal_spatial,
-                None,
-                None,
-                ks[0].batch_axis,
-                ks[0].channel_axis,
-                None,
-                None)))
+    return Kernel(cov1=cov1,
+                  cov2=cov2,
+                  nngp=nngp,
+                  ntk=ntk,
+                  x1_is_x2=ks[0].x1_is_x2,
+                  is_gaussian=is_gaussian,
+                  is_reversed=is_reversed,
+                  is_input=ks[0].is_input,
+                  diagonal_batch=ks[0].diagonal_batch,
+                  diagonal_spatial=ks[0].diagonal_spatial,
+                  shape1=ks[0].shape1,
+                  shape2=ks[0].shape2,
+                  batch_axis=ks[0].batch_axis,
+                  channel_axis=ks[0].channel_axis,
+                  mask1=None,
+                  mask2=None)  # pytype:disable=wrong-keyword-args
 
   def mask_fn(mask, input_shape):
     return _sum_masks(mask)
@@ -1252,21 +1378,22 @@ def FanInProd() -> InternalLayer:
     cov2 = None if None in cov2s else functools.reduce(np.multiply, cov2s)
     nngp, ntk = _mats_prod(nngps, ntks)
 
-    kers = (nngp, ntk, cov1, cov2)
-
-    return Kernel(*(
-        kers + (ks[0].x1_is_x2,
-                is_gaussian,
-                is_reversed,
-                ks[0].is_input,
-                ks[0].diagonal_batch,
-                ks[0].diagonal_spatial,
-                None,
-                None,
-                ks[0].batch_axis,
-                ks[0].channel_axis,
-                None,
-                None)))
+    return Kernel(cov1=cov1,
+                  cov2=cov2,
+                  nngp=nngp,
+                  ntk=ntk,
+                  x1_is_x2=ks[0].x1_is_x2,
+                  is_gaussian=is_gaussian,
+                  is_reversed=is_reversed,
+                  is_input=ks[0].is_input,
+                  diagonal_batch=ks[0].diagonal_batch,
+                  diagonal_spatial=ks[0].diagonal_spatial,
+                  shape1=None,
+                  shape2=None,
+                  batch_axis=ks[0].batch_axis,
+                  channel_axis=ks[0].channel_axis,
+                  mask1=None,
+                  mask2=None)  # pytype:disable=wrong-keyword-args
 
   def mask_fn(mask, input_shape):
     return _sum_masks(mask)
@@ -1361,21 +1488,22 @@ def FanInConcat(axis: int = -1) -> InternalLayer:
     ntk = _concat_kernels([k.ntk for k in ks], _axis,
                           False, diagonal_spatial, widths)
 
-    kers = (nngp, ntk, cov1, cov2)
-
-    return Kernel(*(
-        kers + (ks[0].x1_is_x2,
-                is_gaussian,
-                is_reversed,
-                ks[0].is_input,
-                diagonal_batch,
-                diagonal_spatial,
-                None,
-                None,
-                batch_axis,
-                channel_axis,
-                None,
-                None)))
+    return Kernel(cov1=cov1,
+                  cov2=cov2,
+                  nngp=nngp,
+                  ntk=ntk,
+                  x1_is_x2=ks[0].x1_is_x2,
+                  is_gaussian=is_gaussian,
+                  is_reversed=is_reversed,
+                  is_input=ks[0].is_input,
+                  diagonal_batch=diagonal_batch,
+                  diagonal_spatial=diagonal_spatial,
+                  shape1=None,
+                  shape2=None,
+                  batch_axis=batch_axis,
+                  channel_axis=channel_axis,
+                  mask1=None,
+                  mask2=None)  # pytype:disable=wrong-keyword-args
 
   def mask_fn(mask, input_shape):
     return _concat_masks(mask, input_shape, axis)
@@ -1389,7 +1517,7 @@ def AvgPool(
     window_shape: Sequence[int],
     strides: Sequence[int] = None,
     padding: str = Padding.VALID.name,
-    normalize_edges: bool = True,
+    normalize_edges: bool = False,
     batch_axis: int = 0,
     channel_axis: int = -1) -> InternalLayer:
   """Layer construction function for an average pooling layer.
@@ -1528,25 +1656,37 @@ def _Pool(
 
   @_requires(batch_axis=batch_axis,
              channel_axis=channel_axis,
-             diagonal_spatial=False)
-  def kernel_fn(k: Kernel, **kwargs):
+             diagonal_spatial=_Diagonal(input=_Bool.MAYBE))  # pytype:disable=wrong-keyword-args
+  def kernel_fn(k: Kernel, **kwargs) -> Kernel:
     """Kernel transformation."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
-    window_shape_kernel = window_shape[::(-1 if k.is_reversed else 1)]
-    strides_kernel = strides[::(-1 if k.is_reversed else 1)]
+    if k.diagonal_spatial:
+      window_shape_kernel = window_shape
+      strides_kernel = strides
+    else:
+      window_shape_kernel = _double_tuple(
+          window_shape[::(-1 if k.is_reversed else 1)])
+      strides_kernel = _double_tuple(strides[::(-1 if k.is_reversed else 1)])
 
-    nngp = _pool_kernel(nngp, pool_type, window_shape_kernel, strides_kernel,
-                        padding, normalize_edges, 2)
-    ntk = _pool_kernel(ntk, pool_type, window_shape_kernel, strides_kernel,
-                       padding, normalize_edges, 2)
-    cov1 = _pool_kernel(cov1, pool_type, window_shape_kernel, strides_kernel,
-                        padding, normalize_edges,
-                        1 if k.diagonal_batch else 2)
-    cov2 = _pool_kernel(cov2, pool_type, window_shape_kernel, strides_kernel,
-                        padding, normalize_edges,
-                        1 if k.diagonal_batch else 2)
+    def pool(mat, batch_ndim):
+      if mat is None or mat.ndim == 0:
+        return mat
 
+      out = _pool_kernel(mat, pool_type, window_shape_kernel, strides_kernel,
+                         padding, normalize_edges, batch_ndim)
+
+      if k.diagonal_spatial and pool_type == Pooling.AVG:
+        _window_shape = (1,) * batch_ndim + tuple(window_shape)
+        _strides = (1,) * batch_ndim + tuple(strides)
+        out = _normalize(mat, out, normalize_edges, padding, _strides,
+                         _window_shape)
+      return out
+
+    nngp = pool(nngp, 2)
+    ntk = pool(ntk, 2)
+    cov1 = pool(cov1, 1 if k.diagonal_batch else 2)
+    cov2 = pool(cov2, 1 if k.diagonal_batch else 2)
     return k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
 
   def mask_fn(mask, input_shape):
@@ -1644,15 +1784,18 @@ def _GlobalPool(
 
   @_requires(batch_axis=batch_axis,
              channel_axis=channel_axis,
-             diagonal_spatial=False)
+             diagonal_spatial=_Diagonal(input=_Bool.MAYBE, output=_Bool.YES))  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel, **kwargs):
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
     def _pool(mat, batch_ndim, mask=None):
-      if mat is None or mat.ndim == 0:
+      if mat is None:
         return mat
       spatial_axes = tuple(range(batch_ndim, mat.ndim))
-      return pool_fn(mat, axis=spatial_axes, mask=mask)
+      out = pool_fn(mat, axis=spatial_axes, mask=mask)
+      if k.diagonal_spatial and pool_type == Pooling.AVG:
+        out /= utils.size_at(mat, spatial_axes)
+      return out
 
     mask11, mask12, mask22 = k._get_mask_prods(k.mask1, k.mask2)
 
@@ -1730,7 +1873,7 @@ def Flatten(batch_axis: int = 0, batch_axis_out: int = 0) -> InternalLayer:
 
   @_requires(batch_axis=batch_axis,
              channel_axis=None,
-             diagonal_spatial=True)
+             diagonal_spatial=_Diagonal(output=_Bool.YES))  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel, **kwargs):
     """Compute kernels."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -2128,7 +2271,7 @@ def GlobalSelfAttention(
 
   @_requires(batch_axis=batch_axis,
              channel_axis=channel_axis,
-             diagonal_spatial=False)
+             diagonal_spatial=_Diagonal(input=_Bool.NO))  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel, **kwargs):
     # Generate (optional) positional embedding covariances.
     R1, R12, R2 = _get_all_pos_emb(k, pos_emb_type, pos_emb_p_norm,
@@ -2482,6 +2625,7 @@ def Erf(
   def fn(x):
     return a * erf(b * x) + c
 
+  _requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     k *= b
 
@@ -2555,6 +2699,7 @@ def Gelu(
   def fn(x):
     return 0.5 * x * (1. + erf(x / np.sqrt(2.)))
 
+  _requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     """Compute kernels after a `Gelu` layer; NNGP see `arXiv:2002.08517`."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -2630,6 +2775,7 @@ def Sin(
   def fn(x):
     return a * np.sin(b * x + c)
 
+  _requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
@@ -2688,6 +2834,7 @@ def Rbf(
   def fn(x):
     return np.sqrt(2) * np.sin(np.sqrt(2 * gamma) * x + np.pi/4)
 
+  _requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     """Compute new kernels after an `Rbf` layer."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -2745,6 +2892,7 @@ def ABRelu(
   def fn(x):
     return a * np.minimum(x, 0) + b * np.maximum(x, 0)
 
+  _requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     """Compute new kernels after an `ABRelu` layer.
 
@@ -2890,6 +3038,7 @@ def NumericalActivation(
   if df is None:
     df = np.vectorize(grad(fn))
 
+  _requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     """Kernel transformation of activation function using quadrature."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -2971,32 +3120,149 @@ _DEFAULT_INPUT_REQ = frozendict.frozendict({'diagonal_batch': True,
                                             'mask_constant': None})
 
 
-def _get_input_req_attr(kernel_fns: List[LayerKernelFn]) -> Dict[str, bool]:
+class _Bool(enum.IntEnum):
+  """Helper trinary logic class."""
+  NO = 0
+  MAYBE = 1
+  YES = 2
+
+  def __and__(self, other: '_Bool') -> '_Bool':
+    return min(self, other)
+
+  __rand__ = __and__
+
+
+@dataclasses.dataclass
+class _Diagonal:
+  """Helps decide whether to allow the kernel to contain diagonal entries only.
+
+  The intended behavior is to be diagonal-only iff
+    a) output off-diagonal entries are all zeros, and
+    b) diagonal-only `Kernel` is sufficient for all steps of computation.
+
+  Note that currently this parameter is shared between all parallel branches,
+  even if this is excessive, and it is defined once for the whole network and
+  does not change from layer to layer, even if it could be possible.
+
+  Must be endowed with
+    1) A commutative, associative, idempotent `AND` (`&`) operation,
+      corresponding to combining requirements of two layers in parallel.
+    2) An associative composition `>>` operation, corresponding to the
+      requirement of a composition of two layers.
+
+  Attributes:
+    input:
+      specifies whether inputs to given layer can contain only diagonal
+      entries. `_Bool.YES` means "yes"; `_Bool.MAYBE` means iff off-diagonal
+      entries are zero. `_Bool.NO` means "no". When traversing the network
+      tree from inputs to outputs (as well as parallel branches from left/right
+      to right/left) can only decrease.
+    output:
+      specifies whether any outputs (starting from this layer to the output of
+      the network) can contain only diagonal entries. `_Bool.YES` means yes;
+      `_Bool.MAYBE` means "yes" after current layer, but may become "no"
+      further in the network. `_Bool.NO` means "no".
+  """
+
+  input: _Bool = _Bool.YES
+  output: _Bool = _Bool.NO
+
+  def __rshift__(self, other: '_Diagonal') -> '_Diagonal':
+    """Associative composition (`self >> other`) operation.
+
+    Returns the requirement satisfied by composition `other(self(.))`.
+    """
+    if self.output == _Bool.YES:
+      return self
+
+    if self.output > _Bool.NO and other.input > _Bool.NO:
+      input = self.input
+    elif self.output == _Bool.NO and other.input < _Bool.YES:
+      input = _Bool.NO
+    else:
+      input = min(self.input, other.input)
+
+    return _Diagonal(input=input, output=other.output)  # pytype:disable=wrong-keyword-args
+
+  def __and__(self, other: '_Diagonal') -> '_Diagonal':
+    """Commutative, associative, and idempotent `AND` operation.
+
+    Returns the largest value allowed both `self` and `other`.
+    """
+    return _Diagonal(input=self.input & other.input,
+                     output=self.output & other.output)  # pytype:disable=wrong-keyword-args
+
+  def __bool__(self) -> bool:
+    """Convert to `diagonal_spatial` / `diagonal_batch` `Kernel` attribute."""
+    return self.input == _Bool.YES and self.output > _Bool.NO
+
+  def __lshift__(self, other: '_Diagonal') -> '_Diagonal':
+    """Associative composition (`self << other`) operation.
+
+    Returns the value allowed by composition `self(other(.))`.
+    """
+    return other >> self
+
+  __rand__ = __and__
+
+
+_R = TypeVar('_R')
+
+
+def _get_input_req_attr(
+    kernel_fns: List[LayerKernelFn],
+    fold: Callable[[_Diagonal, _Diagonal], _Diagonal]) -> Dict[str, Any]:
   """Gets requirements of the combined layer based on individual requirements.
 
-  Specifically, gets the requirements to the inputs to a `serial` or `parallel`
-  sequence of layers based on requirements of each layer, setting requirements
-  to the most demanding among all layers.
+  Specifically, gets the requirements / allowances to the inputs to a `serial`
+  or `parallel` sequence of layers based on requirements of each layer, setting
+  requirements / allowances to the most / least demanding among all layers.
 
   Args:
-    kernel_fns: list of 'kernel_fn`s fed to the `kernel_fns` (e.g. a list of
+    kernel_fns:
+      list of `kernel_fn`s fed to the `kernel_fns` (e.g. a list of
       convolutional layers and nonlinearities to be chained together with the
-      `serial` combinator).
+      `serial` combinator) or evaluated in parallel (`parallel` combinator).
+    fold:
+      binary associative operator to combine allowances of consecutive
+      individual `kernel_fn`s. Can be only `operator.rshift` (`>>`), i.e.
+      composition (corresponding to `serial`) or `operator.and_`, (`&`), i.e.
+      `AND` (corresponding to `parallel`).
+
   Returns:
-    A `dict` with combined requirements.
+    A `dict` with combined requirements / allowances.
   """
   req = {}
-  for f in reversed(kernel_fns):
+
+  for f in kernel_fns:
     req_f = getattr(f, _INPUT_REQ, {})
 
     for k, v in req_f.items():
-      if k in ('batch_axis', 'channel_axis', 'use_dropout'):
+      if k == 'use_dropout':
+        if k in req and req[k] != v:
+          raise ValueError('`use_dropout` is a single whole-network attribute '
+                           'and cannot be set to different values.')
         req[k] = v
 
+      elif k in ('batch_axis', 'channel_axis'):
+        if k not in req:
+          req[k] = v
+        else:
+          if fold is op.and_:
+            if k in req and req[k] != v:
+              if (req[k] >= 0 and v >= 0) or (req[k] < 0 and v < 0):
+                raise ValueError(f'`{k}` parameters must match in all '
+                                 f'parallel branches, got {req[k]} and {v}.')
+              else:
+                warnings.warn(f'Got potentially mismatching `{k}` values in '
+                              f'parallel branches: {req[k]} and {v}.')
+
+          elif fold is not op.rshift:
+            raise ValueError(fold)
+
       elif k in ('diagonal_batch', 'diagonal_spatial'):
-        # Set the most demanding diagonal requirement.
         if k in req:
-          req[k] &= v
+          req[k] = fold(req[k], v)
         else:
           req[k] = v
 
@@ -3120,7 +3386,7 @@ def _inputs_to_kernel(
     x2: Optional[np.ndarray],
     *,
     diagonal_batch: bool,
-    diagonal_spatial: bool,
+    diagonal_spatial: Union[bool, _Diagonal],
     compute_ntk: bool,
     batch_axis: int,
     channel_axis: Optional[int],
@@ -3211,11 +3477,13 @@ def _inputs_to_kernel(
   Returns:
     The `Kernel` object containing inputs covariance[s].
   """
+
   if not ((type(x1) is type(x2)) or x2 is None):
     raise TypeError(('Inconsistent input types given. Found x1 of type '
-                      f'{type(x1)} and x2 of type {type(x2)}.'))
+                     f'{type(x1)} and x2 of type {type(x2)}.'))
 
   batch_axis %= x1.ndim
+  diagonal_spatial = bool(diagonal_spatial)
 
   if batch_axis != 0:
     # TODO(romann): add support or clear error for batching.
@@ -3267,22 +3535,22 @@ def _inputs_to_kernel(
   x1_is_x2 = utils.x1_is_x2(x1, x2, eps=eps)
   is_input = False
 
-  return Kernel(nngp,
-                ntk,
-                cov1,
-                cov2,
-                x1_is_x2,
-                is_gaussian,
-                is_reversed,
-                is_input,
-                diagonal_batch,
-                diagonal_spatial,
-                x1.shape,
-                x2.shape if x2 is not None else x1.shape,
-                batch_axis,
-                channel_axis,
-                mask1,
-                mask2)
+  return Kernel(cov1=cov1,
+                cov2=cov2,
+                nngp=nngp,
+                ntk=ntk,
+                x1_is_x2=x1_is_x2,
+                is_gaussian=is_gaussian,
+                is_reversed=is_reversed,
+                is_input=is_input,
+                diagonal_batch=diagonal_batch,
+                diagonal_spatial=diagonal_spatial,
+                shape1=x1.shape,
+                shape2=x1.shape if x2 is None else x2.shape,
+                batch_axis=batch_axis,
+                channel_axis=channel_axis,
+                mask1=mask1,
+                mask2=mask2)  # pytype:disable=wrong-keyword-args
 
 
 def _propagate_shape(init_fn: InitFn,
@@ -3337,23 +3605,24 @@ def _fuse_requirements(kernel_fn_reqs, default_reqs, **user_reqs):
   # Override static requirements with explicit user-specified requirements,
   # but only if they are less demanding, raise an error otherwise.
   kernel_fn_reqs = dict(kernel_fn_reqs)
-  for req, v in user_reqs.items():
-    if v is not None:
-      if req in kernel_fn_reqs:
-        if not kernel_fn_reqs[req] and v:
+  for k, v_user in user_reqs.items():
+    if v_user is not None:
+      if k in kernel_fn_reqs:
+        v_kernel = kernel_fn_reqs[k]
+        if (v_user is True and
+            (v_kernel is False or
+             (isinstance(kernel_fn_reqs[k], _Diagonal) and
+              kernel_fn_reqs[k].input == _Bool.NO))):
           raise ValueError(f'Asked to compute `kernel_fn` output with '
-                           f'`{req} == {v}`, while `kernel_fn` '
-                           f'requires `{req} == {kernel_fn_reqs[req]}`.')
+                           f'`{k} == {v_user}`, while `kernel_fn` '
+                           f'requires `{k} == {kernel_fn_reqs[k]}`.')
 
-        kernel_fn_reqs[req] &= v
-
-      else:
-        kernel_fn_reqs[req] = v
+      kernel_fn_reqs[k] = v_user
 
   # Fill unspecified requirements with defaults.
-  for req, v in default_reqs.items():
-    if req not in kernel_fn_reqs:
-      kernel_fn_reqs[req] = v
+  for k, v_user in default_reqs.items():
+    if k not in kernel_fn_reqs:
+      kernel_fn_reqs[k] = v_user
 
   return frozendict.frozendict(kernel_fn_reqs)
 
@@ -3367,7 +3636,9 @@ def _preprocess_kernel_fn(
   Args:
     init_fn: layer parameters initialization function. Used for shape
       inference.
+    apply_fn: layer forward-prop function. Used for shape inference.
     kernel_fn: the `Kernel` -> `Kernel` layer propagation function.
+
   Returns:
     A new `kernel_fn` that does the same computation but accepts additional
     arguments to flexibly specify the required computation, and can be applied
@@ -3491,7 +3762,6 @@ def _elementwise(fn: Callable[[float], float],
 
   init_fn.__name__ = apply_fn.__name__ = new_kernel_fn.__name__ = name
   return init_fn, apply_fn, new_kernel_fn
-
 
 
 def _arccos(x, do_backprop):
@@ -3649,94 +3919,6 @@ def _proprocess_kernels_for_fan_in(
                 '`Conv` / `GlobalSelfAttention` etc. layer in each branch.')
 
   return ks, is_reversed
-
-
-def _fan_in_kernel_fn_concat(ks: List[Kernel], axis: int) -> Kernel:
-  ks, is_reversed = _proprocess_kernels_for_fan_in(ks)
-
-  diagonal_batch = ks[0].diagonal_batch
-  diagonal_spatial = ks[0].diagonal_spatial
-
-  shape1, shape2 = ks[0].shape1, ks[0].shape2
-
-  ndim = len(shape1)
-  axis = axis % ndim
-  batch_axis = ks[0].batch_axis
-  channel_axis = ks[0].channel_axis
-
-  new_shape1 = shape1[:axis] + shape1[axis + 1:]
-  new_shape2 = shape2[:axis] + shape2[axis + 1:]
-  for k in ks:
-    k_shape1 = k.shape1[:axis] + k.shape1[axis + 1:]
-    k_shape2 = k.shape2[:axis] + k.shape2[axis + 1:]
-    if k_shape1 != new_shape1 or k_shape2 != new_shape2:
-      raise ValueError('Non-`axis` shapes should be equal in `FanInConcat`.')
-
-  # Check if inputs are independent Gaussians.
-  if axis != channel_axis:
-    is_gaussian = all(k.is_gaussian for k in ks)
-    if not is_gaussian:
-      # TODO(xlc): FanInSum/FanInConcat could allow non-Gaussian inputs, but
-      # we need to propagate the mean of the random variables as well.
-      raise NotImplementedError('`FanInConcat` layer along the '
-                                'non-channel axis is only implemented for the '
-                                'case if all input layers guaranteed to be mean'
-                                '-zero Gaussian, i.e. having all `is_gaussian '
-                                'set to `True`.')
-  else:
-    # TODO(romann): allow to apply nonlinearity after channelwise concatenation.
-    # TODO(romann): support concatenating different channelwise masks.
-    is_gaussian = False
-
-  if axis == batch_axis:
-    warnings.warn(f'Concatenation along the batch axis ({axis}) gives '
-                  f'inconsistent covariances when batching - '
-                  f'proceed with caution.')
-
-  spatial_axes = tuple(i for i in range(ndim)
-                       if i not in (channel_axis, batch_axis))
-  # Change spatial axis according to the kernel `is_reversed`.
-  if axis in spatial_axes and is_reversed:
-    axis = spatial_axes[::-1][spatial_axes.index(axis)]
-
-  # Map activation tensor axis to the covariance tensor axis.
-  tensor_axis_to_kernel_axis = {
-      **{
-          batch_axis: 0,
-          channel_axis: -1,
-      },
-      **{
-          spatial_axis: idx + 1 for idx, spatial_axis in enumerate(spatial_axes)
-      }
-  }
-
-  axis = tensor_axis_to_kernel_axis[axis]
-  widths = [k.shape1[channel_axis] for k in ks]
-
-  cov1 = _concat_kernels([k.cov1 for k in ks], axis,
-                         diagonal_batch, diagonal_spatial, widths)
-  cov2 = _concat_kernels([k.cov2 for k in ks], axis,
-                         diagonal_batch, diagonal_spatial, widths)
-  nngp = _concat_kernels([k.nngp for k in ks], axis,
-                         False, diagonal_spatial, widths)
-  ntk = _concat_kernels([k.ntk for k in ks], axis,
-                        False, diagonal_spatial, widths)
-
-  kers = (nngp, ntk, cov1, cov2)
-
-  return Kernel(*(
-      kers + (ks[0].x1_is_x2,
-              is_gaussian,
-              is_reversed,
-              ks[0].is_input,
-              diagonal_batch,
-              diagonal_spatial,
-              None,
-              None,
-              batch_axis,
-              channel_axis,
-              None,
-              None)))
 
 
 def _concat_kernels(
@@ -3932,7 +4114,7 @@ def _get_dimension_numbers(
   return dimension_numbers
 
 
-def _conv_kernel_full_spatial(
+def _conv_kernel_full_spatial_shared(
     lhs: Optional[np.ndarray],
     filter_shape: Sequence[int],
     strides: Sequence[int],
@@ -4023,9 +4205,63 @@ def _conv_kernel_full_spatial(
       raise NotImplementedError(platform)
     return n_channels
 
-  lhs = _conv_kernel_full_spatial_loop(lhs, filter_shape, strides, padding,
+  out = _conv_kernel_full_spatial_loop(lhs, filter_shape, strides, padding,
                                        lax_conv, get_n_channels)
-  return lhs
+  return out
+
+
+def _conv_kernel_full_spatial_unshared(
+    lhs: Optional[np.ndarray],
+    filter_shape: Sequence[int],
+    strides: Sequence[int],
+    padding: Padding,
+    batch_ndim: int,
+) -> Optional[np.ndarray]:
+  """Compute covariance of unshared CNN given inputs with covariance `lhs`.
+
+  Used when `kernel.diagonal_spatial == False`. Has the same outputs on the
+  spatial diagonal as `_conv_kernel_full_spatial_shared`, but `0` in all
+  off-spatial-diagonal entries. The diagonal entries are computed via calling
+  ``_conv_kernel_diagonal_spatial`.
+
+  Args:
+    lhs:
+      a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
+      sample-[sample-]position-position covariances of CNN inputs, where `S` is
+      the number of spatial dimensions (e.g. 2 for images). Has shape
+      `(batch_size_1, [batch_size_2,] height, height, width, width, depth,
+      depth, ...)`.
+    filter_shape:
+      positive integers, the convolutional filters spatial shape
+      (e.g. `(3, 3)` for a 2D convolution).
+    strides:
+      positive integers, the CNN strides (e.g. `(1, 1)` for a 2D
+      convolution).
+    padding:
+      a `Padding` enum, e.g. `Padding.CIRCULAR`.
+    batch_ndim:
+      number of batch dimensions, 1 or 2.
+
+  Returns:
+    a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
+    sample-[sample-]position-position covariances of CNN outputs, where `S` is
+    the number of spatial dimensions (e.g. 2 for images). Has shape
+    `(batch_size_1, [batch_size_2,] new_width, new_width, new_height,
+    new_height, new_depth, new_depth, ...)`.
+  """
+  if lhs is None or lhs.ndim == 0:
+    return lhs
+
+  lhs = utils.unzip_axes(lhs, batch_ndim)
+  lhs_diag = utils.diagonal_between(lhs, batch_ndim)
+  out_diag = _conv_kernel_diagonal_spatial(lhs_diag, filter_shape, strides,
+                                           padding, batch_ndim)
+  out_diag_flat = out_diag.reshape((onp.prod(out_diag.shape[:batch_ndim]), -1))
+  out_flat = vmap(np.diag)(out_diag_flat)
+  out = out_flat.reshape(out_diag.shape[:batch_ndim] +
+                         out_diag.shape[batch_ndim:] * 2)
+  out = utils.zip_axes(out, batch_ndim)
+  return out
 
 
 def _conv_kernel_full_spatial_transpose(
@@ -4245,31 +4481,38 @@ def _conv_kernel_diagonal_spatial_transpose(
 
 
 def _pool_kernel(
-    lhs: Optional[np.ndarray],
+    lhs: np.ndarray,
     pool_type: Pooling,
     window_shape: Sequence[int],
     strides: Sequence[int],
     padding: Padding,
     normalize_edges: bool,
-    batch_ndim: int) -> Optional[np.ndarray]:
+    batch_ndim: int
+) -> np.ndarray:
   """Get covariances of pooling outputs given inputs covariances `lhs`.
 
   Args:
-    lhs: a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
+    lhs:
+      a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
       sample-[sample-]position-position covariances of pooling inputs, where `S`
       is the number of spatial dimensions (e.g. 2 for images). Has shape
       `(batch_size_1, [batch_size_2,]
         height, height, width, width, depth, depth, ...)`.
-    pool_type: a `Pooling` enum, e.g. `Pooling.AVG`.
-    window_shape: tuple of two positive integers, the pooling spatial shape
-      (e.g. `(3, 3)`).
-    strides: tuple of two positive integers, the pooling strides, e.g. `(1, 1)`.
-    padding: a `Padding` enum, e.g. `Padding.CIRCULAR`.
-    normalize_edges: `True` to normalize output by the effective receptive
-      field, `False` to normalize by the window size. Only has effect at the
-      edges when `SAME` padding is used. Set to `True` to retain correspondence
-      to `ostax.AvgPool`.
-    batch_ndim: integer, number of leading batch dimensions, 1 or 2.
+    pool_type:
+      a `Pooling` enum, e.g. `Pooling.AVG`.
+    window_shape:
+      tuple of positive integers, the pooling spatial shape (e.g. `(3, 3)`).
+    strides:
+      tuple of positive integers, the pooling strides, e.g. `(1, 1)`.
+    padding:
+      a `Padding` enum, e.g. `Padding.CIRCULAR`.
+    normalize_edges:
+      `True` to normalize output by the effective receptive field, `False` to
+      normalize by the window size. Only has effect at the edges when `SAME`
+      padding is used. Set to `True` to retain correspondence to
+      `ostax.AvgPool`.
+    batch_ndim:
+      number of leading batch dimensions, 1 or 2.
 
   Returns:
       a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
@@ -4278,33 +4521,33 @@ def _pool_kernel(
       `(batch_size_1, [batch_size_2,]
         height, height, width, width, depth, depth, ...)`.
   """
-  if lhs is None or lhs.ndim == 0:
-    return lhs
-
   if padding == Padding.CIRCULAR:
     spatial_axes = tuple(range(batch_ndim, lhs.ndim))
-    lhs = _same_pad_for_filter_shape(lhs, _double_tuple(window_shape),
-                                     _double_tuple(strides), spatial_axes)
+    lhs = _same_pad_for_filter_shape(lhs, window_shape, strides, spatial_axes)
     padding = Padding.VALID
 
-  window_shape = (1,) * batch_ndim + _double_tuple(window_shape)
-  strides = (1,) * batch_ndim + _double_tuple(strides)
+  window_shape = (1,) * batch_ndim + tuple(window_shape)
+  strides = (1,) * batch_ndim + tuple(strides)
 
-  mat_out = lax.reduce_window(lhs, 0., lax.add, window_shape, strides,
-                              padding.name)
+  out = lax.reduce_window(lhs, 0., lax.add, window_shape, strides, padding.name)
 
   if pool_type == Pooling.AVG:
-    if padding == Padding.SAME and normalize_edges:
-      # `SAME` padding in `jax.experimental.stax.AvgPool` normalizes by actual
-      # window size, which is smaller at the edges.
-      one = np.ones_like(lhs, lhs.dtype)
-      window_sizes = lax.reduce_window(one, 0., lax.add, window_shape, strides,
-                                       padding.name)
-      mat_out /= window_sizes
-    else:
-      mat_out /= onp.prod(window_shape)
+    out = _normalize(lhs, out, normalize_edges, padding, strides, window_shape)
 
-  return mat_out
+  return out
+
+
+def _normalize(lhs, out, normalize_edges, padding, strides, window_shape):
+  if padding == Padding.SAME and normalize_edges:
+    # `SAME` padding in `jax.experimental.stax.AvgPool` normalizes by actual
+    # window size, which is smaller at the edges.
+    one = np.ones_like(lhs, lhs.dtype)
+    window_sizes = lax.reduce_window(one, 0., lax.add, window_shape, strides,
+                                     padding.name)
+    out /= window_sizes
+  else:
+    out /= onp.prod(window_shape)
+  return out
 
 
 def _diag_mul_full_spatial(

@@ -712,7 +712,8 @@ class PredictTest(jtu.JaxTestCase):
                                   stax.Relu(),
                                   stax.Conv(1, (2, 1)))
     y = random.normal(key, (8, 2, 5, 1))
-    predictor = predict.gradient_descent_mse_ensemble(kernel_fn, x, y)
+    predictor = predict.gradient_descent_mse_ensemble(kernel_fn, x, y,
+                                                      diagonal_spatial=False)
 
     for t in [None, np.array([0., 1., 10.])]:
       with self.subTest(t=t):

@@ -120,6 +120,6 @@ class NeuralTangentsTestCase(jtu.JaxTestCase):
         if is_pytree_node:
           assert_close(x_name, y_name)
         else:
-          self.assertEqual(x_name, y_name)
+          self.assertEqual(x_name, y_name, name)
     else:
       assert_close(x, y)

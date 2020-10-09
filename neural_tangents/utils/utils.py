@@ -17,18 +17,18 @@
 from collections import namedtuple
 import functools
 import inspect
-import warnings
-
 import operator
 import types
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Sized, Tuple, Union
 from .typing import Axes, PyTree
+import warnings
+
 from . import dataclasses
 from jax import lax
+from jax import random
 from jax.lib import xla_bridge
 import jax.numpy as np
 from jax.tree_util import tree_all, tree_map
-from jax import random
 from .kernel import Kernel
 import numpy as onp
 
@@ -299,7 +299,7 @@ def canonicalize_axis(axis: Axes,
 
 def zip_axes(x: np.ndarray,
              start_axis: int = 0,
-             end_axis: int = -1) -> np.ndarray:
+             end_axis: int = None) -> np.ndarray:
   """Zip (interleave) axes starting from `start_axis`.
 
   Changes the shape as follows:
@@ -318,7 +318,7 @@ def zip_axes(x: np.ndarray,
 
 def unzip_axes(x: np.ndarray,
                start_axis: int = 0,
-               end_axis: int = -1) -> np.ndarray:
+               end_axis: int = None) -> np.ndarray:
   """Unzip (de-interleave) axes starting from `start_axis`.
 
   Changes the shape as follows:
@@ -337,7 +337,7 @@ def unzip_axes(x: np.ndarray,
 
 def _zip_axes(x: np.ndarray,
               start_axis: int = 0,
-              end_axis: int = -1,
+              end_axis: int = None,
               unzip: bool = False) -> np.ndarray:
   """Zip/unzip (interleave/de-interleave) axes starting from `start_axis`.
 
@@ -356,8 +356,9 @@ def _zip_axes(x: np.ndarray,
   Returns:
     A `np.ndarray` with a new shape.
   """
-  if end_axis == -1:
+  if end_axis is None:
     end_axis = x.ndim
+
   half_ndim, ragged = divmod(end_axis - start_axis, 2)
   if ragged:
     raise ValueError(
@@ -379,10 +380,11 @@ def transpose_zipped(x: np.ndarray) -> np.ndarray:
 
 def diagonal_between(x: np.ndarray,
                      start_axis: int = 0,
-                     end_axis: int = -1) -> np.ndarray:
+                     end_axis: int = None) -> np.ndarray:
   """Returns the diagonal along all dimensions between start and end axes."""
-  if end_axis == -1:
+  if end_axis is None:
     end_axis = x.ndim
+
   half_ndim, ragged = divmod(end_axis - start_axis, 2)
   if ragged:
     raise ValueError(
@@ -426,20 +428,20 @@ def outer_prod(x, y, start_axis, end_axis, prod_op):
 
 
 def reverse_zipped(
-    mat: Union[np.ndarray, Sequence[int]],
+    x: Union[np.ndarray, Sequence[int]],
     start_axis: int = 0) -> Union[np.ndarray, Sequence[int]]:
-  if mat is not None:
-    ndim = _get_ndim(mat)
+  if x is not None:
+    ndim = _get_ndim(x)
     source_axes = tuple(j
                         for i in range(ndim - 2, start_axis - 1, -2)
                         for j in (i, i + 1))
 
-    if isinstance(mat, np.ndarray):
+    if isinstance(x, np.ndarray):
       target_axes = range(start_axis, ndim)
-      mat = np.moveaxis(mat, source_axes, target_axes)
+      x = np.moveaxis(x, source_axes, target_axes)
     else:
-      mat = mat[:start_axis] + type(mat)(mat[i] for i in source_axes)
-  return mat
+      x = x[:start_axis] + type(x)(x[i] for i in source_axes)
+  return x
 
 
 @dataclasses.dataclass
@@ -595,18 +597,239 @@ def axis_after_dot(axis: int,
   )
 
 
-def make_2d(mat: Optional[np.ndarray]) -> Optional[np.ndarray]:
-  if mat is None:
-    return mat
+def _extract_image_patches(
+    lhs: np.ndarray,
+    filter_shape: Sequence[int],
+    window_strides: Sequence[int],
+    padding: str,
+    lhs_dilation: Sequence[int] = None,
+    rhs_dilation: Sequence[int] = None,
+    dimension_numbers: lax.ConvDimensionNumbers = None,
+    precision: lax.Precision = None,
+) -> np.ndarray:
+  """Extract patches subject to the receptive field of a general convolution.
 
-  if mat.ndim % 2 == 1:
-    raise ValueError('Expected an even-dimensional matrix. Please file a bug at'
-                     'https://github.com/google/neural-tangents/issues/new')
+  Runs the input through a convolution that packs input spatial and channel
+  entries into output channel `"C"` entries. The order of dimensions packed is
+  `"C" + ''.join(c for c in rhs_spec if c not in 'OI')`, where
+  `rhs_spec == dimension_numbers[1]`.
 
-  mat = unzip_axes(mat)
-  mat = mat.reshape((size_at(mat.shape[:mat.ndim // 2]),
-                     size_at(mat.shape[mat.ndim // 2:])))
-  return mat
+  Docstring below adapted from `jax.lax.conv_general_dilated`.
+
+  See Also:
+    https://www.tensorflow.org/xla/operation_semantics#conv_convolution
+
+  Args:
+    lhs: a rank `n+2` dimensional input array.
+    filter_shape: a sequence of `n` integers, representing the receptive window
+      spatial shape in the order as specified in
+      `rhs_spec = dimension_numbers[1]`.
+    window_strides: a sequence of `n` integers, representing the inter-window
+      strides.
+    padding: either the string `'SAME'`, the string `'VALID'`, or a sequence of
+      `n` `(low, high)` integer pairs that give the padding to apply before and
+      after each spatial dimension.
+    lhs_dilation: `None`, or a sequence of `n` integers, giving the
+      dilation factor to apply in each spatial dimension of `lhs`. LHS dilation
+      is also known as transposed convolution.
+    rhs_dilation: `None`, or a sequence of `n` integers, giving the
+      dilation factor to apply in each spatial dimension of `rhs`. RHS dilation
+      is also known as atrous convolution.
+    dimension_numbers: either `None`, a `ConvDimensionNumbers` object, or
+      a 3-tuple `(lhs_spec, rhs_spec, out_spec)`, where each element is a string
+      of length `n+2`.
+    precision: Optional. Either ``None``, which means the default precision for
+      the backend, or a ``lax.Precision`` enum value (``Precision.DEFAULT``,
+      ``Precision.HIGH`` or ``Precision.HIGHEST``).
+
+  Returns:
+    An array containing the image patches flattened inside the `"C"` output
+    dimension. The size of this dimension is `C_input * onp.prod(filter_shape)`.
+
+  In the string case of `dimension_numbers`, each character identifies by
+  position:
+
+  - the batch dimensions in `lhs`, `rhs`, and the output with the character
+    'N',
+  - the feature dimensions in `lhs` and the output with the character 'C',
+  - the input and output feature dimensions in rhs with the characters 'I'
+    and 'O' respectively, and
+  - spatial dimension correspondences between lhs, rhs, and the output using
+    any distinct characters.
+
+  For example, to indicate dimension numbers consistent with the `conv` function
+  with two spatial dimensions, one could use `('NCHW', 'OIHW', 'NCHW')`. As
+  another example, to indicate dimension numbers consistent with the TensorFlow
+  Conv2D operation, one could use `('NHWC', 'HWIO', 'NHWC')`. When using the
+  latter form of convolution dimension specification, window strides are
+  associated with spatial dimension character labels according to the order in
+  which the labels appear in the `rhs_spec` string, so that `window_strides[0]`
+  is matched with the dimension corresponding to the first character
+  appearing in rhs_spec that is not `'I'` or `'O'`.
+
+  If `dimension_numbers` is `None`, the default is `('NCHW', 'OIHW', 'NCHW')`
+  (for a 2D convolution).
+  """
+  lhs_spec, rhs_spec, out_spec = dimension_numbers
+
+  filter_shape = tuple(filter_shape)
+  spatial_size = onp.prod(filter_shape)
+  n_channels = lhs.shape[lhs_spec.index('C')]
+
+  # Move separate `lhs` spatial locations into separate `rhs` channels.
+  rhs = np.eye(spatial_size, dtype=lhs.dtype).reshape(filter_shape * 2)
+
+  rhs = rhs.reshape((spatial_size, 1) + filter_shape)
+  rhs = np.tile(rhs, (n_channels,) + (1,) * (rhs.ndim - 1))
+  rhs = np.moveaxis(rhs, (0, 1), (rhs_spec.index('O'), rhs_spec.index('I')))
+
+  out = lax.conv_general_dilated(
+      lhs=lhs,
+      rhs=rhs,
+      window_strides=window_strides,
+      padding=padding,
+      lhs_dilation=lhs_dilation,
+      rhs_dilation=rhs_dilation,
+      dimension_numbers=dimension_numbers,
+      precision=precision,
+      feature_group_count=n_channels
+  )
+  return out
+
+
+def conv_local_general_dilated(
+    lhs: np.ndarray,
+    rhs: np.ndarray,
+    window_strides: Sequence[int],
+    padding: str,
+    filter_shape: Sequence[int],
+    lhs_dilation: Sequence[int] = None,
+    rhs_dilation: Sequence[int] = None,
+    dimension_numbers: lax.ConvDimensionNumbers = None,
+    precision: lax.Precision = None
+) -> np.ndarray:
+  """General n-dimensional unshared convolution operator with optional dilation.
+
+  Also known as locally connected layer, the operation is equivalent to
+  convolution with a separate (unshared) `rhs` kernel used at each output
+  spatial location. Docstring below adapted from `jax.lax.conv_general_dilated`.
+
+  See Also:
+    https://www.tensorflow.org/xla/operation_semantics#conv_convolution
+
+  Args:
+    lhs: a rank `n+2` dimensional input array.
+    rhs: a rank `n+2` dimensional array of kernel weights. Unlike in regular
+      CNNs, its spatial coordinates (`H`, `W`, ...) correspond to output spatial
+      locations, while input spatial locations are fused with the input channel
+      locations in the single `I` dimension, in the oreder of
+      `"C" + ''.join(c for c in rhs_spec if c not in 'OI')` order, where
+      `rhs_spec = dimension_numbers[1]`. For example, if `rhs_spec == "WHIO",
+      the unfolded kernel shape is
+      `"[output W][output H]{I[receptive window W][receptive window H]}O"`.
+    window_strides: a sequence of `n` integers, representing the inter-window
+      strides.
+    padding: either the string `'SAME'`, the string `'VALID'`, or a sequence of
+      `n` `(low, high)` integer pairs that give the padding to apply before and
+      after each spatial dimension.
+    filter_shape: a sequence of `n` integers, representing the receptive window
+      spatial shape in the order as specified in
+      `rhs_spec = dimension_numbers[1]`.
+    lhs_dilation: `None`, or a sequence of `n` integers, giving the
+      dilation factor to apply in each spatial dimension of `lhs`. LHS dilation
+      is also known as transposed convolution.
+    rhs_dilation: `None`, or a sequence of `n` integers, giving the
+      dilation factor to apply in each input spatial dimension of `rhs`.
+      RHS dilation is also known as atrous convolution.
+    dimension_numbers: either `None`, a `ConvDimensionNumbers` object, or
+      a 3-tuple `(lhs_spec, rhs_spec, out_spec)`, where each element is a string
+      of length `n+2`.
+    precision: Optional. Either ``None``, which means the default precision for
+      the backend, or a ``lax.Precision`` enum value (``Precision.DEFAULT``,
+      ``Precision.HIGH`` or ``Precision.HIGHEST``).
+
+  Returns:
+    An array containing the unshared convolution result.
+
+  In the string case of `dimension_numbers`, each character identifies by
+  position:
+
+  - the batch dimensions in `lhs`, `rhs`, and the output with the character
+    'N',
+  - the feature dimensions in `lhs` and the output with the character 'C',
+  - the input and output feature dimensions in rhs with the characters 'I'
+    and 'O' respectively, and
+  - spatial dimension correspondences between `lhs`, `rhs`, and the output using
+    any distinct characters.
+
+  For example, to indicate dimension numbers consistent with the `conv` function
+  with two spatial dimensions, one could use `('NCHW', 'OIHW', 'NCHW')`. As
+  another example, to indicate dimension numbers consistent with the TensorFlow
+  Conv2D operation, one could use `('NHWC', 'HWIO', 'NHWC')`. When using the
+  latter form of convolution dimension specification, window strides are
+  associated with spatial dimension character labels according to the order in
+  which the labels appear in the `rhs_spec` string, so that `window_strides[0]`
+  is matched with the dimension corresponding to the first character
+  appearing in rhs_spec that is not `'I'` or `'O'`.
+
+  If `dimension_numbers` is `None`, the default is `('NCHW', 'OIHW', 'NCHW')`
+  (for a 2D convolution).
+  """
+  out = _extract_image_patches(
+      lhs=lhs,
+      filter_shape=filter_shape,
+      window_strides=window_strides,
+      padding=padding,
+      lhs_dilation=lhs_dilation,
+      rhs_dilation=rhs_dilation,
+      dimension_numbers=dimension_numbers,
+      precision=precision
+  )
+  _, rhs_spec, out_spec = dimension_numbers
+
+  lhs_c_dims, rhs_c_dims = [out_spec.index('C')], [rhs_spec.index('I')]
+  lhs_b_dims, rhs_b_dims = [], []
+
+  for i, c in enumerate(out_spec):
+    if c not in ('N', 'C'):
+      lhs_b_dims += [i]
+      rhs_b_dims += [rhs_spec.index(c)]
+
+  dn = ((lhs_c_dims, rhs_c_dims), (lhs_b_dims, rhs_b_dims))
+  out = lax.dot_general(out, rhs, dimension_numbers=dn)
+  out = np.moveaxis(out, (-2, -1), (out_spec.index('N'), out_spec.index('C')))
+  return out
+
+
+def make_2d(x: Optional[np.ndarray],
+            start_axis: int = 0,
+            end_axis: int = None) -> Optional[np.ndarray]:
+  """Makes `x` 2D from `start_axis` to `end_axis`, preserving other axes.
+
+  `x` is assumed to follow the (`X, X, Y, Y, Z, Z`) axes layout.
+
+  Example:
+    >>> x = np.ones((1, 2, 3, 3, 4, 4))
+    >>> make_2d(x).shape == (12, 24)
+    >>>
+    >>> make_2d(x, 2).shape == (1, 2, 12, 12)
+    >>>
+    >>> make_2d(x, 2, 4).shape == (1, 2, 3, 3, 4, 4)
+  """
+  if x is None:
+    return x
+
+  if end_axis is None:
+    end_axis = x.ndim
+
+  x = unzip_axes(x, start_axis, end_axis)
+
+  half_ndim = (end_axis - start_axis) // 2
+  x = x.reshape(x.shape[:start_axis] +
+                (size_at(x.shape[start_axis:start_axis + half_ndim]),
+                 size_at(x.shape[start_axis + half_ndim:end_axis])) +
+                x.shape[end_axis:])
+  return x
 
 
 def is_on_cpu(x: PyTree) -> bool:

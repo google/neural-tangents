@@ -19,6 +19,7 @@ import functools
 import itertools
 import random as prandom
 import string
+import time
 from typing import Tuple
 
 from absl.testing import absltest
@@ -101,6 +102,11 @@ PARAMETERIZATIONS = [
 ]
 
 test_utils.update_test_tolerance()
+
+
+def _skip_test(msg='Skipping large tests for speed.', platforms=('cpu',)):
+  if xla_bridge.get_backend().platform in platforms:
+    raise absltest.SkipTest(msg)
 
 
 def _get_inputs(
@@ -717,7 +723,9 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
 
     Block = stax.serial(stax.Conv(256, (3, 3)), stax.Relu())
     if avg_pool:
-      Readout = stax.serial(stax.GlobalAvgPool(), stax.Dense(10))
+      Readout = stax.serial(stax.Conv(256, (3, 3)),
+                            stax.GlobalAvgPool(),
+                            stax.Dense(10))
     else:
       Readout = stax.serial(stax.Flatten(), stax.Dense(10))
 
@@ -1659,7 +1667,9 @@ class DiagonalTest(test_utils.NeuralTangentsTestCase):
     names = readout[0].__name__, readin[0].__name__
 
     if 'GlobalAvgPool' in names:
-      self.assertRaises(ValueError, kernel_fn, x1, x2, diagonal_spatial=True)
+      if (readout[0].__name__ == 'GlobalAvgPool' and
+          readin[0].__name__ == 'Identity'):
+        self.assertRaises(ValueError, kernel_fn, x1, x2, diagonal_spatial=True)
       self.assertEqual(K_full.nngp.shape, batch_shape)
       self.assertAllClose(K_full, K)
 
@@ -1674,6 +1684,26 @@ class DiagonalTest(test_utils.NeuralTangentsTestCase):
         self.assertEqual(K_diag.nngp.shape, batch_shape + x1.shape[1:-1])
         self.assertAllClose(K_full, K)
         self.assertAllClose(K_diag.nngp, np.einsum('...iijj->...ij', K.nngp))
+
+
+class DiagonalClassTest(test_utils.NeuralTangentsTestCase):
+
+  def test_diagonal_compose_is_associative(self):
+    for inp_a, inp_b, inp_c in itertools.product(stax._Bool, repeat=3):
+      for out_a, out_b, out_c in itertools.product(stax._Bool, repeat=3):
+        a = stax._Diagonal(inp_a, out_a)
+        b = stax._Diagonal(inp_b, out_b)
+        c = stax._Diagonal(inp_c, out_c)
+        with self.subTest(a=a, b=b, c=c):
+          ab_c = (a >> b) >> c
+          a_bc = a >> (b >> c)
+          self.assertEqual(ab_c, a_bc)
+
+          _ab_c = c << (b << a)
+          _a_bc = (c << b) << a
+          self.assertEqual(_ab_c, _a_bc)
+
+          self.assertEqual(ab_c, _ab_c)
 
 
 @jtu.parameterized.parameters([
@@ -2044,7 +2074,9 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
               f'_same_inputs={same_inputs}_kernel_type={kernel_type}',
           'same_inputs': same_inputs,
           'kernel_type': kernel_type
-      } for same_inputs in [True, False] for kernel_type in ['nngp', 'ntk']))
+      }
+                          for same_inputs in [True, False]
+                          for kernel_type in ['nngp', 'ntk']))
   def test_parallel_in(self, same_inputs, kernel_type):
     platform = xla_bridge.get_backend().platform
     rtol = RTOL if platform != 'tpu' else 0.05
@@ -2470,9 +2502,8 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
                           for diagonal_spatial in [True, False]))
   def test_conv_transpose(self, same_inputs, padding, filter_shape, strides,
                           size, diagonal_batch, diagonal_spatial):
-    platform = xla_bridge.get_backend().platform
-    if platform == 'cpu' and size > 2:
-      raise absltest.SkipTest('Skipping large tests on CPU for speed.')
+    if size > 2:
+      _skip_test()
 
     width = 512
     tol = 0.01
@@ -2538,8 +2569,11 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
     _, apply_fn, _ = stax.Conv(
         out_chan=rhs.shape[dimension_numbers[1].index('I')],
         filter_shape=(rhs.shape[dimension_numbers[1].index('H')],),
-        strides=strides, padding=padding, dimension_numbers=dimension_numbers,
-        parameterization='standard')
+        strides=strides,
+        padding=padding,
+        dimension_numbers=dimension_numbers,
+        parameterization='standard'
+    )
     conv = lambda x: apply_fn((rhs, 0.), x)
     _, g = vjp(conv, placeholder)
     return g(lhs)[0]
@@ -2558,7 +2592,8 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
         strides=strides,
         padding=padding,
         dimension_numbers=dimension_numbers,
-        parameterization='standard')
+        parameterization='standard'
+    )
     return apply_fn((params[0], 0.), lhs)
 
   @jtu.parameterized.named_parameters(
@@ -2573,8 +2608,8 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
                           for strides in range(1, 5)
                           for size in range(1, 5)))
   def test_conv_transpose_circular(self, size, filter_shape, strides):
-    if xla_bridge.get_backend().platform == 'cpu' and size > 2:
-      raise absltest.SkipTest('Skipping large tests on CPU for speed.')
+    if size > 2:
+      _skip_test()
 
     x = random.normal(random.PRNGKey(1), (2, size, 3))
     dn = ('NHC', 'HIO', 'NHC')
@@ -2904,6 +2939,291 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
     k = get_k(x1, x2, m1, m2)
     self.assertAllClose(np.zeros_like(k[:2]), k[:2])
     self.assertAllClose(np.full_like(k[2:], 4.), k[2:])
+
+
+class ConvLocalTest(test_utils.NeuralTangentsTestCase):
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name': f'_diag_spatial={diagonal_spatial}_',
+          'diagonal_spatial': diagonal_spatial,
+      }
+                          for diagonal_spatial in [True, False]))
+  def test_whitened_inputs(self, diagonal_spatial):
+    _skip_test()
+
+    x = np.cos(random.normal(random.PRNGKey(1), (4 * 8 * 8, 512)))
+    cov = x @ x.T
+    whiten = np.linalg.cholesky(np.linalg.inv(cov))
+    x_white = whiten.T @ x
+    cov_white = x_white @ x_white.T
+    self.assertAllClose(np.eye(x.shape[0]), cov_white)
+
+    width = 256
+
+    scales = random.normal(random.PRNGKey(2), (4, 8, 8, 1))
+
+    x_white = x_white.reshape((4, 8, 8, 512)) * scales
+    x = x.reshape(x_white.shape) * scales
+
+    init_fn, apply_fn, kernel_fn = stax.serial(
+        stax.AvgPool((2, 3)),
+        stax.ConvLocal(width, (3, 1), padding='SAME', W_std=4.2, b_std=0.09),
+        stax.Relu(),
+        stax.Conv(width, (2, 3), padding='SAME', W_std=3.8, b_std=0.04),
+        stax.Relu(),
+        stax.ConvLocal(width, (2, 2), padding='SAME', W_std=6.4, b_std=0.1),
+        stax.GlobalAvgPool())
+
+    k_white = kernel_fn(x_white, None, diagonal_spatial=diagonal_spatial)
+    self._test_against_mc(apply_fn, init_fn, k_white.nngp, x_white, None)
+
+    k = kernel_fn(x, None, diagonal_spatial=diagonal_spatial)
+
+    if diagonal_spatial:
+      with self.assertRaises(AssertionError):
+        self._test_against_mc(apply_fn, init_fn, k.nngp, x, None)
+    else:
+      self._test_against_mc(apply_fn, init_fn, k.nngp, x, None)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              f'_same_inputs={same_inputs}_{padding}_size={size}_'
+              f'strides={strides}_filter={filter_shape}_'
+              f'diag_batch={diagonal_batch}_diag_spatial={diagonal_spatial}_'
+              f'get={get}_parameterization={parameterization}',
+          'padding': padding,
+          'size': size,
+          'same_inputs': same_inputs,
+          'filter_shape': filter_shape,
+          'strides': strides,
+          'diagonal_batch': diagonal_batch,
+          'diagonal_spatial': diagonal_spatial,
+          'get': get,
+          'parameterization': parameterization
+      }
+                          for padding in ['SAME', 'VALID', 'CIRCULAR']
+                          for same_inputs in [False]
+                          for filter_shape in range(2, 4)
+                          for strides in range(1, 3)
+                          for size in range(2, 4)
+                          for diagonal_batch in [True]
+                          for diagonal_spatial in [True, False]
+                          for get in ['cov1', 'nngp', 'ntk']
+                          for parameterization in ['standard', 'ntk']))
+  def test_conv_local(self, same_inputs, padding, filter_shape, strides,
+                      size, diagonal_batch, diagonal_spatial, get,
+                      parameterization):
+    _skip_test()
+
+    if diagonal_batch and get != 'cov1':
+      raise absltest.SkipTest('Checking `diagonal_batch` only on `cov1`.')
+
+    key1, key2, key_mc = random.split(random.PRNGKey(1), 3)
+    shape = (size, 1)
+    x1 = random.normal(key1, (2,) + shape)
+    x2 = random.normal(key2, (3,) + shape) if not same_inputs else None
+
+    kernel_kwargs = dict(diagonal_batch=diagonal_batch,
+                         diagonal_spatial=diagonal_spatial)
+
+    conv_kwargs = dict(out_chan=512,
+                       filter_shape=(filter_shape,),
+                       strides=(strides,),
+                       padding=padding,
+                       b_std=0.2,
+                       W_std=1.5,
+                       parameterization=parameterization)
+
+    init_fn, apply_fn, kernel_fn = stax.ConvLocal(**conv_kwargs)
+    k = kernel_fn(x1, x2, **kernel_kwargs)
+
+    # Compared to MC estimate
+    diagonal_axes = ()
+    if diagonal_batch:
+      diagonal_axes += (0,)
+    if diagonal_spatial:
+      diagonal_axes += (1,)
+
+    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, key_mc, n_samples=512, diagonal_axes=diagonal_axes,
+        device_count=0)
+    k_mc = kernel_fn_mc(x1, None if get == 'cov1' else x2,
+                        'nngp' if get == 'cov1' else get)
+    test_utils.assert_close_matrices(self, k_mc, getattr(k, get), 0.011)
+
+    # Compared diagonal entries to CNN
+    _, _, kernel_fn_conv = stax.Conv(**conv_kwargs)
+    k_conv = kernel_fn_conv(x1, x2, **kernel_kwargs)
+
+    if not diagonal_spatial:
+      def get_diag(k):
+        k = getattr(k, get)
+        k = np.diagonal(k, axis1=-1, axis2=-2)
+        return k
+      k_conv = get_diag(k_conv)
+      k = get_diag(k)
+
+    tol = 0.005 if xla_bridge.get_backend().platform == 'tpu' else 0.001
+    self.assertAllClose(k_conv, k, atol=tol, rtol=tol)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              f'_get={get}'
+              f'_same_inputs={same_inputs}_'
+              f'readout={readout[0].__name__}_'
+              f'parameterization={parameterization}_'
+              f'pool={pool[0].__name__}',
+          'same_inputs': same_inputs,
+          'parameterization': parameterization,
+          'readout': readout,
+          'pool': pool,
+          'get': get
+      }
+                          for pool in [stax.Identity(),
+                                       stax.AvgPool((2, 3), (2, 1), 'VALID')]
+                          for readout in [stax.Flatten(),
+                                          stax.GlobalAvgPool()]
+                          for same_inputs in [False]
+                          for get in ['ntk']
+                          for parameterization in ['ntk', 'standard']))
+  def test_conv_local_deep(self, get, pool, same_inputs, readout,
+                           parameterization):
+    _skip_test()
+
+    key1, key2, key_mc = random.split(random.PRNGKey(1), 3)
+    x1 = random.normal(key1, (2, 7, 8, 3))
+    x2 = random.normal(key2, (3, 7, 8, 3)) if not same_inputs else None
+
+    def get_nn(conv):
+      width = 256
+      return stax.serial(
+          conv(width, (2, 3), (2, 1), padding='CIRCULAR', W_std=1.5, b_std=0.2,
+               parameterization=parameterization),
+          pool,
+          stax.Erf(),
+          conv(width, (3, 1), (1, 2), padding='SAME'),
+          stax.Relu(),
+          conv(width, (2, 3), (2, 1), padding='VALID', W_std=1.2, b_std=0.3,
+               parameterization=parameterization),
+          readout,
+          stax.Dense(1 if get == 'ntk' else width)
+      )
+
+    init_fn, apply_fn, kernel_fn_local = get_nn(stax.ConvLocal)
+
+    k_local = kernel_fn_local(x1, x2, get)
+
+    # Test results for consistency with different diagonalizations.
+    for diagonal_batch in [True]:
+      for diagonal_spatial in [True, False]:
+        kwargs = dict(get=get,
+                      diagonal_batch=diagonal_batch,
+                      diagonal_spatial=diagonal_spatial)
+        with self.subTest(**kwargs):
+          k_local_d = kernel_fn_local(x1, x2, **kwargs)
+          test_utils.assert_close_matrices(self, k_local, k_local_d, 0.01)
+
+    # Test against CNN-GP diagonal if only flattening is used.
+    if pool[0].__name__ == 'Identity' and readout[0].__name__ == 'Flatten':
+      _, _, kernel_fn_conv = get_nn(stax.Conv)
+      k_conv = kernel_fn_conv(x1, x2, get)
+      self.assertAllClose(k_conv, k_local)
+
+    # Test against MC.
+    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, key_mc, n_samples=512, device_count=0)
+    k_mc = kernel_fn_mc(x1, x2, get)
+    test_utils.assert_close_matrices(self, k_mc, k_local, 0.015)
+
+  def test_conv_local_conv(self):
+    _skip_test(platforms=('cpu', 'tpu'))
+
+    key1, key2 = random.split(random.PRNGKey(1), 2)
+    x1 = np.cos(random.normal(key1, (5, 32, 32, 1)))
+    x2 = np.sin(random.normal(key2, (5, 32, 32, 1)))
+
+    width = 128
+    local_conv = stax.serial(stax.ConvLocal(width, (3, 2)),
+                             stax.AvgPool((2, 3), padding='SAME'),
+                             stax.Relu(),
+                             stax.ConvLocal(width, (1, 2), padding='SAME'),
+                             stax.AvgPool((2, 1), padding='SAME'),
+                             stax.Relu(),
+                             stax.Conv(width, (3, 3), padding='SAME'),
+                             stax.Relu(),
+                             stax.Conv(width, (3, 3), padding='SAME'),
+                             stax.Relu(),
+                             stax.Conv(width, (3, 3), padding='SAME'))
+
+    init_fn, apply_fn, kernel_fn = local_conv
+
+    # No projection layer
+    k = kernel_fn(x1, x2)
+    self.assertEqual(k.diagonal_spatial, False)
+    self._test_against_mc(apply_fn, init_fn, k.reverse().nngp, x1, x2, 0.03)
+
+    # Top layer flat
+    init_fn, apply_fn, kernel_fn = stax.serial(local_conv, stax.Flatten())
+    k_jit = jit(lambda x1, x2: kernel_fn(x1, x2))
+    k_jit(x2, x1).nngp.block_until_ready()
+    time_flat = time.time()
+    k = k_jit(x1, x2).nngp.block_until_ready()
+    time_flat = time.time() - time_flat
+    self._test_against_mc(apply_fn, init_fn, k, x1, x2, 0.03)
+
+    # Top layer pooling
+    init_fn, apply_fn, kernel_fn = stax.serial(local_conv, stax.GlobalAvgPool())
+    k_jit = jit(lambda x1, x2: kernel_fn(x1, x2))
+    k_jit(x2, x1).nngp.block_until_ready()
+    time_pool = time.time()
+    k = k_jit(x1, x2).nngp.block_until_ready()
+    time_pool = time.time() - time_pool
+    self.assertLess(time_flat * 5, time_pool)
+    self._test_against_mc(apply_fn, init_fn, k, x1, x2, 0.03)
+
+    # Top layer LCN + pooling
+    init_fn, apply_fn, kernel_fn = stax.serial(local_conv,
+                                               stax.ConvLocal(width, (2, 2),
+                                                              padding='SAME'),
+                                               stax.GlobalAvgPool())
+    k_jit = jit(lambda x1, x2: kernel_fn(x1, x2))
+    k_jit(x2, x1).nngp.block_until_ready()
+    time_lcn_pool = time.time()
+    k = k_jit(x1, x2).nngp.block_until_ready()
+    time_lcn_pool = time.time() - time_lcn_pool
+    self.assertLess(time_lcn_pool * 5, time_pool)
+    self._test_against_mc(apply_fn, init_fn, k, x1, x2, 0.03)
+
+  def test_double_pool(self):
+    _skip_test()
+
+    key1, key2, key_mc = random.split(random.PRNGKey(1), 3)
+    x1 = np.cos(random.normal(key1, (2, 4, 6, 3)))
+    x2 = np.sin(random.normal(key2, (3, 4, 6, 3)))
+
+    width = 256
+    single_pool = stax.serial(stax.ConvLocal(width, (2, 3),
+                                             W_std=2., b_std=0.01),
+                              stax.AvgPool((3, 2)))
+    init_fn, apply_fn, kernel_fn = stax.serial(single_pool,
+                                               stax.Flatten())
+    k_single = kernel_fn(x1, x2)
+    self._test_against_mc(apply_fn, init_fn, k_single.nngp, x1, x2, 0.05)
+
+    init_fn, apply_fn, kernel_fn = stax.serial(single_pool,
+                                               stax.AvgPool((1, 2)),
+                                               stax.Flatten())
+    k_double = kernel_fn(x1, x2)
+    self._test_against_mc(apply_fn, init_fn, k_double.nngp, x1, x2, 0.05)
+
+  def _test_against_mc(self, apply_fn, init_fn, k, x1, x2, tol=0.01, n=256):
+    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, random.PRNGKey(2), n_samples=n, device_count=0)
+    k_mc = kernel_fn_mc(x1, x2, 'nngp')
+    test_utils.assert_close_matrices(self, k_mc, k, tol)
 
 
 if __name__ == '__main__':
