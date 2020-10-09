@@ -78,7 +78,6 @@ from jax import numpy as np
 from jax import ops
 from jax import random
 from jax.api import ShapeDtypeStruct, eval_shape, grad, ShapedArray, vmap
-from jax.api_util import flatten_fun
 import jax.experimental.stax as ostax
 from jax.lib import xla_bridge
 from jax.scipy.special import erf
@@ -3204,9 +3203,6 @@ class _Diagonal:
     return other >> self
 
   __rand__ = __and__
-
-
-_R = TypeVar('_R')
 
 
 def _get_input_req_attr(
