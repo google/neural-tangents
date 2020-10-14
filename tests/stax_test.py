@@ -2076,7 +2076,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
           'kernel_type': kernel_type
       }
                           for same_inputs in [True, False]
-                          for kernel_type in ['nngp', 'ntk']))
+                          for kernel_type in ['ntk']))
   def test_parallel_in(self, same_inputs, kernel_type):
     platform = xla_bridge.get_backend().platform
     rtol = RTOL if platform != 'tpu' else 0.05
@@ -2112,7 +2112,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
               f'_same_inputs={same_inputs}_kernel_type={kernel_type}',
           'same_inputs': same_inputs,
           'kernel_type': kernel_type
-      } for same_inputs in [True, False] for kernel_type in ['nngp', 'ntk']))
+      } for same_inputs in [True, False] for kernel_type in ['ntk']))
   def test_parallel_out(self, same_inputs, kernel_type):
     platform = xla_bridge.get_backend().platform
     rtol = RTOL if platform != 'tpu' else 0.05
@@ -2120,7 +2120,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
     rng = random.PRNGKey(0)
     input_key1, input_key2, mc_key = random.split(rng, 3)
 
-    x1, x2 = _get_inputs(input_key1, same_inputs, (BATCH_SIZE, 10))
+    x1, x2 = _get_inputs(input_key1, same_inputs, (BATCH_SIZE, 1))
 
     N = 2 ** 10
 
@@ -2146,7 +2146,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
               f'_same_inputs={same_inputs}_kernel_type={kernel_type}',
           'same_inputs': same_inputs,
           'kernel_type': kernel_type,
-      } for same_inputs in [True, False] for kernel_type in ['nngp', 'ntk']))
+      } for same_inputs in [True, False] for kernel_type in ['ntk']))
   def test_parallel_in_out(self, same_inputs, kernel_type):
     platform = xla_bridge.get_backend().platform
     rtol = RTOL if platform != 'tpu' else 0.05
@@ -2154,8 +2154,8 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
     rng = random.PRNGKey(0)
     input_key1, input_key2, mc_key = random.split(rng, 3)
 
-    x1_1, x2_1 = _get_inputs(input_key1, same_inputs, (BATCH_SIZE, 10))
-    x1_2, x2_2 = _get_inputs(input_key2, same_inputs, (BATCH_SIZE, 20))
+    x1_1, x2_1 = _get_inputs(input_key1, same_inputs, (BATCH_SIZE, 1))
+    x1_2, x2_2 = _get_inputs(input_key2, same_inputs, (BATCH_SIZE, 2))
 
     x1 = (x1_1, x1_2)
     x2 = (x2_1, x2_2)
@@ -2195,7 +2195,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
               f'_same_inputs={same_inputs}_kernel_type={kernel_type}',
           'same_inputs': same_inputs,
           'kernel_type': kernel_type,
-      } for same_inputs in [True, False] for kernel_type in ['nngp', 'ntk']))
+      } for same_inputs in [True, False] for kernel_type in ['ntk']))
   def test_nested_parallel(self, same_inputs, kernel_type):
     platform = xla_bridge.get_backend().platform
     rtol = RTOL if platform != 'tpu' else 0.05
