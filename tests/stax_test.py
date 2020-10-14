@@ -2419,7 +2419,6 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
           'do_batch': do_batch
       } for get in ['ntk']
                           for name, readout in [
-                              ('Flattten', stax.Flatten()),
                               ('Pooling', stax.GlobalAvgPool())]
                           for same_input in [True, False]
                           for act_name, activation in [('Relu', stax.Relu())]
@@ -2494,11 +2493,11 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
           'diagonal_spatial': diagonal_spatial
       }
                           for padding in ['CIRCULAR', 'SAME', 'VALID']
-                          for same_inputs in [True, False]
+                          for same_inputs in [False]
                           for filter_shape in range(2, 5)
                           for strides in range(2, 5)
                           for size in range(2, 5)
-                          for diagonal_batch in [True, False]
+                          for diagonal_batch in [True]
                           for diagonal_spatial in [True, False]))
   def test_conv_transpose(self, same_inputs, padding, filter_shape, strides,
                           size, diagonal_batch, diagonal_spatial):

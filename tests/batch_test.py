@@ -282,8 +282,8 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     # Check Fully-Connected.
     rng = random.PRNGKey(0)
     rng_self, rng_other = random.split(rng)
-    x_self = random.normal(rng_self, (8, 10))
-    x_other = random.normal(rng_other, (2, 10))
+    x_self = random.normal(rng_self, (8, 2))
+    x_other = random.normal(rng_other, (2, 2))
     Block = stax.serial(stax.Dense(256), stax.Relu())
 
     _, _, ker_fn = Block
@@ -306,8 +306,8 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     self.assertAllClose(ker_out, composed_ker_out)
 
     # Check convolutional + pooling.
-    x_self = random.normal(rng, (8, 10, 10, 3))
-    x_other = random.normal(rng, (2, 10, 10, 3))
+    x_self = random.normal(rng, (8, 4, 4, 3))
+    x_other = random.normal(rng, (2, 4, 4, 3))
 
     Block = stax.serial(stax.Conv(256, (2, 2)), stax.Relu())
     Readout = stax.serial(stax.GlobalAvgPool(), stax.Dense(10))
@@ -439,8 +439,8 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     rng = random.PRNGKey(0)
     input_key1, input_key2, mc_key = random.split(rng, 3)
 
-    x1_1, x1_2, x1_3 = random.normal(input_key1, (3, 4, 10))
-    x2_1, x2_2, x2_3 = random.normal(input_key2, (3, 8, 10))
+    x1_1, x1_2, x1_3 = random.normal(input_key1, (3, 4, 1))
+    x2_1, x2_2, x2_3 = random.normal(input_key2, (3, 8, 1))
 
     x1 = (x1_1, (x1_2, x1_3))
     x2 = (x2_1, (x2_2, x2_3))
@@ -494,8 +494,8 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     rng = random.PRNGKey(0)
     input_key1, input_key2, net_key = random.split(rng, 3)
 
-    x1_1, x1_2, x1_3 = random.normal(input_key1, (3, 4, 10))
-    x2_1, x2_2, x2_3 = random.normal(input_key2, (3, 8, 10))
+    x1_1, x1_2, x1_3 = random.normal(input_key1, (3, 4, 1))
+    x2_1, x2_2, x2_3 = random.normal(input_key2, (3, 8, 1))
 
     x1 = (x1_1, (x1_2, x1_3))
     x2 = (x2_1, (x2_2, x2_3))
@@ -507,7 +507,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
 
     # Check NNGP.
     init_fn, apply_fn, _ = net(WIDTH)
-    _, params = init_fn(net_key, ((-1, 10), ((-1, 10), (-1, 10))))
+    _, params = init_fn(net_key, ((-1, 1), ((-1, 1), (-1, 1))))
 
     kernel_fn = jit(empirical.empirical_nngp_fn(apply_fn))
     batch_kernel_fn = jit(batch.batch(kernel_fn, 2))
@@ -520,7 +520,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
 
     # Check NTK.
     init_fn, apply_fn, _ = stax.serial(net(WIDTH), net(1))
-    _, params = init_fn(net_key, ((-1, 10), ((-1, 10), (-1, 10))))
+    _, params = init_fn(net_key, ((-1, 1), ((-1, 1), (-1, 1))))
 
     kernel_fn = jit(empirical.empirical_ntk_fn(apply_fn))
     batch_kernel_fn = jit(batch.batch(kernel_fn, 2))

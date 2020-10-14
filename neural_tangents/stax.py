@@ -3474,9 +3474,11 @@ def _inputs_to_kernel(
     The `Kernel` object containing inputs covariance[s].
   """
 
-  if not ((type(x1) is type(x2)) or x2 is None):
-    raise TypeError(('Inconsistent input types given. Found x1 of type '
-                     f'{type(x1)} and x2 of type {type(x2)}.'))
+  if not (isinstance(x1, np.ndarray) and
+          (x2 is None or isinstance(x2, np.ndarray))):
+    raise TypeError(('Wrong input types given. Found `x1` of type '
+                     f'{type(x1)} and `x2` of type {type(x2)}, need both to be'
+                     f'`np.ndarray`s (`x2` can be `None`).'))
 
   batch_axis %= x1.ndim
   diagonal_spatial = bool(diagonal_spatial)
