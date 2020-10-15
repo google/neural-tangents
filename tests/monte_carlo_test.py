@@ -36,7 +36,7 @@ BATCH_SIZES = [
     4,
 ]
 
-WIDTH = 1024
+WIDTH = 256
 
 DEVICE_COUNTS = [0, 1, 2]
 
@@ -173,7 +173,7 @@ class MonteCarloTest(jtu.JaxTestCase):
     test_utils.stub_out_pmap(batch, device_count)
 
     x1, x2, init_fn, apply_fn, stax_kernel_fn, key = _get_inputs_and_model(
-        256, 2, xla_bridge.get_backend().platform == 'tpu')
+        WIDTH, 2, xla_bridge.get_backend().platform == 'tpu')
 
     sample = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn, key, 100,
                                                batch_size, device_count,
@@ -269,11 +269,14 @@ class MonteCarloTest(jtu.JaxTestCase):
     rng = random.PRNGKey(0)
     input_key1, input_key2, net_key = random.split(rng, 3)
 
-    x1_1, x1_2, x1_3 = random.normal(input_key1, (3, 2, 10))
-    x2_1, x2_2, x2_3 = random.normal(input_key2, (3, 4, 10))
-
+    x1_1, x1_2, x1_3 = random.normal(input_key1, (3, 2, 5))
     x1 = (x1_1, (x1_2, x1_2))
-    x2 = (x2_1, (x2_2, x2_3))
+
+    if same_inputs:
+      x2 = None
+    else:
+      x2_1, x2_2, x2_3 = random.normal(input_key2, (3, 4, 5))
+      x2 = (x2_1, (x2_2, x2_3))
 
     def net(N_out):
       return stax.parallel(stax.Dense(N_out),
@@ -286,17 +289,18 @@ class MonteCarloTest(jtu.JaxTestCase):
     nb_kernel_fn = monte_carlo.monte_carlo_kernel_fn(init_fn,
                                                      apply_fn,
                                                      net_key,
-                                                     n_samples=10,
+                                                     n_samples=4,
                                                      trace_axes=(-1,))
 
     kernel_fn = monte_carlo.monte_carlo_kernel_fn(init_fn,
                                                   apply_fn,
                                                   net_key,
-                                                  n_samples=10,
+                                                  n_samples=4,
                                                   batch_size=batch_size,
                                                   trace_axes=(-1,))
 
     self.assertAllClose(kernel_fn(x1, x2, 'nngp'), nb_kernel_fn(x1, x2, 'nngp'))
+
 
 if __name__ == '__main__':
   absltest.main()

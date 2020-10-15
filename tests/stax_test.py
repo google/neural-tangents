@@ -1253,7 +1253,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
           }
           for same_inputs in [False]
           for axis in [0, 1]
-          for n_branches in [2, 3] for get in ['ntk']
+          for n_branches in [3] for get in ['ntk']
           for branch_in in ['dense_before_branch_in',
                             'dense_after_branch_in']
           for fan_in_mode in ['FanInSum', 'FanInConcat', 'FanInProd']))
@@ -1832,8 +1832,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
           for concat in [None, 0, 1] for p in [0.5]
           for mask_axis in [(),
                             (0,),
-                            (1, 3),
-                            (0, 1, 2, 3)]
+                            (1, 3)]
           for mask_constant in [10.]))
   def test_mask_fc(self, same_inputs, get, concat, p, mask_axis, mask_constant):
     width = 512
