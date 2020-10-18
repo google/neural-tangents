@@ -15,10 +15,10 @@
 """Tests for `utils/empirical.py`."""
 
 from functools import partial
-
+import operator
 from absl.testing import absltest
 from jax import test_util as jtu
-from jax.api import jit
+from jax.api import jit, tree_multimap
 from jax.config import config
 import jax.numpy as np
 import jax.random as random
@@ -115,7 +115,10 @@ class EmpiricalTest(jtu.JaxTestCase):
       w2 /= 0.9
     if do_shift_x:
       x = x * 2 + 1.
-    return 0.5 * np.dot(np.dot(x.T, w1), x) + np.dot(w2, x) + b
+    return [0.5 * np.dot(np.dot(x.T, w1), x) + np.dot(w2, x) + b,
+            (np.dot(w1, x),
+             w2)
+            ]
 
   @classmethod
   def f_lin_exact(cls, x0, x, params, do_alter, do_shift_x=True):
@@ -129,7 +132,12 @@ class EmpiricalTest(jtu.JaxTestCase):
       b *= 2.
       w1 += 5.
       w2 /= 0.9
-    return f0 + np.dot(np.dot(x0.T, w1) + w2, dx)
+    return tree_multimap(operator.add,
+                         f0,
+                         [np.dot(np.dot(x0.T, w1) + w2, dx),
+                          (np.dot(w1, dx),
+                           0.)
+                          ])
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -177,7 +185,12 @@ class EmpiricalTest(jtu.JaxTestCase):
         w1 += 5.
         w2 /= 0.9
       dx = x - x0
-      return f_lin + 0.5 * np.dot(np.dot(dx.T, w1), dx)
+      return tree_multimap(operator.add,
+                           f_lin,
+                           [0.5 * np.dot(np.dot(dx.T, w1), dx),
+                            (0.,
+                             0.)
+                            ])
 
     key = random.PRNGKey(0)
     key, s1, s2, s3, = random.split(key, 4)

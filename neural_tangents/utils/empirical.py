@@ -33,21 +33,19 @@ refer to individual functions' docstrings for details.
 """
 
 import operator
-from typing import Union, Callable, Optional, Tuple, Dict, List
-import warnings
-from jax import random
+from typing import Union, Callable, Optional, Tuple, Dict
 from jax.api import eval_shape
 from jax.api import jacobian
 from jax.api import jvp
 from jax.api import vjp
 import jax.numpy as np
-from jax.tree_util import tree_flatten, tree_unflatten, tree_structure, tree_multimap, tree_reduce, tree_all, tree_map
+from jax.tree_util import tree_flatten, tree_unflatten, tree_structure, tree_multimap, tree_reduce, tree_map
 from neural_tangents.utils import utils
 from neural_tangents.utils.typing import ApplyFn, EmpiricalKernelFn, NTTree, PyTree, Axes
 
 
-def linearize(f: Callable[..., np.ndarray],
-              params: PyTree) -> Callable[..., np.ndarray]:
+def linearize(f: Callable[..., PyTree],
+              params: PyTree) -> Callable[..., PyTree]:
   """Returns a function `f_lin`, the first order taylor approximation to `f`.
 
   Example:
@@ -59,7 +57,7 @@ def linearize(f: Callable[..., np.ndarray],
     f:
       A function that we would like to linearize. It should have the signature
       `f(params, *args, **kwargs)` where params is a `PyTree` and `f` should
-      return an `np.ndarray`.
+      return a `PyTree`.
     params:
       Initial parameters to the function that we would like to take the
       Taylor series about. This can be any structure that is compatible with the
@@ -71,16 +69,16 @@ def linearize(f: Callable[..., np.ndarray],
     `params`.
   """
   def f_lin(p, *args, **kwargs):
-    dparams = tree_multimap(lambda x, y: x - y, p, params)
+    dparams = tree_multimap(operator.sub, p, params)
     f_params_x, proj = jvp(lambda param: f(param, *args, **kwargs),
                            (params,), (dparams,))
-    return f_params_x + proj
+    return tree_multimap(operator.add, f_params_x, proj)
   return f_lin
 
 
-def taylor_expand(f: Callable[..., np.ndarray],
+def taylor_expand(f: Callable[..., PyTree],
                   params: PyTree,
-                  degree: int) -> Callable[..., np.ndarray]:
+                  degree: int) -> Callable[..., PyTree]:
   """Returns a function `f_tayl`, Taylor approximation to `f` of order `degree`.
 
   Example:
@@ -92,7 +90,7 @@ def taylor_expand(f: Callable[..., np.ndarray],
     f:
       A function that we would like to Taylor expand. It should have the
       signature `f(params, *args, **kwargs)` where `params` is a `PyTree`, and
-      `f` returns a `np.ndarray`.
+      `f` returns a `PyTree`.
     params:
       Initial parameters to the function that we would like to take the Taylor
       series about. This can be any structure that is compatible with the JAX
@@ -102,8 +100,8 @@ def taylor_expand(f: Callable[..., np.ndarray],
 
   Returns:
     A function `f_tayl(new_params, *args, **kwargs)` whose signature is the
-    same as `f`. Here `f_tayl` implements the degree-order taylor series of `f`
-    about `params`.
+    same as `f`. Here `f_tayl` implements the `degree`-order taylor series of
+    `f` about `params`.
   """
   def taylorize_r(f, params, dparams, degree, current_degree):
     """Recursive function to accumulate contributions to the Taylor series."""
@@ -114,11 +112,12 @@ def taylor_expand(f: Callable[..., np.ndarray],
       _, val_jvp = jvp(f, (p,), (dparams,))
       return val_jvp
 
-    df = taylorize_r(f_jvp, params, dparams, degree, current_degree+1)
-    return f(params) + df / (current_degree + 1)
+    df = taylorize_r(f_jvp, params, dparams, degree, current_degree + 1)
+    return tree_multimap(operator.add, f(params),
+                         tree_map(lambda x: x / (current_degree + 1), df))
 
   def f_tayl(p, *args, **kwargs):
-    dparams = tree_multimap(lambda x, y: x - y, p, params)
+    dparams = tree_multimap(operator.sub, p, params)
     return taylorize_r(lambda param: f(param, *args, **kwargs),
                        params, dparams, degree, 0)
 
