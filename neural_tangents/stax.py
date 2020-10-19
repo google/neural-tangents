@@ -192,7 +192,7 @@ def _requires(**static_reqs):
   return req
 
 
-def _supports_masking(remask_kernel: bool):
+def supports_masking(remask_kernel: bool):
   """Returns a decorator that turns layers into layers supporting masking.
 
   Specifically:
@@ -355,7 +355,7 @@ def parallel(*layers: Layer) -> InternalLayer:
 
 
 @layer
-@_supports_masking(remask_kernel=False)
+@supports_masking(remask_kernel=False)
 def DotGeneral(
     *,
     lhs: Union[np.ndarray, float] = None,
@@ -487,7 +487,7 @@ def DotGeneral(
 
 
 @layer
-@_supports_masking(remask_kernel=True)
+@supports_masking(remask_kernel=True)
 def Aggregate(
     aggregate_axis: Axes = None,
     batch_axis: int = 0,
@@ -683,7 +683,7 @@ def Aggregate(
 
 
 @layer
-@_supports_masking(remask_kernel=True)
+@supports_masking(remask_kernel=True)
 def Dense(
     out_dim: int,
     W_std: float = 1.,
@@ -812,7 +812,7 @@ def Dense(
 
 
 @layer
-@_supports_masking(remask_kernel=True)
+@supports_masking(remask_kernel=True)
 def Conv(
     out_chan: int,
     filter_shape: Sequence[int],
@@ -836,7 +836,7 @@ def Conv(
       number of spatial dimensions in `dimension_numbers`.
     strides:
       The stride of the convolution. The shape of the tuple should agree with
-      the number of spatial dimensions in `dimension_nubmers`.
+      the number of spatial dimensions in `dimension_numbers`.
     padding:
       Specifies padding for the convolution. Can be one of `"VALID"`, `"SAME"`,
       or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
@@ -860,7 +860,7 @@ def Conv(
 
 
 @layer
-@_supports_masking(remask_kernel=True)
+@supports_masking(remask_kernel=True)
 def ConvTranspose(
     out_chan: int,
     filter_shape: Sequence[int],
@@ -908,7 +908,7 @@ def ConvTranspose(
 
 
 @layer
-@_supports_masking(remask_kernel=True)
+@supports_masking(remask_kernel=True)
 def ConvLocal(
     out_chan: int,
     filter_shape: Sequence[int],
@@ -934,7 +934,7 @@ def ConvLocal(
       number of spatial dimensions in `dimension_numbers`.
     strides:
       The stride of the convolution. The shape of the tuple should agree with
-      the number of spatial dimensions in `dimension_nubmers`.
+      the number of spatial dimensions in `dimension_numbers`.
     padding:
       Specifies padding for the convolution. Can be one of `"VALID"`, `"SAME"`,
       or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
@@ -982,7 +982,7 @@ def _Conv(
       in `dimension_numbers`.
     strides:
       The stride of the convolution. The shape of the tuple should agree with
-      the number of spatial dimensions in `dimension_nubmers`.
+      the number of spatial dimensions in `dimension_numbers`.
     padding:
       Specifies padding for the convolution. Can be one of `"VALID"`, `"SAME"`,
       or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
@@ -1276,7 +1276,7 @@ def FanOut(num: int) -> InternalLayer:
 
 
 @layer
-@_supports_masking(remask_kernel=False)
+@supports_masking(remask_kernel=False)
 def FanInSum() -> InternalLayer:
   """Layer construction function for a fan-in sum layer.
 
@@ -1335,7 +1335,7 @@ def FanInSum() -> InternalLayer:
 
 
 @layer
-@_supports_masking(remask_kernel=False)
+@supports_masking(remask_kernel=False)
 def FanInProd() -> InternalLayer:
   """Layer construction function for a fan-in product layer.
 
@@ -1401,7 +1401,7 @@ def FanInProd() -> InternalLayer:
 
 
 @layer
-@_supports_masking(remask_kernel=False)
+@supports_masking(remask_kernel=False)
 def FanInConcat(axis: int = -1) -> InternalLayer:
   """Layer construction function for a fan-in concatenation layer.
 
@@ -1511,7 +1511,7 @@ def FanInConcat(axis: int = -1) -> InternalLayer:
 
 
 @layer
-@_supports_masking(remask_kernel=True)
+@supports_masking(remask_kernel=True)
 def AvgPool(
     window_shape: Sequence[int],
     strides: Sequence[int] = None,
@@ -1547,7 +1547,7 @@ def AvgPool(
 
 
 @layer
-@_supports_masking(remask_kernel=True)
+@supports_masking(remask_kernel=True)
 def SumPool(
     window_shape: Sequence[int],
     strides: Sequence[int] = None,
@@ -1697,7 +1697,7 @@ def _Pool(
 
 
 @layer
-@_supports_masking(remask_kernel=False)
+@supports_masking(remask_kernel=False)
 def GlobalSumPool(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
   """Layer construction function for a global sum pooling layer.
 
@@ -1718,7 +1718,7 @@ def GlobalSumPool(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
 
 
 @layer
-@_supports_masking(remask_kernel=False)
+@supports_masking(remask_kernel=False)
 def GlobalAvgPool(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
   """Layer construction function for a global average pooling layer.
 
@@ -1824,7 +1824,7 @@ def _GlobalPool(
 
 
 @layer
-@_supports_masking(remask_kernel=False)
+@supports_masking(remask_kernel=False)
 def Flatten(batch_axis: int = 0, batch_axis_out: int = 0) -> InternalLayer:
   """Layer construction function for flattening all non-batch dimensions.
 
@@ -1915,7 +1915,7 @@ def Flatten(batch_axis: int = 0, batch_axis_out: int = 0) -> InternalLayer:
 
 
 @layer
-@_supports_masking(remask_kernel=False)
+@supports_masking(remask_kernel=False)
 def Identity() -> InternalLayer:
   """Layer construction function for an identity layer.
 
@@ -1953,7 +1953,7 @@ class AttentionMechanism(enum.Enum):
 
 
 @layer
-@_supports_masking(remask_kernel=True)
+@supports_masking(remask_kernel=True)
 def GlobalSelfAttention(
     n_chan_out: int,
     n_chan_key: int,
@@ -2439,7 +2439,7 @@ def GlobalSelfAttention(
 
 
 @layer
-@_supports_masking(remask_kernel=False)
+@supports_masking(remask_kernel=False)
 def LayerNorm(
     axis: Axes = -1,
     eps: float = 1e-12,
@@ -2547,7 +2547,7 @@ def LayerNorm(
 
 
 @layer
-@_supports_masking(remask_kernel=False)
+@supports_masking(remask_kernel=False)
 def Dropout(rate: float, mode: str = 'train') -> InternalLayer:
   """Dropout layer.
 
@@ -2604,7 +2604,7 @@ def Dropout(rate: float, mode: str = 'train') -> InternalLayer:
 
 
 @layer
-@_supports_masking(remask_kernel=True)
+@supports_masking(remask_kernel=True)
 def Erf(
     a: float = 1.,
     b: float = 1.,
@@ -2684,7 +2684,7 @@ def Sigmoid_like():
 
 
 @layer
-@_supports_masking(remask_kernel=False)
+@supports_masking(remask_kernel=False)
 def Gelu(
     do_backprop: bool = False) -> InternalLayer:
   """Gelu function.
@@ -2757,7 +2757,7 @@ def Gelu(
 
 
 @layer
-@_supports_masking(remask_kernel=True)
+@supports_masking(remask_kernel=True)
 def Sin(
     a: float = 1.,
     b: float = 1.,
@@ -2813,7 +2813,7 @@ def Sin(
 
 
 @layer
-@_supports_masking(remask_kernel=True)
+@supports_masking(remask_kernel=True)
 def Rbf(
     gamma: float = 1.0) -> InternalLayer:
   """Dual activation function for normalized RBF or squared exponential kernel.
@@ -2871,7 +2871,7 @@ def Rbf(
 
 
 @layer
-@_supports_masking(remask_kernel=False)
+@supports_masking(remask_kernel=False)
 def ABRelu(
     a: float,
     b: float,
@@ -2998,8 +2998,8 @@ def Abs(
 
 
 @layer
-@_supports_masking(remask_kernel=True)
-def NumericalActivation(
+@supports_masking(remask_kernel=True)
+def ElementwiseNumerical(
     fn: Callable[[float], float],
     deg: int,
     df: Callable[[float], float] = None,
@@ -3035,6 +3035,9 @@ def NumericalActivation(
   quad_points = osp.special.roots_hermite(deg)
 
   if df is None:
+    warnings.warn(
+        'Using JAX autodiff to compute the `fn` derivative for NTK. Beware of '
+        'https://jax.readthedocs.io/en/latest/faq.html#gradients-contain-nan-where-using-where.')
     df = np.vectorize(grad(fn))
 
   _requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
@@ -3745,17 +3748,25 @@ def _preprocess_kernel_fn(
   return kernel_fn_any
 
 
-def _elementwise(fn: Callable[[float], float],
+def _elementwise(fn: Optional[Callable[[float], float]],
                  name: str,
-                 kernel_fn: LayerKernelFn) -> InternalLayer:
-  init_fn, apply_fn = ostax.elementwise(fn)
+                 kernel_fn: Optional[LayerKernelFn]) -> InternalLayer:
+  init_fn = lambda rng, input_shape: (input_shape, ())
+
+  def apply_fn(params, inputs, **kwargs):
+    if fn is None:
+      raise NotImplementedError(fn)
+    return fn(inputs)  # pytype:disable=not-callable
 
   def new_kernel_fn(k: Kernel, **kwargs) -> Kernel:
+    if kernel_fn is None:
+      raise NotImplementedError(kernel_fn)
+
     if not k.is_gaussian:
       raise ValueError('The input to the activation function must be Gaussian, '
                        'i.e. a random affine transform is required before the '
                        'activation function.')
-    k = kernel_fn(k)
+    k = kernel_fn(k)  # pytype:disable=not-callable
     return k.replace(is_gaussian=False)
 
   init_fn.__name__ = apply_fn.__name__ = new_kernel_fn.__name__ = name

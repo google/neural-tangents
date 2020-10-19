@@ -952,9 +952,30 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
                           rbf_gamma=gamma)
 
 
-class NumericalActivationTest(test_utils.NeuralTangentsTestCase):
+class ElementwiseNumericalTest(test_utils.NeuralTangentsTestCase):
 
-  def _test_activation(self, activation, same_inputs, model, get):
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              '_{}_{}_{}_{}'.format(
+                  model,
+                  phi[0].__name__,
+                  'Same_inputs' if same_inputs else 'Different_inputs',
+                  get),
+          'model': model,
+          'phi': phi,
+          'same_inputs': same_inputs,
+          'get': get,
+      }
+                          for model in ['fc', 'conv-pool', 'conv-flatten']
+                          for phi in [
+                              stax.Erf(),
+                              stax.Gelu(),
+                              stax.Sin(),
+                          ]
+                          for same_inputs in [False, True]
+                          for get in ['nngp', 'ntk']))
+  def test_elementwise_numerical(self, same_inputs, model, phi, get):
     platform = xla_bridge.get_backend().platform
     if platform == 'cpu' and 'conv' in model:
       raise absltest.SkipTest('Not running CNNs on CPU to save time.')
@@ -986,46 +1007,16 @@ class NumericalActivationTest(test_utils.NeuralTangentsTestCase):
                             stax.Dense(output_dim))
       depth = 2
 
-    _, _, kernel_fn = stax.serial(*[affine, activation]*depth, readout)
+    _, _, kernel_fn = stax.serial(*[affine, phi] * depth, readout)
     analytic_kernel = kernel_fn(X0_1, X0_2, get)
 
-    fn = lambda x: activation[1]((), x)
+    fn = lambda x: phi[1]((), x)
     _, _, kernel_fn = stax.serial(
-        *[affine, stax.NumericalActivation(fn, deg=deg)]*depth, readout)
+        *[affine, stax.ElementwiseNumerical(fn, deg=deg)] * depth, readout)
     numerical_activation_kernel = kernel_fn(X0_1, X0_2, get)
 
     test_utils.assert_close_matrices(self, analytic_kernel,
                                      numerical_activation_kernel, rtol)
-
-  @jtu.parameterized.named_parameters(
-      jtu.cases_from_list({
-          'testcase_name':
-              '_{}_{}_{}_{}'.format(
-                  model,
-                  phi_name,
-                  'Same_inputs' if same_inputs else 'Different_inputs',
-                  get),
-          'model': model,
-          'phi_name': phi_name,
-          'same_inputs': same_inputs,
-          'get': get,
-      }
-                          for model in ['fc', 'conv-pool', 'conv-flatten']
-                          for phi_name in ['Erf', 'Gelu', 'Sin', 'Cos']
-                          for same_inputs in [False, True]
-                          for get in ['nngp', 'ntk']))
-  def test_numerical_activation(self, same_inputs, model, phi_name, get):
-    if phi_name == 'Erf':
-      activation = stax.Erf()
-    elif phi_name == 'Gelu':
-      activation = stax.Gelu()
-    elif phi_name == 'Sin':
-      activation = stax.Sin()
-    elif phi_name == 'Cos':
-      activation = stax.Sin(c=np.pi/2)
-    else:
-      raise NotImplementedError(f'Activation {phi_name} is not implemented.')
-    self._test_activation(activation, same_inputs, model, get)
 
 
 @jtu.parameterized.parameters([
