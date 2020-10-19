@@ -45,7 +45,7 @@ TEST_SHAPES = [(2, 4), (2, 8), (16, 8), (2, 4, 4, 3), (2, 3, 3, 3)]
 NETWORK = [FLAT, FLAT, FLAT, FLAT, INTERMEDIATE_CONV]
 OUTPUT_LOGITS = [1, 2, 3]
 CONVOLUTION_CHANNELS = 4
-WIDTH = 1024
+WIDTH = 8
 RTOL = 1e-2
 test_utils.update_test_tolerance(f64_tol=5e-5)
 
