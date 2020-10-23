@@ -896,8 +896,8 @@ class PredictTest(jtu.JaxTestCase):
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
-              '_train={}_network={}_logits={}_{}'.format(
-                  train, network, out_logits, name),
+              f'_train={train}_network={network}_logits={out_logits}_{name}' +
+              f'_lr_factor={lr_factor}_momentum={momentum}',
           'train_shape':
               train,
           'network':
@@ -905,12 +905,18 @@ class PredictTest(jtu.JaxTestCase):
           'out_logits':
               out_logits,
           'fn_and_kernel':
-              fn
+              fn,
+          'lr_factor':
+              lr_factor,
+          'momentum':
+              momentum,
       } for train, network in zip(TRAIN_SHAPES, NETWORK)
                           for out_logits in OUTPUT_LOGITS
-                          for name, fn in KERNELS.items()))
+                          for name, fn in KERNELS.items()
+                          for lr_factor in [0.5, 1., 3.]
+                          for momentum in [0., 0.1, 0.5, 0.9]))
   def testMaxLearningRate(self, train_shape, network, out_logits,
-                          fn_and_kernel):
+                          fn_and_kernel, lr_factor, momentum):
 
     key = random.PRNGKey(0)
 
@@ -932,30 +938,34 @@ class PredictTest(jtu.JaxTestCase):
     def get_loss(opt_state):
       return loss(get_params(opt_state), x_train)
 
-    steps = 20
+    steps = 30
 
-    for lr_factor in [0.5, 3.]:
-      params, f, ntk = fn_and_kernel(key, train_shape[1:], network, out_logits)
-      g_dd = ntk(x_train, None, 'ntk')
+    params, f, ntk = fn_and_kernel(key, train_shape[1:], network, out_logits)
+    g_dd = ntk(x_train, None, 'ntk')
 
-      step_size = predict.max_learning_rate(
-          g_dd, y_train_size=y_train.size) * lr_factor
-      opt_init, opt_update, get_params = optimizers.sgd(step_size)
-      opt_state = opt_init(params)
+    step_size = predict.max_learning_rate(
+        g_dd, y_train_size=y_train.size, momentum=momentum) * lr_factor
+    opt_init, opt_update, get_params = optimizers.momentum(step_size,
+                                                           mass=momentum)
 
-      init_loss = get_loss(opt_state)
+    opt_state = opt_init(params)
 
-      for i in range(steps):
-        params = get_params(opt_state)
-        opt_state = opt_update(i, grad_loss(params, x_train), opt_state)
+    init_loss = get_loss(opt_state)
 
-      trained_loss = get_loss(opt_state)
-      loss_ratio = trained_loss / (init_loss + 1e-12)
-      if lr_factor == 3.:
-        if not math.isnan(loss_ratio):
-          self.assertGreater(loss_ratio, 10.)
-      else:
-        self.assertLess(loss_ratio, 0.1)
+    for i in range(steps):
+      params = get_params(opt_state)
+      opt_state = opt_update(i, grad_loss(params, x_train), opt_state)
+
+    trained_loss = get_loss(opt_state)
+    loss_ratio = trained_loss / (init_loss + 1e-12)
+    if lr_factor < 1.:
+      self.assertLess(loss_ratio, 0.1)
+    elif lr_factor == 1:
+      # At the threshold, the loss decays slowly
+      self.assertLess(loss_ratio, 1.)
+    if lr_factor > 2.:
+      if not math.isnan(loss_ratio):
+        self.assertGreater(loss_ratio, 10.)
 
 
 if __name__ == '__main__':

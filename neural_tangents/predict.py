@@ -942,22 +942,33 @@ def gradient_descent_mse_ensemble(
 def max_learning_rate(
     ntk_train_train: np.ndarray,
     y_train_size: int = None,
+    momentum=0.,
     eps: float = 1e-12) -> float:
   r"""Computes the maximal feasible learning rate for infinite width NNs.
 
-  The network is assumed to be trained using SGD or full-batch GD with mean
-  squared loss. The loss is assumed to have the form
-  `1/(2 * batch_size * output_size) \|f(train_x) - train_y\|^2`. The maximal
-  feasible learning rate is the largest `\eta` such that the operator
-  `(I - \eta / (batch_size * output_size) * NTK)` is a contraction, which is
-  '2 * batch_size * output_size * lambda_max(NTK)'.
+  The network is assumed to be trained using mini-/full-batch GD + momentum
+  with mean squared loss. The loss is assumed to have the form
+  `1/(2 * batch_size * output_size) \|f(train_x) - train_y\|^2`. For vanilla SGD
+  (i.e. `momentum = 0`) the maximal feasible learning rate is the largest `\eta`
+  such that the operator
+                `(I - \eta / (batch_size * output_size) * NTK)`
+  is a contraction, which is
+                `2 * batch_size * output_size * lambda_max(NTK)`.
+  When `momentum > 0`, we use (see `The Dynamics of Momentum` section in
+  https://distill.pub/2017/momentum/)
+                `2 * (1 + momentum) * batch_size * output_size * lambda_max(NTK)`.
 
   Args:
-    ntk_train_train: analytic or empirical NTK on the training data.
-    y_train_size: total training set output size, i.e.
+    ntk_train_train:
+      analytic or empirical NTK on the training data.
+    y_train_size:
+      total training set output size, i.e.
       `f(x_train).size ==  y_train.size`. If `output_size=None` it is inferred
       from `ntk_train_train.shape` assuming `trace_axes=()`.
-    eps: a float to avoid zero divisor.
+    momentum:
+      The `momentum` for momentum optimizers.
+    eps:
+      a float to avoid zero divisor.
 
   Returns:
     The maximal feasible learning rate for infinite width NNs.
@@ -971,7 +982,7 @@ def max_learning_rate(
                                            ntk_train_train.shape[0] - 1))[-1]
   else:
     max_eva = np.linalg.eigvalsh(ntk_train_train)[-1]
-  lr = 2 * factor / (max_eva + eps)
+  lr = 2 * (1 + momentum) * factor / (max_eva + eps)
   return lr
 
 
