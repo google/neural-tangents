@@ -4081,7 +4081,7 @@ def _same_pad_for_filter_shape_transpose(
         slices += [slice(pads[axis][0], x.shape[axis] - pads[axis][1])]
       else:
         slices += [slice(None)]
-    x = x[slices]
+    x = x[tuple(slices)]
   return x
 
 
