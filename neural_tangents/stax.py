@@ -820,7 +820,7 @@ def Conv(
     padding: str = Padding.VALID.name,
     W_std: float = 1.0,
     b_std: float = 0.0,
-    dimension_numbers: lax.ConvDimensionNumbers = None,
+    dimension_numbers: Tuple[str, str, str] = None,
     parameterization: str = 'ntk'
 ) -> InternalLayer:
   """Layer construction function for a general convolution layer.
@@ -868,7 +868,7 @@ def ConvTranspose(
     padding: str = Padding.VALID.name,
     W_std: float = 1.0,
     b_std: float = 0.0,
-    dimension_numbers: lax.DotDimensionNumbers = None,
+    dimension_numbers: Tuple[str, str, str] = None,
     parameterization: str = 'ntk'
 ) -> InternalLayer:
   """Layer construction function for a general transpose convolution layer.
@@ -916,7 +916,7 @@ def ConvLocal(
     padding: str = Padding.VALID.name,
     W_std: float = 1.0,
     b_std: float = 0.0,
-    dimension_numbers: lax.DotDimensionNumbers = None,
+    dimension_numbers: Tuple[str, str, str] = None,
     parameterization: str = 'ntk'
 ) -> InternalLayer:
   """Layer construction function for a general unshared convolution layer.
@@ -964,7 +964,7 @@ def _Conv(
     padding: str,
     W_std: float,
     b_std: float,
-    dimension_numbers: Optional[lax.ConvDimensionNumbers],
+    dimension_numbers: Optional[Tuple[str, str, str]],
     parameterization: str,
     transpose: bool,
     shared_weights: bool
