@@ -428,6 +428,11 @@ as an example. With `NVIDIA V100` 64-bit precision, `nt` took 316/330/508 GPU-ho
 
 Neural Tangents has been used in the following papers:
 
+* [Deep learning versus kernel learning: an empirical study of loss landscape geometry and the time evolution of the Neural Tangent Kernel](https://arxiv.org/abs/2010.15110)
+* [Stable ResNet](https://arxiv.org/abs/2010.12859)
+* [Label-Aware Neural Tangent Kernel: Toward Better Generalization and Local Elasticity](https://arxiv.org/abs/2010.11775)
+* [Semi-supervised Batch Active Learning via Bilevel Optimization](https://arxiv.org/abs/2010.09654)
+* [Temperature check: theory and practice for training models with softmax-cross-entropy losses](https://arxiv.org/abs/2010.07344)
 * [Experimental Design for Overparameterized Learning with Application to Single Shot Deep Active Learning](https://arxiv.org/abs/2009.12820)
 * [How Neural Networks Extrapolate: From Feedforward to Graph Neural Networks](https://arxiv.org/abs/2009.11848)
 * [Exploring the Uncertainty Properties of Neural Networks’ Implicit Priors in the Infinite-Width Limit](http://www.gatsby.ucl.ac.uk/~balaji/udl2020/accepted-papers/UDL2020-paper-115.pdf)
