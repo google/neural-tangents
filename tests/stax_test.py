@@ -647,13 +647,19 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
-          'testcase_name': '_act={}_kernel={}'.format(act, kern),
+          'testcase_name':
+              f'_act={act}_kernel={kern}_do_stabilize={do_stabilize}',
           'act': act,
-          'kernel': kern
+          'kernel': kern,
+          'do_stabilize': do_stabilize
       }
                           for act in ['erf', 'relu']
+                          for do_stabilize in [True, False]
                           for kern in ['nngp', 'ntk']))
-  def test_sparse_inputs(self, act, kernel):
+  def test_sparse_inputs(self, act, kernel, do_stabilize):
+    if do_stabilize and act != 'relu':
+      raise absltest.SkipTest('Stabilization possible only in Relu.')
+
     key = random.PRNGKey(1)
 
     input_count = 4
@@ -675,7 +681,8 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     x_dense = random.normal(key, (input_count, input_size))
     x_sparse = ops.index_update(x_dense, ops.index[:sparse_count, :], 0.)
 
-    activation = stax.Relu() if act == 'relu' else stax.Erf()
+    activation = (stax.Relu(do_stabilize=do_stabilize) if act == 'relu'
+                  else stax.Erf())
 
     init_fn, apply_fn, kernel_fn = stax.serial(
         stax.Dense(width),
@@ -1021,15 +1028,25 @@ class ElementwiseNumericalTest(test_utils.NeuralTangentsTestCase):
 
 @jtu.parameterized.parameters([
     {
-        'same_inputs': True
+        'same_inputs': True,
+        'do_stabilize': True
     },
     {
-        'same_inputs': False
+        'same_inputs': False,
+        'do_stabilize': True
+    },
+    {
+        'same_inputs': True,
+        'do_stabilize': False
+    },
+    {
+        'same_inputs': False,
+        'do_stabilize': False
     },
 ])
 class ABReluTest(test_utils.NeuralTangentsTestCase):
 
-  def test_ab_relu_relu(self, same_inputs):
+  def test_ab_relu_relu(self, same_inputs, do_stabilize):
     key = random.PRNGKey(1)
     X0_1 = random.normal(key, (5, 7))
     fc = stax.Dense(10, 1, 0)
@@ -1042,7 +1059,8 @@ class ABReluTest(test_utils.NeuralTangentsTestCase):
 
     for a, b in [(0, 1), (0, -1), (-1, 0), (1, 0)]:
       with self.subTest(a=a, b=b):
-        _, apply_ab_relu, kernel_fn_ab_relu = stax.serial(fc, stax.ABRelu(a, b))
+        _, apply_ab_relu, kernel_fn_ab_relu = stax.serial(
+            fc, stax.ABRelu(a, b, do_stabilize=do_stabilize))
 
         X1_1_relu = (b - a) * apply_relu(params, X0_1 * (-1 if a != 0 else 1))
         X1_1_ab_relu = apply_ab_relu(params, X0_1)
@@ -1052,7 +1070,7 @@ class ABReluTest(test_utils.NeuralTangentsTestCase):
         kernels_ab_relu = kernel_fn_ab_relu(X0_1, X0_2)
         self.assertAllClose(kernels_relu, kernels_ab_relu)
 
-  def test_ab_relu_id(self, same_inputs):
+  def test_ab_relu_id(self, same_inputs, do_stabilize):
     key = random.PRNGKey(1)
     X0_1 = random.normal(key, (5, 7))
     fc = stax.Dense(10, 1, 0)
@@ -1065,7 +1083,8 @@ class ABReluTest(test_utils.NeuralTangentsTestCase):
 
     for a in [-5, -1, -0.5, 0, 0.5, 1, 5]:
       with self.subTest(a=a):
-        _, apply_ab_relu, kernel_fn_ab_relu = stax.serial(fc, stax.ABRelu(a, a))
+        _, apply_ab_relu, kernel_fn_ab_relu = stax.serial(
+            fc, stax.ABRelu(a, a, do_stabilize=do_stabilize))
 
         X1_1_id = a * apply_id(params, X0_1)
         X1_1_ab_relu = apply_ab_relu(params, X0_1)
@@ -1078,7 +1097,7 @@ class ABReluTest(test_utils.NeuralTangentsTestCase):
         kernels_ab_relu = kernels_ab_relu.replace(is_gaussian=True)
         self.assertAllClose(kernels_id, kernels_ab_relu)
 
-  def test_leaky_relu(self, same_inputs):
+  def test_leaky_relu(self, same_inputs, do_stabilize):
     key = random.PRNGKey(1)
     X0_1 = random.normal(key, (5, 7))
     fc = stax.Dense(10, 1, 0)
@@ -1089,7 +1108,7 @@ class ABReluTest(test_utils.NeuralTangentsTestCase):
     for a in [-2, -1, 0, 1, 2]:
       with self.subTest(alpha=a):
         init_fn, apply_leaky_relu, kernel_fn_leaky_relu = stax.serial(
-            fc, stax.LeakyRelu(a))
+            fc, stax.LeakyRelu(a, do_stabilize=do_stabilize))
         _, apply_ab_relu, kernel_fn_ab_relu = stax.serial(fc, stax.ABRelu(a, 1))
 
         _, params = init_fn(key, input_shape=(-1, 7))
@@ -1101,7 +1120,7 @@ class ABReluTest(test_utils.NeuralTangentsTestCase):
         kernels_ab_relu = kernel_fn_ab_relu(X0_1, X0_2)
         self.assertAllClose(kernels_leaky_relu, kernels_ab_relu)
 
-  def test_abs(self, same_inputs):
+  def test_abs(self, same_inputs, do_stabilize):
     key = random.PRNGKey(1)
     X0_1 = random.normal(key, (5, 7))
     fc = stax.Dense(10, 1, 0)
@@ -1109,7 +1128,8 @@ class ABReluTest(test_utils.NeuralTangentsTestCase):
     X0_2 = None if same_inputs else random.normal(key, (9, 7))
 
     # Test that Abs == ABRelu(-1, 1)
-    init_fn, apply_leaky_relu, kernel_fn_abs = stax.serial(fc, stax.Abs())
+    init_fn, apply_leaky_relu, kernel_fn_abs = stax.serial(
+        fc, stax.Abs(do_stabilize=do_stabilize))
     _, apply_ab_relu, kernel_fn_ab_relu = stax.serial(fc, stax.ABRelu(-1, 1))
 
     _, params = init_fn(key, input_shape=(-1, 7))

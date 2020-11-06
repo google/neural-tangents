@@ -2900,7 +2900,7 @@ def ABRelu(
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
     if do_stabilize:
-      factor = np.max([np.max(np.abs(nngp)), 1e-12])
+      factor = np.maximum(np.max(np.abs(nngp)), 1e-12)
       nngp /= factor
       cov1 /= factor
       if cov2 is not None:
