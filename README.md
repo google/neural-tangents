@@ -428,6 +428,7 @@ as an example. With `NVIDIA V100` 64-bit precision, `nt` took 316/330/508 GPU-ho
 
 Neural Tangents has been used in the following papers:
 
+* [Dataset Meta-Learning from Kernel Ridge-Regression](https://arxiv.org/abs/2011.00050)
 * [Deep learning versus kernel learning: an empirical study of loss landscape geometry and the time evolution of the Neural Tangent Kernel](https://arxiv.org/abs/2010.15110)
 * [Stable ResNet](https://arxiv.org/abs/2010.12859)
 * [Label-Aware Neural Tangent Kernel: Toward Better Generalization and Local Elasticity](https://arxiv.org/abs/2010.11775)
