@@ -90,7 +90,7 @@ def _build_network(input_shape, network, out_logits):
 def _empirical_kernel(key, input_shape, network, out_logits):
   init_fn, f, _ = _build_network(input_shape, network, out_logits)
   _, params = init_fn(key, (-1,) + input_shape)
-  _kernel_fn = empirical.empirical_kernel_fn(f, trace_axes=())
+  _kernel_fn = empirical.empirical_kernel_fn(f, trace_axes=(), vmap_axes=0)
   kernel_fn = lambda x1, x2, get: _kernel_fn(x1, x2, get, params)
   return params, f, jit(kernel_fn, static_argnums=(2,))
 

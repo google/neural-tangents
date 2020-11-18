@@ -1045,7 +1045,7 @@ def _Conv(
       lax_conv = lax.conv_general_dilated
       ntk_init_fn, _ = ostax.GeneralConv(**init_args)
     else:
-      lax_conv = functools.partial(utils.conv_local_general_dilated,
+      lax_conv = functools.partial(utils.conv_general_dilated_local,
                                    filter_shape=filter_shape)
       def ntk_init_fn(rng, input_shape):
         """Adapted from `jax.experimental.GeneralConv`."""

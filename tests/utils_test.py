@@ -129,7 +129,7 @@ class UtilsTest(jtu.JaxTestCase):
 
     filter_shape = [rhs.shape[i]
                     for i in range(n + 2) if rhs_spec[i] not in ('O', 'I')]
-    out_local = utils.conv_local_general_dilated(rhs=rhs_local,
+    out_local = utils.conv_general_dilated_local(rhs=rhs_local,
                                                  filter_shape=filter_shape,
                                                  **kwargs)
 
