@@ -45,7 +45,7 @@ TEST_SHAPES = [(2, 4), (2, 8), (16, 8), (2, 4, 4, 3), (2, 3, 3, 3)]
 NETWORK = [FLAT, FLAT, FLAT, FLAT, INTERMEDIATE_CONV]
 OUTPUT_LOGITS = [1, 2, 3]
 CONVOLUTION_CHANNELS = 4
-WIDTH = 8
+WIDTH = 4
 RTOL = 1e-2
 test_utils.update_test_tolerance(f64_tol=5e-5)
 
@@ -437,7 +437,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
   def test_parallel_in_out(self, same_inputs):
     test_utils.stub_out_pmap(batch, 2)
     rng = random.PRNGKey(0)
-    input_key1, input_key2, mc_key = random.split(rng, 3)
+    input_key1, input_key2 = random.split(rng, 2)
 
     x1_1, x1_2, x1_3 = random.normal(input_key1, (3, 4, 1))
     x2_1, x2_2, x2_3 = random.normal(input_key2, (3, 8, 1))
@@ -503,7 +503,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     def net(N_out):
       return stax.parallel(stax.Dense(N_out),
                            stax.parallel(stax.Dense(N_out + 1),
-                                        stax.Dense(N_out + 2)))
+                                         stax.Dense(N_out + 2)))
 
     # Check NNGP.
     init_fn, apply_fn, _ = net(WIDTH)

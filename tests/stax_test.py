@@ -691,7 +691,10 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     exact = kernel_fn(x_sparse, None, kernel)
     mc = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn,
                                            random.split(key, 2)[0],
-                                           samples)(x_sparse, None, kernel)
+                                           samples,
+                                           vmap_axes=0,
+                                           implementation=2)(
+        x_sparse, None, kernel)
     mc = np.reshape(mc, exact.shape)
 
     assert not np.any(np.isnan(exact))
@@ -785,7 +788,8 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     def _get_empirical(n_samples, get):
       kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
           init_fn, apply_fn, key, n_samples, device_count=device_count,
-          trace_axes=(channel_axis,), batch_size=batch_size
+          trace_axes=(channel_axis,), batch_size=batch_size,
+          implementation=2
       )
       if same_inputs:
         assert x2 is None
@@ -855,6 +859,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
       affine = stax.Dense(1024, W_std, b_std)
       readout = stax.Dense(output_dim)
       depth = 1
+
     else:
       rtol = 0.1
       X0_1 = random.normal(key, (4, 8, 8, 3))
@@ -864,6 +869,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
                             stax.Flatten(),
                             stax.Dense(output_dim))
       depth = 2
+
     if platform == 'cpu':
       num_samplings = 200
       rtol *= 2
@@ -875,7 +881,9 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
         *[affine, activation_fn]*depth, readout)
     analytic_kernel = kernel_fn(X0_1, X0_2, get)
     mc_kernel_fn = monte_carlo.monte_carlo_kernel_fn(
-        init_fn, apply_fn, split, num_samplings)
+        init_fn, apply_fn, split, num_samplings, implementation=2,
+        vmap_axes=0
+    )
     empirical_kernel = mc_kernel_fn(X0_1, X0_2, get)
     test_utils.assert_close_matrices(self, analytic_kernel,
                                      empirical_kernel, rtol)
@@ -1177,13 +1185,17 @@ class FlattenTest(test_utils.NeuralTangentsTestCase):
                                                   stax.Dense(1024, 2., 0.5))
 
     kernel_fc_mc = monte_carlo.monte_carlo_kernel_fn(init_fc, apply_fc, key,
-                                                     200)
+                                                     200, implementation=2,
+                                                     vmap_axes=0)
     kernel_bot_mc = monte_carlo.monte_carlo_kernel_fn(init_bot, apply_bot, key,
-                                                      200)
+                                                      200, implementation=2,
+                                                      vmap_axes=0)
     kernel_mid_mc = monte_carlo.monte_carlo_kernel_fn(init_mid, apply_mid, key,
-                                                      200)
+                                                      200, implementation=2,
+                                                      vmap_axes=0)
     kernel_top_mc = monte_carlo.monte_carlo_kernel_fn(init_top, apply_top, key,
-                                                      200)
+                                                      200, implementation=2,
+                                                      vmap_axes=0)
 
     K = kernel_fc(X0_1_flat, X0_2_flat)
 
@@ -1345,7 +1357,10 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
 
     kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
         init_fn, apply_fn, key, n_samples,
-        device_count=0 if axis in (0, -2) else -1)
+        device_count=0 if axis in (0, -2) else -1,
+        implementation=2,
+        vmap_axes=None if axis in (0, -2) else 0,
+    )
 
     exact = kernel_fn(X0_1, X0_2, get=get)
     empirical = kernel_fn_mc(X0_1, X0_2, get=get)
@@ -1476,7 +1491,10 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
         apply_fn,
         key,
         n_samples,
-        device_count=0 if axis in (0, -4) else -1)
+        device_count=0 if axis in (0, -4) else -1,
+        implementation=2,
+        vmap_axes=None if axis in (0, -4) else 0,
+    )
 
     exact = kernel_fn(X0_1, X0_2, get=get)
     empirical = kernel_fn_mc(X0_1, X0_2, get=get)
@@ -1608,7 +1626,7 @@ class ConvNDTest(test_utils.NeuralTangentsTestCase):
       raise ValueError(get)
 
     kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
-        init_fn, apply_fn, key, n_samples)
+        init_fn, apply_fn, key, n_samples, implementation=2, vmap_axes=0)
 
     exact = kernel_fn(X0_1, X0_2, get=get)
     empirical = kernel_fn_mc(X0_1, X0_2, get=get)
@@ -1757,7 +1775,9 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
     )
 
     correct_conv_fn_mc = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn,
-                                                           key, 400)
+                                                           key, 400,
+                                                           implementation=2,
+                                                           vmap_axes=0)
     K = correct_conv_fn(x1, x2, get='nngp')
     K_mc = correct_conv_fn_mc(x1, x2, get='nngp')
     self.assertAllClose(K, K_mc, atol=0.01, rtol=0.05)
@@ -1783,7 +1803,9 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
     )
 
     correct_conv_fn_mc = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn,
-                                                           key, 300)
+                                                           key, 300,
+                                                           implementation=2,
+                                                           vmap_axes=0)
     K = correct_conv_fn(x1, x2, get='nngp')
     K_mc = correct_conv_fn_mc(x1, x2, get='nngp')
     self.assertAllClose(K, K_mc, atol=0.01, rtol=0.05)
@@ -1806,7 +1828,9 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
     )
 
     correct_conv_fn_mc = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn,
-                                                           key, 200)
+                                                           key, 200,
+                                                           implementation=2,
+                                                           vmap_axes=0)
     K = correct_conv_fn(x1, x2, get='ntk')
     K_mc = correct_conv_fn_mc(x1, x2, get='ntk')
     self.assertAllClose(K, K_mc, atol=0.01, rtol=0.05)
@@ -1897,7 +1921,10 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
 
     kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
         init_fn, apply_fn, key, n_samples,
-        device_count=0 if concat in (0, -2) else -1)
+        device_count=0 if concat in (0, -2) else -1,
+        implementation=2,
+        vmap_axes=None if concat in (0, -2) else 0,
+    )
 
     kernel_fn = jit(kernel_fn, static_argnums=(2,))
     exact = kernel_fn(x1, x2, get, mask_constant=mask_constant)
@@ -2067,7 +2094,9 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
 
     kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
         init_fn, apply_fn, key, n_samples,
-        device_count=0 if concat in (0, -n) else -1
+        device_count=0 if concat in (0, -n) else -1,
+        implementation=2,
+        vmap_axes=None if concat in (0, -n) else 0,
     )
 
     kernel_fn = jit(kernel_fn, static_argnums=(2,))
@@ -2110,7 +2139,10 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
     init_fn, apply_fn, kernel_fn = net(N if kernel_type == 'nngp' else 1)
 
     kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
-        init_fn, apply_fn, mc_key, N_SAMPLES, trace_axes=(-1,))
+        init_fn, apply_fn, mc_key, N_SAMPLES, trace_axes=(-1,),
+        implementation=2,
+        vmap_axes=((0, 0), 0, {})
+    )
     test_utils.assert_close_matrices(self,
                                      kernel_fn(x1, x2, kernel_type),
                                      kernel_fn_empirical(x1, x2, kernel_type),
@@ -2128,7 +2160,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
     rtol = RTOL if platform != 'tpu' else 0.05
 
     rng = random.PRNGKey(0)
-    input_key1, input_key2, mc_key = random.split(rng, 3)
+    input_key1, mc_key = random.split(rng, 2)
 
     x1, x2 = _get_inputs(input_key1, same_inputs, (BATCH_SIZE, 1))
 
@@ -2143,7 +2175,9 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
     init_fn, apply_fn, kernel_fn = net(N if kernel_type == 'nngp' else 1)
 
     kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
-        init_fn, apply_fn, mc_key, N_SAMPLES, trace_axes=(-1,))
+        init_fn, apply_fn, mc_key, N_SAMPLES, trace_axes=(-1,),
+        implementation=2,
+        vmap_axes=(0, [0, 0], {}))
 
     test_utils.assert_close_matrices(self,
                                      kernel_fn(x1, x2, kernel_type),
@@ -2185,7 +2219,10 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
     K_readout_fn = jit(functools.partial(readout[2], get=kernel_type))
 
     kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
-        init_fn, apply_fn, mc_key, N_SAMPLES, trace_axes=(-1,))
+        init_fn, apply_fn, mc_key, N_SAMPLES, trace_axes=(-1,),
+        implementation=2,
+        vmap_axes=((0, 0), [0, 0, 0], {})
+    )
 
     test_utils.assert_close_matrices(
         self,
@@ -2220,8 +2257,8 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
 
     x1_1, x2_1 = _get_inputs(input_key1, same_inputs, (BATCH_SIZE, 5))
     x1_2, x2_2 = _get_inputs(input_key2, same_inputs, (BATCH_SIZE, 2, 2, 2))
-    x1_3, x2_3 = _get_inputs(input_key2, same_inputs, (BATCH_SIZE, 2, 2, 3))
-    x1_4, x2_4 = _get_inputs(input_key2, same_inputs, (BATCH_SIZE, 3, 4))
+    x1_3, x2_3 = _get_inputs(input_key3, same_inputs, (BATCH_SIZE, 2, 2, 3))
+    x1_4, x2_4 = _get_inputs(input_key4, same_inputs, (BATCH_SIZE, 3, 4))
 
     m1_key, m2_key, m3_key, m4_key = random.split(mask_key, 4)
 
@@ -2252,7 +2289,10 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
             stax.Conv(N_in + 3, (2,)))
 
     kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
-        init_fn, apply_fn, mc_key, N_SAMPLES)
+        init_fn, apply_fn, mc_key, N_SAMPLES, implementation=2,
+        vmap_axes=(((((0, 0), 0), 0), (((0, 0), 0), 0), {})
+                   if platform == 'tpu' else None)
+    )
 
     test_utils.assert_close_matrices(
         self,
@@ -2403,7 +2443,9 @@ class AttentionTest(test_utils.NeuralTangentsTestCase):
 
     kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
         init_fn, apply_fn, key, n_samples,
-        device_count=-1
+        device_count=-1,
+        implementation=2,
+        vmap_axes=0
     )
 
     kernel_fn = jit(kernel_fn, static_argnums=(2,))
@@ -2475,7 +2517,9 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
 
     kernel_mc_fn = monte_carlo.monte_carlo_kernel_fn(
         init_fn, apply_fn, random.PRNGKey(10), 128,
-        batch_size=2 if xla_bridge.get_backend().platform == 'tpu' else 0)
+        batch_size=2 if xla_bridge.get_backend().platform == 'tpu' else 0,
+        implementation=2,
+    )
     empirical = kernel_mc_fn(x1, x2, get,
                              mask_constant=mask_constant if test_mask else None,
                              pattern=(pattern1, pattern2))
@@ -2542,7 +2586,7 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
 
     kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
         init_fn, apply_fn, key, n_samples, diagonal_axes=diagonal_axes,
-        device_count=0)
+        device_count=0, implementation=2, vmap_axes=0)
     k_mc = kernel_fn_mc(x1, None if diagonal_batch else x2, 'nngp')
 
     test_utils.assert_close_matrices(self, k_mc, k, tol)
@@ -2804,7 +2848,9 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
             diagonal_axes=get_diagonal_axes(),
             device_count=-1 if (get == 'nngp' and
                                 batch_axis == out_b_axis == 0 and
-                                0 not in c_dims + b_dims) else 0)
+                                0 not in c_dims + b_dims) else 0,
+            implementation=2,
+        )
 
         empirical = kernel_fn_mc(x1=x2 if get == 'cov2' else x1,
                                  x2=x2 if get == 'nngp' else None,
@@ -2910,7 +2956,8 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
     kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
         init_fn, apply_fn, key1, n_samples,
         trace_axes=(int(out_c_axis > out_b_axis) if do_pool else 1,),
-        device_count=0
+        device_count=0,
+        implementation=2
     )
 
     empirical = kernel_fn_mc(x1, x2, get, mask_constant=mask_constant)
@@ -3057,7 +3104,10 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
 
     kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
         init_fn, apply_fn, key_mc, n_samples=512, diagonal_axes=diagonal_axes,
-        device_count=0)
+        device_count=0,
+        implementation=2,
+        vmap_axes=0
+    )
     k_mc = kernel_fn_mc(x1, None if get == 'cov1' else x2,
                         'nngp' if get == 'cov1' else get)
     test_utils.assert_close_matrices(self, k_mc, getattr(k, get), 0.011)
@@ -3143,7 +3193,10 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
 
     # Test against MC.
     kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
-        init_fn, apply_fn, key_mc, n_samples=512, device_count=0)
+        init_fn, apply_fn, key_mc, n_samples=512, device_count=0,
+        implementation=2,
+        vmap_axes=0
+    )
     k_mc = kernel_fn_mc(x1, x2, get)
     test_utils.assert_close_matrices(self, k_mc, k_local, 0.015)
 
@@ -3209,7 +3262,7 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
   def test_double_pool(self):
     _skip_test()
 
-    key1, key2, key_mc = random.split(random.PRNGKey(1), 3)
+    key1, key2 = random.split(random.PRNGKey(1), 2)
     x1 = np.cos(random.normal(key1, (2, 4, 6, 3)))
     x2 = np.sin(random.normal(key2, (3, 4, 6, 3)))
 
@@ -3230,7 +3283,10 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
 
   def _test_against_mc(self, apply_fn, init_fn, k, x1, x2, tol=0.01, n=256):
     kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
-        init_fn, apply_fn, random.PRNGKey(2), n_samples=n, device_count=0)
+        init_fn, apply_fn, random.PRNGKey(2), n_samples=n, device_count=0,
+        implementation=2,
+        vmap_axes=0
+    )
     k_mc = kernel_fn_mc(x1, x2, 'nngp')
     test_utils.assert_close_matrices(self, k_mc, k, tol)
 

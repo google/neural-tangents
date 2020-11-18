@@ -37,7 +37,7 @@ from jax.tree_util import tree_multimap
 from neural_tangents.utils import batch
 from neural_tangents.utils import empirical
 from neural_tangents.utils import utils
-from neural_tangents.utils.typing import PRNGKey, InitFn, ApplyFn, MonteCarloKernelFn, Axes, Get, EmpiricalKernelFn, PyTree, NTTree
+from neural_tangents.utils.typing import PRNGKey, InitFn, ApplyFn, MonteCarloKernelFn, Axes, Get, EmpiricalKernelFn, PyTree, NTTree, VMapAxes
 
 
 def _sample_once_kernel_fn(kernel_fn: EmpiricalKernelFn,
@@ -121,9 +121,11 @@ def monte_carlo_kernel_fn(
     device_count: int = -1,
     store_on_device: bool = True,
     trace_axes: Axes = (-1,),
-    diagonal_axes: Axes = ()
+    diagonal_axes: Axes = (),
+    vmap_axes: VMapAxes = None,
+    implementation: int = 1
     ) -> MonteCarloKernelFn:
-  """Return a Monte Carlo sampler of NTK and NNGP kernels of a given function.
+  r"""Return a Monte Carlo sampler of NTK and NNGP kernels of a given function.
 
   Note that the returned function is appropriately batched / parallelized. You
   don't need to apply the `nt.batch` or `jax.jit` decorators  to it. Further,
@@ -187,6 +189,43 @@ def monte_carlo_kernel_fn(
       (instead of covariance) along certain axes.
       Also related to "batch dimensions" in XLA terms.
       (https://www.tensorflow.org/xla/operation_semantics#dotgeneral)
+    vmap_axes:
+      applicable only to NTK. A triple of `(in_axes, out_axes, kwargs_axes)`
+      passed to `vmap` to evaluate the empirical NTK in parallel ove these axes.
+      Precisely, providing this argument implies that `f(params, x, **kwargs)`
+      equals to a concatenation along `out_axes` of `f` applied to slices of
+      `x` and `**kwargs` along `in_axes` and `kwargs_axes`, i.e. `f` can be
+      evaluated as a `vmap`. This allows to evaluate Jacobians much more
+      efficiently. If `vmap_axes` is not a triple, it is interpreted as
+      `in_axes = out_axes = vmap_axes, kwargs_axes = {}`. For example a very
+      common usecase is `vmap_axes=0` for a neural network with leading (`0`)
+      batch dimension, both for inputs and outputs, and no interactions between
+      different elements of the batch (e.g. no BatchNorm, and, in the case of
+      `nt.stax`, also no Dropout). However, if there is interaction between
+      batch elements or no concept of a batch axis at all, `vmap_axes` must be
+      set to `None`, to avoid wrong (and potentially silent) results.
+    implementation:
+      applicable only to NTK.
+
+      `1` or `2`.
+
+      `1` directly instantiates Jacobians and computes their outer
+      product.
+
+      `2` uses implicit differentiation to avoid instantiating whole
+      Jacobians at once. The implicit kernel is derived by observing that:
+      :math:`\Theta = J(X_1) J(X_2)^T = [J(X_1) J(X_2)^T](I)`,
+      i.e. a linear function :math:`[J(X_1) J(X_2)^T]` applied to an identity
+      matrix :math:`I`. This allows the computation of the NTK to be
+      phrased as: :math:`a(v) = J(X_2)^T v`, which is computed by a
+      vector-Jacobian product; :math:`b(v) = J(X_1) a(v)` which is computed by
+      a Jacobian-vector product; and :math:`\Theta = [b(v)] / d[v^T](I)` which
+      is computed via a `vmap` of :math:`b(v)` over columns of the identity
+      matrix :math:`I`.
+
+      It is best to benchmark each method on your specific task. We suggest
+      using `1` unless you get OOMs due to large number of trainable parameters,
+      otherwise - `2`.
 
   Returns:
     If `n_samples` is an integer, returns a function of signature
@@ -231,7 +270,9 @@ def monte_carlo_kernel_fn(
   """
   kernel_fn = empirical.empirical_kernel_fn(apply_fn,
                                             trace_axes=trace_axes,
-                                            diagonal_axes=diagonal_axes)
+                                            diagonal_axes=diagonal_axes,
+                                            vmap_axes=vmap_axes,
+                                            implementation=implementation)
 
   kernel_fn_sample_once = _sample_once_kernel_fn(kernel_fn,
                                                  init_fn,

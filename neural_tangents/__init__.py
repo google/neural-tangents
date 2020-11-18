@@ -16,13 +16,12 @@
 """Public Neural Tangents modules and functions."""
 
 
-__version__ = '0.3.4'
+__version__ = '0.3.5'
 
 
 from neural_tangents import predict
 from neural_tangents import stax
 from neural_tangents.utils.batch import batch
-from neural_tangents.utils.empirical import empirical_direct_ntk_fn
 from neural_tangents.utils.empirical import empirical_kernel_fn
 from neural_tangents.utils.empirical import empirical_nngp_fn
 from neural_tangents.utils.empirical import empirical_ntk_fn

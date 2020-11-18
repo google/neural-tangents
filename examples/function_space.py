@@ -69,7 +69,8 @@ def main(unused_argv):
   grad_loss = jit(grad(lambda params, x, y: loss(apply_fn(params, x), y)))
 
   # Create an MSE predictor to solve the NTK equation in function space.
-  ntk = nt.batch(nt.empirical_ntk_fn(apply_fn), batch_size=4, device_count=0)
+  ntk = nt.batch(nt.empirical_ntk_fn(apply_fn, vmap_axes=0),
+                 batch_size=4, device_count=0)
   g_dd = ntk(x_train, None, params)
   g_td = ntk(x_test, x_train, params)
   predictor = nt.predict.gradient_descent_mse(g_dd, y_train)

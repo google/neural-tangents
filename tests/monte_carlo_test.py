@@ -177,7 +177,8 @@ class MonteCarloTest(jtu.JaxTestCase):
 
     sample = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn, key, 100,
                                                batch_size, device_count,
-                                               store_on_device)
+                                               store_on_device,
+                                               vmap_axes=0)
 
     ker_empirical = sample(x1, x2, 'ntk')
     ker_analytic = stax_kernel_fn(x1, x2, 'ntk')
@@ -210,7 +211,7 @@ class MonteCarloTest(jtu.JaxTestCase):
     n_samples = [2**k for k in range(log_n_max)]
     sample_generator = monte_carlo.monte_carlo_kernel_fn(
         init_fn, apply_fn, key, n_samples, batch_size, device_count,
-        store_on_device)
+        store_on_device, vmap_axes=0)
 
     if get is None:
       samples_12 = sample_generator(x1, x2)
@@ -221,7 +222,8 @@ class MonteCarloTest(jtu.JaxTestCase):
         sample_fn = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn, key,
                                                       n, batch_size,
                                                       device_count,
-                                                      store_on_device)
+                                                      store_on_device,
+                                                      vmap_axes=0)
         sample_12 = sample_fn(x1, x2)
         sample_34 = sample_fn(x3, x4)
         self.assertAllClose(s_12, sample_12)
@@ -242,7 +244,7 @@ class MonteCarloTest(jtu.JaxTestCase):
       for n, s_12, s_34 in zip(n_samples, samples_12, samples_34):
         sample_fn = monte_carlo.monte_carlo_kernel_fn(
             init_fn, apply_fn, key, n, batch_size,
-            device_count, store_on_device)
+            device_count, store_on_device, vmap_axes=0)
         sample_12 = sample_fn(x1, x2, get)
         sample_34 = sample_fn(x3, x4, get)
         self.assertAllClose(s_12, sample_12)
@@ -270,7 +272,7 @@ class MonteCarloTest(jtu.JaxTestCase):
     input_key1, input_key2, net_key = random.split(rng, 3)
 
     x1_1, x1_2, x1_3 = random.normal(input_key1, (3, 2, 5))
-    x1 = (x1_1, (x1_2, x1_2))
+    x1 = (x1_1, (x1_2, x1_3))
 
     if same_inputs:
       x2 = None

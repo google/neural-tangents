@@ -14,8 +14,7 @@
 
 """Common Type Definitions."""
 
-from typing import Tuple, Callable, Union, List, Any, Optional, Sequence, \
-  Generator, TypeVar
+from typing import Tuple, Callable, Union, List, Any, Optional, Sequence, Generator, TypeVar, Dict
 import jax.numpy as np
 from neural_tangents.utils.kernel import Kernel
 
@@ -50,7 +49,7 @@ have internal nodes that are either Lists or Tuples and leaves which are either
 array or kernel objects.
 """
 T = TypeVar('T')
-NTTree = Union[List[T], Tuple[T], T]
+NTTree = Union[List[T], Tuple[T, ...], T]
 
 
 Shapes = NTTree[Tuple[int, ...]]
@@ -131,3 +130,14 @@ InternalLayer = Union[Tuple[InitFn, ApplyFn, LayerKernelFn],
 
 
 Layer = Tuple[InitFn, ApplyFn, AnalyticKernelFn]
+
+
+"""A type alias for kernel inputs/outputs of `FanOut`, `FanInSum`, etc.
+"""
+Kernels = Union[List[Kernel], Tuple[Kernel, ...]]
+
+
+"""Specifies `(input, output, kwargs)` axes for `vmap` in empirical NTK.
+"""
+_VMapAxis = Optional[NTTree[int]]
+VMapAxes = Tuple[_VMapAxis, _VMapAxis, Dict[str, _VMapAxis]]

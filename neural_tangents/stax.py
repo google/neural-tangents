@@ -84,7 +84,7 @@ from jax.scipy.special import erf
 from jax.tree_util import tree_map
 from neural_tangents.utils import utils, dataclasses
 from neural_tangents.utils.kernel import Kernel
-from neural_tangents.utils.typing import AnalyticKernelFn, Axes, Get, InitFn, ApplyFn, InternalLayer, Layer, LayerKernelFn, PyTree, NTTree
+from neural_tangents.utils.typing import AnalyticKernelFn, Axes, Get, InitFn, ApplyFn, InternalLayer, Layer, LayerKernelFn, PyTree, NTTree, Kernels
 import numpy as onp
 import scipy as osp
 
@@ -342,14 +342,17 @@ def parallel(*layers: Layer) -> InternalLayer:
     sequence of outputs with the same length as the argument `layers`.
   """
   init_fns, apply_fns, kernel_fns = zip(*layers)
-  init_fn_stax, apply_fn = ostax.parallel(*zip(init_fns, apply_fns))
+  init_fn_stax, apply_fn_stax = ostax.parallel(*zip(init_fns, apply_fns))
 
   def init_fn(rng, input_shape):
-    return list(init_fn_stax(rng, input_shape))
+    return type(input_shape)(init_fn_stax(rng, input_shape))
+
+  def apply_fn(params, inputs, **kwargs):
+    return type(inputs)(apply_fn_stax(params, inputs, **kwargs))
 
   @_requires(**_get_input_req_attr(kernel_fns, fold=op.and_))
-  def kernel_fn(ks: List[Kernel], **kwargs) -> List[Kernel]:
-    return [f(k, **kwargs) for k, f in zip(ks, kernel_fns)]
+  def kernel_fn(ks: NTTree[Kernel], **kwargs) -> NTTree[Kernel]:
+    return type(ks)(f(k, **kwargs) for k, f in zip(ks, kernel_fns))
 
   return init_fn, apply_fn, kernel_fn
 
@@ -1288,7 +1291,7 @@ def FanInSum() -> InternalLayer:
   """
   init_fn, apply_fn = ostax.FanInSum
 
-  def kernel_fn(ks: List[Kernel], **kwargs) -> Kernel:
+  def kernel_fn(ks: Kernels, **kwargs) -> Kernel:
     ks, is_reversed = _proprocess_kernels_for_fan_in(ks)
     if not all([k.shape1 == ks[0].shape1 and
                 k.shape2 == ks[0].shape2 for k in ks[1:]]):
@@ -1350,7 +1353,7 @@ def FanInProd() -> InternalLayer:
   def apply_fn(params, inputs, **kwargs):
     return functools.reduce(np.multiply, inputs)
 
-  def kernel_fn(ks: List[Kernel], **kwargs) -> Kernel:
+  def kernel_fn(ks: Kernels, **kwargs) -> Kernel:
     ks, is_reversed = _proprocess_kernels_for_fan_in(ks)
     if not all([k.shape1 == ks[0].shape1 and
                 k.shape2 == ks[0].shape2 for k in ks[1:]]):
@@ -1415,7 +1418,7 @@ def FanInConcat(axis: int = -1) -> InternalLayer:
   """
   init_fn, apply_fn = ostax.FanInConcat(axis)
 
-  def kernel_fn(ks: List[Kernel], **kwargs) -> Kernel:
+  def kernel_fn(ks: Kernels, **kwargs) -> Kernel:
     ks, is_reversed = _proprocess_kernels_for_fan_in(ks)
 
     diagonal_batch = ks[0].diagonal_batch
@@ -3250,8 +3253,10 @@ def _get_input_req_attr(
           if fold is op.and_:
             if k in req and req[k] != v:
               if (req[k] >= 0 and v >= 0) or (req[k] < 0 and v < 0):
-                raise ValueError(f'`{k}` parameters must match in all '
-                                 f'parallel branches, got {req[k]} and {v}.')
+                warnings.warn(f'For `kernel_fn`, `{k}` parameters must match in'
+                              f' all parallel branches, got {req[k]} and {v}. '
+                              f'This WILL lead to [silent] errors if '
+                              f'`kernel_fn` is called.')
               else:
                 warnings.warn(f'Got potentially mismatching `{k}` values in '
                               f'parallel branches: {req[k]} and {v}.')
@@ -3892,8 +3897,7 @@ def _affine(
   return  W_std**2 * mat + b_std**2
 
 
-def _proprocess_kernels_for_fan_in(
-    ks: List[Kernel]) -> Tuple[List[Kernel], bool]:
+def _proprocess_kernels_for_fan_in(ks: Kernels) -> Tuple[List[Kernel], bool]:
   # Check diagonal requirements.
   if not all(k.diagonal_batch == ks[0].diagonal_batch and
              k.diagonal_spatial == ks[0].diagonal_spatial and
@@ -3909,6 +3913,7 @@ def _proprocess_kernels_for_fan_in(
   # If kernels have different spatial axes order, transpose some of them.
   n_kernels = len(ks)
   n_reversed = sum(ker.is_reversed for ker in ks)
+  ks = list(ks)
 
   if n_reversed > n_kernels / 2:
     is_reversed = True

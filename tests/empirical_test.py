@@ -18,7 +18,7 @@ from functools import partial
 import operator
 from absl.testing import absltest
 from jax import test_util as jtu
-from jax.api import jit, tree_multimap
+from jax.api import jit, tree_map, tree_multimap
 from jax.config import config
 import jax.numpy as np
 import jax.random as random
@@ -80,18 +80,22 @@ def _kernel_fns(key,
                 network,
                 out_logits,
                 diagonal_axes,
-                trace_axes):
+                trace_axes,
+                vmap_axes=None):
   init_fn, f, _ = _build_network(input_shape, network, out_logits)
   _, params = init_fn(key, (-1,) + input_shape)
-  implicit_kernel_fn = empirical.empirical_implicit_ntk_fn(f, trace_axes,
-                                                           diagonal_axes)
-  direct_kernel_fn = empirical.empirical_direct_ntk_fn(f, trace_axes,
-                                                       diagonal_axes)
-  nngp_kernel_fn = empirical.empirical_nngp_fn(f, trace_axes, diagonal_axes)
+  implicit_kernel_fn = jit(empirical._empirical_implicit_ntk_fn(f,
+                                                                trace_axes,
+                                                                diagonal_axes,
+                                                                vmap_axes))
+  direct_kernel_fn = jit(empirical._empirical_direct_ntk_fn(f,
+                                                            trace_axes,
+                                                            diagonal_axes,
+                                                            vmap_axes))
 
-  implicit_kernel_fn = jit(implicit_kernel_fn)
-  direct_kernel_fn = jit(direct_kernel_fn)
-  nngp_kernel_fn = jit(nngp_kernel_fn)
+  nngp_kernel_fn = jit(empirical.empirical_nngp_fn(f,
+                                                   trace_axes,
+                                                   diagonal_axes))
 
   return (partial(implicit_kernel_fn, params=params),
           partial(direct_kernel_fn, params=params),
@@ -239,13 +243,27 @@ class EmpiricalTest(jtu.JaxTestCase):
     implicit, direct, _ = kernel_fn(key, train_shape[1:], network,
                                     diagonal_axes=(), trace_axes=())
 
+    implicit_batched, direct_batched, _ = kernel_fn(key, train_shape[1:],
+                                                    network,
+                                                    diagonal_axes=(),
+                                                    trace_axes=(),
+                                                    vmap_axes=0)
+
     g = implicit(data_self, None)
     g_direct = direct(data_self, None)
+    g_batched = implicit_batched(data_self, None)
+    g_direct_batched = direct_batched(data_self, None)
     self.assertAllClose(g, g_direct)
+    self.assertAllClose(g, g_batched)
+    self.assertAllClose(g, g_direct_batched)
 
     g = implicit(data_other, data_self)
     g_direct = direct(data_other, data_self)
+    g_batched = implicit_batched(data_other, data_self)
+    g_direct_batched = direct_batched(data_other, data_self)
     self.assertAllClose(g, g_direct)
+    self.assertAllClose(g, g_batched)
+    self.assertAllClose(g, g_direct_batched)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -292,12 +310,17 @@ class EmpiricalTest(jtu.JaxTestCase):
       raise absltest.SkipTest(
           'diagonal axes must be different from channel axes.')
 
-    implicit, direct, nngp = KERNELS['empirical_logits_3'](
-        key,
-        (5, 6, 3),
-        CONV,
+    get_kernel = KERNELS['empirical_logits_3']
+    kwargs = dict(
+        key=key,
+        input_shape=(5, 6, 3),
+        network=CONV,
         diagonal_axes=diagonal_axes,
-        trace_axes=trace_axes)
+        trace_axes=trace_axes
+    )
+
+    implicit, direct, nngp = get_kernel(**kwargs)
+    implicit_batched, direct_batched, _ = get_kernel(**kwargs, vmap_axes=0)
 
     n_marg = len(_diagonal_axes)
     n_chan = len(_trace_axes)
@@ -308,8 +331,13 @@ class EmpiricalTest(jtu.JaxTestCase):
     g_direct = direct(data_self, None)
     self.assertEqual(g_nngp.shape, g_direct.shape)
 
+    g_direct_batched = direct_batched(data_self, None)
     g = implicit(data_self, None)
+    g_batched = implicit_batched(data_self, None)
+
     self.assertAllClose(g_direct, g)
+    self.assertAllClose(g_direct, g_direct_batched)
+    self.assertAllClose(g_direct, g_batched)
 
     if 0 not in _trace_axes and 0 not in _diagonal_axes:
       g_nngp = nngp(data_other, data_self)
@@ -318,8 +346,13 @@ class EmpiricalTest(jtu.JaxTestCase):
       g_direct = direct(data_other, data_self)
       self.assertEqual(g_nngp.shape, g_direct.shape)
 
+      g_direct_batched = direct_batched(data_other, data_self)
       g = implicit(data_other, data_self)
+      g_batched = implicit_batched(data_other, data_self)
+
       self.assertAllClose(g_direct, g)
+      self.assertAllClose(g_direct, g_direct_batched)
+      self.assertAllClose(g_direct, g_batched)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -334,7 +367,7 @@ class EmpiricalTest(jtu.JaxTestCase):
     x2_1, x2_2 = np.split(random.normal(input_key2, (4, 21)), (10,), axis=1)
 
     x1 = (x1_1, x1_2)
-    x2 = (x2_1, x2_2)
+    x2 = (x2_1, x2_2) if not same_inputs else None
 
     def layer(N_out):
       return stax.parallel(stax.Dense(N_out), stax.Dense(N_out + 1))
@@ -342,17 +375,25 @@ class EmpiricalTest(jtu.JaxTestCase):
     init_fn, apply_fn, _ = stax.serial(layer(1024), layer(1))
 
     _, params = init_fn(net_key, (x1_1.shape, x1_2.shape))
-    implicit_kernel_fn = empirical.empirical_implicit_ntk_fn(apply_fn)
-    direct_kernel_fn = empirical.empirical_direct_ntk_fn(apply_fn)
-    nngp_kernel_fn = empirical.empirical_nngp_fn(apply_fn)
 
-    self.assertAllClose(direct_kernel_fn(x1, x2, params),
-                        implicit_kernel_fn(x1, x2, params))
+    implicit_kernel_fn = jit(empirical._empirical_implicit_ntk_fn(apply_fn))
+    direct_kernel_fn = jit(empirical._empirical_direct_ntk_fn(apply_fn))
+    implicit_batched_kernel_fn = jit(empirical._empirical_implicit_ntk_fn(
+        apply_fn, vmap_axes=(0, 0)))
+    direct_batched_kernel_fn = jit(empirical._empirical_direct_ntk_fn(
+        apply_fn, vmap_axes=(0, 0)))
 
+    k_direct = direct_kernel_fn(x1, x2, params)
+
+    self.assertAllClose(k_direct, implicit_kernel_fn(x1, x2, params))
+    self.assertAllClose(k_direct, direct_batched_kernel_fn(x1, x2, params))
+    self.assertAllClose(k_direct, implicit_batched_kernel_fn(x1, x2, params))
+
+    nngp_kernel_fn = jit(empirical.empirical_nngp_fn(apply_fn))
     nngp = nngp_kernel_fn(x1, x2, params)
     self.assertEqual(len(nngp), 2)
-    self.assertEqual(nngp[0].shape, (3, 4))
-    self.assertEqual(nngp[1].shape, (3, 4))
+    self.assertEqual(nngp[0].shape, (3, 3 if same_inputs else 4))
+    self.assertEqual(nngp[1].shape, (3, 3 if same_inputs else 4))
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -368,8 +409,8 @@ class EmpiricalTest(jtu.JaxTestCase):
     x2_1, x2_2, x2_3 = np.split(random.normal(input_key2, (4, 33)),
                                 (10, 21), axis=1)
 
-    x1 = ((x1_1, x1_2), x1_3)
-    x2 = ((x2_1, x2_2), x2_3)
+    x1 = ([x1_1, x1_2], x1_3)
+    x2 = ([x2_1, x2_2], x2_3) if not same_inputs else None
 
     def layer(N_out):
       return stax.parallel(stax.parallel(stax.Dense(N_out),
@@ -378,19 +419,93 @@ class EmpiricalTest(jtu.JaxTestCase):
 
     init_fn, apply_fn, _ = stax.serial(layer(1024), layer(1))
 
-    _, params = init_fn(net_key, ((x1_1.shape, x1_2.shape), x1_3.shape))
-    implicit_kernel_fn = empirical.empirical_implicit_ntk_fn(apply_fn)
-    direct_kernel_fn = empirical.empirical_direct_ntk_fn(apply_fn)
-    nngp_kernel_fn = empirical.empirical_nngp_fn(apply_fn)
+    _, params = init_fn(net_key, tree_map(np.shape, x1))
+    implicit_kernel_fn = jit(empirical._empirical_implicit_ntk_fn(apply_fn))
+    direct_kernel_fn = jit(empirical._empirical_direct_ntk_fn(apply_fn))
 
-    self.assertAllClose(direct_kernel_fn(x1, x2, params),
-                        implicit_kernel_fn(x1, x2, params))
+    implicit_batched_kernel_fn = jit(empirical._empirical_implicit_ntk_fn(
+        apply_fn, vmap_axes=([0, 0], 0)))
+    direct_batched_kernel_fn = jit(empirical._empirical_direct_ntk_fn(
+        apply_fn, vmap_axes=([0, 0], 0)))
 
+    k_direct = direct_kernel_fn(x1, x2, params)
+
+    self.assertAllClose(k_direct, implicit_kernel_fn(x1, x2, params))
+    self.assertAllClose(k_direct, direct_batched_kernel_fn(x1, x2, params))
+    self.assertAllClose(k_direct, implicit_batched_kernel_fn(x1, x2, params))
+
+    nngp_kernel_fn = jit(empirical.empirical_nngp_fn(apply_fn))
     nngp = nngp_kernel_fn(x1, x2, params)
+
     self.assertEqual(len(nngp), 2)
-    self.assertEqual(nngp[0][0].shape, (3, 4))
-    self.assertEqual(nngp[0][1].shape, (3, 4))
-    self.assertEqual(nngp[1].shape, (3, 4))
+    nngp_shape = (3, 3 if same_inputs else 4)
+    self.assertEqual(nngp[0][0].shape, nngp_shape)
+    self.assertEqual(nngp[0][1].shape, nngp_shape)
+    self.assertEqual(nngp[1].shape, nngp_shape)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name': '_same_inputs={}'.format(same_inputs),
+          'same_inputs': same_inputs
+      } for same_inputs in [True, False]))
+  def test_vmap_axes(self, same_inputs):
+    n1, n2 = 3, 4
+    c1, c2, c3 = 9, 5, 7
+    h2, h3, w3 = 6, 8, 2
+
+    def get_x(n, k):
+      k1, k2, k3 = random.split(k, 3)
+      x1 = random.normal(k1, (n, c1))
+      x2 = random.normal(k2, (h2, n, c2))
+      x3 = random.normal(k3, (c3, w3, n, h3))
+      x = [(x1, x2), x3]
+      return x
+
+    x1 = get_x(n1, random.PRNGKey(1))
+    x2 = get_x(n2, random.PRNGKey(2)) if not same_inputs else None
+
+    p1 = random.normal(random.PRNGKey(5), (n1, h2, h2))
+    p2 = None if same_inputs else random.normal(random.PRNGKey(6), (n2, h2, h2))
+
+    init_fn, apply_fn, _ = stax.serial(
+        stax.parallel(
+            stax.parallel(
+                stax.serial(stax.Dense(4, 2., 0.1),
+                            stax.Relu(),
+                            stax.Dense(3, 1., 0.15)),  # 1
+                stax.serial(stax.Conv(7, (2,), padding='SAME',
+                                      dimension_numbers=('HNC', 'OIH', 'NHC')),
+                            stax.Erf(),
+                            stax.Aggregate(1, 0, -1),
+                            stax.GlobalAvgPool(),
+                            stax.Dense(3, 0.5, 0.2)),  # 2
+            ),
+            stax.serial(
+                stax.Conv(5, (2, 3), padding='SAME',
+                          dimension_numbers=('CWNH', 'IOHW', 'HWCN')),
+                stax.Sin(),
+            )  # 3
+        ),
+        stax.parallel(
+            stax.FanInSum(),
+            stax.Conv(2, (2, 1), dimension_numbers=('HWCN', 'OIHW', 'HNWC'))
+        )
+    )
+
+    _, params = init_fn(random.PRNGKey(3), tree_map(np.shape, x1))
+    implicit = jit(empirical._empirical_implicit_ntk_fn(apply_fn))
+    direct = jit(empirical._empirical_direct_ntk_fn(apply_fn))
+
+    implicit_batched = jit(empirical._empirical_implicit_ntk_fn(
+        apply_fn, vmap_axes=([(0, 1), 2], [-2, -3], dict(pattern=0))))
+    direct_batched = jit(empirical._empirical_direct_ntk_fn(
+        apply_fn, vmap_axes=([(-2, -2), -2], [0, 1], dict(pattern=-3))))
+
+    k = direct(x1, x2, params, pattern=(p1, p2))
+
+    self.assertAllClose(k, implicit(x1, x2, params, pattern=(p1, p2)))
+    self.assertAllClose(k, direct_batched(x1, x2, params, pattern=(p1, p2)))
+    self.assertAllClose(k, implicit_batched(x1, x2, params, pattern=(p1, p2)))
 
 
 if __name__ == '__main__':
