@@ -429,43 +429,44 @@ as an example. With `NVIDIA V100` 64-bit precision, `nt` took 316/330/508 GPU-ho
 Neural Tangents has been used in the following papers:
 
 1. [Dataset Meta-Learning from Kernel Ridge-Regression](https://arxiv.org/abs/2011.00050)
-* [Deep learning versus kernel learning: an empirical study of loss landscape geometry and the time evolution of the Neural Tangent Kernel](https://arxiv.org/abs/2010.15110)
-* [Stable ResNet](https://arxiv.org/abs/2010.12859)
-* [Label-Aware Neural Tangent Kernel: Toward Better Generalization and Local Elasticity](https://arxiv.org/abs/2010.11775)
-* [Semi-supervised Batch Active Learning via Bilevel Optimization](https://arxiv.org/abs/2010.09654)
-* [Temperature check: theory and practice for training models with softmax-cross-entropy losses](https://arxiv.org/abs/2010.07344)
-* [Experimental Design for Overparameterized Learning with Application to Single Shot Deep Active Learning](https://arxiv.org/abs/2009.12820)
-* [How Neural Networks Extrapolate: From Feedforward to Graph Neural Networks](https://arxiv.org/abs/2009.11848)
-* [Exploring the Uncertainty Properties of Neural Networks’ Implicit Priors in the Infinite-Width Limit](http://www.gatsby.ucl.ac.uk/~balaji/udl2020/accepted-papers/UDL2020-paper-115.pdf)
-* [Cold Posteriors and Aleatoric Uncertainty](https://arxiv.org/abs/2008.00029)
-* [Asymptotics of Wide Convolutional Neural Networks](https://arxiv.org/abs/2008.08675)
-* [Finite Versus Infinite Neural Networks: an Empirical Study](https://arxiv.org/abs/2007.15801)
-* [Bayesian Deep Ensembles via the Neural Tangent Kernel](https://arxiv.org/abs/2007.05864)
-* [The Surprising Simplicity of the Early-Time Learning Dynamics of Neural Networks
+1. [Deep learning versus kernel learning: an empirical study of loss landscape geometry and the time evolution of the Neural Tangent Kernel](https://arxiv.org/abs/2010.15110)
+1. [Stable ResNet](https://arxiv.org/abs/2010.12859)
+1. [Label-Aware Neural Tangent Kernel: Toward Better Generalization and Local Elasticity](https://arxiv.org/abs/2010.11775)
+1. [Semi-supervised Batch Active Learning via Bilevel Optimization](https://arxiv.org/abs/2010.09654)
+1. [Temperature check: theory and practice for training models with softmax-cross-entropy losses](https://arxiv.org/abs/2010.07344)
+1. [Experimental Design for Overparameterized Learning with Application to Single Shot Deep Active Learning](https://arxiv.org/abs/2009.12820)
+1. [How Neural Networks Extrapolate: From Feedforward to Graph Neural Networks](https://arxiv.org/abs/2009.11848)
+1. [Exploring the Uncertainty Properties of Neural Networks’ Implicit Priors in the Infinite-Width Limit](http://www.gatsby.ucl.ac.uk/~balaji/udl2020/accepted-papers/UDL2020-paper-115.pdf)
+1. [Cold Posteriors and Aleatoric Uncertainty](https://arxiv.org/abs/2008.00029)
+1. [Asymptotics of Wide Convolutional Neural Networks](https://arxiv.org/abs/2008.08675)
+1. [Finite Versus Infinite Neural Networks: an Empirical Study](https://arxiv.org/abs/2007.15801)
+1. [Bayesian Deep Ensembles via the Neural Tangent Kernel](https://arxiv.org/abs/2007.05864)
+1. [The Surprising Simplicity of the Early-Time Learning Dynamics of Neural Networks
 ](https://arxiv.org/abs/2006.14599)
-* [When Do Neural Networks Outperform Kernel Methods?](https://arxiv.org/abs/2006.13409)
-* [Statistical Mechanics of Generalization in Kernel Regression
+1. [When Do Neural Networks Outperform Kernel Methods?](https://arxiv.org/abs/2006.13409)
+1. [Statistical Mechanics of Generalization in Kernel Regression
 ](https://arxiv.org/abs/2006.13198)
-* [Exact posterior distributions of wide Bayesian neural networks
+1. [Exact posterior distributions of wide Bayesian neural networks
 ](https://arxiv.org/abs/2006.10541)
-* [Infinite attention: NNGP and NTK for deep attention networks
+1. [Infinite attention: NNGP and NTK for deep attention networks
 ](https://arxiv.org/abs/2006.10540)
-* [Fourier Features Let Networks Learn High Frequency Functions in Low Dimensional Domains
+1. [Fourier Features Let Networks Learn High Frequency Functions in Low Dimensional Domains
 ](https://arxiv.org/abs/2006.10739)
-* [Finding trainable sparse networks through Neural Tangent Transfer](https://arxiv.org/abs/2006.08228)
-* [Coresets via Bilevel Optimization for Continual Learning and Streaming](https://arxiv.org/abs/2006.03875)
-* [On the Neural Tangent Kernel of Deep Networks with Orthogonal Initialization](https://arxiv.org/abs/2004.05867)
-* [The large learning rate phase of deep learning: the catapult mechanism](https://arxiv.org/abs/2003.02218)
-* [Spectrum Dependent Learning Curves in Kernel Regression and Wide Neural Networks
+1. [Finding trainable sparse networks through Neural Tangent Transfer](https://arxiv.org/abs/2006.08228)
+1. [Coresets via Bilevel Optimization for Continual Learning and Streaming](https://arxiv.org/abs/2006.03875)
+1. [On the Neural Tangent Kernel of Deep Networks with Orthogonal Initialization](https://arxiv.org/abs/2004.05867)
+1. [The large learning rate phase of deep learning: the catapult mechanism](https://arxiv.org/abs/2003.02218)
+1. [Spectrum Dependent Learning Curves in Kernel Regression and Wide Neural Networks
 ](https://arxiv.org/abs/2002.02561)
-* [Taylorized Training: Towards Better Approximation of Neural Network Training at Finite Width](https://arxiv.org/abs/2002.04010)
-* [On the Infinite Width Limit of Neural Networks with a Standard Parameterization](https://arxiv.org/pdf/2001.07301.pdf)
-* [Disentangling Trainability and Generalization in Deep Learning](https://arxiv.org/abs/1912.13053)
-* [Information in Infinite Ensembles of Infinitely-Wide Neural Networks](https://arxiv.org/abs/1911.09189)
-* [Training Dynamics of Deep Networks using Stochastic Gradient Descent via Neural Tangent Kernel](https://arxiv.org/abs/1905.13654)
-* [Wide Neural Networks of Any Depth Evolve as Linear Models Under Gradient
+1. [Taylorized Training: Towards Better Approximation of Neural Network Training at Finite Width](https://arxiv.org/abs/2002.04010)
+1. [On the Infinite Width Limit of Neural Networks with a Standard Parameterization](https://arxiv.org/pdf/2001. 07301. pdf)
+1. [Disentangling Trainability and Generalization in Deep Learning](https://arxiv.org/abs/1912.13053)
+1. [Information in Infinite Ensembles of Infinitely-Wide Neural Networks](https://arxiv.org/abs/1911. 09189)
+1. [Training Dynamics of Deep Networks using Stochastic Gradient Descent via Neural Tangent Kernel](https://arxiv.org/abs/1905.13654)
+1. [Wide Neural Networks of Any Depth Evolve as Linear Models Under Gradient
 Descent](https://arxiv.org/abs/1902.06720)
-* [Bayesian Deep Convolutional Networks with Many Channels are Gaussian Processes](https://arxiv.org/abs/1810.05148)
+1. [Bayesian Deep Convolutional Networks with Many Channels are Gaussian Processes](https://arxiv.org/abs/1810.05148)
+
 
 Please let us know if you make use of the code in a publication and we'll add it
 to the list!
