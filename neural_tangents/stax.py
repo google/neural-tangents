@@ -3002,6 +3002,39 @@ def Abs(
 
 @layer
 @supports_masking(remask_kernel=True)
+def Sign(do_backprop: bool = False) -> InternalLayer:
+  """Sign function.
+
+  Args:
+    do_backprop: set to `True` if you want to backpropagate through the kernel.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  def fn(x):
+    return np.sign(x)
+
+  _requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
+  def kernel_fn(k: Kernel) -> Kernel:
+    cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
+    if ntk is not None:
+      ntk = np.zeros_like(ntk)
+    _, prod12, _ = _get_diagonal_outer_prods(cov1,
+                                             cov2,
+                                             k.diagonal_batch,
+                                             k.diagonal_spatial,
+                                             op.mul)
+    nngp = 1 - _arccos(nngp / _safe_sqrt(prod12), do_backprop) * 2 / np.pi
+    cov1 = np.ones_like(cov1)
+    cov2 = cov2 if cov2 is None else np.ones_like(cov2)
+    k = k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
+    return k
+
+  return _elementwise(fn, 'Sign', kernel_fn)
+
+
+@layer
+@supports_masking(remask_kernel=True)
 def ElementwiseNumerical(
     fn: Callable[[float], float],
     deg: int,

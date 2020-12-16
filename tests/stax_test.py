@@ -915,7 +915,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
           'abc': abc,
       }
                           for model in ['fc', 'conv-pool', 'conv-flatten']
-                          for phi_name in ['Sin', 'Erf', 'Gelu']
+                          for phi_name in ['Sin', 'Erf', 'Gelu', 'Sign']
                           for same_inputs in [False]
                           for get in ['nngp', 'ntk']
                           for abc in itertools.product(
@@ -933,10 +933,11 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
       activation = stax.Sin(a=a, b=b, c=c)
     elif phi_name == 'Erf':
       activation = stax.Erf(a=a, b=b, c=c)
-    elif phi_name == 'Gelu':
-      activation = stax.Gelu()
-      if a != 1. or b != 1. or c != 0.:
-        absltest.SkipTest('Skip `Gelu` test if (a, b, c) != (1., 1., 0.).')
+    elif phi_name in ['Gelu', 'Sign']:
+      if a != 0.3 or b != 0.3 or c != 0.:
+        raise absltest.SkipTest('Skip `Gelu/Sign` test if '
+                                ' (a, b, c) != (.3, .3, 0.).')
+      activation = stax.Gelu() if phi_name == 'Gelu' else stax.Sign()
     else:
       raise absltest.SkipTest(f'Activation {phi_name} is not implemented.')
     self._test_activation(activation, same_inputs, model, get)
