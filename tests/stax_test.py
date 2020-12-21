@@ -2510,9 +2510,9 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
         pattern = [np.zeros((batch_size, n_edges, 0), np.int32)]
 
         for d in range(len(shape)):
-          rng_d, _ = random.split(rng)
+          rng, _ = random.split(rng)
           n_nodes = shape[d]
-          edges = random.randint(rng_d, (batch_size, n_edges, 2), 0, n_nodes)
+          edges = random.randint(rng, (batch_size, n_edges, 2), 0, n_nodes)
           pattern += [edges]
 
         pattern = np.concatenate(pattern, 2)
