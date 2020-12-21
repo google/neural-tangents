@@ -790,7 +790,7 @@ def split_kwargs(kwargs, x1=None, x2=None):
   kwargs1 = {}
   kwargs2 = {}
   for k, v in kwargs.items():
-    if x1 is not None and k == 'rng':
+    if k == 'rng':
       key1, key2 = _read_keys(v, x1, x2)
       kwargs1[k] = key1
       kwargs2[k] = key2
