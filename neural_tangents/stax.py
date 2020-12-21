@@ -494,7 +494,9 @@ def DotGeneral(
 def Aggregate(
     aggregate_axis: Axes = None,
     batch_axis: int = 0,
-    channel_axis: int = -1) -> InternalLayer:
+    channel_axis: int = -1,
+    to_dense: Callable[[np.ndarray], np.ndarray] = lambda pattern: pattern
+) -> InternalLayer:
   r"""Layer constructor for aggregation operator (graphical neural network).
 
   See e.g. arXiv: 1905.13192.
@@ -504,8 +506,7 @@ def Aggregate(
   2-adjacency `2K+1`-D tensor `pattern` of shape
   `(batch, X_i1, ..., X_iK, X_i1, ..., X_iK)` (i.e. leading batch dimensions,
   repeated spatial dimensions, no channel dimension) and the output tensor is
-  `lax.dot_general(inputs, pattern, ((aggregate_axes, range(1, K + 1)),
-                                     (batch_axis,), (0,)))`
+  `lax.dot_general(inputs, pattern, ((aggregate_axes, range(1, K + 1)), (batch_axis,), (0,)))`
   with the `batch_axis` and `channel_axis` preserved. `K = len(aggregate_axes)`.
 
   Qualitatively, having `pattern[n, i1, ..., iK, j1, ..., jK] == w` represents
@@ -595,6 +596,12 @@ def Aggregate(
     channel_axis:
       channel axis for `inputs`. Defaults to `-1`, the trailing axis. For
       `kernel_fn`, channel size is considered to be infinite.
+    to_dense:
+      function to convert potentially sparse `pattern` matrices into dense
+      `2K+1`-D tensors of shape `(batch, X_i1, ..., X_iK, X_i1, ..., X_iK)`,
+      with the batch leading dimension, and no channel dimension, where
+      `K = len(aggregate_axes)`. Defaults to identity, meaning that `pattern` is
+      expected in the dense format.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -629,7 +636,11 @@ def Aggregate(
       pattern:
         An `2K+1`-D tensor of shape `(batch, X_i1, ..., X_iK, X_i1, ..., X_iK)`,
         with the batch leading dimension, and no channel dimension, where
-        `K = len(aggregate_axes)`.
+        `K = len(aggregate_axes)`. Can have another shape
+        (e.g. a sparse matrix), as long as `to_dense(pattern)` has the correct
+        (dense) shape. If `nt.batch` is used, the leading dimension of `pattern`
+         must be the batch dimension, of size `batch`. `None` means identity
+        adjacency, i.e. `apply_fn` is an identity function.
       **kwargs:
         unused.
 
@@ -638,6 +649,7 @@ def Aggregate(
     """
     if pattern is None:
       return inputs
+    pattern = to_dense(pattern)
 
     del params
     ndim = inputs.ndim
@@ -671,6 +683,9 @@ def Aggregate(
 
     """
     pattern1, pattern2 = pattern
+    pattern1 = None if pattern1 is None else to_dense(pattern1)
+    pattern2 = None if pattern2 is None else to_dense(pattern2)
+
     ndim = len(k.shape1)
     return k.dot_general(
         other1=pattern1,

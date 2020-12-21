@@ -2461,15 +2461,16 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
-              f'{get}-{name}-{same_input}-{act_name}-{test_mask}-{shape}'
-              f'-{do_batch}',
+              f'{get}-{name}-same_inp={same_input}-{act_name}-mask={test_mask}'
+              f'-shape={shape}-batch={do_batch}--sparse={sparse}',
           'get': get,
           'readout': readout,
           'same_input': same_input,
           'activation': activation,
           'test_mask': test_mask,
           'shape': shape,
-          'do_batch': do_batch
+          'do_batch': do_batch,
+          'sparse': sparse
       } for get in ['ntk']
                           for name, readout in [
                               ('Pooling', stax.GlobalAvgPool())]
@@ -2478,9 +2479,10 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
                           for test_mask in [True]
                           for shape in [(), (8,), (2, 3), (3, 1, 2)]
                           for do_batch in [True, False]
+                          for sparse in [True, False]
                           ))
   def test_aggregate(self, get, readout, same_input, activation, test_mask,
-                     shape, do_batch):
+                     shape, do_batch, sparse):
     batch1, batch2 = 8, 6
     num_channels = 12
     output_dims = 1 if get == 'ntk' else 1024
@@ -2500,18 +2502,53 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
         mask2 = random.bernoulli(split2, p=0.5, shape=(batch2,) + shape + (1,))
         x2 = np.where(mask2, mask_constant, x2)
     key, split1, split2 = random.split(key, 3)
-    pattern1 = random.uniform(split1, (batch1,) + shape * 2)
-    pattern2 = pattern1 if same_input else random.uniform(
-        split2, (batch2,) + shape * 2)
+
+    if sparse:
+      def get_sparse_pattern(batch_size, rng):
+        n_edges_max = onp.prod((1,) + shape)**2
+        n_edges = prandom.randint(0, n_edges_max)
+        pattern = [np.zeros((batch_size, n_edges, 0), np.int32)]
+
+        for d in range(len(shape)):
+          rng_d, _ = random.split(rng)
+          n_nodes = shape[d]
+          edges = random.randint(rng_d, (batch_size, n_edges, 2), 0, n_nodes)
+          pattern += [edges]
+
+        pattern = np.concatenate(pattern, 2)
+        return pattern
+
+      def to_dense(pattern):
+        batch_size, n_edges, n_dims = pattern.shape
+        batch_range = np.broadcast_to(
+            np.arange(batch_size).reshape((batch_size, 1, 1)),
+            (batch_size, n_edges, 1))
+        pattern = np.concatenate([batch_range, pattern], 2)
+        pattern = pattern.reshape((batch_size * n_edges, n_dims + 1))
+        out = np.zeros((batch_size,) + shape * 2)
+        out = out.at[tuple(pattern.T)].set(1.)
+        return out
+
+      pattern1 = get_sparse_pattern(batch1, split1)
+      pattern2 = pattern1 if same_input else get_sparse_pattern(batch2, split2)
+
+    else:
+      pattern1 = random.uniform(split1, (batch1,) + shape * 2)
+      pattern2 = pattern1 if same_input else random.uniform(
+          split2, (batch2,) + shape * 2)
+      to_dense = lambda x: x
 
     # Build the infinite network.
-    init_fn, apply_fn, kernel_fn = stax.serial(
-        stax.Dense(128 * 8),
-        activation,
-        stax.Dropout(0.5, mode='train'),
-        stax.Aggregate(),
-        readout,
-        stax.Dense(output_dims))
+    def get_nn(to_dense):
+      return stax.serial(
+          stax.Dense(128 * 8),
+          activation,
+          stax.Dropout(0.5, mode='train'),
+          stax.Aggregate(to_dense=to_dense),
+          readout,
+          stax.Dense(output_dims))
+
+    init_fn, apply_fn, kernel_fn = get_nn(to_dense)
 
     if do_batch:
       kernel_fn = batch.batch(kernel_fn, batch_size=4)
@@ -2521,14 +2558,23 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
         batch_size=2 if xla_bridge.get_backend().platform == 'tpu' else 0,
         implementation=2,
     )
+    mask_constant = mask_constant if test_mask else None
     empirical = kernel_mc_fn(x1, x2, get,
-                             mask_constant=mask_constant if test_mask else None,
+                             mask_constant=mask_constant,
                              pattern=(pattern1, pattern2))
     exact = kernel_fn(x1, x2, get,
-                      mask_constant=mask_constant if test_mask else None,
+                      mask_constant=mask_constant,
                       pattern=(pattern1, pattern2))
     rtol = 0.03
     test_utils.assert_close_matrices(self, exact, empirical, rtol)
+
+    if sparse:
+      _, _, kernel_fn_dense = get_nn(lambda x: x)
+      pattern1, pattern2 = to_dense(pattern1), to_dense(pattern2)
+      exact_dense = kernel_fn_dense(x1, x2, get,
+                                    mask_constant=mask_constant,
+                                    pattern=(pattern1, pattern2))
+      self.assertAllClose(exact_dense, exact)
 
 
 class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
