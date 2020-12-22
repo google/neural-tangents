@@ -30,6 +30,7 @@ import jax.numpy as np
 import jax.random as random
 from neural_tangents import predict
 from neural_tangents import stax
+from neural_tangents import monte_carlo_kernel_fn, empirical_kernel_fn
 from neural_tangents.utils import batch
 from neural_tangents.utils import empirical
 from neural_tangents.utils import test_utils
@@ -107,7 +108,7 @@ KERNELS = {
 }
 
 
-class PredictTest(jtu.JaxTestCase):
+class PredictTest(test_utils.NeuralTangentsTestCase):
 
   def _assertAllClose(self, x, y, rtol):
     x = ravel_pytree(x)[0]
@@ -966,6 +967,111 @@ class PredictTest(jtu.JaxTestCase):
     if lr_factor > 2.:
       if not math.isnan(loss_ratio):
         self.assertGreater(loss_ratio, 10.)
+
+
+class PredictKwargsTest(test_utils.NeuralTangentsTestCase):
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name': f'batch={do_batch}_mode={mode}',
+          'do_batch': do_batch,
+          'mode': mode
+      } for do_batch in [True, False]
+        for mode in ['analytic', 'mc', 'empirical']))
+  def test_kwargs(self, do_batch, mode):
+    rng = random.PRNGKey(1)
+
+    x_train = random.normal(rng, (8, 7, 10))
+    x_test = random.normal(rng, (4, 7, 10))
+    y_train = random.normal(rng, (8, 1))
+
+    rng_train, rng_test = random.split(rng, 2)
+
+    pattern_train = random.normal(rng, (8, 7, 7))
+    pattern_test = random.normal(rng, (4, 7, 7))
+
+    init_fn, apply_fn, kernel_fn = stax.serial(
+        stax.Dense(8),
+        stax.Relu(),
+        stax.Dropout(rate=0.4),
+        stax.Aggregate(),
+        stax.GlobalAvgPool(),
+        stax.Dense(1)
+    )
+
+    kw_dd = dict(pattern=(pattern_train, pattern_train))
+    kw_td = dict(pattern=(pattern_test, pattern_train))
+    kw_tt = dict(pattern=(pattern_test, pattern_test))
+
+    if mode == 'mc':
+      kernel_fn = monte_carlo_kernel_fn(init_fn, apply_fn, rng, 2,
+                                        batch_size=2 if do_batch else 0)
+
+    elif mode == 'empirical':
+      kernel_fn = empirical_kernel_fn(apply_fn)
+      if do_batch:
+        raise absltest.SkipTest('Batching of empirical kernel is not '
+                                'implemented with keyword arguments.')
+
+      for kw in (kw_dd, kw_td, kw_tt):
+        kw.update(dict(params=init_fn(rng, x_train.shape)[1],
+                       get=('nngp', 'ntk')))
+
+      kw_dd.update(dict(rng=(rng_train, None)))
+      kw_td.update(dict(rng=(rng_test, rng_train)))
+      kw_tt.update(dict(rng=(rng_test, None)))
+
+    elif mode == 'analytic':
+      if do_batch:
+        kernel_fn = batch.batch(kernel_fn, batch_size=2)
+
+    else:
+      raise ValueError(mode)
+
+    k_dd = kernel_fn(x_train, None, **kw_dd)
+    k_td = kernel_fn(x_test, x_train, **kw_td)
+    k_tt = kernel_fn(x_test, None, **kw_tt)
+
+    # Infinite time NNGP/NTK.
+    predict_fn_gp = predict.gp_inference(k_dd, y_train)
+    out_gp = predict_fn_gp(k_test_train=k_td, nngp_test_test=k_tt.nngp)
+
+    if mode == 'empirical':
+      for kw in (kw_dd, kw_td, kw_tt):
+        kw.pop('get')
+
+    predict_fn_ensemble = predict.gradient_descent_mse_ensemble(kernel_fn,
+                                                                x_train,
+                                                                y_train,
+                                                                **kw_dd)
+    out_ensemble = predict_fn_ensemble(x_test=x_test, compute_cov=True, **kw_tt)
+    self.assertAllClose(out_gp, out_ensemble)
+
+    # Finite time NTK test.
+    predict_fn_mse = predict.gradient_descent_mse(k_dd.ntk, y_train)
+    out_mse = predict_fn_mse(t=1.,
+                             fx_train_0=None,
+                             fx_test_0=0.,
+                             k_test_train=k_td.ntk)
+    out_ensemble = predict_fn_ensemble(t=1.,
+                                       get='ntk',
+                                       x_test=x_test,
+                                       compute_cov=False,
+                                       **kw_tt)
+    self.assertAllClose(out_mse, out_ensemble)
+
+    # Finite time NNGP train.
+    predict_fn_mse = predict.gradient_descent_mse(k_dd.nngp, y_train)
+    out_mse = predict_fn_mse(t=2.,
+                             fx_train_0=0.,
+                             fx_test_0=None,
+                             k_test_train=k_td.nngp)
+    out_ensemble = predict_fn_ensemble(t=2.,
+                                       get='nngp',
+                                       x_test=None,
+                                       compute_cov=False,
+                                       **kw_dd)
+    self.assertAllClose(out_mse, out_ensemble)
 
 
 if __name__ == '__main__':

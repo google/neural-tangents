@@ -33,7 +33,7 @@ from jax.api import grad
 from jax.experimental import ode
 import jax.numpy as np
 import jax.scipy as sp
-from jax.tree_util import tree_map
+from jax.tree_util import tree_map, tree_all
 from neural_tangents.utils import utils, dataclasses
 import scipy as osp
 from neural_tangents.utils.typing import KernelFn, Axes, Get
@@ -557,7 +557,7 @@ def gp_inference(
     return solve(g)(y_train, trace_axes)
 
   @utils.get_namedtuple('Gaussians')
-  def predict_fn(get: Get,
+  def predict_fn(get: Get=None,
                  k_test_train=None,
                  nngp_test_test: np.ndarray = None
                  ) -> Dict[str, Union[np.ndarray, Gaussian]]:
@@ -666,7 +666,7 @@ def gradient_descent_mse_ensemble(
     diag_reg: float = 0.0,
     diag_reg_absolute_scale: bool = False,
     trace_axes: Axes = (-1,),
-    **kernel_fn_kwargs):
+    **kernel_fn_train_train_kwargs):
   r"""Predicts the gaussian embedding induced by gradient descent on MSE loss.
 
   This is equivalent to an infinite ensemble of infinite-width networks after
@@ -719,8 +719,16 @@ def gradient_descent_mse_ensemble(
       axes indeed converges to a constant-diagonal matrix. However, if you
       target linearized dynamics of a specific finite-width network,
       `trace_axes=()` will yield most accurate result.
-    **kernel_fn_kwargs:
-      optional keyword arguments passed to `kernel_fn`.
+    **kernel_fn_train_train_kwargs:
+      optional keyword arguments passed to `kernel_fn`. For train-train kernel,
+      these are passed to `kernel_fn` without changes. For test-test kernel,
+      they are passed to `kernel_fn`, unless overwritten by a similar
+      `**kernel_fn_test_test_kwargs` arguments passed to the `predict_fn`
+      function call. Finally, for test-train kernel, values that are tuples of
+      arrays (destined for calls of the finite-width network on training and
+      testing data) will be tuples of values combined from
+      `**kernel_fn_train_train_kwargs` and `**kernel_fn_test_test_kwargs`, and
+      all other values must match.
 
   Returns:
     A function with signature `predict_fn(t, x_test, get, compute_cov)`
@@ -746,16 +754,19 @@ def gradient_descent_mse_ensemble(
     if len(get) == 1:
       get = get[0]
       if get not in k_dd_cache:
-        k_dd_cache[get] = kernel_fn(x_train, None, get, **kernel_fn_kwargs)
+        k_dd_cache[get] = kernel_fn(x_train, None, get,
+                                    **kernel_fn_train_train_kwargs)
 
     elif len(get) == 2:
       if not any(g in k_dd_cache for g in get):
         k_dd_cache.update(
-            kernel_fn(x_train, None, get, **kernel_fn_kwargs)._asdict())
+            kernel_fn(x_train, None, get,
+                      **kernel_fn_train_train_kwargs)._asdict())
       else:
         for g in get:
           if g not in k_dd_cache:
-            k_dd_cache[g] = kernel_fn(x_train, None, g, **kernel_fn_kwargs)
+            k_dd_cache[g] = kernel_fn(x_train, None, g,
+                                      **kernel_fn_train_train_kwargs)
 
     else:
       raise ValueError(get)
@@ -777,16 +788,53 @@ def gradient_descent_mse_ensemble(
     return gp_inference(k_dd, y_train, diag_reg, diag_reg_absolute_scale,
                         trace_axes)
 
-  def get_matrices(get: Get, x_test: Optional[np.ndarray], compute_cov: bool):
+  def get_kernels(get: Get, x_test: Optional[np.ndarray],
+                  compute_cov: bool,
+                  **kernel_fn_test_test_kwargs):
     get = _get_dependency(get, compute_cov)
     k_dd = get_k_train_train(get)
     if x_test is None:
       k_td = None
       nngp_tt = compute_cov or None
     else:
-      k_td = kernel_fn(x_test, x_train, get, **kernel_fn_kwargs)
+      args_train, _ = utils.split_kwargs(kernel_fn_train_train_kwargs, x_train)
+      args_test, _ = utils.split_kwargs(kernel_fn_test_test_kwargs, x_test)
+
+      def is_array(x):
+        return tree_all(tree_map(lambda x: isinstance(x, np.ndarray), x))
+
+      kwargs_td = dict(kernel_fn_train_train_kwargs)
+      kwargs_tt = dict(kernel_fn_train_train_kwargs)
+
+      for k in kernel_fn_test_test_kwargs.keys():
+        v_tt = kernel_fn_test_test_kwargs[k]
+        v_dd = kernel_fn_train_train_kwargs[k]
+
+        if is_array(v_dd) and is_array(v_tt):
+          if (isinstance(v_dd, tuple) and len(v_dd) == 2 and
+              isinstance(v_tt, tuple) and len(v_tt) == 2):
+            v_td = (args_test[k], args_train[k])
+          else:
+            v_td = v_tt
+
+        elif v_dd != v_tt:
+          raise ValueError(f'Same keyword argument {k} of `kernel_fn` is set to'
+                           f'different values {v_dd} != {v_tt} when computing '
+                           f'the train-train and test-train/test-test kernels. '
+                           f'If this is your intention, please submit a feature'
+                           f' request at '
+                           f'https://github.com/google/neural-tangents/issues')
+
+        else:
+          v_td = v_tt
+
+        kwargs_td[k] = v_td
+        kwargs_tt[k] = v_tt
+
+      k_td = kernel_fn(x_test, x_train, get, **kwargs_td)
+
       if compute_cov:
-        nngp_tt = kernel_fn(x_test, None, 'nngp', **kernel_fn_kwargs)
+        nngp_tt = kernel_fn(x_test, None, 'nngp', **kwargs_tt)
       else:
         nngp_tt = None
     return k_dd, k_td, nngp_tt
@@ -795,7 +843,8 @@ def gradient_descent_mse_ensemble(
   def predict_fn(t: ArrayOrScalar = None,
                  x_test: np.ndarray = None,
                  get: Get = None,
-                 compute_cov: bool = False) -> Dict[str, Gaussian]:
+                 compute_cov: bool = False,
+                 **kernel_fn_test_test_kwargs) -> Dict[str, Gaussian]:
     """Return output mean and covariance on the test set at time[s] `t`.
 
     Args:
@@ -814,6 +863,9 @@ def gradient_descent_mse_ensemble(
       compute_cov:
         if `True` computing both `mean` and `variance` and only `mean`
         otherwise.
+      **kernel_fn_test_test_kwargs:
+        optional keyword arguments passed to `kernel_fn`. See also
+        `kernel_fn_train_train_kwargs` argument of the parent function.
 
     Returns:
       `fx_test_mean_t` or `(fx_test_mean_t, fx_test_cov_t)` if
@@ -823,7 +875,8 @@ def gradient_descent_mse_ensemble(
       get = ('nngp', 'ntk')
 
     # train-train, test-train, test-test.
-    k_dd, k_td, nngp_tt = get_matrices(get, x_test, compute_cov)
+    k_dd, k_td, nngp_tt = get_kernels(get, x_test, compute_cov,
+                                      **kernel_fn_test_test_kwargs)
 
     # Infinite time.
     if t is None:
