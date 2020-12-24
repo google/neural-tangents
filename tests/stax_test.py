@@ -26,7 +26,7 @@ from absl.testing import absltest
 from jax import lax
 from jax import ops
 from jax import test_util as jtu
-from jax.api import jit, vjp
+from jax.api import jit, vjp, jvp, jacfwd, jacrev
 from jax.config import config
 from jax.lib import xla_bridge
 import jax.numpy as np
@@ -853,7 +853,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
       b_std = 0.0
 
     if model == 'fc':
-      rtol = 0.05
+      rtol = 0.03
       X0_1 = random.normal(key, (6, 7))
       X0_2 = None if same_inputs else random.normal(split, (10, 7))
       affine = stax.Dense(1024, W_std, b_std)
@@ -861,7 +861,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
       depth = 1
 
     else:
-      rtol = 0.1
+      rtol = 0.05
       X0_1 = random.normal(key, (4, 8, 8, 3))
       X0_2 = None if same_inputs else random.normal(split, (6, 8, 8, 3))
       affine = stax.Conv(1024, (3, 2), W_std=W_std, b_std=b_std, padding='SAME')
@@ -3336,6 +3336,112 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
     )
     k_mc = kernel_fn_mc(x1, x2, 'nngp')
     test_utils.assert_close_matrices(self, k_mc, k, tol)
+
+
+class AutodiffTest(test_utils.NeuralTangentsTestCase):
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              f'{get}-{same_inputs}-{phi.__name__}',
+          'get': get,
+          'same_inputs': same_inputs,
+          'phi': phi,
+      }
+                          for get in [
+                              'ntk',
+                              'nngp'
+                          ]
+                          for same_inputs in [True, False, None]
+                          for phi in [
+                              stax.Erf,
+                              stax.Sin,
+                              stax.Gelu,
+                              stax.Relu,
+                              stax.ElementwiseNumerical
+                          ]))
+  def test_autodiff(self, get, same_inputs, phi):
+    x1 = np.cos(random.normal(random.PRNGKey(1), (3, 1, 2, 3)))
+    if same_inputs is None:
+      x2 = None
+    elif same_inputs is True:
+      x2 = x1
+    else:
+      x2 = np.cos(random.normal(random.PRNGKey(2), (4, 1, 2, 3)))
+
+    name = phi.__name__
+    if name == 'LeakyRelu':
+      phi = phi(0.1)
+    elif name == 'ElementwiseNumerical':
+      phi = phi(fn=np.cos, deg=25)
+    else:
+      phi = phi()
+
+    _, _, kernel_fn = stax.serial(stax.Dense(1, 2., 0.01), phi,
+                                  stax.Dense(1, 2., 0.01), phi)
+
+    def k(x1, x2):
+      return kernel_fn(x1, x2, get)
+
+    dx1 = random.normal(random.PRNGKey(3), x1.shape) * 0.01
+    if same_inputs is None:
+      dx2 = None
+    else:
+      dx2 = random.normal(random.PRNGKey(4), x2.shape) * 0.01
+
+    def dk(x1, x2):
+      return jvp(k, (x1, x2), (dx1, dx2))[1]
+
+    def d2k(x1, x2):
+      return jvp(dk, (x1, x2), (dx1, dx2))[1]
+
+    _dk = dk(x1, x2)
+
+    if (same_inputs is not False and
+        get == 'ntk' and
+        ('Relu' in name or 'Abs' in name)):
+      # TODO(romann): revisit numerical issues of second derivative of `Relu`
+      _d2k = 0
+      tol = 0.02
+    else:
+      _d2k = d2k(x1, x2)
+      tol = 2e-3 if name == 'ElementwiseNumerical' else 1e-4
+
+    def assert_close(x, y, tol=3e-5):
+      if xla_bridge.get_backend().platform == 'tpu':
+        # TODO(romann): understand why TPUs have high errors.
+        tol = 0.21
+      self.assertLess(
+          np.max(np.abs(x - y)) / (np.mean(np.abs(x)) + np.mean(np.abs(y))),
+          tol)
+
+    # k(x + dx) ~ k(x) + dk(x) dx + dx^T d2k(x) dx
+    assert_close(k(x1 + dx1, None if same_inputs is None else x2 + dx2),
+                 k(x1, x2) + _dk + _d2k / 2,
+                 tol=tol)
+
+    # d/dx1
+    k_fwd_0 = jacfwd(k)(x1, x2)
+    k_rev_0 = jacrev(k)(x1, x2)
+    assert_close(k_fwd_0, k_rev_0)
+
+    if same_inputs is not None:
+      # d/dx2
+      k_fwd_1 = jacfwd(k, 1)(x1, x2)
+      k_rev_1 = jacrev(k, 1)(x1, x2)
+      assert_close(k_fwd_1, k_rev_1)
+
+      # dk(x2, x1)/dx2 = dk(x1, x2)/dx1
+      k_fwd_01 = jacfwd(k, 1)(x2, x1)
+      k_rev_01 = jacrev(k, 1)(x2, x1)
+      assert_close(np.moveaxis(k_fwd_0, (0, 2, 4), (1, 3, 5)), k_fwd_01)
+      assert_close(np.moveaxis(k_rev_0, (0, 2, 4), (1, 3, 5)), k_rev_01)
+
+      # dk(x2, x1)/dx1 = dk(x1, x2)/dx2
+      k_fwd_10 = jacfwd(k)(x2, x1)
+      k_rev_10 = jacrev(k)(x2, x1)
+      assert_close(np.moveaxis(k_fwd_1, (0, 2, 4), (1, 3, 5)), k_fwd_10)
+      assert_close(np.moveaxis(k_rev_1, (0, 2, 4), (1, 3, 5)), k_rev_10)
 
 
 if __name__ == '__main__':

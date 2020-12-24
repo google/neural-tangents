@@ -77,7 +77,7 @@ from jax import lax
 from jax import numpy as np
 from jax import ops
 from jax import random
-from jax.api import ShapeDtypeStruct, eval_shape, grad, ShapedArray, vmap
+from jax.api import ShapeDtypeStruct, eval_shape, grad, ShapedArray, vmap, custom_jvp
 import jax.experimental.stax as ostax
 from jax.lib import xla_bridge
 from jax.scipy.special import erf
@@ -2626,15 +2626,13 @@ def Dropout(rate: float, mode: str = 'train') -> InternalLayer:
 def Erf(
     a: float = 1.,
     b: float = 1.,
-    c: float = 0.,
-    do_backprop: bool = False) -> InternalLayer:
+    c: float = 0.) -> InternalLayer:
   """Affine transform of `Erf` nonlinearity, i.e. `a * Erf(b * x) + c`.
 
   Args:
     a: output scale.
     b: input scale.
     c: output shift.
-    do_backprop: set to `True` if you want to backpropagate through the kernel.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -2657,25 +2655,30 @@ def Erf(
                                                        k.diagonal_spatial,
                                                        op.mul)
 
+    factor = 2 / np.pi
+
     def nngp_ntk_fn(
         nngp: np.ndarray,
         prod: np.ndarray,
         ntk: np.ndarray = None) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+      square_root = _sqrt(prod - 4 * nngp**2)
+      nngp = factor * np.arctan2(2 * nngp, square_root)
+
       if ntk is not None:
-        dot_sigma = 4 / (np.pi * np.sqrt(prod - 4 * nngp ** 2))
+        dot_sigma = 2 * factor / square_root
         ntk *= dot_sigma
-      nngp = _arcsin(2 * nngp / np.sqrt(prod), do_backprop) * 2 / np.pi
+
       return nngp, ntk
 
-    def nngp_fn_diag(nngp: np.ndarray, denom: np.ndarray) -> np.ndarray:
-      return np.arcsin(2 * nngp / denom) * 2 / np.pi
+    def nngp_fn_diag(nngp: np.ndarray) -> np.ndarray:
+      return factor * np.arctan2(nngp, np.sqrt(nngp + 1. / 4))
 
     nngp, ntk = nngp_ntk_fn(nngp, prod12, ntk)
 
     if k.diagonal_batch and k.diagonal_spatial:
-      cov1 = nngp_fn_diag(cov1, cov1_denom)
+      cov1 = nngp_fn_diag(cov1)
       if cov2 is not None:
-        cov2 = nngp_fn_diag(cov2, cov2_denom)
+        cov2 = nngp_fn_diag(cov2)
     else:
       cov1, _ = nngp_ntk_fn(cov1, prod11)
       if cov2 is not None:
@@ -2703,12 +2706,8 @@ def Sigmoid_like():
 
 @layer
 @supports_masking(remask_kernel=False)
-def Gelu(
-    do_backprop: bool = False) -> InternalLayer:
+def Gelu() -> InternalLayer:
   """Gelu function.
-
-  Args:
-    do_backprop: set to `True` if you want to backpropagate through the kernel.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -2735,15 +2734,15 @@ def Gelu(
                     ntk: np.ndarray = None
                     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
       delta_squared = prod_plus_1 - nngp**2
-      delta = _safe_sqrt(delta_squared)
-      ratio = nngp / _safe_sqrt(prod_plus_1)
+      delta = _sqrt(delta_squared)
+      angles = np.arctan2(nngp, delta)
       new_nngp = (nngp**2 + prod * delta_squared) / (prod_plus_1 * delta)
-      new_nngp += nngp * _arcsin(ratio, do_backprop)
+      new_nngp += nngp * angles
       new_nngp /= 2 * np.pi
       new_nngp += 0.25 * nngp
 
       if ntk is not None:
-        second_term = 0.25 + _arcsin(ratio, do_backprop) / (2 * np.pi)
+        second_term = 0.25 + angles / (2 * np.pi)
         first_term = 1 / delta_squared + (1 - prod) / prod_plus_1 + 1
         first_term *= nngp / delta / (2. * np.pi)
         dot_sigma = first_term + second_term
@@ -2751,8 +2750,9 @@ def Gelu(
       return new_nngp, ntk
 
     def nngp_fn_diag(nngp: np.ndarray) -> np.ndarray:
+      square_root = np.sqrt(1. + 2. * nngp)
       new_nngp = nngp / ((nngp + 1.) * np.sqrt(1. + 2. * nngp))
-      new_nngp += _arcsin(nngp / (nngp + 1), do_backprop) / 2
+      new_nngp += np.arctan2(nngp, square_root) / 2
       new_nngp /= np.pi
       new_nngp += 0.25
       new_nngp *= nngp
@@ -2893,14 +2893,12 @@ def Rbf(
 def ABRelu(
     a: float,
     b: float,
-    do_backprop: bool = False,
     do_stabilize: bool = False) -> InternalLayer:
   """ABReLU nonlinearity, i.e. `a * min(x, 0) + b * max(x, 0)`.
 
   Args:
     a: slope for `x < 0`.
     b: slope for `x > 0`.
-    do_backprop: set to `True` if you want to backpropagate through the kernel.
     do_stabilize: set to `True` for very deep networks.
 
   Returns:
@@ -2931,12 +2929,12 @@ def ABRelu(
                                                        op.mul)
 
     def nngp_ntk_fn(nngp, prod, ntk=None):
-      cosines = nngp / _safe_sqrt(prod)
-      angles = _arccos(cosines, do_backprop)
+      square_root = _sqrt(prod - nngp ** 2)
+      angles = np.arctan2(square_root, nngp)
 
-      dot_sigma = (a**2 + b**2 - (a - b)**2 * angles / np.pi) / 2
-      nngp = ((a - b) ** 2 * _sqrt(prod - nngp ** 2, do_backprop) / (2 * np.pi)
-              + dot_sigma * nngp)
+      factor = (a - b)**2 / (2 * np.pi)
+      dot_sigma = (a**2 + b**2) / 2 - factor * angles
+      nngp = factor * square_root + dot_sigma * nngp
 
       if ntk is not None:
         ntk *= dot_sigma
@@ -2969,59 +2967,50 @@ def ABRelu(
 
 
 def Relu(
-    do_backprop: bool = False,
     do_stabilize: bool = False) -> InternalLayer:
   """ReLU nonlinearity.
 
   Args:
-    do_backprop: set to `True` if you want to backpropagate through the kernel.
     do_stabilize: set to `True` for very deep networks.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
-  return ABRelu(0, 1, do_backprop, do_stabilize)
+  return ABRelu(0, 1, do_stabilize)
 
 
 def LeakyRelu(
     alpha: float,
-    do_backprop: bool = False,
     do_stabilize: bool = False) -> InternalLayer:
   """Leaky ReLU nonlinearity, i.e. `alpha * min(x, 0) + max(x, 0)`.
 
   Args:
     alpha: slope for `x < 0`.
-    do_backprop: set to `True` if you want to backpropagate through the kernel.
     do_stabilize: set to `True` for very deep networks.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
-  return ABRelu(alpha, 1, do_backprop, do_stabilize)
+  return ABRelu(alpha, 1, do_stabilize)
 
 
 def Abs(
-    do_backprop: bool = False,
     do_stabilize: bool = False) -> InternalLayer:
   """Absolute value nonlinearity.
 
   Args:
-    do_backprop: set to `True` if you want to backpropagate through the kernel.
     do_stabilize: set to `True` for very deep networks.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
-  return ABRelu(-1, 1, do_backprop, do_stabilize)
+  return ABRelu(-1, 1, do_stabilize)
 
 
 @layer
 @supports_masking(remask_kernel=True)
-def Sign(do_backprop: bool = False) -> InternalLayer:
+def Sign() -> InternalLayer:
   """Sign function.
-
-  Args:
-    do_backprop: set to `True` if you want to backpropagate through the kernel.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -3039,7 +3028,7 @@ def Sign(do_backprop: bool = False) -> InternalLayer:
                                              k.diagonal_batch,
                                              k.diagonal_spatial,
                                              op.mul)
-    nngp = 1 - _arccos(nngp / _safe_sqrt(prod12), do_backprop) * 2 / np.pi
+    nngp = 1 - np.arctan2(_sqrt(prod12 - nngp**2), nngp) * 2 / np.pi
     cov1 = np.ones_like(cov1)
     cov2 = cov2 if cov2 is None else np.ones_like(cov2)
     k = k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
@@ -3053,8 +3042,7 @@ def Sign(do_backprop: bool = False) -> InternalLayer:
 def ElementwiseNumerical(
     fn: Callable[[float], float],
     deg: int,
-    df: Callable[[float], float] = None,
-    do_backprop: bool = False) -> InternalLayer:
+    df: Callable[[float], float] = None) -> InternalLayer:
   """Activation function using numerical integration.
 
   Supports general activation functions using Gauss-Hermite quadrature.
@@ -3072,7 +3060,6 @@ def ElementwiseNumerical(
     df: optional, derivative of the activation funtion(`fn`). If not provided,
       it is computed by `jax.grad`. Providing analytic derivative can speed up
       the NTK computations.
-    do_backprop: set to `True` if you want to backpropagate through the kernel.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -3115,9 +3102,9 @@ def ElementwiseNumerical(
       q11, q22 = np.expand_dims(q11, xy_axes), np.expand_dims(q22, xy_axes)
 
       def integrate(f):
-        fvals = f(_sqrt(2*q11, do_backprop) * x) * f(
-            nngp/_sqrt(q11/2, do_backprop) * x + _sqrt(
-                2*(q22 - nngp**2/q11), do_backprop)* y)
+        fvals = f(_sqrt(2 * q11) * x) * f(
+            nngp / _sqrt(q11 / 2, 1e-30) * x + _sqrt(
+                2*(q22 - nngp**2/q11)) * y)
         return np.tensordot(grid, fvals, (xy_axes, xy_axes)) / np.pi
 
       if ntk is not None:
@@ -3130,7 +3117,7 @@ def ElementwiseNumerical(
       x = xs.reshape((xs.shape[0],) + (1,) * nngp.ndim)
       x_axes = (0,)
       nngp = np.expand_dims(nngp, x_axes)
-      fval = fn(_sqrt(2 * nngp, do_backprop) * x) ** 2
+      fval = fn(_sqrt(2 * nngp) * x) ** 2
       return np.tensordot(ws, fval, (x_axes, x_axes)) / np.sqrt(np.pi)
 
     nngp, ntk = nngp_ntk_fn(nngp, q11, q22, ntk)
@@ -3826,35 +3813,18 @@ def _elementwise(fn: Optional[Callable[[float], float]],
   return init_fn, apply_fn, new_kernel_fn
 
 
-def _arccos(x, do_backprop):
-  if do_backprop:
-    # https://github.com/google/jax/issues/654
-    x = np.where(np.abs(x) >= 1, np.sign(x), x)
-  else:
-    x = np.clip(x, -1, 1)
-  return np.arccos(x)
+@functools.partial(custom_jvp, nondiff_argnums=(1,))
+def _sqrt(x, tol=0.):
+  return np.sqrt(np.maximum(x, tol))
 
 
-def _sqrt(x, do_backprop):
-  if do_backprop:
-    # https://github.com/google/jax/issues/654
-    x = np.where(x <= 0, 0, x)
-  else:
-    x = np.maximum(x, 0)
-  return np.sqrt(x)
-
-
-def _safe_sqrt(x):
-  return np.sqrt(np.maximum(x, 1e-20))
-
-
-def _arcsin(x, do_backprop):
-  if do_backprop:
-    # https://github.com/google/jax/issues/654
-    x = np.where(np.abs(x) >= 1, np.sign(x), x)
-  else:
-    x = np.clip(x, -1, 1)
-  return np.arcsin(x)
+@_sqrt.defjvp
+def _sqrt_jvp(tol, primals, tangents):
+  x, = primals
+  x_dot, = tangents
+  safe_tol = max(tol, 1e-30)
+  square_root = _sqrt(x, safe_tol)
+  return square_root, np.where(x > safe_tol, x_dot / (2 * square_root), 0.)
 
 
 def _get_diagonal(
