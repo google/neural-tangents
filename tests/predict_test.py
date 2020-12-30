@@ -776,11 +776,48 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
                   k_td is not None):
                 with self.assertRaises(ValueError):
                   out_gp_inf = gp_inference(get=get, k_test_train=k_td,
-                                            nngp_test_test=nngp_tt)
+                                            k_test_test=nngp_tt)
               else:
                 out_gp_inf = gp_inference(get=get, k_test_train=k_td,
-                                          nngp_test_test=nngp_tt)
+                                          k_test_test=nngp_tt)
                 self.assertAllClose(out_ens, out_gp_inf)
+        
+        # Test ntkgp
+        # Create a hacked kernel function that always returns the ntk kernel
+        def always_ntk(x1, x2, get=('nngp', 'ntk')):
+          out = kernel_fn(x1, x2, get=('nngp', 'ntk'))
+          if get == 'nngp' or get == 'ntk':
+            return out.ntk
+          else:
+            return out._replace(nngp=out.ntk)
+        k_dd = kernel_fn(x_train, None, 'ntk')
+        always_ntk_k_dd = always_ntk(x_train, None)
+
+        gp_inference = predict.gp_inference(k_dd, y_train, diag_reg=reg)
+        always_ntk_gp_inference = predict.gp_inference(always_ntk_k_dd, y_train, diag_reg=reg)
+        for x_test in [None, 'x_test']:
+          x_test = None if x_test is None else random.normal(key, (8, 2))
+          k_td = None if x_test is None else kernel_fn(x_test, x_train, 'ntk')
+          always_ntk_k_td = None if x_test is None else always_ntk(x_test, x_train)
+
+          for compute_cov in [True, False]:
+            with self.subTest(kernel_fn_is_analytic=kernel_fn_is_analytic,
+                              get=get,
+                              x_test=x_test if x_test is None else 'x_test',
+                              compute_cov=compute_cov):
+              if compute_cov:
+                ntk_tt = (True if x_test is None else
+                           kernel_fn(x_test, None, 'ntk'))
+              else:
+                ntk_tt = None
+              
+              out_ntkgp_inf = gp_inference(get='ntkgp', k_test_train=k_td, k_test_test = ntk_tt)
+              out_always_ntk_gp_inf = always_ntk_gp_inference(
+                get='nngp', k_test_train=always_ntk_k_td, k_test_test=ntk_tt)
+
+              # Compare ntkgp predictions to when using nngp code, with hacked kernel 
+              self._assertAllClose(out_ntkgp_inf, out_always_ntk_gp_inf, 0.08) 
+
 
   def testPredictOnCPU(self):
     x_train = random.normal(random.PRNGKey(1), (4, 4, 4, 2))
@@ -1034,7 +1071,7 @@ class PredictKwargsTest(test_utils.NeuralTangentsTestCase):
 
     # Infinite time NNGP/NTK.
     predict_fn_gp = predict.gp_inference(k_dd, y_train)
-    out_gp = predict_fn_gp(k_test_train=k_td, nngp_test_test=k_tt.nngp)
+    out_gp = predict_fn_gp(k_test_train=k_td, k_test_test=k_tt.nngp)
 
     if mode == 'empirical':
       for kw in (kw_dd, kw_td, kw_tt):

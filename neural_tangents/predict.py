@@ -530,7 +530,7 @@ def gp_inference(
       `False` to be `diag_reg * np.mean(np.trace(k_train_train))`.
     trace_axes:
       `f(x_train)` axes such that `k_train_train`,
-      `k_test_train`[, and `nngp_test_test`] lack these pairs of dimensions and
+      `k_test_train`[, and `k_test_test`] lack these pairs of dimensions and
       are to be interpreted as :math:`\Theta \otimes I`, i.e. block-diagonal
       along `trace_axes`. These can can be specified either to save space and
       compute, or to even improve approximation accuracy of the infinite-width
@@ -540,7 +540,7 @@ def gp_inference(
       finite-width network, `trace_axes=()` will yield most accurate result.
 
   Returns:
-    A function of signature `predict_fn(get, k_test_train, nngp_test_test)`
+    A function of signature `predict_fn(get, k_test_train, k_test_test)`
     computing posterior Gaussian distribution (mean or mean and covariance)
     on a given test set.
   """
@@ -559,7 +559,7 @@ def gp_inference(
   @utils.get_namedtuple('Gaussians')
   def predict_fn(get: Get=None,
                  k_test_train=None,
-                 nngp_test_test: np.ndarray = None
+                 k_test_test: np.ndarray = None
                  ) -> Dict[str, Union[np.ndarray, Gaussian]]:
     """`test`-set posterior given respective covariance matrices.
 
@@ -576,16 +576,16 @@ def gp_inference(
         `k_test_train` must contain both `ntk` and `nngp` kernels. If `None`,
         returns predictions on the training set. Note that train-set outputs are
         always `N(y_train, 0)` and mostly returned for API consistency.
-      nngp_test_test:
+      k_test_test:
         A test-test NNGP array. Provide if you want to compute test-test
-        posterior covariance. `nngp_test_tes=None`, means to not compute it. If
+        posterior covariance. `k_test_test=None`, means to not compute it. If
         `k_test_train is None`, pass any non-`None` value (e.g. `True`) if you
         want to get non-regularized (`diag_reg=0`) train-train posterior
         covariance. Note that non-regularized train-set outputs will always be
         the zero-variance Gaussian `N(y_train, 0)` and mostly returned for API
         consistency. For regularized train-set posterior outputs according to a
         positive `diag_reg`, pass `k_test_train=k_train_train`, and, optionally,
-        `nngp_test_test=nngp_train_train`.
+        `k_test_test=nngp_train_train`.
 
     Returns:
       Either a `Gaussian('mean', 'variance')` namedtuple or `mean` of the GP
@@ -597,18 +597,19 @@ def gp_inference(
     out = {}
 
     for g in get:
-      k_dd = _get_attr(k_train_train, g)
-      k_td = None if k_test_train is None else _get_attr(k_test_train, g)
+      k = g if g != 'ntkgp' else 'ntk'
+      k_dd = _get_attr(k_train_train, k)
+      k_td = None if k_test_train is None else _get_attr(k_test_train, k)
 
       if k_td is None:
         # Train set predictions.
         y = y_train.astype(k_dd.dtype)
       else:
         # Test set predictions.
-        y = np.tensordot(k_td, k_inv_y(g), (odd, first))
+        y = np.tensordot(k_td, k_inv_y(k), (odd, first))
         y = np.moveaxis(y, range(-len(trace_axes), 0), trace_axes)
 
-      if nngp_test_test is not None:
+      if k_test_test is not None:
         if k_td is None:
           out[g] = Gaussian(y, np.zeros_like(k_dd, k_dd.dtype))
         else:
@@ -616,7 +617,7 @@ def gp_inference(
               (not hasattr(k_train_train, 'nngp') or
                not hasattr(k_test_train, 'nngp'))):
             raise ValueError(
-                'If `"ntk" in get`, and `nngp_test_test is not None`, '
+                'If `"ntk" in get`, and `k_test_test is not None`, '
                 'and `k_test_train is not None`, i.e. you request the '
                 'NTK posterior covariance on the test set, you need '
                 'both NTK and NNGP train-train and test-train matrices '
@@ -624,11 +625,12 @@ def gp_inference(
                 'Hence they must be `namedtuple`s with `nngp` and '
                 '`ntk` attributes.')
 
-          k_td_nngp_inv_y = solve(g)(_get_attr(k_test_train, 'nngp'), even)
+          k_td_g_inv_y = solve(k)(
+            _get_attr(k_test_train, 'nngp' if g != 'ntkgp' else 'ntk'), even)
 
-          if g == 'nngp':
-            cov = np.tensordot(k_td, k_td_nngp_inv_y, (odd, first))
-            cov = nngp_test_test - utils.zip_axes(cov)
+          if g == 'nngp' or g == 'ntkgp':
+            cov = np.tensordot(k_td, k_td_g_inv_y, (odd, first))
+            cov = k_test_test - utils.zip_axes(cov)
             out[g] = Gaussian(y, cov)
 
           elif g == 'ntk':
@@ -637,9 +639,9 @@ def gp_inference(
                                (odd, first))
             cov = np.tensordot(term_1, cov, (first, first))
 
-            term_2 = np.tensordot(k_td, k_td_nngp_inv_y, (odd, first))
+            term_2 = np.tensordot(k_td, k_td_g_inv_y, (odd, first))
             term_2 += np.moveaxis(term_2, first, last)
-            cov = utils.zip_axes(cov - term_2) + nngp_test_test
+            cov = utils.zip_axes(cov - term_2) + k_test_test
             out[g] = Gaussian(y, cov)
 
           else:
@@ -881,7 +883,7 @@ def gradient_descent_mse_ensemble(
     # Infinite time.
     if t is None:
       return predict_inf(get)(get=get, k_test_train=k_td,
-                              nngp_test_test=nngp_tt)
+                              k_test_test=nngp_tt)
 
     # Finite time.
     t = np.array(t) * learning_rate
