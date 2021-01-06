@@ -410,7 +410,6 @@ _, _, kernel_fn = stax.serial(*(layers + [stax.Flatten()]))
 
 
 
-
 Tested using version `0.2.1`. All GPU results are per single accelerator.
 Note that runtime is proportional to the depth of your network.
 If your performance differs significantly,
