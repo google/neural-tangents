@@ -1,5 +1,6 @@
-# Neural Tangents [[ICLR 2020](https://iclr.cc/virtual_2020/poster_SklD9yrFPS.html)]
-[**Paper**](https://arxiv.org/abs/1912.02803)
+# Neural Tangents
+[**ICLR 2020 Video**](https://iclr.cc/virtual_2020/poster_SklD9yrFPS.html)
+| [**Paper**](https://arxiv.org/abs/1912.02803)
 | [**Quickstart**](#colab-notebooks)
 | [**Install guide**](#installation)
 | [**Reference docs**](https://neural-tangents.readthedocs.io/en/latest/)
