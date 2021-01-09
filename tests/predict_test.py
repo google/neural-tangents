@@ -493,6 +493,16 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
           zero_x = predictor(t=0.0, x_test=x_train, get=('NTK', 'NNGP'),
                              compute_cov=True)
           self.assertAllClose((ref,) * 2, zero_x)
+  
+  @classmethod
+  def _always_ntk(self, ker_fun):
+    def always_ntk(x1, x2, get=('nngp', 'ntk')):
+      out = ker_fun(x1, x2, get=('nngp', 'ntk'))
+      if get == 'nngp' or get == 'ntk':
+        return out.ntk
+      else:
+        return out._replace(nngp=out.ntk)
+    return always_ntk
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -540,14 +550,8 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
                                     t.shape + ntk.shape[2:])
             self.assertAllClose(ntk_ind, ntk)
 
-          # Create a hacked kernel function that always returns the ntk kernel
-          def always_ntk(x1, x2, get=('nngp', 'ntk')):
-            out = ker_fun(x1, x2, get=('nngp', 'ntk'))
-            if get == 'nngp' or get == 'ntk':
-              return out.ntk
-            else:
-              return out._replace(nngp=out.ntk)
 
+          always_ntk = self._always_ntk(ker_fun)
           predictor_ntk = predict.gradient_descent_mse_ensemble(always_ntk,
                                                                 x_train,
                                                                 y_train,
@@ -781,43 +785,59 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
                 out_gp_inf = gp_inference(get=get, k_test_train=k_td,
                                           k_test_test=nngp_tt)
                 self.assertAllClose(out_ens, out_gp_inf)
+
+      # Test NTKGP  
+      for get in [('nngp', 'ntk'), ('ntk',)]:
+        ntkgp_get = get + ('ntkgp',)
+        k_dd = kernel_fn(x_train, None, get)
         
-        # Test ntkgp
-        # Create a hacked kernel function that always returns the ntk kernel
-        def always_ntk(x1, x2, get=('nngp', 'ntk')):
-          out = kernel_fn(x1, x2, get=('nngp', 'ntk'))
-          if get == 'nngp' or get == 'ntk':
-            return out.ntk
-          else:
-            return out._replace(nngp=out.ntk)
-        k_dd = kernel_fn(x_train, None, 'ntk')
-        always_ntk_k_dd = always_ntk(x_train, None)
+        always_ntk = self._always_ntk(kernel_fn)
+        always_ntk_k_dd = always_ntk(x_train, None, get)
 
         gp_inference = predict.gp_inference(k_dd, y_train, diag_reg=reg)
+
         always_ntk_gp_inference = predict.gp_inference(always_ntk_k_dd, y_train, diag_reg=reg)
+        gd_ensemble = predict.gradient_descent_mse_ensemble(kernel_fn,
+                                                            x_train,
+                                                            y_train,
+                                                            diag_reg=reg)
         for x_test in [None, 'x_test']:
           x_test = None if x_test is None else random.normal(key, (8, 2))
-          k_td = None if x_test is None else kernel_fn(x_test, x_train, 'ntk')
+          k_td = None if x_test is None else kernel_fn(x_test, x_train, get)
           always_ntk_k_td = None if x_test is None else always_ntk(x_test, x_train)
 
           for compute_cov in [True, False]:
             with self.subTest(kernel_fn_is_analytic=kernel_fn_is_analytic,
-                              get=get,
+                              get=ntkgp_get,
                               x_test=x_test if x_test is None else 'x_test',
                               compute_cov=compute_cov):
               if compute_cov:
-                ntk_tt = (True if x_test is None else
+                k_tt = (True if x_test is None else
+                           kernel_fn(x_test, None, get))
+                always_ntk_tt = (True if x_test is None else
                            kernel_fn(x_test, None, 'ntk'))
+
               else:
-                ntk_tt = None
-              
-              out_ntkgp_inf = gp_inference(get='ntkgp', k_test_train=k_td, k_test_test = ntk_tt)
-              out_always_ntk_gp_inf = always_ntk_gp_inference(
-                get='nngp', k_test_train=always_ntk_k_td, k_test_test=ntk_tt)
+                k_tt = None
+                always_ntk_tt = None
 
-              # Compare ntkgp predictions to when using nngp code, with hacked kernel 
-              self._assertAllClose(out_ntkgp_inf, out_always_ntk_gp_inf, 0.08) 
+              if ('nngp' not in get and
+                  compute_cov and
+                  k_td is not None):
+                with self.assertRaises(ValueError):
+                  out_gp_inf = gp_inference(get=ntkgp_get, k_test_train=k_td,
+                                            k_test_test=k_tt)
+              else:
+                out_gp_inf = gp_inference(get=ntkgp_get, k_test_train=k_td,
+                                          k_test_test=k_tt)
+                out_ens = gd_ensemble(None, x_test, get, compute_cov)
+                out_always_ntk_gp_inf = always_ntk_gp_inference(
+                  get='nngp', k_test_train=always_ntk_k_td, k_test_test=always_ntk_tt)
 
+                # Compare ntkgp predictions to when using nngp code, with hacked kernel 
+                self._assertAllClose(out_gp_inf.ntkgp, out_always_ntk_gp_inf, 0.01) 
+                for g in get:
+                  self._assertAllClose(getattr(out_gp_inf, g), getattr(out_ens, g), 0.01)
 
   def testPredictOnCPU(self):
     x_train = random.normal(random.PRNGKey(1), (4, 4, 4, 2))

@@ -559,15 +559,15 @@ def gp_inference(
   @utils.get_namedtuple('Gaussians')
   def predict_fn(get: Get=None,
                  k_test_train=None,
-                 k_test_test: np.ndarray = None
+                 k_test_test=None
                  ) -> Dict[str, Union[np.ndarray, Gaussian]]:
     """`test`-set posterior given respective covariance matrices.
 
     Args:
       get:
-        string, the mode of the Gaussian process, either "nngp" or "ntk", or a
-        tuple, or `None`. If `None` then both `nngp` and `ntk` predictions are
-        returned.
+        string, the mode of the Gaussian process, either "nngp", "ntk", "ntkgp", 
+        or a tuple, or `None`. If `None` then both `nngp` and `ntk` predictions 
+        are returned.
       k_test_train:
         test-train kernel. Can be (a) `np.ndarray`, (b) `Kernel` namedtuple, (c)
         `Kernel` object. Must contain the necessary `nngp` and/or `ntk` kernels
@@ -577,15 +577,17 @@ def gp_inference(
         returns predictions on the training set. Note that train-set outputs are
         always `N(y_train, 0)` and mostly returned for API consistency.
       k_test_test:
-        A test-test NNGP array. Provide if you want to compute test-test
-        posterior covariance. `k_test_test=None`, means to not compute it. If
-        `k_test_train is None`, pass any non-`None` value (e.g. `True`) if you
-        want to get non-regularized (`diag_reg=0`) train-train posterior
-        covariance. Note that non-regularized train-set outputs will always be
-        the zero-variance Gaussian `N(y_train, 0)` and mostly returned for API
-        consistency. For regularized train-set posterior outputs according to a
-        positive `diag_reg`, pass `k_test_train=k_train_train`, and, optionally,
-        `k_test_test=nngp_train_train`.
+        test-test kernel. Can be (a) `np.ndarray`, (b) `Kernel` namedtuple, (c)
+        `Kernel` object. Must contain the necessary `nngp` and/or `ntk` kernels
+        for arguments provided to the returned `predict_fn` function.Provide 
+        if you want to compute test-test posterior covariance. 
+        `k_test_test=None`, means to not compute it. If `k_test_train is None`, 
+        pass any non-`None` value (e.g. `True`) if you want to get non-regularized
+        (`diag_reg=0`) train-train posterior covariance. Note that non-regularized 
+        train-set outputs will always be the zero-variance Gaussian `N(y_train, 0)`
+        and mostly returned for API consistency. For regularized train-set 
+        posterior outputs according to a positive `diag_reg`, pass 
+        `k_test_train=k_train_train`, and, optionally, `k_test_test=nngp_train_train`.
 
     Returns:
       Either a `Gaussian('mean', 'variance')` namedtuple or `mean` of the GP
@@ -624,13 +626,16 @@ def gp_inference(
                 'contained in `k_test_train` and `k_train_train`. '
                 'Hence they must be `namedtuple`s with `nngp` and '
                 '`ntk` attributes.')
+          
+          #  kernel of wide NN at initialization
+          g_init = 'nngp' if g != 'ntkgp' else 'ntk'
 
-          k_td_g_inv_y = solve(k)(
-            _get_attr(k_test_train, 'nngp' if g != 'ntkgp' else 'ntk'), even)
+          k_td_g_inv_y = solve(k)(_get_attr(k_test_train, g_init), even)
+          k_tt = _get_attr(k_test_test, g_init)
 
           if g == 'nngp' or g == 'ntkgp':
             cov = np.tensordot(k_td, k_td_g_inv_y, (odd, first))
-            cov = k_test_test - utils.zip_axes(cov)
+            cov = k_tt - utils.zip_axes(cov)
             out[g] = Gaussian(y, cov)
 
           elif g == 'ntk':
@@ -641,7 +646,7 @@ def gp_inference(
 
             term_2 = np.tensordot(k_td, k_td_g_inv_y, (odd, first))
             term_2 += np.moveaxis(term_2, first, last)
-            cov = utils.zip_axes(cov - term_2) + k_test_test
+            cov = utils.zip_axes(cov - term_2) + k_tt
             out[g] = Gaussian(y, cov)
 
           else:
