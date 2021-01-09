@@ -579,7 +579,7 @@ def gp_inference(
       k_test_test:
         test-test kernel. Can be (a) `np.ndarray`, (b) `Kernel` namedtuple, (c)
         `Kernel` object. Must contain the necessary `nngp` and/or `ntk` kernels
-        for arguments provided to the returned `predict_fn` function.Provide 
+        for arguments provided to the returned `predict_fn` function. Provide 
         if you want to compute test-test posterior covariance. 
         `k_test_test=None`, means to not compute it. If `k_test_train is None`, 
         pass any non-`None` value (e.g. `True`) if you want to get non-regularized
