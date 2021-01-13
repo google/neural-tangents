@@ -3008,7 +3008,7 @@ def Abs(
 
 
 @layer
-@supports_masking(remask_kernel=True)
+@supports_masking(remask_kernel=False)
 def Sign() -> InternalLayer:
   """Sign function.
 
