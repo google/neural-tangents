@@ -3832,7 +3832,7 @@ def _sqrt(x, tol=0.):
   return np.sqrt(np.maximum(x, tol))
 
 
-_sqrt = functools.partial(custom_jvp, nondiff_argnums=(1,))(_sqrt)
+_sqrt = custom_jvp(_sqrt, nondiff_argnums=(1,))
 
 
 @_sqrt.defjvp
