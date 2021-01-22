@@ -504,7 +504,13 @@ def gp_inference(
     diag_reg: float = 0.,
     diag_reg_absolute_scale: bool = False,
     trace_axes: Axes = (-1,)):
-  r"""Compute the mean and variance of the `posterior` of NNGP and NTK.
+  r"""Compute the mean and variance of the 'posterior' of NNGP/NTK/NTKGP.
+
+  NNGP - the exact posterior of an infinitely wide Bayesian NN. NTK - exact
+  distribution of an infinite ensemble of infinitely wide NNs trained with
+  gradient flow for infinite time. NTKGP - posterior of a GP (Gaussian process)
+  with the NTK covariance (see https://arxiv.org/abs/2007.05864 for how this
+  can correspond to infinite ensembles of infinitely wide NNs as well).
 
   Note that first invocation of the returned `predict_fn` will be slow and
   allocate a lot of memory for its whole lifetime, as a Cholesky factorization
@@ -541,7 +547,7 @@ def gp_inference(
 
   Returns:
     A function of signature `predict_fn(get, k_test_train, k_test_test)`
-    computing posterior Gaussian distribution (mean or mean and covariance)
+    computing 'posterior' Gaussian distribution (mean or mean and covariance)
     on a given test set.
   """
   even, odd, first, last = _get_axes(_get_first(k_train_train))
@@ -557,7 +563,7 @@ def gp_inference(
     return solve(g)(y_train, trace_axes)
 
   @utils.get_namedtuple('Gaussians')
-  def predict_fn(get: Get=None,
+  def predict_fn(get: Get = None,
                  k_test_train=None,
                  k_test_test=None
                  ) -> Dict[str, Union[np.ndarray, Gaussian]]:
@@ -565,9 +571,9 @@ def gp_inference(
 
     Args:
       get:
-        string, the mode of the Gaussian process, either "nngp", "ntk", "ntkgp", 
-        or a tuple, or `None`. If `None` then both `nngp` and `ntk` predictions 
-        are returned.
+        string, the mode of the Gaussian process, either "nngp", "ntk", "ntkgp",
+        (see https://arxiv.org/abs/2007.05864) or a tuple, or `None`. If `None`
+        then both `nngp` and `ntk` predictions are returned.
       k_test_train:
         test-train kernel. Can be (a) `np.ndarray`, (b) `Kernel` namedtuple, (c)
         `Kernel` object. Must contain the necessary `nngp` and/or `ntk` kernels
@@ -579,15 +585,16 @@ def gp_inference(
       k_test_test:
         test-test kernel. Can be (a) `np.ndarray`, (b) `Kernel` namedtuple, (c)
         `Kernel` object. Must contain the necessary `nngp` and/or `ntk` kernels
-        for arguments provided to the returned `predict_fn` function. Provide 
-        if you want to compute test-test posterior covariance. 
-        `k_test_test=None`, means to not compute it. If `k_test_train is None`, 
-        pass any non-`None` value (e.g. `True`) if you want to get non-regularized
-        (`diag_reg=0`) train-train posterior covariance. Note that non-regularized 
-        train-set outputs will always be the zero-variance Gaussian `N(y_train, 0)`
-        and mostly returned for API consistency. For regularized train-set 
-        posterior outputs according to a positive `diag_reg`, pass 
-        `k_test_train=k_train_train`, and, optionally, `k_test_test=nngp_train_train`.
+        for arguments provided to the returned `predict_fn` function. Provide
+        if you want to compute test-test posterior covariance.
+        `k_test_test=None` means to not compute it. If `k_test_train is None`,
+        pass any non-`None` value (e.g. `True`) if you want to get
+        non-regularized (`diag_reg=0`) train-train posterior covariance. Note
+        that non-regularized train-set outputs will always be the zero-variance
+        Gaussian `N(y_train, 0)` and mostly returned for API consistency. For
+        regularized train-set posterior outputs according to a positive
+        `diag_reg`, pass `k_test_train=k_train_train`, and, optionally,
+        `k_test_test=nngp_train_train`.
 
     Returns:
       Either a `Gaussian('mean', 'variance')` namedtuple or `mean` of the GP
@@ -626,7 +633,7 @@ def gp_inference(
                 'contained in `k_test_train` and `k_train_train`. '
                 'Hence they must be `namedtuple`s with `nngp` and '
                 '`ntk` attributes.')
-          
+
           #  kernel of wide NN at initialization
           g_init = 'nngp' if g != 'ntkgp' else 'ntk'
 
@@ -813,7 +820,7 @@ def gradient_descent_mse_ensemble(
       kwargs_td = dict(kernel_fn_train_train_kwargs)
       kwargs_tt = dict(kernel_fn_train_train_kwargs)
 
-      for k in kernel_fn_test_test_kwargs.keys():
+      for k in kernel_fn_test_test_kwargs:
         v_tt = kernel_fn_test_test_kwargs[k]
         v_dd = kernel_fn_train_train_kwargs[k]
 
@@ -1010,13 +1017,11 @@ def max_learning_rate(
   with mean squared loss. The loss is assumed to have the form
   `1/(2 * batch_size * output_size) \|f(train_x) - train_y\|^2`. For vanilla SGD
   (i.e. `momentum = 0`) the maximal feasible learning rate is the largest `\eta`
-  such that the operator
-                `(I - \eta / (batch_size * output_size) * NTK)`
-  is a contraction, which is
-                `2 * batch_size * output_size * lambda_max(NTK)`.
-  When `momentum > 0`, we use (see `The Dynamics of Momentum` section in
-  https://distill.pub/2017/momentum/)
-                `2 * (1 + momentum) * batch_size * output_size * lambda_max(NTK)`.
+  such that the operator `(I - \eta / (batch_size * output_size) * NTK)` is a
+  contraction, which is `2 * batch_size * output_size * lambda_max(NTK)`. When
+  `momentum > 0`, we use
+  `2 * (1 + momentum) * batch_size * output_size * lambda_max(NTK)` (see
+  `The Dynamics of Momentum` section in https://distill.pub/2017/momentum/).
 
   Args:
     ntk_train_train:
