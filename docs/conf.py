@@ -194,4 +194,4 @@ epub_exclude_files = ['search.html']
 # -- Options for intersphinx extension ---------------------------------------
 
 autodoc_mock_imports = [
-    'frozendict', 'absl', 'numpy', 'scipy']
+    'frozendict', 'jax', 'absl', 'numpy', 'scipy']
