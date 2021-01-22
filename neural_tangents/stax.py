@@ -3828,22 +3828,18 @@ def _elementwise(fn: Optional[Callable[[float], float]],
   return init_fn, apply_fn, new_kernel_fn
 
 
-def _sqrt_fn(x, tol=0.):
+@functools.partial(custom_jvp, nondiff_argnums=(1,))
+def _sqrt(x, tol=0.):
   return np.sqrt(np.maximum(x, tol))
 
 
-_sqrt = custom_jvp(_sqrt_fn, nondiff_argnums=(1,))
-
-
+@getattr(_sqrt, 'defjvp')  # ReadTheDocs-friendly version of `_sqrt.defjvp`.
 def _sqrt_jvp(tol, primals, tangents):
   x, = primals
   x_dot, = tangents
   safe_tol = max(tol, 1e-30)
   square_root = _sqrt(x, safe_tol)
   return square_root, np.where(x > safe_tol, x_dot / (2 * square_root), 0.)
-
-
-_sqrt.defjvp(_sqrt_jvp)
 
 
 def _get_diagonal(
