@@ -3210,7 +3210,12 @@ class _Diagonal:
   def __rshift__(self, other: '_Diagonal') -> '_Diagonal':
     """Associative composition (`self >> other`) operation.
 
-    Returns the requirement satisfied by composition `other(self(.))`.
+    Args:
+      other:
+        lhs.
+
+    Returns:
+      The requirement satisfied by composition `other(self(.))`.
     """
     if self.output == _Bool.YES:
       return self
@@ -3227,7 +3232,12 @@ class _Diagonal:
   def __and__(self, other: '_Diagonal') -> '_Diagonal':
     """Commutative, associative, and idempotent `AND` operation.
 
-    Returns the largest value allowed both `self` and `other`.
+    Args:
+      other:
+        lhs/rhs.
+
+    Returns:
+       The largest value allowed both `self` and `other`.
     """
     return _Diagonal(input=self.input & other.input,
                      output=self.output & other.output)  # pytype:disable=wrong-keyword-args
@@ -3239,7 +3249,12 @@ class _Diagonal:
   def __lshift__(self, other: '_Diagonal') -> '_Diagonal':
     """Associative composition (`self << other`) operation.
 
-    Returns the value allowed by composition `self(other(.))`.
+    Args:
+      other:
+        lhs.
+
+    Returns:
+      The value allowed by composition `self(other(.))`.
     """
     return other >> self
 
@@ -3818,7 +3833,7 @@ def _sqrt(x, tol=0.):
   return np.sqrt(np.maximum(x, tol))
 
 
-@_sqrt.defjvp
+@getattr(_sqrt, 'defjvp', lambda f: f)  # ReadTheDocs-friendly `@_sqrt.defjvp`.
 def _sqrt_jvp(tol, primals, tangents):
   x, = primals
   x_dot, = tangents
