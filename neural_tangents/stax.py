@@ -3833,7 +3833,11 @@ def _sqrt(x, tol=0.):
   return np.sqrt(np.maximum(x, tol))
 
 
-@getattr(_sqrt, 'defjvp')  # ReadTheDocs-friendly version of `_sqrt.defjvp`.
+def _raise(_):
+  raise RuntimeError('This should never happen - please file a bug.')
+
+
+@getattr(_sqrt, 'defjvp', _raise)  # ReadTheDocs-friendly `@_sqrt.defjvp`.
 def _sqrt_jvp(tol, primals, tangents):
   x, = primals
   x_dot, = tangents
