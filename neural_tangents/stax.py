@@ -3835,13 +3835,15 @@ def _sqrt(x, tol=0.):
 _sqrt = custom_jvp(_sqrt, nondiff_argnums=(1,))
 
 
-@_sqrt.defjvp
 def _sqrt_jvp(tol, primals, tangents):
   x, = primals
   x_dot, = tangents
   safe_tol = max(tol, 1e-30)
   square_root = _sqrt(x, safe_tol)
   return square_root, np.where(x > safe_tol, x_dot / (2 * square_root), 0.)
+
+
+_sqrt.defjvp(_sqrt_jvp)
 
 
 def _get_diagonal(
