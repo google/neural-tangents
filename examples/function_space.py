@@ -70,7 +70,7 @@ def main(unused_argv):
 
   # Create an MSE predictor to solve the NTK equation in function space.
   ntk = nt.batch(nt.empirical_ntk_fn(apply_fn, vmap_axes=0),
-                 batch_size=4, device_count=0)
+                 batch_size=32, device_count=0)
   g_dd = ntk(x_train, None, params)
   g_td = ntk(x_test, x_train, params)
   predictor = nt.predict.gradient_descent_mse(g_dd, y_train)
