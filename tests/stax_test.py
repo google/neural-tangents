@@ -1169,34 +1169,42 @@ class FlattenTest(test_utils.NeuralTangentsTestCase):
     X0_1_flat = np.reshape(X0_1, (X0_1.shape[0], -1))
     X0_2_flat = None if same_inputs else np.reshape(X0_2, (X0_2.shape[0], -1))
 
-    init_fc, apply_fc, kernel_fc = stax.serial(stax.Dense(1024, 2., 0.5),
-                                               stax.Relu(),
-                                               stax.Dense(1024, 2., 0.5))
-    init_top, apply_top, kernel_top = stax.serial(stax.Dense(1024, 2., 0.5),
-                                                  stax.Relu(),
-                                                  stax.Dense(1024, 2., 0.5),
+    dense = stax.Dense(512, 1.7, 0.1)
+    init_fc, apply_fc, kernel_fc = stax.serial(dense,
+                                               stax.Erf(),
+                                               dense)
+    init_top, apply_top, kernel_top = stax.serial(dense,
+                                                  stax.Erf(),
+                                                  dense,
                                                   stax.Flatten())
-    init_mid, apply_mid, kernel_mid = stax.serial(stax.Dense(1024, 2., 0.5),
-                                                  stax.Relu(),
+    init_mid, apply_mid, kernel_mid = stax.serial(dense,
+                                                  stax.Erf(),
                                                   stax.Flatten(),
-                                                  stax.Dense(1024, 2., 0.5))
+                                                  dense)
     init_bot, apply_bot, kernel_bot = stax.serial(stax.Flatten(),
-                                                  stax.Dense(1024, 2., 0.5),
-                                                  stax.Relu(),
-                                                  stax.Dense(1024, 2., 0.5))
+                                                  dense,
+                                                  stax.Erf(),
+                                                  dense)
+
+    kernel_fc = jit(kernel_fc)
+    kernel_top = jit(kernel_top)
+    kernel_mid = jit(kernel_mid)
+    kernel_bot = jit(kernel_bot)
+
+    n = 100
 
     kernel_fc_mc = monte_carlo.monte_carlo_kernel_fn(init_fc, apply_fc, key,
-                                                     200, implementation=2,
-                                                     vmap_axes=0)
+                                                     n, vmap_axes=0,
+                                                     implementation=2)
     kernel_bot_mc = monte_carlo.monte_carlo_kernel_fn(init_bot, apply_bot, key,
-                                                      200, implementation=2,
-                                                      vmap_axes=0)
+                                                      n, vmap_axes=0,
+                                                      implementation=2)
     kernel_mid_mc = monte_carlo.monte_carlo_kernel_fn(init_mid, apply_mid, key,
-                                                      200, implementation=2,
-                                                      vmap_axes=0)
+                                                      n, vmap_axes=0,
+                                                      implementation=2)
     kernel_top_mc = monte_carlo.monte_carlo_kernel_fn(init_top, apply_top, key,
-                                                      200, implementation=2,
-                                                      vmap_axes=0)
+                                                      n, vmap_axes=0,
+                                                      implementation=2)
 
     K = kernel_fc(X0_1_flat, X0_2_flat)
 
