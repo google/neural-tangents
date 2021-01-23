@@ -31,7 +31,6 @@ config.update('jax_numpy_rank_promotion', 'raise')
 
 
 BATCH_SIZES = [
-    1,
     2,
     4,
 ]
