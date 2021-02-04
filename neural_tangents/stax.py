@@ -484,7 +484,10 @@ def DotGeneral(
   def mask_fn(mask, input_shape):
     mask_shape = list(input_shape)
     mask_shape[channel_axis] = mask.shape[channel_axis]
-    return ~dot_fn(~np.broadcast_to(mask, mask_shape))
+    # TODO(romann): simplify after https://github.com/google/jax/issues/5406
+    # (http://b/177524741) is fixed.
+    return ~dot_fn(
+        ~np.broadcast_to(mask, mask_shape)).astype(np.float32).astype(np.bool_)
 
   return init_fn, apply_fn, kernel_fn, mask_fn
 
