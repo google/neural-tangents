@@ -2640,7 +2640,7 @@ def Erf(
   def fn(x):
     return a * erf(b * x) + c
 
-  _requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
+  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     k *= b
 
@@ -2715,7 +2715,7 @@ def Gelu() -> InternalLayer:
   def fn(x):
     return 0.5 * x * (1. + erf(x / np.sqrt(2.)))
 
-  _requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
+  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     """Compute kernels after a `Gelu` layer; NNGP see `arXiv:2002.08517`."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -2792,7 +2792,7 @@ def Sin(
   def fn(x):
     return a * np.sin(b * x + c)
 
-  _requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
+  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
@@ -2851,7 +2851,7 @@ def Rbf(
   def fn(x):
     return np.sqrt(2) * np.sin(np.sqrt(2 * gamma) * x + np.pi/4)
 
-  _requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
+  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     """Compute new kernels after an `Rbf` layer."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -2907,7 +2907,7 @@ def ABRelu(
   def fn(x):
     return a * np.minimum(x, 0) + b * np.maximum(x, 0)
 
-  _requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
+  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     """Compute new kernels after an `ABRelu` layer.
 
@@ -3018,7 +3018,7 @@ def Sign() -> InternalLayer:
   def fn(x):
     return np.sign(x)
 
-  _requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
+  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
     if ntk is not None:
@@ -3078,7 +3078,7 @@ def ElementwiseNumerical(
         'https://jax.readthedocs.io/en/latest/faq.html#gradients-contain-nan-where-using-where.')
     df = np.vectorize(grad(fn))
 
-  _requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
+  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     """Kernel transformation of activation function using quadrature."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk

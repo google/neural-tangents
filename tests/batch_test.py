@@ -44,8 +44,8 @@ TRAIN_SHAPES = [(2, 4), (4, 8), (8, 8), (8, 4, 4, 3), (4, 3, 3, 3)]
 TEST_SHAPES = [(2, 4), (2, 8), (16, 8), (2, 4, 4, 3), (2, 3, 3, 3)]
 NETWORK = [FLAT, FLAT, FLAT, FLAT, INTERMEDIATE_CONV]
 OUTPUT_LOGITS = [1, 2, 3]
-CONVOLUTION_CHANNELS = 4
-WIDTH = 4
+CONVOLUTION_CHANNELS = 2
+WIDTH = 2
 RTOL = 1e-2
 test_utils.update_test_tolerance(f64_tol=5e-5)
 
