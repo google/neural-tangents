@@ -497,7 +497,7 @@ If you use the code in a publication, please cite our ICLR 2020 paper:
 ###### [2] [Exponential expressivity in deep neural networks through transient chaos](https://arxiv.org/abs/1606.05340)
 ###### [3] [Toward deeper understanding of neural networks: The power of initialization and a dual view on expressivity](http://papers.nips.cc/paper/6427-toward-deeper-understanding-of-neural-networks-the-power-of-initialization-and-a-dual-view-on-expressivity)
 ###### [4] [Deep Information Propagation](https://arxiv.org/abs/1611.01232)
-###### [5] [Deep Neural Networks as Gaussian Processes](https://arxiv.org/abs/1806.07572)
+###### [5] [Deep Neural Networks as Gaussian Processes](https://arxiv.org/abs/1711.00165)
 ###### [6] [Gaussian Process Behaviour in Wide Deep Neural Networks](https://arxiv.org/abs/1804.11271)
 ###### [7] [Dynamical Isometry and a Mean Field Theory of CNNs: How to Train 10,000-Layer Vanilla Convolutional Neural Networks.](https://arxiv.org/abs/1806.05393)
 ###### [8] [Bayesian Deep Convolutional Networks with Many Channels are Gaussian Processes](https://arxiv.org/abs/1810.05148)
