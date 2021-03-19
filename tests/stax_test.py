@@ -915,7 +915,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
           'abc': abc,
       }
                           for model in ['fc', 'conv-pool', 'conv-flatten']
-                          for phi_name in ['Sin', 'Erf', 'Gelu', 'Sign']
+                          for phi_name in ['Sin', 'Cos', 'Erf', 'Gelu', 'Sign']
                           for same_inputs in [False]
                           for get in ['nngp', 'ntk']
                           for abc in itertools.product(

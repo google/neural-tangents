@@ -2815,14 +2815,14 @@ def Sin(
       return nngp, ntk
 
     def nngp_fn_diag(nngp):
-      return half_a_square *(1. - np.exp(-b**2 * nngp) * np.cos(2 * c))
+      return half_a_square * (1. - np.exp(-2 * b**2 * nngp) * np.cos(2 * c))
 
     nngp, ntk = nngp_ntk_fn(nngp, sum12, ntk)
 
     if k.diagonal_batch and k.diagonal_spatial:
-      cov1 = nngp_fn_diag(sum11)
+      cov1 = nngp_fn_diag(cov1)
       if cov2 is not None:
-        cov2 = nngp_fn_diag(sum22)
+        cov2 = nngp_fn_diag(cov2)
     else:
       cov1, _ = nngp_ntk_fn(cov1, sum11)
       if cov2 is not None:
@@ -2831,6 +2831,19 @@ def Sin(
     return k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
 
   return _elementwise(fn, f'Sin({a}, {b}, {c})', kernel_fn)
+
+
+def Cos(a: float = 1., b: float = 1., c: float = 0.) -> InternalLayer:
+  """Affine transform of `Cos` nonlinearity, i.e. `a cos(b*x + c)`.
+
+  Args:
+    a: output scale.
+    b: input scale.
+    c: input phase shift.
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  return Sin(a=a, b=b, c=c + np.pi / 2)
 
 
 @layer
@@ -2866,10 +2879,9 @@ def Rbf(
                                                     op.add)
 
     def nngp_ntk_fn(nngp, sum_, ntk):
-      s1 = np.exp(gamma * (-sum_ + 2 * nngp))
-      nngp = s1
+      nngp = np.exp(gamma * (-sum_ + 2 * nngp))
       if ntk is not None:
-        ntk *= 2 * gamma * s1
+        ntk *= 2 * gamma * nngp
       return nngp, ntk
 
     def nngp_fn_diag(nngp):
@@ -2878,9 +2890,9 @@ def Rbf(
     nngp, ntk = nngp_ntk_fn(nngp, sum12, ntk)
 
     if k.diagonal_batch and k.diagonal_spatial:
-      cov1 = nngp_fn_diag(sum11)
+      cov1 = nngp_fn_diag(cov1)
       if cov2 is not None:
-        cov2 = nngp_fn_diag(sum22)
+        cov2 = nngp_fn_diag(cov2)
     else:
       cov1, _ = nngp_ntk_fn(cov1, sum11, None)
       if cov2 is not None:
