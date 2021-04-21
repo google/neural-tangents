@@ -146,11 +146,12 @@ def _scan(f: Callable[[_Carry, _Input], Tuple[_Carry, _Output]],
 
 
 def _flatten_batch_dimensions(k: np.ndarray,
+                              is_parallel: bool,
                               discard_axis: int = None) -> np.ndarray:
   """Takes a kernel that has been evaluated in batches and flattens."""
 
   if discard_axis is not None:
-    if k.ndim % 2:
+    if not is_parallel:
       k = np.take(k, 0, axis=discard_axis)
       return np.reshape(k, (-1,) + k.shape[2:])
 
@@ -160,7 +161,7 @@ def _flatten_batch_dimensions(k: np.ndarray,
     return k[0]
 
   else:
-    if k.ndim % 2:
+    if is_parallel:
       return np.reshape(k, (k.shape[0] * k.shape[1],) + k.shape[2:])
 
     k = np.transpose(k, (0, 2, 1, 3) + tuple(range(4, k.ndim)))
@@ -188,24 +189,24 @@ def _flatten_kernel_dict(k: Dict[str, Any],
 
   for key, value in k.items():
     if key == 'cov1':
-      k[key] = _flatten_batch_dimensions(value, 1)
+      k[key] = _flatten_batch_dimensions(value, is_parallel, 1)
     elif key == 'cov2':
       if x2_is_none:
         k[key] = None
       else:
-        k[key] = _flatten_batch_dimensions(value, 0)
+        k[key] = _flatten_batch_dimensions(value, is_parallel, 0)
     elif key == 'x1_is_x2':
       k[key] = value[(0,) * value.ndim]
     elif key == 'mask1':
       if value is None:
         k[key] = None
       else:
-        k[key] = _flatten_batch_dimensions(value, 1)
+        k[key] = _flatten_batch_dimensions(value, is_parallel, 1)
     elif key == 'mask2':
       if value is None or x2_is_none:
         k[key] = None
       else:
-        k[key] = -_flatten_batch_dimensions(value, 0)
+        k[key] = -_flatten_batch_dimensions(value, is_parallel, 0)
     elif key in ('shape1', 'shape2'):
       if key == 'shape2' and is_parallel:
         continue
@@ -215,7 +216,7 @@ def _flatten_kernel_dict(k: Dict[str, Any],
                 (shape[batch_axis] * batch_size[key[-1]],) +
                 shape[batch_axis + 1:])
     elif isinstance(k[key], np.ndarray):
-      k[key] = _flatten_batch_dimensions(value)
+      k[key] = _flatten_batch_dimensions(value, is_parallel)
     else:
       pass
   return k
@@ -237,7 +238,7 @@ def _flatten_kernel(k: Kernel,
   # pytype:enable=attribute-error
 
   elif isinstance(k, np.ndarray):
-    return _flatten_batch_dimensions(k)
+    return _flatten_batch_dimensions(k, is_parallel)
 
   raise TypeError(f'Expected kernel to be either a namedtuple, `Kernel`, or '
                   f'`np.ndarray`, got {type(k)}.')

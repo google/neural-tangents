@@ -531,6 +531,51 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
         batch_kernel_fn(x1, x2, params),
         RTOL)
 
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list(
+          ({
+              'testcase_name': (f'_same_inputs={same_inputs}'
+                                f'_device_count={device_count}'
+                                f'_trace_axes={trace_axes}'
+                                f'_diagonal_axes={diagonal_axes}'),
+              'same_inputs': same_inputs,
+              'device_count': device_count,
+              'trace_axes': trace_axes,
+              'diagonal_axes': diagonal_axes
+          }
+           for same_inputs in [True, False]
+           for device_count in [-1, 0, 1, 2]
+           for trace_axes, diagonal_axes in zip([(-1,), (1, -1), ()],
+                                                [(1,), (), (1, -1)]))))
+  def test_empirical_ntk_diagonal_outputs(self, same_inputs, device_count,
+                                          trace_axes, diagonal_axes):
+    test_utils.stub_out_pmap(batch, 2)
+    rng = random.PRNGKey(0)
+
+    input_key1, input_key2, net_key = random.split(rng, 3)
+
+    init_fn, apply_fn, _ = stax.serial(stax.Dense(256),
+                                       stax.Relu(),
+                                       stax.Dense(10))
+
+    test_x1 = random.normal(input_key1, (50, 4, 4))
+    test_x2 = None
+    if same_inputs:
+      test_x2 = random.normal(input_key2, (60, 4, 4))
+
+    kernel_fn = empirical.empirical_ntk_fn(apply_fn,
+                                           trace_axes=trace_axes,
+                                           diagonal_axes=diagonal_axes,
+                                           vmap_axes=0,
+                                           implementation=2)
+
+    _, params = init_fn(net_key, test_x1.shape)
+
+    true_kernel = kernel_fn(test_x1, test_x2, params)
+    batched_fn = batch.batch(kernel_fn, device_count=device_count, batch_size=5)
+    batch_kernel = batched_fn(test_x1, test_x2, params)
+    self.assertAllClose(true_kernel, batch_kernel)
+
 
 if __name__ == '__main__':
   absltest.main()
