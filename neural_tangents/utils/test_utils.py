@@ -105,11 +105,12 @@ class NeuralTangentsTestCase(jtu.JaxTestCase):
       check_dtypes=True,
       atol=None,
       rtol=None,
-      canonicalize_dtypes=True):
+      canonicalize_dtypes=True,
+      err_msg=''):
     def assert_close(x, y):
       super(NeuralTangentsTestCase, self).assertAllClose(
           x, y, check_dtypes=check_dtypes, atol=atol, rtol=rtol,
-          canonicalize_dtypes=canonicalize_dtypes)
+          canonicalize_dtypes=canonicalize_dtypes, err_msg=err_msg)
 
     if isinstance(x, Kernel):
       self.assertIsInstance(y, Kernel)
