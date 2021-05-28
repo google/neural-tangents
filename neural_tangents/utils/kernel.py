@@ -172,7 +172,7 @@ class Kernel:
                         ntk=ntk,
                         is_reversed=not self.is_reversed)
 
-  def transpose(self, axes: Sequence[int] = None) -> 'Kernel':
+  def transpose(self, axes: Optional[Sequence[int]] = None) -> 'Kernel':
     """Permute spatial dimensions of the `Kernel` according to `axes`.
 
     Follows
@@ -354,8 +354,8 @@ class Kernel:
 
     def dot(mat: Optional[np.ndarray],
             batch_ndim: int,
-            other1: np.ndarray = None,
-            other2: np.ndarray = None) -> Optional[np.ndarray]:
+            other1: Optional[np.ndarray] = None,
+            other2: Optional[np.ndarray] = None) -> Optional[np.ndarray]:
       if mat is None or mat.ndim == 0 or other1 is None and other2 is None:
         return mat
 

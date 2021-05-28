@@ -47,8 +47,8 @@ def is_nt_tree_of(x, dtype):
   return all(is_nt_tree_of(_x, dtype) for _x in x)
 
 
-def nt_tree_fn(nargs: int = None,
-               tree_structure_argnum: int = None,
+def nt_tree_fn(nargs: Optional[int] = None,
+               tree_structure_argnum: Optional[int] = None,
                reduce: Callable = lambda x: x):
   """Convert a function that acts on single inputs to one that acts on trees.
 
@@ -117,7 +117,7 @@ def nt_tree_fn(nargs: int = None,
   return tree_fn
 
 
-def all_none(x: Any, attr: str = None) -> bool:
+def all_none(x: Any, attr: Optional[str] = None) -> bool:
   get_fn = (lambda x: x) if attr is None else lambda x: getattr(x, attr)
   return tree_all(tree_map(lambda x: get_fn(x) is None, x))
 
@@ -240,7 +240,7 @@ def get_namedtuple(name):
 
 @nt_tree_fn(nargs=2, reduce=lambda x: np.all(np.array(x)))
 def x1_is_x2(x1: np.ndarray,
-             x2: np.ndarray = None,
+             x2: Optional[np.ndarray] = None,
              eps: float = 1e-12) -> Union[bool, np.ndarray]:
   if not isinstance(x1, np.ndarray):
     raise TypeError('`x1` must be an ndarray. A {} is found.'.format(type(x1)))
@@ -299,7 +299,7 @@ def canonicalize_axis(axis: Axes,
 
 def zip_axes(x: np.ndarray,
              start_axis: int = 0,
-             end_axis: int = None) -> np.ndarray:
+             end_axis: Optional[int] = None) -> np.ndarray:
   """Zip (interleave) axes starting from `start_axis`.
 
   Changes the shape as follows:
@@ -318,7 +318,7 @@ def zip_axes(x: np.ndarray,
 
 def unzip_axes(x: np.ndarray,
                start_axis: int = 0,
-               end_axis: int = None) -> np.ndarray:
+               end_axis: Optional[int] = None) -> np.ndarray:
   """Unzip (de-interleave) axes starting from `start_axis`.
 
   Changes the shape as follows:
@@ -337,7 +337,7 @@ def unzip_axes(x: np.ndarray,
 
 def _zip_axes(x: np.ndarray,
               start_axis: int = 0,
-              end_axis: int = None,
+              end_axis: Optional[int] = None,
               unzip: bool = False) -> np.ndarray:
   """Zip/unzip (interleave/de-interleave) axes starting from `start_axis`.
 
@@ -380,7 +380,7 @@ def transpose_zipped(x: np.ndarray) -> np.ndarray:
 
 def diagonal_between(x: np.ndarray,
                      start_axis: int = 0,
-                     end_axis: int = None) -> np.ndarray:
+                     end_axis: Optional[int] = None) -> np.ndarray:
   """Returns the diagonal along all dimensions between start and end axes."""
   if end_axis is None:
     end_axis = x.ndim
@@ -460,7 +460,7 @@ class MaskedArray:
 
 @nt_tree_fn(nargs=1)
 def get_masked_array(x: np.ndarray,
-                     mask_constant: float = None) -> MaskedArray:
+                     mask_constant: Optional[float] = None) -> MaskedArray:
   """Return `x` with entries equal to `mask_constant` zeroed-out, and the mask.
 
   The mask returned is a boolean `np.ndarray` with masked indices having `True`.
@@ -504,7 +504,7 @@ def mask(x: Optional[np.ndarray], mask_mat: Optional[np.ndarray]):
 
 
 def size_at(x: Union[np.ndarray, Sequence[int]],
-            axes: Iterable[int] = None) -> int:
+            axes: Optional[Iterable[int]] = None) -> int:
   if hasattr(x, 'shape'):
     x = x.shape
 
@@ -584,7 +584,7 @@ def dot_general(lhs: np.ndarray,
 def axis_after_dot(axis: int,
                    contracting_dims: Sequence[int],
                    batch_dims: Sequence[int],
-                   lhs_ndim: int = None) -> int:
+                   lhs_ndim: Optional[int] = None) -> int:
   if axis in batch_dims:
     return batch_dims.index(axis)
 
@@ -603,10 +603,10 @@ def conv_general_dilated_local(
     window_strides: Sequence[int],
     padding: str,
     filter_shape: Sequence[int],
-    lhs_dilation: Sequence[int] = None,
-    rhs_dilation: Sequence[int] = None,
-    dimension_numbers: Tuple[str, str, str] = None,
-    precision: lax.Precision = None
+    lhs_dilation: Optional[Sequence[int]] = None,
+    rhs_dilation: Optional[Sequence[int]] = None,
+    dimension_numbers: Optional[Tuple[str, str, str]] = None,
+    precision: Optional[lax.Precision] = None
 ) -> np.ndarray:
   """General n-dimensional unshared convolution operator with optional dilation.
 
@@ -689,7 +689,7 @@ def conv_general_dilated_local(
       dimension_numbers=dimension_numbers,
       precision=lhs_precision
   )
-  _, rhs_spec, out_spec = dimension_numbers
+  _, rhs_spec, out_spec = dimension_numbers  # pytype: disable=attribute-error
 
   lhs_c_dims, rhs_c_dims = [out_spec.index('C')], [rhs_spec.index('I')]
   lhs_b_dims, rhs_b_dims = [], []
@@ -707,7 +707,7 @@ def conv_general_dilated_local(
 
 def make_2d(x: Optional[np.ndarray],
             start_axis: int = 0,
-            end_axis: int = None) -> Optional[np.ndarray]:
+            end_axis: Optional[int] = None) -> Optional[np.ndarray]:
   """Makes `x` 2D from `start_axis` to `end_axis`, preserving other axes.
 
   `x` is assumed to follow the (`X, X, Y, Y, Z, Z`) axes layout.

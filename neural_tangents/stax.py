@@ -359,15 +359,14 @@ def parallel(*layers: Layer) -> InternalLayer:
 
 @layer
 @supports_masking(remask_kernel=False)
-def DotGeneral(
-    *,
-    lhs: Union[np.ndarray, float] = None,
-    rhs: Union[np.ndarray, float] = None,
-    dimension_numbers: lax.DotDimensionNumbers = (((), ()), ((), ())),
-    precision: Optional[lax.Precision] = None,
-    batch_axis: int = 0,
-    channel_axis: int = -1
-) -> InternalLayer:
+def DotGeneral(*,
+               lhs: Optional[Union[np.ndarray, float]] = None,
+               rhs: Optional[Union[np.ndarray, float]] = None,
+               dimension_numbers: lax.DotDimensionNumbers = (((), ()), ((),
+                                                                        ())),
+               precision: Optional[lax.Precision] = None,
+               batch_axis: int = 0,
+               channel_axis: int = -1) -> InternalLayer:
   r"""Layer constructor for a constant (non-trainable) rhs/lhs Dot General.
 
   Dot General allows to express any linear transformation on the inputs,
@@ -495,7 +494,7 @@ def DotGeneral(
 @layer
 @supports_masking(remask_kernel=True)
 def Aggregate(
-    aggregate_axis: Axes = None,
+    aggregate_axis: Optional[Axes] = None,
     batch_axis: int = 0,
     channel_axis: int = -1,
     to_dense: Callable[[np.ndarray], np.ndarray] = lambda pattern: pattern
@@ -625,8 +624,9 @@ def Aggregate(
     return (agg_axes, (range(1, len(agg_axes) + 1))), ((batch_axis,), (0,))
 
   def apply_fn(params,
-               inputs: np.ndarray, *,
-               pattern: np.ndarray = None,
+               inputs: np.ndarray,
+               *,
+               pattern: Optional[np.ndarray] = None,
                **kwargs):
     """Compute the transformed tensors after an aggregation layer.
 
@@ -834,16 +834,14 @@ def Dense(
 
 @layer
 @supports_masking(remask_kernel=True)
-def Conv(
-    out_chan: int,
-    filter_shape: Sequence[int],
-    strides: Sequence[int] = None,
-    padding: str = Padding.VALID.name,
-    W_std: float = 1.0,
-    b_std: float = 0.0,
-    dimension_numbers: Tuple[str, str, str] = None,
-    parameterization: str = 'ntk'
-) -> InternalLayer:
+def Conv(out_chan: int,
+         filter_shape: Sequence[int],
+         strides: Optional[Sequence[int]] = None,
+         padding: str = Padding.VALID.name,
+         W_std: float = 1.0,
+         b_std: float = 0.0,
+         dimension_numbers: Optional[Tuple[str, str, str]] = None,
+         parameterization: str = 'ntk') -> InternalLayer:
   """Layer construction function for a general convolution layer.
 
   Based on `jax.experimental.stax.GeneralConv`.
@@ -882,16 +880,14 @@ def Conv(
 
 @layer
 @supports_masking(remask_kernel=True)
-def ConvTranspose(
-    out_chan: int,
-    filter_shape: Sequence[int],
-    strides: Sequence[int] = None,
-    padding: str = Padding.VALID.name,
-    W_std: float = 1.0,
-    b_std: float = 0.0,
-    dimension_numbers: Tuple[str, str, str] = None,
-    parameterization: str = 'ntk'
-) -> InternalLayer:
+def ConvTranspose(out_chan: int,
+                  filter_shape: Sequence[int],
+                  strides: Optional[Sequence[int]] = None,
+                  padding: str = Padding.VALID.name,
+                  W_std: float = 1.0,
+                  b_std: float = 0.0,
+                  dimension_numbers: Optional[Tuple[str, str, str]] = None,
+                  parameterization: str = 'ntk') -> InternalLayer:
   """Layer construction function for a general transpose convolution layer.
 
   Based on `jax.experimental.stax.GeneralConvTranspose`.
@@ -930,16 +926,14 @@ def ConvTranspose(
 
 @layer
 @supports_masking(remask_kernel=True)
-def ConvLocal(
-    out_chan: int,
-    filter_shape: Sequence[int],
-    strides: Sequence[int] = None,
-    padding: str = Padding.VALID.name,
-    W_std: float = 1.0,
-    b_std: float = 0.0,
-    dimension_numbers: Tuple[str, str, str] = None,
-    parameterization: str = 'ntk'
-) -> InternalLayer:
+def ConvLocal(out_chan: int,
+              filter_shape: Sequence[int],
+              strides: Optional[Sequence[int]] = None,
+              padding: str = Padding.VALID.name,
+              W_std: float = 1.0,
+              b_std: float = 0.0,
+              dimension_numbers: Optional[Tuple[str, str, str]] = None,
+              parameterization: str = 'ntk') -> InternalLayer:
   """Layer construction function for a general unshared convolution layer.
 
   Also known and "Locally connected networks" or LCNs, these are equivalent to
@@ -1533,13 +1527,12 @@ def FanInConcat(axis: int = -1) -> InternalLayer:
 
 @layer
 @supports_masking(remask_kernel=True)
-def AvgPool(
-    window_shape: Sequence[int],
-    strides: Sequence[int] = None,
-    padding: str = Padding.VALID.name,
-    normalize_edges: bool = False,
-    batch_axis: int = 0,
-    channel_axis: int = -1) -> InternalLayer:
+def AvgPool(window_shape: Sequence[int],
+            strides: Optional[Sequence[int]] = None,
+            padding: str = Padding.VALID.name,
+            normalize_edges: bool = False,
+            batch_axis: int = 0,
+            channel_axis: int = -1) -> InternalLayer:
   """Layer construction function for an average pooling layer.
 
   Based on `jax.experimental.stax.AvgPool`.
@@ -1569,12 +1562,11 @@ def AvgPool(
 
 @layer
 @supports_masking(remask_kernel=True)
-def SumPool(
-    window_shape: Sequence[int],
-    strides: Sequence[int] = None,
-    padding: str = Padding.VALID.name,
-    batch_axis: int = 0,
-    channel_axis: int = -1) -> InternalLayer:
+def SumPool(window_shape: Sequence[int],
+            strides: Optional[Sequence[int]] = None,
+            padding: str = Padding.VALID.name,
+            batch_axis: int = 0,
+            channel_axis: int = -1) -> InternalLayer:
   """Layer construction function for a 2D sum pooling layer.
 
   Based on `jax.experimental.stax.SumPool`.
@@ -1989,8 +1981,8 @@ def GlobalSelfAttention(
     attention_mechanism: str = AttentionMechanism.SOFTMAX.name,
     pos_emb_type: str = PositionalEmbedding.NONE.name,
     pos_emb_p_norm: float = 2,
-    pos_emb_decay_fn: Callable[[float], float] = None,
-    n_chan_pos_emb: int = None,
+    pos_emb_decay_fn: Optional[Callable[[float], float]] = None,
+    n_chan_pos_emb: Optional[int] = None,
     W_pos_emb_std: float = 1.0,
     val_pos_emb: bool = False,
     batch_axis: int = 0,
@@ -2188,7 +2180,7 @@ def GlobalSelfAttention(
 
   def apply_fn(params: PyTree,
                inputs: np.ndarray,
-               mask: np.ndarray = None,
+               mask: Optional[np.ndarray] = None,
                **kwargs) -> np.ndarray:
     query_matrices, key_matrices, val_matrices, W_out, b, pos_emb = params
 
@@ -2663,7 +2655,8 @@ def Erf(
     def nngp_ntk_fn(
         nngp: np.ndarray,
         prod: np.ndarray,
-        ntk: np.ndarray = None) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        ntk: Optional[np.ndarray] = None
+    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
       square_root = _sqrt(prod - 4 * nngp**2)
       nngp = factor * np.arctan2(2 * nngp, square_root)
 
@@ -2731,11 +2724,12 @@ def Gelu() -> InternalLayer:
     prod11, prod12, prod22 = _get_diagonal_outer_prods(
         cov1, cov2, k.diagonal_batch, k.diagonal_spatial, op.mul)
 
-    def nngp_ntk_fn(nngp: np.ndarray,
-                    prod: np.ndarray,
-                    prod_plus_1: np.ndarray,
-                    ntk: np.ndarray = None
-                    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    def nngp_ntk_fn(
+        nngp: np.ndarray,
+        prod: np.ndarray,
+        prod_plus_1: np.ndarray,
+        ntk: Optional[np.ndarray] = None
+    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
       delta_squared = prod_plus_1 - nngp**2
       delta = _sqrt(delta_squared)
       angles = np.arctan2(nngp, delta)
@@ -3057,7 +3051,7 @@ def Sign() -> InternalLayer:
 def ElementwiseNumerical(
     fn: Callable[[float], float],
     deg: int,
-    df: Callable[[float], float] = None) -> InternalLayer:
+    df: Optional[Callable[[float], float]] = None) -> InternalLayer:
   """Activation function using numerical integration.
 
   Supports general activation functions using Gauss-Hermite quadrature.
@@ -3737,14 +3731,14 @@ def _preprocess_kernel_fn(
 
   @utils.get_namedtuple('AnalyticKernel')
   def kernel_fn_any(x1_or_kernel: Union[NTTree[np.ndarray], NTTree[Kernel]],
-                    x2: NTTree[np.ndarray] = None,
-                    get: Get = None,
+                    x2: Optional[NTTree[np.ndarray]] = None,
+                    get: Optional[Get] = None,
                     *,
-                    pattern: Tuple[Optional[np.ndarray],
-                                   Optional[np.ndarray]] = None,
-                    mask_constant: float = None,
-                    diagonal_batch: bool = None,
-                    diagonal_spatial: bool = None,
+                    pattern: Optional[Tuple[Optional[np.ndarray],
+                                            Optional[np.ndarray]]] = None,
+                    mask_constant: Optional[float] = None,
+                    diagonal_batch: Optional[bool] = None,
+                    diagonal_spatial: Optional[bool] = None,
                     **kwargs):
     """Returns the `Kernel` resulting from applying `kernel_fn` to given inputs.
 
@@ -4683,14 +4677,13 @@ def _check_is_implemented(mask: np.ndarray, channel_axis: int) -> None:
 
 def _mean_and_var(
     x: Optional[np.ndarray],
-    axis: Axes = None,
-    dtype: np.dtype = None,
-    out: None = None,
+    axis: Optional[Axes] = None,
+    dtype: Optional[np.dtype] = None,
+    out: Optional[None] = None,
     ddof: int = 0,
     keepdims: bool = False,
-    mask: np.ndarray = None,
-    get_var: bool = False
-    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    mask: Optional[np.ndarray] = None,
+    get_var: bool = False) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
   """`np.mean` and `np.var` taking the `mask` information into account."""
   var = None
   if x is None:

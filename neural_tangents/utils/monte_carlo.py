@@ -91,7 +91,7 @@ def _sample_many_kernel_fn(
     def get_sampled_kernel(
         x1: np.ndarray,
         x2: np.ndarray,
-        get: Get = None,
+        get: Optional[Get] = None,
         **apply_fn_kwargs
     ) -> Generator[Union[np.ndarray, Tuple[np.ndarray, ...]], None, None]:
       for n, sample in get_samples(x1, x2, get, **apply_fn_kwargs):
@@ -102,7 +102,7 @@ def _sample_many_kernel_fn(
     def get_sampled_kernel(
         x1: np.ndarray,
         x2: np.ndarray,
-        get: Get = None,
+        get: Optional[Get] = None,
         **apply_fn_kwargs
     ) -> Union[np.ndarray, Tuple[np.ndarray, ...]]:
       for n, sample in get_samples(x1, x2, get, **apply_fn_kwargs):
@@ -122,7 +122,7 @@ def monte_carlo_kernel_fn(
     store_on_device: bool = True,
     trace_axes: Axes = (-1,),
     diagonal_axes: Axes = (),
-    vmap_axes: VMapAxes = None,
+    vmap_axes: Optional[VMapAxes] = None,
     implementation: int = 1
     ) -> MonteCarloKernelFn:
   r"""Return a Monte Carlo sampler of NTK and NNGP kernels of a given function.

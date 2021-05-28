@@ -205,10 +205,10 @@ def gradient_descent_mse(
     return predict_fn_finite
 
   def predict_fn(
-      t: ArrayOrScalar = None,
+      t: Optional[ArrayOrScalar] = None,
       fx_train_0: ArrayOrScalar = 0.,
-      fx_test_0: ArrayOrScalar = None,
-      k_test_train: np.ndarray = None
+      fx_test_0: Optional[ArrayOrScalar] = None,
+      k_test_train: Optional[np.ndarray] = None
   ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """Return output predictions on train [and test] set[s] at time[s] `t`.
 
@@ -254,10 +254,10 @@ def gradient_descent_mse(
 @dataclasses.dataclass
 class ODEState:
   """ODE state dataclass holding outputs and auxiliary variables."""
-  fx_train: np.ndarray = None
-  fx_test: np.ndarray = None
-  qx_train: np.ndarray = None
-  qx_test: np.ndarray = None
+  fx_train: Optional[np.ndarray] = None
+  fx_test: Optional[np.ndarray] = None
+  qx_train: Optional[np.ndarray] = None
+  qx_test: Optional[np.ndarray] = None
 
 
 def gradient_descent(
@@ -265,7 +265,7 @@ def gradient_descent(
     k_train_train: np.ndarray,
     y_train: np.ndarray,
     learning_rate: float = 1.,
-    momentum: float = None,
+    momentum: Optional[float] = None,
     trace_axes: Axes = (-1,)
 ) -> Callable[
     [ArrayOrScalar,
@@ -413,10 +413,10 @@ def gradient_descent(
     return dstate_dt
 
   def predict_fn(
-      t: ArrayOrScalar = None,
+      t: Optional[ArrayOrScalar] = None,
       fx_train_or_state_0: Union[ArrayOrScalar, ODEState] = 0.,
-      fx_test_0: ArrayOrScalar = None,
-      k_test_train: np.ndarray = None
+      fx_test_0: Optional[ArrayOrScalar] = None,
+      k_test_train: Optional[np.ndarray] = None
   ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray], ODEState]:
     """Return output predictions on train [and test] set[s] at time[s] `t`.
 
@@ -563,7 +563,7 @@ def gp_inference(
     return solve(g)(y_train, trace_axes)
 
   @utils.get_namedtuple('Gaussians')
-  def predict_fn(get: Get = None,
+  def predict_fn(get: Optional[Get] = None,
                  k_test_train=None,
                  k_test_test=None
                  ) -> Dict[str, Union[np.ndarray, Gaussian]]:
@@ -854,9 +854,9 @@ def gradient_descent_mse_ensemble(
     return k_dd, k_td, nngp_tt
 
   @utils.get_namedtuple('Gaussians')
-  def predict_fn(t: ArrayOrScalar = None,
-                 x_test: np.ndarray = None,
-                 get: Get = None,
+  def predict_fn(t: Optional[ArrayOrScalar] = None,
+                 x_test: Optional[np.ndarray] = None,
+                 get: Optional[Get] = None,
                  compute_cov: bool = False,
                  **kernel_fn_test_test_kwargs) -> Dict[str, Gaussian]:
     """Return output mean and covariance on the test set at time[s] `t`.
@@ -1008,7 +1008,7 @@ def gradient_descent_mse_ensemble(
 
 def max_learning_rate(
     ntk_train_train: np.ndarray,
-    y_train_size: int = None,
+    y_train_size: Optional[int] = None,
     momentum=0.,
     eps: float = 1e-12) -> float:
   r"""Computes the maximal feasible learning rate for infinite width NNs.

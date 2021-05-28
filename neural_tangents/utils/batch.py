@@ -147,7 +147,7 @@ def _scan(f: Callable[[_Carry, _Input], Tuple[_Carry, _Output]],
 
 def _flatten_batch_dimensions(k: np.ndarray,
                               is_parallel: bool,
-                              discard_axis: int = None) -> np.ndarray:
+                              discard_axis: Optional[int] = None) -> np.ndarray:
   """Takes a kernel that has been evaluated in batches and flattens."""
 
   if discard_axis is not None:
@@ -326,7 +326,7 @@ def _serial(kernel_fn: KernelFn,
   flatten = partial(_flatten_kernel, is_parallel=False)
 
   def serial_fn_x1(x1: NTTree[np.ndarray],
-                   x2: NTTree[Optional[np.ndarray]] = None,
+                   x2: Optional[NTTree[Optional[np.ndarray]]] = None,
                    *args,
                    **kwargs) -> NTTree[Kernel]:
 
@@ -449,7 +449,7 @@ def _serial(kernel_fn: KernelFn,
 
   @utils.wraps(kernel_fn)
   def serial_fn(x1_or_kernel: Union[NTTree[np.ndarray], NTTree[Kernel]],
-                x2: NTTree[Optional[np.ndarray]] = None,
+                x2: Optional[NTTree[Optional[np.ndarray]]] = None,
                 *args,
                 **kwargs) -> NTTree[Kernel]:
     if utils.is_nt_tree_of(x1_or_kernel, np.ndarray):
