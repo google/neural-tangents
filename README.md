@@ -428,6 +428,16 @@ as an example. With `NVIDIA V100` 64-bit precision, `nt` took 316/330/508 GPU-ho
 
 Neural Tangents has been used in the following papers (newest first):
 
+1. [Spectral bias and task-model alignment explain generalization in kernel regression and infinitely wide neural networks](https://www.nature.com/articles/s41467-021-23103-1)
+1. [Bridging Multi-Task Learning and Meta-Learning: Towards Efficient Training and Effective Adaptation](https://arxiv.org/abs/2106.09017)
+1. [Wide Mean-Field Variational Bayesian Neural Networks Ignore the Data](https://arxiv.org/abs/2106.07052)
+1. [What can linearized neural networks actually say about generalization?](https://arxiv.org/abs/2106.06770)
+1. [Measuring the sensitivity of Gaussian processes to kernel choice](https://arxiv.org/abs/2106.06510)
+1. [A Neural Tangent Kernel Perspective of GANs](https://arxiv.org/abs/2106.05566)
+1. [On the Power of Shallow Learning](https://arxiv.org/abs/2106.03186)
+1. [Learning Curves for SGD on Structured Features](https://arxiv.org/abs/2106.02713)
+1. [Out-of-Distribution Generalization in Kernel Regression](https://arxiv.org/abs/2106.02261)
+1. [Rapid Feature Evolution Accelerates Learning in Neural Networks](https://arxiv.org/abs/2105.14301)
 1. [Scalable and Flexible Deep Bayesian Optimization with Auxiliary Information for Scientific Problems](https://arxiv.org/abs/2104.11667)
 1. [Random Features for the Neural Tangent Kernel](https://arxiv.org/abs/2104.01351)
 1. [Multi-Level Fine-Tuning: Closing Generalization Gaps in Approximation of Solution Maps under a Limited Budget for Training Data](https://arxiv.org/abs/2102.07169)
