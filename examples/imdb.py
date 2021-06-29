@@ -1,7 +1,7 @@
 """An example doing inference with an infinitely wide attention network on IMDb.
 
 Adapted from
-https://github.com/google/neural-tangents/blob/master/examples/infinite_fcn.py
+https://github.com/google/neural-tangents/blob/main/examples/infinite_fcn.py
 
 By default, this example does inference on a very small subset, and uses small
  word embeddings for performance. A 300/300 train/test split takes 30 seconds

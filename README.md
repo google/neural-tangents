@@ -7,9 +7,9 @@
 | [**Release notes**](https://github.com/google/neural-tangents/releases)
 
 [![PyPI](https://img.shields.io/pypi/v/neural-tangents)](https://pypi.org/project/neural-tangents/) [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/neural-tangents)](https://pypi.org/project/neural-tangents/)
-[![Build Status](https://travis-ci.org/google/neural-tangents.svg?branch=master)](https://travis-ci.org/google/neural-tangents)
+[![Build Status](https://travis-ci.org/google/neural-tangents.svg?branch=main)](https://travis-ci.org/google/neural-tangents)
 [![Readthedocs](https://readthedocs.org/projects/neural-tangents/badge/?version=latest)](https://neural-tangents.readthedocs.io/en/latest/?badge=latest)
-[![PyPI - License](https://img.shields.io/pypi/l/neural_tangents)](https://github.com/google/neural-tangents/blob/master/LICENSE)
+[![PyPI - License](https://img.shields.io/pypi/l/neural_tangents)](https://github.com/google/neural-tangents/blob/main/LICENSE)
 
 
 ## Overview
@@ -44,11 +44,11 @@ We happily welcome contributions!
 
 An easy way to get started with Neural Tangents is by playing around with the following interactive notebooks in Colaboratory. They demo the major features of Neural Tangents and show how it can be used in research.
 
-- [Neural Tangents Cookbook](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/neural_tangents_cookbook.ipynb)
-- [Weight Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/weight_space_linearization.ipynb)
-- [Function Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/master/notebooks/function_space_linearization.ipynb)
-- [Neural Network Phase Diagram](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/phase_diagram.ipynb)
-- [Performance Benchmark](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/myrtle_kernel_with_neural_tangents.ipynb)
+- [Neural Tangents Cookbook](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/neural_tangents_cookbook.ipynb)
+- [Weight Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/weight_space_linearization.ipynb)
+- [Function Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/function_space_linearization.ipynb)
+- [Neural Network Phase Diagram](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/phase_diagram.ipynb)
+- [Performance Benchmark](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/myrtle_kernel_with_neural_tangents.ipynb)
 : Simple benchmark for Myrtle kernels used in [[16]](#16-neural-kernels-without-tangents). Also see [Performance](#myrtle-network).
 
 ## Installation
@@ -87,9 +87,9 @@ set -e; for f in tests/*.py; do python $f; done
 
 ## 5-Minute intro
 
-<b>See this [Colab](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/neural_tangents_cookbook.ipynb) for a detailed tutorial. Below is a very quick introduction.</b>
+<b>See this [Colab](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/neural_tangents_cookbook.ipynb) for a detailed tutorial. Below is a very quick introduction.</b>
 
-Our library closely follows JAX's API for specifying neural networks,  [`stax`](https://github.com/google/jax/blob/master/jax/experimental/stax.py). In `stax` a network is defined by a pair of functions `(init_fn, apply_fn)` initializing the trainable parameters and computing the outputs of the network respectively. Below is an example of defining a 3-layer network and computing it's outputs `y` given inputs `x`.
+Our library closely follows JAX's API for specifying neural networks,  [`stax`](https://github.com/google/jax/blob/main/jax/experimental/stax.py). In `stax` a network is defined by a pair of functions `(init_fn, apply_fn)` initializing the trainable parameters and computing the outputs of the network respectively. Below is an example of defining a 3-layer network and computing it's outputs `y` given inputs `x`.
 
 ```python
 from jax import random
@@ -240,7 +240,7 @@ The `neural_tangents` (`nt`) package contains the following modules and function
 ## Technical gotchas
 
 
-### [`nt.stax`](https://github.com/google/neural-tangents/blob/master/neural_tangents/stax.py) vs [`jax.experimental.stax`](https://github.com/google/jax/blob/master/jax/experimental/stax.py)
+### [`nt.stax`](https://github.com/google/neural-tangents/blob/main/neural_tangents/stax.py) vs [`jax.experimental.stax`](https://github.com/google/jax/blob/main/jax/experimental/stax.py)
 We remark the following differences between our library and the JAX one.
 
 * All `nt.stax` layers are instantiated with a function call, i.e. `nt.stax.Relu()` vs `jax.experimental.stax.Relu`.
@@ -419,7 +419,7 @@ please [file a bug](https://github.com/google/neural-tangents/issues/new)!
 
 ### Myrtle network
 
-Colab notebook [Performance Benchmark](https://colab.sandbox.google.com/github/google/neural-tangents/blob/master/notebooks/myrtle_kernel_with_neural_tangents.ipynb)
+Colab notebook [Performance Benchmark](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/myrtle_kernel_with_neural_tangents.ipynb)
 demonstrates how one would construct and benchmark kernels. To demonstrate
 flexibility, we took architecture from [[16]](#16-neural-kernels-without-tangents)
 as an example. With `NVIDIA V100` 64-bit precision, `nt` took 316/330/508 GPU-hours on full 60k CIFAR-10 dataset for Myrtle-5/7/10 kernels.

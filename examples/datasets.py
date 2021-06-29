@@ -166,7 +166,7 @@ def _get_glove_embedding_layer(tokenizer, glove_path, max_sentence_length):
   if not os.path.exists(glove_path):
     if not os.path.exists(f'{glove_path}.gz'):
       print(f'Did not find {glove_path} word embeddings, downloading...')
-      url = 'https://github.com/icml2020-attention/glove/raw/master/glove.6B.50d.txt.gz'
+      url = 'https://github.com/icml2020-attention/glove/raw/main/glove.6B.50d.txt.gz'
       urllib.request.urlretrieve(url, f'{glove_path}.gz')
 
     with gzip.open(f'{glove_path}.gz', 'rt') as f_in:
