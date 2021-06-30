@@ -574,7 +574,7 @@ def Aggregate(
     >>>  x1 = random.normal(random.PRNGKey(1), (5, 3, 32))  # NCH
     >>>  x2 = random.normal(random.PRNGKey(2), (2, 3, 32))  # NCH
     >>>
-    >>>  # 1) NHH binary adjacency matrices
+    >>>  # NHH binary adjacency matrices
     >>>  A1 = random.bernoulli(random.PRNGKey(2), 0.5, (5, 32, 32))
     >>>  A2 = random.bernoulli(random.PRNGKey(2), 0.5, (2, 32, 32))
     >>>
