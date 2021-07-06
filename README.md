@@ -428,6 +428,7 @@ as an example. With `NVIDIA V100` 64-bit precision, `nt` took 316/330/508 GPU-ho
 
 Neural Tangents has been used in the following papers (newest first):
 
+1. [Scale Mixtures of Neural Network Gaussian Processes](https://arxiv.org/abs/2107.01408)
 1. [Provably efficient machine learning for quantum many-body problems](https://arxiv.org/abs/2106.12627)
 1. [Wide Mean-Field Variational Bayesian Neural Networks Ignore the Data](https://arxiv.org/abs/2106.07052)
 1. [Spectral bias and task-model alignment explain generalization in kernel regression and infinitely wide neural networks](https://www.nature.com/articles/s41467-021-23103-1)
