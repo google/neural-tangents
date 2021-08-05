@@ -81,7 +81,10 @@ def assert_close_matrices(self, expected, actual, rtol):
         np.linalg.norm(actual - expected) /
         np.maximum(np.linalg.norm(expected), 1e-12))
 
-    if relative_error > rtol or np.isnan(relative_error):
+    if np.isnan(relative_error):
+      self.assertAllClose(expected, actual)
+
+    elif relative_error > rtol:
       _log(relative_error, expected, actual, False)
       self.fail(self.failureException('Relative ERROR: ',
                                       float(relative_error),
