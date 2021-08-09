@@ -3581,7 +3581,7 @@ def _inputs_to_kernel(
     x, mask = x.masked_value, x.mask
 
     # TODO(schsam): Think more about dtype automatic vs manual dtype promotion.
-    x = x.astype(np.float64)
+    x = x.astype(jax.dtypes.canonicalize_dtype(np.float64))
 
     if diagonal_batch:
       cov = _cov_diag_batch(x, diagonal_spatial, batch_axis, channel_axis)

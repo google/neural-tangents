@@ -17,6 +17,7 @@
 import itertools
 
 from absl.testing import absltest
+import jax
 from jax import lax
 from jax import test_util as jtu
 from jax.api import device_get
@@ -35,7 +36,12 @@ config.update('jax_numpy_rank_promotion', 'raise')
 class UtilsTest(jtu.JaxTestCase):
 
   def test_is_on_cpu(self):
-    for dtype in [np.float32, np.float64]:
+    dtypes = [np.float16, np.float32]
+    float64 = jax.dtypes.canonicalize_dtype(np.float64)
+    if float64 != np.float32:
+      dtypes += [float64]
+
+    for dtype in dtypes:
       with self.subTest(dtype=dtype):
 
         def x():
