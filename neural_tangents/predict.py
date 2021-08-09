@@ -28,17 +28,19 @@ that closed-form kernels currently only support a single `channel_axis`).
 
 
 import collections
+from functools import lru_cache
+from typing import Union, Tuple, Callable, Iterable, Optional, Dict, NamedTuple, Sequence, Generator
+
 import jax
 from jax.api import grad
 from jax.experimental import ode
+from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.scipy as sp
 from jax.tree_util import tree_map, tree_all
 from neural_tangents.utils import utils, dataclasses
-import scipy as osp
 from neural_tangents.utils.typing import KernelFn, Axes, Get
-from typing import Union, Tuple, Callable, Iterable, Optional, Dict, NamedTuple, Sequence, Generator
-from functools import lru_cache
+import scipy as osp
 
 
 """Alias for optional arrays or scalars."""
@@ -923,7 +925,7 @@ def gradient_descent_mse_ensemble(
         mean = np.einsum(
             'ji,ti,ki,k...->tj...',
             evecs, -expm1(evals, t), evecs, y_train_flat,
-            optimize=True)
+            optimize=_optimize())
 
       # Test set.
       else:
@@ -932,7 +934,7 @@ def gradient_descent_mse_ensemble(
         mean = np.einsum(
             'lj,ji,ti,ki,k...->tl...',
             ktd_g, evecs, neg_inv_expm1, evecs, y_train_flat,
-            optimize=True)
+            optimize=_optimize())
 
       mean = reshape_mean(mean)
 
@@ -948,7 +950,7 @@ def gradient_descent_mse_ensemble(
                 (np.maximum(evals, 0.) *
                  np.exp(- 2 * np.maximum(evals, 0.) * t / y_train.size)),
                 evecs,
-                optimize=True)
+                optimize=_optimize())
 
           elif g == 'ntk':
             exp = np.einsum(
@@ -956,13 +958,13 @@ def gradient_descent_mse_ensemble(
                 evecs,
                 np.exp(-np.maximum(evals, 0.) * t / y_train.size),
                 evecs,
-                optimize=True)
+                optimize=_optimize())
             cov = np.einsum(
                 'tmk,kl,tnl->tmn',
                 exp,
                 nngp_dd,
                 exp,
-                optimize=True)
+                optimize=_optimize())
 
           else:
             raise ValueError(g)
@@ -975,22 +977,22 @@ def gradient_descent_mse_ensemble(
             cov = _nngp_tt - np.einsum(
                 'mj,ji,ti,ki,lk->tml',
                 ktd_g, evecs, -inv_expm1(evals, 2 * t), evecs, ktd_g,
-                optimize=True)
+                optimize=_optimize())
 
           elif g == 'ntk':
             term_1 = np.einsum(
                 'mi,ti,ki,lk->tml',
                 evecs, neg_inv_expm1, evecs, ktd_g,
-                optimize=True)
+                optimize=_optimize())
             term_2 = np.einsum(
                 'mj,ji,ti,ki,lk->tml',
                 ktd_g, evecs, neg_inv_expm1, evecs, utils.make_2d(k_td.nngp),  # pytype:disable=attribute-error
-                optimize=True)
+                optimize=_optimize())
             term_2 += np.moveaxis(term_2, 1, 2)
             cov = np.einsum(
                 'tji,jk,tkl->til',
                 term_1, nngp_dd, term_1,
-                optimize=True)
+                optimize=_optimize())
             cov += -term_2 + _nngp_tt
 
           else:
@@ -1054,6 +1056,15 @@ def max_learning_rate(
 # INTERNAL UTILITIES
 
 
+def _optimize() -> str:
+  """Return contraction order for `np.einsum` based on platform.
+
+  Introduced after https://github.com/google/jax/pull/7512 since TPU seems to
+  be more precise in `greeedy` mode.
+  """
+  return 'greedy' if xla_bridge.get_backend().platform == 'tpu' else 'optimal'
+
+
 def _get_dependency(get: Get, compute_cov: bool) -> Tuple[str, ...]:
   """Figure out dependency for get."""
   _, get = utils.canonicalize_get(get)
@@ -1103,7 +1114,7 @@ def _get_fns_in_eigenbasis(
     def new_fn(y_train, t):
       return np.einsum('ji,ti,ki,k...->tj...',
                        evecs, fn(evals, t), evecs, y_train,
-                       optimize=True)
+                       optimize=_optimize())
 
     return new_fn
 

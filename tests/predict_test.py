@@ -28,9 +28,9 @@ from jax.flatten_util import ravel_pytree
 from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.random as random
+from neural_tangents import monte_carlo_kernel_fn, empirical_kernel_fn
 from neural_tangents import predict
 from neural_tangents import stax
-from neural_tangents import monte_carlo_kernel_fn, empirical_kernel_fn
 from neural_tangents.utils import batch
 from neural_tangents.utils import empirical
 from neural_tangents.utils import test_utils
