@@ -45,6 +45,9 @@ def get_dataset(name,
                 data_dir=None,
                 input_key='image'):
   """Download, parse and process a dataset to unit scale and one-hot labels."""
+  # Need this following http://cl/378185881 to prevent GPU test breakages.
+  tf.config.set_visible_devices([], 'GPU')
+
   ds_builder = tfds.builder(name)
 
   ds_train, ds_test = tfds.as_numpy(

@@ -41,8 +41,9 @@ FLAGS = flags.FLAGS
 def main(unused_argv):
   # Build data pipelines.
   print('Loading data.')
-  x_train, y_train, x_test, y_test = \
-    datasets.get_dataset('cifar10', FLAGS.train_size, FLAGS.test_size)
+  x_train, y_train, x_test, y_test = datasets.get_dataset('cifar10',
+                                                          FLAGS.train_size,
+                                                          FLAGS.test_size)
 
   # Build the infinite network.
   _, _, kernel_fn = stax.serial(
