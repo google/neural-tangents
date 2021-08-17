@@ -105,6 +105,12 @@ class Pooling(enum.Enum):
   SUM = 'SUM'
 
 
+class AggregateImplementation(enum.Enum):
+  """Implementation of the `Aggregate` layer."""
+  DENSE = 'DENSE'
+  SPARSE = 'SPARSE'
+
+
 # Decorators
 
 
@@ -497,35 +503,81 @@ def Aggregate(
     aggregate_axis: Optional[Axes] = None,
     batch_axis: int = 0,
     channel_axis: int = -1,
-    to_dense: Callable[[np.ndarray], np.ndarray] = lambda pattern: pattern
+    to_dense: Optional[Callable[[np.ndarray], np.ndarray]] = lambda p: p,
+    implementation: str = AggregateImplementation.DENSE.value
 ) -> InternalLayer:
   r"""Layer constructor for aggregation operator (graphical neural network).
 
-  See e.g. arXiv: 1905.13192.
+  See e.g. https://arxiv.org/abs/1905.13192.
 
   Specifically, each `N+2`-D `input` of shape `(batch, X_1, ..., X_N, channels)`
-  (subject to `batch_axis` and `channel_axis`) is accompanied by a [weighted]
-  2-adjacency `2K+1`-D tensor `pattern` of shape
-  `(batch, X_i1, ..., X_iK, X_i1, ..., X_iK)` (i.e. leading batch dimensions,
-  repeated spatial dimensions, no channel dimension) and the output tensor is
-  `lax.dot_general(inputs, pattern, ((aggregate_axes, range(1, K + 1)), (batch_axis,), (0,)))`
-  with the `batch_axis` and `channel_axis` preserved. `K = len(aggregate_axes)`.
+  (subject to `batch_axis` and `channel_axis`) is accompanied by an array
+  `pattern` specifying the directed edges (arcs, arrows) of the graph. The
+  format of `pattern` depends on `implementation`:
 
-  Qualitatively, having `pattern[n, i1, ..., iK, j1, ..., jK] == w` represents
-  a directed edge from pixel / token `(i1, ..., iK)` to `(j1, ..., jK)` with
-  weight `w` in an individual input sample `n`. The `apply_fn` of this
-  layer replaces all nodes with the (weighted) sum of (incoming) adjacent nodes
-  to the given node.
+  `implementation = "DENSE"`:
+    Is recommended for dense graphs, where the number of
+    edges `E` is proportional to the number of vertices `V` to the power of 1.5
+    or more. In this case, `pattern` is a [weighted] adjacency 2-adjacency
+    `2K+1`-D tensor of shape `(batch, X_i1, ..., X_iK, X_i1, ..., X_iK)` (i.e.
+    leading batch dimensions, repeated spatial dimensions, no channel dimension)
+    and the output tensor is
+    `lax.dot_general(inputs, pattern, ((aggregate_axes, range(1, K + 1)), (batch_axis,), (0,)))`
+    with the `batch_axis` and `channel_axis` preserved.
+    `K = len(aggregate_axes)`.
 
-  Note that individual inputs can have more than `K` dimensions (e.g. channels,
-  other coordinates), in which case slices along these coordinates are
-  processed in the same way independently.
+    Having `pattern[n, i1, ..., iK, j1, ..., jK] == w` represents a directed
+    edge (arc) from tail pixel / token `(i1, ..., iK)` to head `(j1, ..., jK)`
+    with weight `w` in an individual input sample `n`. The `apply_fn` of this
+    layer replaces all vertices with the (weighted) sum of all direct
+    predecessors to the given vertex.
+
+    Note that individual inputs can have more than `K` dimensions (e.g.
+    channels, other coordinates), in which case slices along these coordinates
+    are processed in the same way independently.
+
+    This implementation uses matrix multiplication, and for a graph with `V`
+    vertices and `E` edges, `apply_fn` costs `O(V^2)` memory and time, while
+    `kernel_fn` costs `O(V^2)` memory and `O(V^3)` time.
+
+    The adjacency tensor `pattern` can be specified in a sparse format. If
+    you provide a `to_dense` function (defaults to identity), then `pattern` is
+    decoded into a dense representation as described above
+    (`pattern_dense = to_dense(pattern)`) each time `apply_fn` or `kernel_fn`
+    are called. This avoids storing the whole graph in the dense format in
+    advance, but only convert it to dense format on the fly, for each
+    individual batch `x` / `(x1, x2)`. However, this does not improve the
+    runtime or memory of the `Aggregate` layer (in fact makes it a bit slower
+    due to an extra `to_dense` call).
+
+  `implementation = "SPARSE"`:
+    Is recommended for sparse graphs, where `E ~ O(V)` or less. In this case,
+    `pattern` must be an integer array of shape `(batch, n_edges, K, 2)`,
+    specifying `n_edges` directed edges (arcs) of weight `w = 1` for each of
+    the `batch` input samples (if `K == 1` `pattern` can also have the shape
+    `(batch, n_edges, 2)`). Trailing dimension of size 2 corresponds to tails
+    (sources, senders) and heads (targets, receivers). Edges can be repeated,
+    which is interpreted as having their weight be the number of repetitions.
+    If any of the `K` coordinates of a given vertex in `heads` is negative
+    (e.g. `-1`), it is discarded. This can be used for padding, when different
+    input samples have different `n_edges`. Note that this means you can't use
+    negative indexing to specify vertices.
+
+    This implementation uses `jax.ops.segment_sum` instead of matrix
+    multiplication. This makes `apply_fn` cost `O(V + E)` memory and `O(V + E)`
+    time, and `kernel_fn` cost `O(V^2)` memory and `O(V^2 + E^2 + V * E)` time.
+    This is beneficial for sparse graphs, i.e. `E << V^2`, but detrimental for
+    dense graphs (when `E ~ V^2`).
+
+  See Also:
+    `AggregateTest` in `tests/stax_test.py` for examples and conversion between
+    sparse and dense patterns.
 
   Example:
     >>>  # 1D inputs
     >>>  x = random.normal(random.PRNGKey(1), (5, 3, 32))  # NCH
     >>>
-    >>>  # 1) NHH binary adjacency matrix
+    >>>  # 1) NHH dense binary adjacency matrix
     >>>  A = random.bernoulli(random.PRNGKey(2), 0.5, (5, 32, 32))
     >>>  # `A[n, h1, h2] == True`
     >>>  # means an edge between tokens `h1` and `h2` in sample `n`.
@@ -537,11 +589,26 @@ def Aggregate(
     >>>  out = apply_fn((), x, pattern=A)
     >>>  # output is the same as `x @ A` of shape (5, 3, 32)
     >>>
+    >>>  # Sparse NHH binary pattern with 10 edges
+    >>>  n_edges = 10
+    >>>  A_sparse = random.randint(random.PRNGKey(3),
+    >>>                            shape=(x.shape[0], n_edges, 1, 2),
+    >>>                            minval=0,
+    >>>                            maxval=x.shape[2])
+    >>>
+    >>>  # Setting `implementation=2` to invoke the segment sum implementation.
+    >>>  init_fn, apply_fn, kernel_fn = stax.Aggregate(aggregate_axis=2,
+    >>>                                                batch_axis=0,
+    >>>                                                channel_axis=1,
+    >>>                                                implementation="SPARSE")
+    >>>
+    >>>  out = apply_fn((), x, pattern=A_sparse)
+    >>>  # output is of shape (5, 3, 32), computed via `jax.ops.segment_sum`.
     >>>
     >>>  # 2D inputs
     >>>  x = random.normal(random.PRNGKey(1), (5, 3, 32, 16))  # NCHW
     >>>
-    >>>  # 2) NHWHW binary adjacency matrix
+    >>>  # 2) NHWHW dense binary adjacency matrix
     >>>  A = random.bernoulli(random.PRNGKey(2), 0.5, (5, 32, 16, 32, 16))
     >>>  # `A[n, h1, w1, h2, w2] == True`
     >>>  # means an edge between pixels `(h1, w1)` and `(h2, w2)` in image `n`.
@@ -592,36 +659,94 @@ def Aggregate(
 
   Args:
     aggregate_axis:
-      axes (non-batch and non-channel) to aggregate adjacent vertices over.
+      axes (non-batch and non-channel) to aggregate predecessor vertices over.
+
     batch_axis:
       batch axis for `inputs`. Defaults to `0`, the leading axis.
+
     channel_axis:
       channel axis for `inputs`. Defaults to `-1`, the trailing axis. For
       `kernel_fn`, channel size is considered to be infinite.
+
     to_dense:
-      function to convert potentially sparse `pattern` matrices into dense
-      `2K+1`-D tensors of shape `(batch, X_i1, ..., X_iK, X_i1, ..., X_iK)`,
-      with the batch leading dimension, and no channel dimension, where
-      `K = len(aggregate_axes)`. Defaults to identity, meaning that `pattern` is
-      expected in the dense format.
+      Ignored unless `implementation == "DENSE"`. A function to convert
+      potentially sparse `pattern` matrices into dense `2K+1`-D tensors of shape
+      `(batch, X_i1, ..., X_iK, X_i1, ..., X_iK)`, with the batch leading
+      dimension, and no channel dimension, where `K = len(aggregate_axes)`.
+      Will be called on input `pattern` (or a pair `(pattern1, pattern2)`)
+      every time  `apply_fn` or `kernel_fn` is called. Defaults to identity,
+      meaning that `pattern` is expected in the dense format.
+
+    implementation:
+      `"DENSE"` or `"SPARSE"`, specifying which implementation to use.
+      `"DENSE"` uses matrix multiplications and is recommended for dense graphs
+      (`E ~> O(V^1.5)`), while `"SPARSE"` uses `jax.ops.segment_sum` and is
+      recommended for sparse graphs (`E ~< O(V)`). Note that different
+      `implementation`s require different `pattern` array format - see the
+      layer docstring above for details.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
+  implementation = AggregateImplementation(implementation)
+  if implementation == AggregateImplementation.SPARSE:
+    warnings.warn('Negative indices in `pattern` are considered as padding '
+                  '(i.e. ignored), unlike typical numpy negative indexing.')
+
+    # TODO(romann): revisit based on https://github.com/google/jax/issues/7538.
+    warnings.warn('Reverse-mode differentiation of this layer can produce '
+                  'wrong results if `pattern` contains negative indices. See '
+                  'https://github.com/google/jax/issues/7538.')
+
   init_fn = lambda rng, input_shape: (input_shape, ())
 
-  def get_agg_axes(ndim: int) -> List[int]:
+  def get_agg_axes(ndim: int) -> Tuple[Tuple[int, ...], int, int]:
+    _batch_axis, _channel_axis = utils.mod((batch_axis, channel_axis), ndim)
     if aggregate_axis is None:
-      _batch_axis, _channel_axis = utils.mod((batch_axis, channel_axis), ndim)
-      agg_axes = [i for i in range(ndim)
-                  if i not in (_batch_axis, _channel_axis)]
+      agg_axes = tuple(i for i in range(ndim)
+                       if i not in (_batch_axis, _channel_axis))
     else:
-      agg_axes = utils.canonicalize_axis(aggregate_axis, ndim)
-    return agg_axes
+      agg_axes = tuple(utils.canonicalize_axis(aggregate_axis, ndim))
+    return agg_axes, _batch_axis, _channel_axis
 
   def get_dimension_numbers(ndim: int) -> lax.DotDimensionNumbers:
-    agg_axes = get_agg_axes(ndim)
-    return (agg_axes, (range(1, len(agg_axes) + 1))), ((batch_axis,), (0,))
+    agg_axes, batch_axis, _ = get_agg_axes(ndim)
+    agg_ndim = len(agg_axes)
+    return (agg_axes, (range(1, agg_ndim + 1))), ((batch_axis,), (0,))
+
+  @functools.partial(vmap, in_axes=(0, None))
+  def make_indices(index_array, agg_shape):
+    index_array = np.moveaxis(index_array, -1, 0)
+    raveled = np.ravel_multi_index(index_array, agg_shape, 'wrap')
+    # We mask edges where either sender or receiver is negative.
+    return np.where(np.all(index_array >= 0, axis=0), raveled, -1)
+
+  def get_senders_receivers(pattern, batch_size: int, agg_ndim: int):
+    """Unpack `pattern` and make sure it has correct shape."""
+    if pattern.shape[-1] != 2:
+      raise ValueError('`pattern` must have a trailing dimension of 2, got '
+                       f'{pattern.shape[-1]}.')
+    s, r = pattern[..., 0], pattern[..., 1]
+
+    # Allow for `(batch, n_edges, 2)` shape for single aggregation
+    # dimension `K == 1`.
+    if agg_ndim == 1 and s.ndim == 2:
+      s, r = np.expand_dims(s, -1), np.expand_dims(r, -1)
+
+    if s.ndim != 3:
+      raise ValueError(f'Tails and heads need to be 3-dimensional, '
+                       f'got {s.ndim}.')
+
+    if s.shape[2] != agg_ndim:
+      raise ValueError(f'Trailing dimension of tails and heads need to have '
+                       f'the same size as the number of aggregate axes of '
+                       f'`aggregate_axis` ({agg_ndim}), got {s.shape[2]}.')
+
+    if s.shape[0] != batch_size:
+      raise ValueError(f'Tails and heads need to have leading dimension equal '
+                       f'to batch size, got {s.shape[0]}.')
+
+    return s, r
 
   def apply_fn(params,
                inputs: np.ndarray,
@@ -633,17 +758,34 @@ def Aggregate(
     Args:
       params:
         Not used.
+
       inputs:
         An input `N+2`-D tensor of shape `(batch, X_1, ..., X_N, channels)`
         (subject to `batch_axis` and `channel_axis`).
+
       pattern:
-        An `2K+1`-D tensor of shape `(batch, X_i1, ..., X_iK, X_i1, ..., X_iK)`,
-        with the batch leading dimension, and no channel dimension, where
-        `K = len(aggregate_axes)`. Can have another shape
-        (e.g. a sparse matrix), as long as `to_dense(pattern)` has the correct
-        (dense) shape. If `nt.batch` is used, the leading dimension of `pattern`
-         must be the batch dimension, of size `batch`. `None` means identity
-        adjacency, i.e. `apply_fn` is an identity function.
+        A tensor specifying the directed edges between `inputs`. The shape and
+        type of `pattern` depends on `implementation` (see docstring of
+        `stax.Aggregate` above).
+
+        `implementation == "DENSE"`:
+          `pattern` must be a (float) `2K+1`-D tensor of shape
+          `(batch, X_i1, ..., X_iK, X_i1, ..., X_iK)`, with the batch leading
+          dimension, and no channel dimension, where `K = len(aggregate_axes)`.
+          Can have another shape (e.g. a sparse matrix), as long as
+          `to_dense(pattern)` has the correct (dense) shape (if `nt.batch` is
+          used, the leading dimension of `pattern` must be the batch dimension,
+          of size `batch`).
+
+        `implementation == "SPARSE"`:
+          `pattern` must be an integer array of shape `(batch, n_edges, K, 2)`,
+          specifying tail and head (source and target / sender and receiver)
+          vertices along the trailing dimension (if `K == 1`, `pattern` is also
+          allowed to have the shape `(batch, n_edges, 2)`).
+
+        `pattern=None` means identity adjacency, i.e. `apply_fn` is an identity
+          function.
+
       **kwargs:
         unused.
 
@@ -652,19 +794,60 @@ def Aggregate(
     """
     if pattern is None:
       return inputs
-    pattern = to_dense(pattern)
 
     del params
-    ndim = inputs.ndim
-    dn = get_dimension_numbers(ndim)
-    out = lax.dot_general(inputs, pattern.astype(inputs.dtype), dn)
 
-    out_c_axis = utils.axis_after_dot(channel_axis % ndim, dn[0][0], dn[1][0])
-    out_b_axis = utils.axis_after_dot(batch_axis % ndim, dn[0][0], dn[1][0])
-    agg_axes = get_agg_axes(ndim)
-    out = np.moveaxis(out,
-                      [out_b_axis, out_c_axis] + list(range(-len(agg_axes), 0)),
-                      [batch_axis, channel_axis] + agg_axes)
+    ndim = inputs.ndim
+    agg_axes, batch_axis, channel_axis = get_agg_axes(ndim)
+    agg_ndim = len(agg_axes)
+
+    if implementation == AggregateImplementation.DENSE:
+      # Dense implementation through matrix multiplication.
+      pattern = to_dense(pattern)
+
+      dn = get_dimension_numbers(ndim)
+      out = lax.dot_general(inputs, pattern.astype(inputs.dtype), dn)
+
+      # Put back potentially displaced batch and channel axes.
+      out_c_axis = utils.axis_after_dot(channel_axis % ndim, dn[0][0], dn[1][0])
+      out_b_axis = utils.axis_after_dot(batch_axis % ndim, dn[0][0], dn[1][0])
+
+      out = np.moveaxis(out,
+                        (out_b_axis, out_c_axis) + tuple(range(-agg_ndim, 0)),
+                        (batch_axis, channel_axis) + agg_axes)
+
+    elif implementation == AggregateImplementation.SPARSE:
+      # Sparse implementation through `jax.ops.segment_sum`.
+      s, r = get_senders_receivers(pattern, inputs.shape[batch_axis], agg_ndim)
+
+      # Canonicalize axes
+      src_axes = (batch_axis,) + agg_axes + (channel_axis,)
+      dst_axes = (0,) + tuple(range(1, agg_ndim + 1)) + (-1,)
+
+      inputs = np.moveaxis(inputs, src_axes, dst_axes)
+      input_shape = inputs.shape
+      inputs = inputs.reshape((inputs.shape[0],
+                               functools.reduce(
+                                   op.mul, inputs.shape[1:agg_ndim + 1], 1))
+                              + inputs.shape[agg_ndim + 1:])
+
+      agg_shape = input_shape[1:agg_ndim + 1]
+      s, r = make_indices(s, agg_shape), make_indices(r, agg_shape)
+
+      @vmap
+      def pass_messages(s, r, inputs):
+        n_nodes = inputs.shape[0]
+        sender_in = inputs[s]
+        messages = ops.segment_sum(sender_in, r, num_segments=n_nodes)
+        return messages
+
+      out = pass_messages(s, r, inputs)
+      out = out.reshape(input_shape)
+      out = np.moveaxis(out, dst_axes, src_axes)
+
+    else:
+      raise ValueError(f'Unregocnized `implementation == {implementation}.')
+
     return out
 
   @_requires(batch_axis=batch_axis,
@@ -678,27 +861,144 @@ def Aggregate(
     """Compute the transformed kernels after an aggregation kernel layer.
 
       Specifically, the `nngp`/`ntk` is a `2N+2`-D tensor of shape
-      `(B_1, B_2, X_1, X_1, ..., X_N, X_N)`. This tensor will
-      be aggregated (via matrix multiplication) on the left by `pattern[0]` of
-      shape `(B_1, X_i1, ..., X_iK)` and on the right by `pattern[1]` of shape
-      `(B_2, X_i1, ..., X_iK)`. Ignoring the batch dimensions, the return
-      `nngp/ntk` is `pattern[0].T @ nngp/ntk @ pattern[1]`
+      `(B_1, B_2, X_1, X_1, ..., X_N, X_N)`.
 
+      If `implementation == "DENSE"`, this tensor will be aggregated
+      (via matrix multiplication) on the left by `to_dense(pattern[0])` of
+      shape `(B_1, X_i1, ..., X_iK)` and on the right by `to_dense(pattern[1])`
+      of shape `(B_2, X_i1, ..., X_iK)`. Ignoring the batch dimensions, the
+      output `nngp/ntk` is `pattern[0].T @ nngp/ntk @ pattern[1]`.
+
+      If `implementation == "SPARSE"`, result is computed using
+      `jax.ops.segment_sum` given `pattern[0]` and `pattern[1]` as integer
+      arrays of shapes `(B_1, n_edges_1, K, 2)` and `(B_2, n_edges_2, K, 2)`
+      respectively.
     """
     pattern1, pattern2 = pattern
-    pattern1 = None if pattern1 is None else to_dense(pattern1)
-    pattern2 = None if pattern2 is None else to_dense(pattern2)
+
+    if pattern1 is None and pattern2 is None:
+      return k
+
+    if pattern1 is None or pattern2 is None:
+      raise NotImplementedError(
+          'Having exactly one of two `pattern1/2=None` is not implemented. '
+          'Please file a bug at '
+          'https://github.com/google/neural-tangents/issues/new.')
 
     ndim = len(k.shape1)
-    return k.dot_general(
-        other1=pattern1,
-        other2=pattern2,
-        is_lhs=False,
-        dimension_numbers=get_dimension_numbers(ndim)
-    ).replace(
-        batch_axis=batch_axis % ndim,
-        channel_axis=channel_axis % ndim
-    )
+    agg_axes, batch_axis, channel_axis = get_agg_axes(ndim)
+    agg_ndim = len(agg_axes)
+    agg_shape = tuple(k.shape1[a] for a in agg_axes)
+    agg_size = functools.reduce(op.mul, agg_shape, 1)
+
+    def bucket_axes(ndim, start_axis):
+      """Bucket kernel axes into batch, aggregate, and non-aggregate."""
+      ndim_spatial = (ndim - start_axis) // 2
+      agg_1 = tuple(
+          a - int(batch_axis < a) - int(channel_axis < a) + start_axis
+          for a in agg_axes)
+      agg_2 = tuple(
+          a + ndim_spatial
+          for a in agg_1)
+      non_agg_1 = tuple(
+          a for a in range(start_axis, start_axis + ndim_spatial)
+          if a not in agg_1)
+      non_agg_2 = tuple(
+          a for a in range(start_axis + ndim_spatial, ndim)
+          if a not in agg_2)
+      return tuple(range(start_axis)), agg_1, agg_2, non_agg_1, non_agg_2
+
+    if implementation == AggregateImplementation.DENSE:
+      # Dense implementation through matrix multiplication.
+      pattern1 = None if pattern1 is None else to_dense(pattern1)
+      pattern2 = None if pattern2 is None else to_dense(pattern2)
+
+      k = k.dot_general(
+          other1=pattern1,
+          other2=pattern2,
+          is_lhs=False,
+          dimension_numbers=get_dimension_numbers(ndim)
+      )
+
+      # Put back potentially displaced axes.
+      def transpose(k, diagonal_batch):
+        if k is None or k.ndim == 0:
+          return k
+
+        start_axis = 1 if diagonal_batch else 2
+
+        k = utils.unzip_axes(k, start_axis)
+        b, agg_1, agg_2, non_agg_1, non_agg_2 = bucket_axes(k.ndim, start_axis)
+        permutation = b + non_agg_1 + agg_1 + non_agg_2 + agg_2
+        k = np.transpose(k, onp.argsort(permutation))
+        return utils.zip_axes(k, start_axis)
+
+      k = k.replace(
+          cov1=transpose(k.cov1, k.diagonal_batch),
+          cov2=transpose(k.cov2, k.diagonal_batch),
+          nngp=transpose(k.nngp, False),
+          ntk=transpose(k.ntk, False),
+          batch_axis=batch_axis % ndim,
+          channel_axis=channel_axis % ndim
+      )
+
+    elif implementation == AggregateImplementation.SPARSE:
+      # Sparse implementation through `jax.ops.segment_sum`.
+      def pass_messages(s1, s2, r1, r2, k):
+        v1, v2 = k.shape[:2]
+
+        def send(s, r, num_segments):
+          return ops.segment_sum(s, r, num_segments=num_segments)
+
+        send_inner = vmap(functools.partial(send, num_segments=v2), (0, None))
+
+        k = k[s1[:, None], s2[None, :]]
+        k = send_inner(k, r2)
+        k = send(k, r1, num_segments=v1)
+        return k
+
+      pass_messages_self = vmap(pass_messages)
+      pass_messages_cross = vmap(vmap(pass_messages,
+                                      (None, 0, None, 0, 0)),
+                                 (0, None, 0, None, 0))
+
+      s1, r1 = get_senders_receivers(pattern1, k.shape1[batch_axis], agg_ndim)
+      s2, r2 = get_senders_receivers(pattern2, k.shape2[batch_axis], agg_ndim)
+
+      s1, r1 = make_indices(s1, agg_shape), make_indices(r1, agg_shape)
+      s2, r2 = make_indices(s2, agg_shape), make_indices(r2, agg_shape)
+
+      def agg(k, diagonal_batch, s1, r1, s2, r2):
+        if k is None or k.ndim == 0:
+          return k
+
+        start_axis = 1 if diagonal_batch else 2
+        k = utils.unzip_axes(k, start_axis)
+        b, agg_1, agg_2, non_agg_1, non_agg_2 = bucket_axes(k.ndim, start_axis)
+        permutation = b + agg_1 + agg_2 + non_agg_1 + non_agg_2
+        k = np.transpose(k, permutation)
+        k_shape = k.shape
+        k = k.reshape(
+            k.shape[:start_axis] +
+            (agg_size,) * 2 +
+            k.shape[start_axis + 2 * len(agg_axes):]
+        )
+        fn = pass_messages_self if diagonal_batch else pass_messages_cross
+        k = fn(s1, s2, r1, r2, k)
+        k = k.reshape(k_shape)
+        k = np.transpose(k, onp.argsort(permutation))
+        return utils.zip_axes(k, start_axis)
+
+      nngp = agg(k.nngp, False, s1, r1, s2, r2)
+      ntk = agg(k.ntk, False, s1, r1, s2, r2)
+      cov1 = agg(k.cov1, k.diagonal_batch, s1, r1, s1, r1)
+      cov2 = agg(k.cov2, k.diagonal_batch, s2, r2, s2, r2)
+      k = k.replace(nngp=nngp, ntk=ntk, cov1=cov1, cov2=cov2)
+
+    else:
+      raise ValueError(f'Unregocnized `implementation == {implementation}.')
+
+    return k
 
   return init_fn, apply_fn, kernel_fn
 

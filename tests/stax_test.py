@@ -693,8 +693,9 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
                                            random.split(key, 2)[0],
                                            samples,
                                            vmap_axes=0,
-                                           implementation=2)(
-        x_sparse, None, kernel)
+                                           implementation=2)(x_sparse,
+                                                             None,
+                                                             kernel)
     mc = np.reshape(mc, exact.shape)
 
     assert not np.any(np.isnan(exact))
@@ -843,7 +844,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
 
     key = random.PRNGKey(1)
     key, split = random.split(key)
-    output_dim = 2048 if get == 'nngp' else 1
+    output_dim = 1024 if get == 'nngp' else 1
     b_std = 0.5
     W_std = 2.0
     if activation_fn[2].__name__ == 'Sin':
@@ -853,18 +854,18 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
       b_std = 0.0
 
     if model == 'fc':
-      rtol = 0.03
-      X0_1 = random.normal(key, (6, 7))
-      X0_2 = None if same_inputs else random.normal(split, (10, 7))
+      rtol = 0.04
+      X0_1 = random.normal(key, (4, 2))
+      X0_2 = None if same_inputs else random.normal(split, (2, 2))
       affine = stax.Dense(1024, W_std, b_std)
       readout = stax.Dense(output_dim)
       depth = 1
 
     else:
       rtol = 0.05
-      X0_1 = random.normal(key, (4, 8, 8, 3))
-      X0_2 = None if same_inputs else random.normal(split, (6, 8, 8, 3))
-      affine = stax.Conv(1024, (3, 2), W_std=W_std, b_std=b_std, padding='SAME')
+      X0_1 = random.normal(key, (2, 4, 4, 3))
+      X0_2 = None if same_inputs else random.normal(split, (4, 4, 4, 3))
+      affine = stax.Conv(512, (3, 2), W_std=W_std, b_std=b_std, padding='SAME')
       readout = stax.serial(stax.GlobalAvgPool() if 'pool' in model else
                             stax.Flatten(),
                             stax.Dense(output_dim))
@@ -1404,7 +1405,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
           }
           for same_inputs in [False]
           for axis in [0, 1, 2, 3]
-          for n_branches in [2, 3] for get in ['ntk']
+          for n_branches in [2] for get in ['ntk']
           for branch_in in ['dense_before_branch_in', 'dense_after_branch_in']
           for readout in ['pool', 'flatten']
           for fan_in_mode in ['FanInSum', 'FanInConcat', 'FanInProd']))
@@ -1428,8 +1429,8 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
       raise absltest.SkipTest('`FanInSum` and `FanInConcat(0/1/2)` '
                               'require `is_gaussian`.')
 
-    if (axis == 3 or fan_in_mode == 'FanInProd') and \
-        branch_in == 'dense_before_branch_in':
+    if ((axis == 3 or fan_in_mode == 'FanInProd') and
+        branch_in == 'dense_before_branch_in'):
       raise absltest.SkipTest('`FanInConcat` or `FanInProd` on feature axis '
                               'requires a dense layer after concatenation '
                               'or Hadamard product.')
@@ -1541,7 +1542,7 @@ class ConvNDTest(test_utils.NeuralTangentsTestCase):
               use_layernorm
       }
                           for same_inputs in [False]
-                          for n in [0, 1, 2, 3]
+                          for n in [0, 1, 2]
                           for get in ['ntk']
                           for proj in ['flatten', 'pool']
                           for use_attn in [True]
@@ -1774,13 +1775,13 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
       wrong_conv_fn(x1, x2)
 
     init_fn, apply_fn, correct_conv_fn = stax.serial(
-        stax.Conv(out_chan=2048, filter_shape=(1, 2, 3),
+        stax.Conv(out_chan=1024, filter_shape=(1, 2, 3),
                   dimension_numbers=('NHWDC', 'DHWIO', 'NCWDH')),
         stax.Relu(),
-        stax.Conv(out_chan=2048, filter_shape=(1, 2, 3),
+        stax.Conv(out_chan=1024, filter_shape=(1, 2, 3),
                   dimension_numbers=('NCHDW', 'WHDIO', 'NCDWH')),
         stax.Flatten(),
-        stax.Dense(2048)
+        stax.Dense(1024)
     )
 
     correct_conv_fn_mc = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn,
@@ -2286,16 +2287,15 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
     # converge on TPU.
     dropout_or_id = stax.Dropout(0.9) if platform != 'tpu' else stax.Identity()
 
-    init_fn, apply_fn, kernel_fn = \
+    init_fn, apply_fn, kernel_fn = stax.parallel(
         stax.parallel(
-            stax.parallel(
-                stax.parallel(stax.Dense(N_in),
-                              stax.serial(stax.Conv(N_in + 1, (2, 2)),
-                                          stax.Flatten())),
-                stax.serial(stax.Conv(N_in + 2, (2, 2)),
-                            dropout_or_id,
-                            stax.GlobalAvgPool())),
-            stax.Conv(N_in + 3, (2,)))
+            stax.parallel(stax.Dense(N_in),
+                          stax.serial(stax.Conv(N_in + 1, (2, 2)),
+                                      stax.Flatten())),
+            stax.serial(stax.Conv(N_in + 2, (2, 2)),
+                        dropout_or_id,
+                        stax.GlobalAvgPool())),
+        stax.Conv(N_in + 3, (2,)))
 
     # TODO(romann): after http://cl/390033200 `implementation=2` fails on GPU.
     # See also http://b/196270945.
@@ -2472,120 +2472,272 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
-              f'{get}-{name}-same_inp={same_input}-{act_name}-mask={test_mask}'
-              f'-shape={shape}-batch={do_batch}--sparse={sparse}',
+              f'{get}-{name}-same_inp={same_input}-{act_name}'
+              f'-mask_constant={mask_constant}'
+              f'-shape={shape}-batch_axis={batch_axis}'
+              f'-channel_axis={channel_axis}-agg_axes={agg_axes}'
+              f'-batch={do_batch}-to_dense={to_dense}'
+              f'-implementation={implementation}',
           'get': get,
           'readout': readout,
           'same_input': same_input,
           'activation': activation,
-          'test_mask': test_mask,
+          'mask_constant': mask_constant,
           'shape': shape,
+          'batch_axis': batch_axis,
+          'channel_axis': channel_axis,
+          'agg_axes': agg_axes,
           'do_batch': do_batch,
-          'sparse': sparse
-      } for get in ['ntk']
+          'implementation': implementation,
+          'to_dense': to_dense
+      }
+                          for get in [
+                              'nngp',
+                              'ntk',
+                          ]
+                          for same_input in [
+                              False,
+                              True
+                          ]
+                          for act_name, activation in [
+                              ('Relu', stax.Relu()),
+                          ]
+                          for mask_constant in [
+                              10.
+                          ]
+                          for shape in [
+                              (4,),
+                              (3, 2),
+                          ]
+                          for batch_axis in range(len(shape) + 2)
+                          for channel_axis in
+                          [
+                              c for c in range(len(shape) + 2)
+                              if c != batch_axis
+                          ]
+                          for agg_axes in [None] +
+                          list(more_itertools.powerset(
+                              [p for p in range(len(shape) + 2)
+                               if p not in (batch_axis, channel_axis)]))
+                          for do_batch in ([
+                              False,
+                              True
+                          ] if batch_axis == 0 else [False])
+                          for implementation in ['DENSE', 'SPARSE']
+                          for to_dense in [
+                              'identity',
+                              'sparse_to_dense',
+                          ]
                           for name, readout in [
-                              ('Pooling', stax.GlobalAvgPool())]
-                          for same_input in [True, False]
-                          for act_name, activation in [('Relu', stax.Relu())]
-                          for test_mask in [True]
-                          for shape in [(), (8,), (2, 3), (3, 1, 2)]
-                          for do_batch in [True, False]
-                          for sparse in [True, False]
+                              ('Pooling',
+                               stax.GlobalAvgPool(batch_axis=batch_axis,
+                                                  channel_axis=channel_axis)),
+                          ]
                           ))
-  def test_aggregate(self, get, readout, same_input, activation, test_mask,
-                     shape, do_batch, sparse):
-    batch1, batch2 = 8, 6
-    num_channels = 12
-    output_dims = 1 if get == 'ntk' else 1024
+  def test_aggregate(self, get, readout, same_input, activation, mask_constant,
+                     shape, batch_axis, channel_axis, agg_axes, do_batch,
+                     implementation, to_dense):
+    if xla_bridge.get_backend().platform == 'cpu' and len(shape) > 1:
+      raise absltest.SkipTest('Skipping large shapes on CPU.')
+
+    if implementation == 'SPARSE' and to_dense != 'identity':
+      raise absltest.SkipTest('`implementation="SPARSE"` ignores '
+                              '`to_dense` argument.')
+
+    if get == 'cov2' and same_input:
+      raise absltest.SkipTest('`get="cov2"` only defined for different inputs.')
+
+    if get in ('cov1', 'cov2') and do_batch:
+      raise absltest.SkipTest('Batching of empirical kernel does not work for '
+                              '`diagonal_axes != ()`.')
+
+    prandom.seed(1)
+    batch1, batch2 = 8, 4
+    num_channels = 1
+    output_dims = 1 if get == 'ntk' else 2**6
+
     key = random.PRNGKey(1)
     key, split1, split2 = random.split(key, 3)
+
     x1 = random.normal(split1, (batch1,) + shape + (num_channels,))
-    x2 = x1 if same_input else random.normal(
-        split2, (batch2,) + shape + (num_channels,))
-    if test_mask:
-      mask_constant = 10.
+    x1 = np.moveaxis(x1, (0, -1), (batch_axis, channel_axis))
+
+    if same_input:
+      x2 = None
+    else:
+      x2 = random.normal(split2, (batch2,) + shape + (num_channels,))
+      x2 = np.moveaxis(x2, (0, -1), (batch_axis, channel_axis))
+
+    if mask_constant is not None:
       key, split1, split2 = random.split(key, 3)
-      mask1 = random.bernoulli(split1, p=0.5, shape=(batch1,) + shape + (1,))
+
+      shape1 = list(x1.shape)
+      shape1[channel_axis] = 1
+      mask1 = random.bernoulli(split1, p=0.3, shape=shape1)
       x1 = np.where(mask1, mask_constant, x1)
-      if same_input:
-        x2 = x1
-      else:
-        mask2 = random.bernoulli(split2, p=0.5, shape=(batch2,) + shape + (1,))
+
+      if not same_input:
+        shape2 = list(x2.shape)
+        shape2[channel_axis] = 1
+        mask2 = random.bernoulli(split2, p=0.2, shape=shape2)
         x2 = np.where(mask2, mask_constant, x2)
+
     key, split1, split2 = random.split(key, 3)
 
-    if sparse:
-      def get_sparse_pattern(batch_size, rng):
-        n_edges_max = onp.prod((1,) + shape)**2
-        n_edges = prandom.randint(0, n_edges_max)
-        pattern = [np.zeros((batch_size, n_edges, 0), np.int32)]
+    agg_shape = shape if agg_axes is None else tuple(x1.shape[a]
+                                                     for a in agg_axes)
+    agg_ndim = len(agg_shape)
 
-        for d in range(len(shape)):
+    def sparse_to_dense(pattern):
+      if pattern is None:
+        return None
+
+      pattern = pattern.reshape(pattern.shape[:2] + (pattern.shape[2] * 2,))
+
+      bsz, n_edges, n_dims = pattern.shape
+      batch_range = np.broadcast_to(
+          np.arange(bsz).reshape((bsz, 1, 1)),
+          (bsz, n_edges, 1))
+      pattern = np.concatenate([batch_range, pattern], 2)
+      pattern = pattern.reshape((bsz * n_edges, n_dims + 1))
+      out = np.zeros((bsz,) + tuple(a for a in agg_shape for _ in (0, 1)))
+      out = out.at[tuple(pattern.T)].add(1.)
+      out = utils.unzip_axes(out, 1)
+      return out
+
+    if to_dense == 'sparse_to_dense' or implementation == 'SPARSE':
+      def get_sparse_pattern(batch_size, rng):
+        n_edges_max = onp.prod((1,) + agg_shape)**2
+        n_edges = prandom.randint(0, n_edges_max)
+        pattern = [np.zeros((batch_size, n_edges, 0, 2), np.int32)]
+
+        for d in range(agg_ndim):
           rng, _ = random.split(rng)
-          n_nodes = shape[d]
-          edges = random.randint(rng, (batch_size, n_edges, 2), 0, n_nodes)
+          n_nodes = agg_shape[d]
+          edges = random.randint(rng, (batch_size, n_edges, 1, 2), 0, n_nodes)
           pattern += [edges]
 
         pattern = np.concatenate(pattern, 2)
-        return pattern
 
-      def to_dense(pattern):
-        batch_size, n_edges, n_dims = pattern.shape
-        batch_range = np.broadcast_to(
-            np.arange(batch_size).reshape((batch_size, 1, 1)),
-            (batch_size, n_edges, 1))
-        pattern = np.concatenate([batch_range, pattern], 2)
-        pattern = pattern.reshape((batch_size * n_edges, n_dims + 1))
-        out = np.zeros((batch_size,) + shape * 2)
-        out = out.at[tuple(pattern.T)].set(1.)
-        return out
+        # TODO(romann): make masking work for NTK after
+        # https://github.com/google/jax/issues/7538.
+        if get != 'ntk':
+          mask = random.bernoulli(rng, p=0.2, shape=pattern.shape[:2])
+          # Make sure the receivers are masked to large negative number.
+          # The number needs to be larger than maximum size of `pattern` along
+          # any of the shape axes, to make `jax.ops.at` ignore these entries in
+          # `sparse_to_dense` above, otherwise they are treated as regular
+          # negative indices.
+          pattern = pattern.at[mask].set(-10000)
+
+        return pattern
 
       pattern1 = get_sparse_pattern(batch1, split1)
       pattern2 = pattern1 if same_input else get_sparse_pattern(batch2, split2)
 
     else:
-      pattern1 = random.uniform(split1, (batch1,) + shape * 2)
+      pattern1 = random.uniform(split1, (batch1,) + agg_shape * 2)
       pattern2 = pattern1 if same_input else random.uniform(
-          split2, (batch2,) + shape * 2)
-      to_dense = lambda x: x
+          split2, (batch2,) + agg_shape * 2)
 
     # Build the infinite network.
-    def get_nn(to_dense):
+    def get_nn(to_dense, implementation):
       return stax.serial(
-          stax.Dense(128 * 8),
+          stax.Dense(2**6, batch_axis=batch_axis, channel_axis=channel_axis),
           activation,
-          stax.Dropout(0.5, mode='train'),
-          stax.Aggregate(to_dense=to_dense),
+          stax.Aggregate(aggregate_axis=agg_axes,
+                         batch_axis=batch_axis,
+                         channel_axis=channel_axis,
+                         to_dense={
+                             'identity': lambda p: p,
+                             'sparse_to_dense': sparse_to_dense}[to_dense],
+                         implementation=implementation
+                         ),
           readout,
-          stax.Dense(output_dims))
+          stax.Dense(output_dims,
+                     batch_axis=int(batch_axis > channel_axis),
+                     channel_axis=int(batch_axis < channel_axis)))
 
-    init_fn, apply_fn, kernel_fn = get_nn(to_dense)
+    init_fn, apply_fn, kernel_fn = get_nn(to_dense, implementation)
+    apply_fn = jit(apply_fn)
+    kernel_fn = jit(kernel_fn, static_argnums=2)
 
     if do_batch:
-      kernel_fn = batch.batch(kernel_fn, batch_size=4)
+      kernel_fn = batch.batch(kernel_fn, batch_size=2)
 
-    kernel_mc_fn = monte_carlo.monte_carlo_kernel_fn(
-        init_fn, apply_fn, random.PRNGKey(10), 128,
-        batch_size=2 if xla_bridge.get_backend().platform == 'tpu' else 0,
-        implementation=2,
-    )
-    mask_constant = mask_constant if test_mask else None
-    empirical = kernel_mc_fn(x1, x2, get,
-                             mask_constant=mask_constant,
-                             pattern=(pattern1, pattern2))
     exact = kernel_fn(x1, x2, get,
                       mask_constant=mask_constant,
                       pattern=(pattern1, pattern2))
-    rtol = 0.03
-    test_utils.assert_close_matrices(self, exact, empirical, rtol)
 
-    if sparse:
-      _, _, kernel_fn_dense = get_nn(lambda x: x)
-      pattern1, pattern2 = to_dense(pattern1), to_dense(pattern2)
+    rtol = 0.08
+
+    if to_dense == 'sparse_to_dense' or implementation == 'SPARSE':
+      init_fn_dense, apply_fn_dense, kernel_fn_dense = get_nn('identity',
+                                                              'DENSE')
+      apply_fn_dense = jit(apply_fn_dense)
+      kernel_fn_dense = jit(kernel_fn_dense, static_argnums=2)
+
+      pattern1_dense = sparse_to_dense(pattern1)
+      pattern2_dense = sparse_to_dense(pattern2)
+
+      # Test parameters agreement
+      key, old = random.split(key, 2)
+      _, params_sparse = init_fn(key, x1.shape)
+      _, params_dense = init_fn_dense(key, x1.shape)
+      self.assertAllClose(params_dense, params_sparse)
+
+      # Test forward-pass agreement
+      fx1_dense = apply_fn_dense(params_dense, x1, pattern=pattern1_dense)
+      fx1_sparse = apply_fn(params_sparse, x1, pattern=pattern1)
+      test_utils.assert_close_matrices(self, fx1_dense, fx1_sparse, rtol)
+
+      if not same_input:
+        fx2_dense = apply_fn_dense(params_dense, x2, pattern=pattern2_dense)
+        fx2_sparse = apply_fn(params_sparse, x2, pattern=pattern2)
+        test_utils.assert_close_matrices(self, fx2_dense, fx2_sparse, rtol)
+
+      # Test agreement with analytic dense kernel
       exact_dense = kernel_fn_dense(x1, x2, get,
                                     mask_constant=mask_constant,
-                                    pattern=(pattern1, pattern2))
+                                    pattern=(pattern1_dense, pattern2_dense))
+
       self.assertAllClose(exact_dense, exact)
+
+    # Test agreement with empirical kernel
+    kernel_mc_fn = monte_carlo.monte_carlo_kernel_fn(
+        init_fn=init_fn,
+        apply_fn=apply_fn,
+        key=random.PRNGKey(10),
+        n_samples=2**6,
+        batch_size=2 if (xla_bridge.get_backend().platform == 'tpu'
+                         and batch_axis == 0) else 0,
+        device_count=-1 if batch_axis == 0 else 0,
+        implementation=2,
+        trace_axes=(int(batch_axis < channel_axis),)
+    )
+
+    if get in ('nngp', 'ntk'):
+      empirical = kernel_mc_fn(x1, x2, get,
+                               mask_constant=mask_constant,
+                               pattern=(pattern1, pattern2))
+
+    elif get in ('cov1', 'cov2'):
+      if get == 'cov1':
+        empirical = kernel_mc_fn(x1, None, 'nngp',
+                                 mask_constant=mask_constant,
+                                 pattern=(pattern1, pattern1))
+
+      elif get == 'cov2':
+        empirical = kernel_mc_fn(x2, None, 'nngp',
+                                 mask_constant=mask_constant,
+                                 pattern=(pattern2, pattern2))
+
+      empirical = np.moveaxis(np.diagonal(empirical), -1, 0)
+
+    else:
+      raise ValueError(get)
+
+    test_utils.assert_close_matrices(self, exact, empirical, rtol)
 
 
 class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
