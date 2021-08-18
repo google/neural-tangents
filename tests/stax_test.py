@@ -670,8 +670,8 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
 
     input_count = 4
     sparse_count = 2
-    input_size = 128
-    width = 4096
+    input_size = 3
+    width = 1024
 
     # NOTE(schsam): It seems that convergence is slower when inputs are sparse.
     samples = N_SAMPLES
@@ -713,8 +713,8 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
 
   def test_composition_dense(self):
     rng = random.PRNGKey(0)
-    x1 = random.normal(rng, (10, 10))
-    x2 = random.normal(rng, (10, 10))
+    x1 = random.normal(rng, (2, 3))
+    x2 = random.normal(rng, (4, 3))
 
     Block = stax.serial(stax.Dense(256), stax.Relu())
 
@@ -738,8 +738,8 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
       } for avg_pool in [True, False] for same_inputs in [True, False]))
   def test_composition_conv(self, avg_pool, same_inputs):
     rng = random.PRNGKey(0)
-    x1 = random.normal(rng, (5, 10, 10, 3))
-    x2 = None if same_inputs else random.normal(rng, (5, 10, 10, 3))
+    x1 = random.normal(rng, (3, 5, 5, 3))
+    x2 = None if same_inputs else random.normal(rng, (4, 5, 5, 3))
 
     Block = stax.serial(stax.Conv(256, (3, 3)), stax.Relu())
     if avg_pool:
@@ -1067,14 +1067,14 @@ class ABReluTest(test_utils.NeuralTangentsTestCase):
 
   def test_ab_relu_relu(self, same_inputs, do_stabilize):
     key = random.PRNGKey(1)
-    X0_1 = random.normal(key, (5, 7))
-    fc = stax.Dense(10, 1, 0)
+    X0_1 = random.normal(key, (3, 2))
+    fc = stax.Dense(5, 1, 0)
 
     # Test that ABRelu(0, 1) == ReLU
     init_fn, apply_relu, kernel_fn_relu = stax.serial(fc, stax.Relu())
-    _, params = init_fn(key, input_shape=(-1, 7))
+    _, params = init_fn(key, input_shape=X0_1.shape)
 
-    X0_2 = None if same_inputs else random.normal(key, (9, 7))
+    X0_2 = None if same_inputs else random.normal(key, (4, 2))
 
     for a, b in [(0, 1), (0, -1), (-1, 0), (1, 0)]:
       with self.subTest(a=a, b=b):
@@ -1091,14 +1091,14 @@ class ABReluTest(test_utils.NeuralTangentsTestCase):
 
   def test_ab_relu_id(self, same_inputs, do_stabilize):
     key = random.PRNGKey(1)
-    X0_1 = random.normal(key, (5, 7))
-    fc = stax.Dense(10, 1, 0)
+    X0_1 = random.normal(key, (3, 2))
+    fc = stax.Dense(5, 1, 0)
 
-    X0_2 = None if same_inputs else random.normal(key, (9, 7))
+    X0_2 = None if same_inputs else random.normal(key, (4, 2))
 
     # Test that ABRelu(a, a) == a * Identity
     init_fn, apply_id, kernel_fn_id = stax.serial(fc, stax.Identity())
-    _, params = init_fn(key, input_shape=(-1, 7))
+    _, params = init_fn(key, input_shape=X0_1.shape)
 
     for a in [-5, -1, -0.5, 0, 0.5, 1, 5]:
       with self.subTest(a=a):
@@ -1118,10 +1118,10 @@ class ABReluTest(test_utils.NeuralTangentsTestCase):
 
   def test_leaky_relu(self, same_inputs, do_stabilize):
     key = random.PRNGKey(1)
-    X0_1 = random.normal(key, (5, 7))
-    fc = stax.Dense(10, 1, 0)
+    X0_1 = random.normal(key, (3, 2))
+    fc = stax.Dense(5, 1, 0)
 
-    X0_2 = None if same_inputs else random.normal(key, (9, 7))
+    X0_2 = None if same_inputs else random.normal(key, (4, 2))
 
     # Test that ABRelu(alpha, 1) == LeakyRelu(alpha)
     for a in [-2, -1, 0, 1, 2]:
@@ -1130,7 +1130,7 @@ class ABReluTest(test_utils.NeuralTangentsTestCase):
             fc, stax.LeakyRelu(a, do_stabilize=do_stabilize))
         _, apply_ab_relu, kernel_fn_ab_relu = stax.serial(fc, stax.ABRelu(a, 1))
 
-        _, params = init_fn(key, input_shape=(-1, 7))
+        _, params = init_fn(key, input_shape=X0_1.shape)
         X1_1_leaky_relu = apply_leaky_relu(params, X0_1)
         X1_1_ab_relu = apply_ab_relu(params, X0_1)
         self.assertAllClose(X1_1_leaky_relu, X1_1_ab_relu)
@@ -1141,17 +1141,17 @@ class ABReluTest(test_utils.NeuralTangentsTestCase):
 
   def test_abs(self, same_inputs, do_stabilize):
     key = random.PRNGKey(1)
-    X0_1 = random.normal(key, (5, 7))
-    fc = stax.Dense(10, 1, 0)
+    X0_1 = random.normal(key, (3, 2))
+    fc = stax.Dense(5, 1, 0)
 
-    X0_2 = None if same_inputs else random.normal(key, (9, 7))
+    X0_2 = None if same_inputs else random.normal(key, (4, 2))
 
     # Test that Abs == ABRelu(-1, 1)
     init_fn, apply_leaky_relu, kernel_fn_abs = stax.serial(
         fc, stax.Abs(do_stabilize=do_stabilize))
     _, apply_ab_relu, kernel_fn_ab_relu = stax.serial(fc, stax.ABRelu(-1, 1))
 
-    _, params = init_fn(key, input_shape=(-1, 7))
+    _, params = init_fn(key, input_shape=X0_1.shape)
     X1_1_abs = apply_leaky_relu(params, X0_1)
     X1_1_ab_relu = apply_ab_relu(params, X0_1)
     self.assertAllClose(X1_1_abs, X1_1_ab_relu)
@@ -1173,8 +1173,8 @@ class FlattenTest(test_utils.NeuralTangentsTestCase):
 
   def test_flatten(self, same_inputs):
     key = random.PRNGKey(1)
-    X0_1 = random.normal(key, (8, 4, 3, 2))
-    X0_2 = None if same_inputs else random.normal(key, (4, 4, 3, 2))
+    X0_1 = random.normal(key, (4, 4, 3, 2))
+    X0_2 = None if same_inputs else random.normal(key, (2, 4, 3, 2))
 
     X0_1_flat = np.reshape(X0_1, (X0_1.shape[0], -1))
     X0_2_flat = None if same_inputs else np.reshape(X0_2, (X0_2.shape[0], -1))

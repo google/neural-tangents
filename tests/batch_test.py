@@ -554,14 +554,14 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
 
     input_key1, input_key2, net_key = random.split(rng, 3)
 
-    init_fn, apply_fn, _ = stax.serial(stax.Dense(256),
+    init_fn, apply_fn, _ = stax.serial(stax.Dense(5),
                                        stax.Relu(),
-                                       stax.Dense(10))
+                                       stax.Dense(3))
 
-    test_x1 = random.normal(input_key1, (50, 4, 4))
+    test_x1 = random.normal(input_key1, (12, 4, 4))
     test_x2 = None
     if same_inputs:
-      test_x2 = random.normal(input_key2, (60, 4, 4))
+      test_x2 = random.normal(input_key2, (9, 4, 4))
 
     kernel_fn = empirical.empirical_ntk_fn(apply_fn,
                                            trace_axes=trace_axes,
@@ -572,7 +572,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     _, params = init_fn(net_key, test_x1.shape)
 
     true_kernel = kernel_fn(test_x1, test_x2, params)
-    batched_fn = batch.batch(kernel_fn, device_count=device_count, batch_size=5)
+    batched_fn = batch.batch(kernel_fn, device_count=device_count, batch_size=3)
     batch_kernel = batched_fn(test_x1, test_x2, params)
     self.assertAllClose(true_kernel, batch_kernel)
 
