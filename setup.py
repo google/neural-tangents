@@ -29,13 +29,9 @@ with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
 
 
 INSTALL_REQUIRES = [
-    'jax>=0.1.77',
+    'jax>=0.2.18',
     'frozendict>=1.2',
 ]
-
-
-if sys.version_info < (3, 7):
-  INSTALL_REQUIRES += ['dataclasses>=0.7']
 
 
 def _get_version() -> str:
@@ -76,9 +72,8 @@ setuptools.setup(
     long_description=long_description,
     long_description_content_type='text/markdown',
     description='Fast and Easy Infinite Neural Networks in Python',
-    python_requires='>=3.6',
+    python_requires='>=3.7',
     classifiers=[
-        'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
