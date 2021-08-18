@@ -257,7 +257,10 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
     raise ValueError(proj_into_2d)
   readout = stax.serial(proj_layer, fc(1 if is_ntk else width))
 
-  device_count = -1 if spec.index('N') == 0 else 0
+  device_count = 0
+  # TODO(http://b/160064607): uncomment when the bug is fixed.
+  # device_count = -1 if spec.index('N') == 0 else 0
+
   return stax.serial(block, readout), input_shape, device_count, channel_axis_fc
 
 
@@ -289,9 +292,12 @@ def _get_net_pool(width, is_ntk, pool_type, padding,
 
   pool = pool_fn(filter_shape, strides, padding)
 
+  # TODO(http://b/160064607): set to `-1` when the bug is fixed.
+  device_count = 0
+
   return stax.serial(
       conv(width), phi, pool, conv(width), phi, global_pool_fn(),
-      fc(1 if is_ntk else width)), INPUT_SHAPE, -1, -1
+      fc(1 if is_ntk else width)), INPUT_SHAPE, device_count, -1
 
 
 def _mask(x, mask_constant, mask_axis, key, p):
@@ -497,7 +503,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
                    padding, phi, strides, width, is_ntk, proj_into_2d,
                    pool_type, layer_norm, parameterization, use_dropout)
     self._check_agreement_with_empirical(net, same_inputs, use_dropout, is_ntk,
-                                         0.05)
+                                         0.07)
 
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
@@ -689,10 +695,13 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
         activation,
         stax.Dense(1 if kernel == 'ntk' else width))
     exact = kernel_fn(x_sparse, None, kernel)
+
+    # TODO(http://b/160064607): set to `device_count=-1` when the bug is fixed.
     mc = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn,
                                            random.split(key, 2)[0],
                                            samples,
                                            vmap_axes=0,
+                                           device_count=0,
                                            implementation=2)(x_sparse,
                                                              None,
                                                              kernel)
