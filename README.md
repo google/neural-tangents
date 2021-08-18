@@ -126,6 +126,7 @@ x2 = random.normal(key2, (20, 100))
 
 kernel = kernel_fn(x1, x2, 'nngp')
 ```
+
 Note that `kernel_fn` can compute _two_ covariance matrices corresponding to the Neural Network Gaussian Process (NNGP) and Neural Tangent (NT) kernels respectively. The NNGP kernel corresponds to the _Bayesian_ infinite neural network [[1-5]](#5-deep-neural-networks-as-gaussian-processes). The NTK corresponds to the _(continuous) gradient descent trained_ infinite network [[10]](#10-neural-tangent-kernel-convergence-and-generalization-in-neural-networks). In the above example, we compute the NNGP kernel but we could compute the NTK or both:
 
 ```python
