@@ -870,11 +870,9 @@ def _div(x, y):
   return tree_map(lambda x: x / y, x)
 
 
-def _squeeze(x, axis, take=False):
+def _squeeze(x, axis):
   if axis is None:
     return x
-  if take:
-    return tree_multimap(lambda x, axis: np.take(x, 0, axis), x, axis)
   return tree_multimap(np.squeeze, x, axis)
 
 
