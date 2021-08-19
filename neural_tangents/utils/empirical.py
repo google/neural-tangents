@@ -18,10 +18,10 @@ All functions in this module are applicable to any JAX functions of proper
 signatures (not only those from `nt.stax`).
 
 NNGP and NTK are computed using `empirical_nngp_fn`, `empirical_ntk_fn`, or
- `empirical_kernel_fn` (for both). The kernels have a very specific output
-shape convention that may be unexpected. Further, NTK has multiple
-implementations that may perform differently depending on the task.
-Please read individual functions' docstrings.
+`empirical_kernel_fn` (for both). The kernels have a very specific output shape
+convention that may be unexpected. Further, NTK has multiple implementations
+that may perform differently depending on the task. Please read individual
+functions' docstrings.
 
 Example:
   >>>  from jax import random
