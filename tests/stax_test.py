@@ -2290,7 +2290,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
     x1 = (((x1_1, x1_2), x1_3), x1_4)
     x2 = (((x2_1, x2_2), x2_3), x2_4) if not same_inputs else None
 
-    N_in = 2 ** 8
+    N_in = 2 ** 7
 
     # We only include dropout on non-TPU backends, because it takes large N to
     # converge on TPU.
