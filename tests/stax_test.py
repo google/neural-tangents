@@ -2314,11 +2314,8 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
                         stax.GlobalAvgPool())),
         stax.Conv(N_in + 3, (2,)))
 
-    # TODO(romann): after http://cl/390033200 `implementation=2` fails on GPU.
-    # See also http://b/196270945.
-    implementation = 1 if xla_bridge.get_backend().platform == 'gpu' else 2
     kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
-        init_fn, apply_fn, mc_key, N_SAMPLES, implementation=implementation,
+        init_fn, apply_fn, mc_key, N_SAMPLES, implementation=2,
         vmap_axes=(((((0, 0), 0), 0), (((0, 0), 0), 0), {})
                    if platform == 'tpu' else None)
     )
