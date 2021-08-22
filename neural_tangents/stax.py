@@ -3460,6 +3460,195 @@ def ElementwiseNumerical(
   return _elementwise(fn, f'ElementwiseNumerical({fn},deg={deg})', kernel_fn)
 
 
+@layer
+@supports_masking(remask_kernel=True)
+def ImageResize(
+    shape: Sequence[int],
+    method: Union[str, jax.image.ResizeMethod],
+    antialias: bool = True,
+    precision: lax.Precision = lax.Precision.HIGHEST,
+    batch_axis: int = 0,
+    channel_axis: int = -1
+) -> InternalLayer:
+  """Image resize function mimicking `jax.image.resize`.
+
+  Docstring adapted from https://jax.readthedocs.io/en/latest/_modules/jax/_src/image/scale.html#resize.
+  Note two changes:
+    1. Only `"linear"` and `"nearest"` interpolation methods are supported;
+    2. Set `shape[i]` to `-1` if you want dimension `i` of `inputs` unchanged.
+
+  The `method` argument expects one of the following resize methods:
+
+  `ResizeMethod.NEAREST`, `"nearest"`:
+    Nearest neighbor interpolation_. The values of `antialias` and `precision`
+    are ignored.
+
+  `ResizeMethod.LINEAR`, `"linear"`, `"bilinear"`, `"trilinear"`, `"triangle"`:
+    Linear interpolation_. If `antialias` is ``True``, uses a triangular filter
+    when downsampling.
+
+  The following methods are NOT SUPPORTED in `kernel_fn` (only `init_fn` and
+  `apply_fn` work):
+
+  `ResizeMethod.CUBIC`, `"cubic"`, `"bicubic"`, `"tricubic"`:
+    Cubic interpolation_, using the Keys cubic kernel.
+
+  `ResizeMethod.LANCZOS3`, `"lanczos3"`:
+    Lanczos resampling_, using a kernel of radius 3.
+
+  `ResizeMethod.LANCZOS5`, `"lanczos5"`:
+    Lanczos resampling_, using a kernel of radius 5.
+
+  .. _Nearest neighbor interpolation: https://en.wikipedia.org/wiki/Nearest-neighbor_interpolation
+  .. _Linear interpolation: https://en.wikipedia.org/wiki/Bilinear_interpolation
+  .. _Cubic interpolation: https://en.wikipedia.org/wiki/Bicubic_interpolation
+  .. _Lanczos resampling: https://en.wikipedia.org/wiki/Lanczos_resampling
+
+  Args:
+    shape:
+      the output shape, as a sequence of integers with length equal to
+      the number of dimensions of `image`. Note that :func:`resize` does not
+      distinguish spatial dimensions from batch or channel dimensions, so this
+      includes all dimensions of the image. To leave a certain dimension
+      (e.g. batch or channel) unchanged, set the respective entry to `-1`.
+      Note that setting it to the respective size of the `input` also works,
+      but will make `kernel_fn` computation much more expensive with no benefit.
+      Further, note that `kernel_fn` does not support resizing the
+      `channel_axis`, therefore `shape[channel_axis]` should be set to `-1`.
+
+    method:
+      the resizing method to use; either a `ResizeMethod` instance or a
+      string. Available methods are: `"LINEAR"`, `"NEAREST"`. Other methods
+      like `"LANCZOS3"`, `"LANCZOS5"`, `"CUBIC"` only work for `apply_fn`, but
+      not `kernel_fn`.
+
+    antialias:
+      should an antialiasing filter be used when downsampling? Defaults to
+      `True`. Has no effect when upsampling.
+
+    precision:
+      `np.einsum` precision.
+
+    batch_axis:
+      batch axis for `inputs`. Defaults to `0`, the leading axis.
+
+    channel_axis:
+      channel axis for `inputs`. Defaults to `-1`, the trailing axis. For
+      `kernel_fn`, channel size is considered to be infinite.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  def _shape(input_shape):
+    return tuple(s if s != -1 else input_shape[i] for i, s in enumerate(shape))
+
+  def init_fn(rng, input_shape):
+    return _shape(input_shape), ()
+
+  def apply_fn(params, x, **kwargs):
+    return jax.image.resize(image=x,
+                            shape=_shape(x.shape),
+                            method=method,
+                            antialias=antialias,
+                            precision=precision)
+
+  def mask_fn(mask, input_shape):
+    # Interploation (except for "NEAREST") is done in float format:
+    # https://github.com/google/jax/issues/3811. Float converted back to bool
+    # rounds up all non-zero elements to `True`, so naively resizing the `mask`
+    # will mark any output that has at least one contribution from a masked
+    # input as fully masked. This can lead to mask growing unexpectedly, e.g.
+    # consider a 5x5 image with a single masked pixel in the center:
+    #
+    # >>> mask = np.array([[0, 0, 0, 0, 0],
+    # >>>                  [0, 0, 0, 0, 0],
+    # >>>                  [0, 0, 1, 0, 0],
+    # >>>                  [0, 0, 0, 0, 0],
+    # >>>                  [0, 0, 0, 0, 0]], dtype=np.bool_)
+    #
+    # Downsampling this mask to 2x2 will mark all output pixels as masked!
+    #
+    # >>> jax.image.resize(mask, (2, 2), method='bilinear').astype(np.bool_)
+    # >>> DeviceArray([[ True,  True],
+    # >>>              [ True,  True]], dtype=bool)
+    #
+    # Therefore, througout `stax` we rather follow the convention of marking
+    # outputs as masked if they _only_ have contributions from masked elements
+    # (in other words, we don't let the mask destroy information; let content
+    # have preference over mask). For this we invert the mask before and after
+    # resizing, to round up unmasked outputs instead.
+    return ~jax.image.resize(image=~mask,
+                             shape=_shape(mask.shape),
+                             method=method,
+                             antialias=antialias,
+                             precision=precision).astype(np.bool_)
+
+  batch_axis, channel_axis = utils.mod((batch_axis, channel_axis), shape)
+
+  diagonal_batch = shape[batch_axis] == -1
+  diagonal_spatial = _Diagonal(
+      input=_Bool.NO
+      if any(shape[i] != -1 for i in range(len(shape))
+             if i not in (batch_axis, channel_axis))
+      else _Bool.YES)  # pytype:disable=wrong-keyword-args
+
+  @_requires(batch_axis=batch_axis,
+             channel_axis=channel_axis,
+             diagonal_batch=diagonal_batch,
+             diagonal_spatial=diagonal_spatial)  # pytype:disable=wrong-keyword-args
+  def kernel_fn(k: Kernel, **kwargs) -> Kernel:
+    if isinstance(method, str):
+      _method = jax.image.ResizeMethod.from_string(method)
+
+    if _method not in (jax.image.ResizeMethod.LINEAR,
+                       jax.image.ResizeMethod.NEAREST):
+      raise NotImplementedError(
+          f'Only "linear" (`jax.image.ResizeMethod.LINEAR`) and '
+          f'"nearest" (`jax.image.ResizeMethod.NEAREST`) interpolation is '
+          f'supported in `kernel_fn`, got {_method}.')
+
+    if shape[channel_axis] != -1:
+      raise ValueError(f'Resizing the channel axis {channel_axis} is not '
+                       f'well-defined in the infinite-width limit. Please '
+                       f'either set `shape[channel_axis] = -1` or file '
+                       f'an issue describing your use case at '
+                       f'https://github.com/google/neural-tangents/issues/new.')
+
+    cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
+    diagonal_spatial = k.diagonal_spatial
+
+    def resize(k, shape1, shape2, diagonal_batch):
+      if k is None or k.ndim == 0:
+        return k
+
+      k_shape = (shape1[batch_axis],)
+      if not diagonal_batch:
+        k_shape += (shape2[batch_axis],)
+
+      for i, (s1, s2) in enumerate(zip(shape1, shape2)):
+        if i not in (batch_axis, channel_axis):
+          k_shape += (s1,)
+          if not diagonal_spatial:
+            k_shape += (s2,)
+
+      return jax.image.resize(image=k,
+                              shape=k_shape,
+                              method=_method,
+                              antialias=antialias,
+                              precision=precision)
+
+    shape1 = _shape(k.shape1)
+    shape2 = _shape(k.shape2)
+
+    k = k.replace(cov1=resize(cov1, shape1, shape1, k.diagonal_batch),
+                  nngp=resize(nngp, shape1, shape2, False),
+                  cov2=resize(cov2, shape2, shape2, k.diagonal_batch),
+                  ntk=resize(ntk, shape1, shape2, False))
+    return k
+
+  return init_fn, apply_fn, kernel_fn, mask_fn
+
+
 # INTERNAL UTILITIES
 
 

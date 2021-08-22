@@ -3221,6 +3221,288 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
     self.assertAllClose(np.full_like(k[2:], 4.), k[2:])
 
 
+class ImageResizeTest(test_utils.NeuralTangentsTestCase):
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list(
+          {
+              'testcase_name':
+                  ' [{}_n={}_channel_axis={}_'
+                  'batch_axis={}_batch={}_spatial={}_method={}_antialias={}_'
+                  'precison={}_shape={}]'.format(
+                      'same_inputs' if same_inputs else 'different_inputs',
+                      n,
+                      channel_axis,
+                      batch_axis,
+                      diagonal_batch,
+                      diagonal_spatial,
+                      method,
+                      antialias,
+                      precision,
+                      shape
+                  ),
+              'same_inputs': same_inputs,
+              'n': n,
+              'channel_axis': channel_axis,
+              'batch_axis': batch_axis,
+              'diagonal_spatial': diagonal_spatial,
+              'diagonal_batch': diagonal_batch,
+              'method': method,
+              'antialias': antialias,
+              'precision': precision,
+              'shape': shape
+          }
+          for same_inputs in [
+              True,
+              False
+          ]
+          for n in [
+              2,
+              3,
+              4
+          ]
+          for batch_axis in range(n)
+          for channel_axis in [i for i in range(n) if i != batch_axis]
+          for diagonal_spatial in [
+              True,
+              False
+          ]
+          for diagonal_batch in [
+              True,
+              False
+          ]
+          for method in [
+              'linear',
+              'nearest'
+          ]
+          for antialias in [
+              True,
+              False
+          ]
+          for precision in [
+              lax.Precision.HIGHEST,
+              lax.Precision.HIGH,
+              lax.Precision.DEFAULT
+          ]
+          for shape in [s[:n] for s in [
+              (-1, 2, 3, 4),
+              (-1, 3, -1, 4),
+              (10, 5, 1, 8),
+              (5, -1, 2, 3)
+          ]]
+      )
+  )
+  def test_image_resize(self, same_inputs, n, channel_axis, diagonal_spatial,
+                        diagonal_batch, batch_axis, method, antialias,
+                        precision, shape):
+    if xla_bridge.get_backend().platform == 'cpu' and n > 2:
+      raise absltest.SkipTest(f'Skipping n = {n} on CPU.')
+
+    n_b1, n_b2 = 2, 4
+    n_c = 1
+    key1, key2, key3 = random.split(random.PRNGKey(1), 3)
+
+    shape = shape[:channel_axis] + (-1,) + shape[channel_axis + 1:]
+
+    x_shape_n_c = [2, 4, 6, 8, 10, 12, 14][:n - 2]
+    x_shape = list(x_shape_n_c)
+
+    for a in sorted((batch_axis, channel_axis)):
+      x_shape.insert(a, n_b1 if a == batch_axis else n_c)
+
+    mask_constant = 10.
+
+    x1 = np.cos(random.normal(key1, x_shape))
+    mask1 = random.bernoulli(key1, p=0.3, shape=x1.shape)
+    x1 = np.where(mask1, mask_constant, x1)
+
+    if same_inputs:
+      x2 = None
+    else:
+      x2_shape = (x_shape[:batch_axis] +
+                  [n_b2] +
+                  x_shape[batch_axis + 1:])
+      x2 = np.cos(random.normal(key2, x2_shape))
+      mask2 = random.bernoulli(key2, p=0.2, shape=x2.shape)
+      x2 = np.where(mask2, mask_constant, x2)
+
+    init_fn, apply_fn, kernel_fn = stax.ImageResize(method=method,
+                                                    antialias=antialias,
+                                                    precision=precision,
+                                                    batch_axis=batch_axis,
+                                                    channel_axis=channel_axis,
+                                                    shape=shape
+                                                    )
+    def get_exact():
+      return kernel_fn(x1, x2,
+                       diagonal_spatial=diagonal_spatial,
+                       diagonal_batch=diagonal_batch,
+                       batch_axis=batch_axis,
+                       channel_axis=channel_axis,
+                       mask_constant=mask_constant
+                       )
+
+    if ((shape[batch_axis] != -1 and diagonal_batch) or
+        (any(shape[i] != -1 for i in range(len(shape))
+            if i not in (batch_axis, channel_axis)) and diagonal_spatial)):
+      self.assertRaises(ValueError, get_exact)
+
+    else:
+      exact = get_exact()
+
+      def get_empirical(get):
+        def get_diagonal_axes():
+          axes = ()
+          if get in ('cov1', 'cov2') and diagonal_batch:
+            axes += (batch_axis,)
+
+          if diagonal_spatial:
+            axes += tuple(i for i in range(n)
+                          if i not in (batch_axis, channel_axis))
+
+          return axes
+
+        kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+            init_fn=init_fn,
+            apply_fn=apply_fn,
+            key=key1,
+            n_samples=1,
+            trace_axes=(channel_axis,),
+            diagonal_axes=get_diagonal_axes(),
+            device_count=-1 if (get == 'nngp' and
+                                batch_axis == 0 and
+                                shape[batch_axis] == -1) else 0,
+            implementation=2,
+        )
+
+        empirical = kernel_fn_mc(x1=x2 if get == 'cov2' else x1,
+                                 x2=x2 if get == 'nngp' else None,
+                                 get='nngp',
+                                 batch_axis=batch_axis,
+                                 channel_axis=channel_axis,
+                                 mask_constant=mask_constant
+                                 )
+
+        def batch_axes():
+          axis = batch_axis
+          if channel_axis < batch_axis:
+            axis -= 1
+          if not diagonal_spatial:
+            axis *= 2
+
+          if get in ('cov1', 'cov2') and diagonal_batch:
+            return (axis,), (0,)
+          return (axis, axis + 1), (0, 1)
+
+        empirical = np.moveaxis(empirical, *batch_axes())
+        return empirical
+
+      for get in ('nngp', 'cov1', 'cov2'):
+        if get == 'cov2' and same_inputs:
+          continue
+
+        with self.subTest(get=get):
+          tol = 1e-2 if xla_bridge.get_backend().platform == 'tpu' else 1e-5
+          test_utils.assert_close_matrices(
+              self, get_empirical(get), getattr(exact, get), tol)
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list(
+          {
+              'testcase_name': ' [{}_get={}_n={}_{}_{}_{}_shape={}]'.format(
+                  'same_inputs' if same_inputs else 'different_inputs',
+                  get,
+                  n,
+                  'pool' if do_pool else 'flat',
+                  method,
+                  bottom_layer,
+                  shape
+              ),
+              'same_inputs': same_inputs,
+              'get': get,
+              'n': n,
+              'do_pool': do_pool,
+              'method': method,
+              'bottom_layer': bottom_layer,
+              'shape': shape
+          }
+          for same_inputs in [False, True]
+          for get in ['ntk']
+          for do_pool in [True, False]
+          for n in [3]
+          for bottom_layer in ['resize', 'conv', 'relu']
+          for method in ['linear', 'nearest']
+          for shape in [
+              (1, 2, 4),
+              (2, 1, 1),
+              (-1, 2, -1),
+              (2, 4, -1),
+              (9, -1, -1),
+              (-1, -1, -1),
+              (3, 4, -1),
+              (1, 1, -1),
+          ]
+      )
+  )
+  def test_image_resize_nn(self, same_inputs, get, n, do_pool, bottom_layer,
+      method, shape):
+    # if xla_bridge.get_backend().platform == 'cpu' and n != 2:
+    #   raise absltest.SkipTest(f'Skipping n = {n} on CPU.')
+
+    width = 2**7
+    n_samples = 2**7
+    tol = 0.03
+    key1, key2, key3 = random.split(random.PRNGKey(1), 3)
+
+    mask_constant = 10.
+
+    x_shape = [6, 3, 4, 5][:n - 1] + [1]
+    x1 = np.cos(random.normal(key1, x_shape))
+    mask1 = random.bernoulli(key1, p=0.2, shape=x1.shape)
+    x1 = np.where(mask1, mask_constant, x1)
+
+    if same_inputs:
+      x2 = None
+    else:
+      x2 = np.cos(random.normal(key2, x_shape))
+      mask2 = random.bernoulli(key2, p=0.1, shape=x2.shape)
+      x2 = np.where(mask2, mask_constant, x2)
+
+    bottom = {'conv': stax.Conv(width, (3,) * (n - 2), padding='SAME'),
+              'relu': stax.serial(
+                  stax.Conv(width, (3,) * (n - 2), padding='SAME'),
+                  stax.Relu()),
+              'resize': stax.Identity()}[bottom_layer]
+
+    init_fn, apply_fn, kernel_fn = stax.serial(
+        bottom,
+        stax.ImageResize(method=method,
+                         shape=shape),
+        stax.Conv(width, (2,), padding='SAME'),
+        stax.Relu(),
+        (stax.GlobalAvgPool() if do_pool else stax.Flatten()),
+        stax.Dense(width if get == 'nngp' else 1, 0.9, 0.1)
+    )
+
+    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+        init_fn, apply_fn, key1, n_samples,
+        device_count=0,
+        implementation=2
+    )
+
+    empirical = kernel_fn_mc(x1, x2, get, mask_constant=mask_constant)
+
+    def get_exact():
+      return kernel_fn(x1, x2, get, mask_constant=mask_constant)
+
+    if shape[-1] != -1:
+      # Make sure an error is thrown if resizing a channel axis is requested.
+      self.assertRaises(ValueError, get_exact)
+    else:
+      exact = get_exact()
+      test_utils.assert_close_matrices(self, empirical, exact, tol)
+
+
 class ConvLocalTest(test_utils.NeuralTangentsTestCase):
 
   @jtu.parameterized.named_parameters(
