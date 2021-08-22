@@ -489,10 +489,7 @@ def DotGeneral(*,
   def mask_fn(mask, input_shape):
     mask_shape = list(input_shape)
     mask_shape[channel_axis] = mask.shape[channel_axis]
-    # TODO(romann): simplify after https://github.com/google/jax/issues/5406
-    # (http://b/177524741) is fixed.
-    return ~dot_fn(
-        ~np.broadcast_to(mask, mask_shape)).astype(np.float32).astype(np.bool_)
+    return ~dot_fn(~np.broadcast_to(mask, mask_shape))
 
   return init_fn, apply_fn, kernel_fn, mask_fn
 
@@ -596,7 +593,8 @@ def Aggregate(
     >>>                            minval=0,
     >>>                            maxval=x.shape[2])
     >>>
-    >>>  # Setting `implementation=2` to invoke the segment sum implementation.
+    >>>  # Setting `implementation="SPARSE"` to invoke the segment sum
+    >>>  # implementation.
     >>>  init_fn, apply_fn, kernel_fn = stax.Aggregate(aggregate_axis=2,
     >>>                                                batch_axis=0,
     >>>                                                channel_axis=1,
@@ -1615,8 +1613,7 @@ def FanInSum() -> InternalLayer:
     if not is_gaussian and len(ks) != 1:
       # TODO(xlc): FanInSum/FanInConcat could allow non-Gaussian inputs, but
       # we need to propagate the mean of the random variables as well.
-      raise NotImplementedError('`FanInSum` or `FanInConcat` along the '
-                                'non-channel axis is only implemented for the '
+      raise NotImplementedError('`FanInSum` is only implemented for the '
                                 'case where all input layers guaranteed to be '
                                 'mean-zero Gaussian, i.e. having all '
                                 '`is_gaussian` set to `True`, got '
