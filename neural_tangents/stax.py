@@ -3006,14 +3006,21 @@ def Sigmoid_like():
 
 @layer
 @supports_masking(remask_kernel=False)
-def Gelu() -> InternalLayer:
+def Gelu(
+    approximate: bool = False) -> InternalLayer:
   """Gelu function.
+
+  Args:
+    approximate:
+      only relevant for finite-width network, `apply_fn`. If `True`, computes
+      an approximation via `tanh`, see https://arxiv.org/abs/1606.08415 and
+      `jax.nn.gelu` for details.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
   def fn(x):
-    return 0.5 * x * (1. + erf(x / np.sqrt(2.)))
+    return jax.nn.gelu(x, approximate=approximate)
 
   @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:

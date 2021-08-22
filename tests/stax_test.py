@@ -909,12 +909,13 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
   @jtu.parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
-              '_{}_{}_{}_{}_{}'.format(
+              '_model={}_phi={}_{}_get={}_abc={}_approximate={}'.format(
                   model,
                   phi_name,
                   'Same_inputs' if same_inputs else 'Different_inputs',
                   get,
-                  abc),
+                  abc,
+                  approximate),
           'model':
               model,
           'phi_name':
@@ -923,20 +924,27 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
               same_inputs,
           'get': get,
           'abc': abc,
+          'approximate': approximate
       }
                           for model in ['fc', 'conv-pool', 'conv-flatten']
                           for phi_name in ['Sin', 'Cos', 'Erf', 'Gelu', 'Sign']
                           for same_inputs in [False]
                           for get in ['nngp', 'ntk']
+                          for approximate in [True, False]
                           for abc in itertools.product(
                               [2., 0.3],
                               [1.5, 0.3],
                               [0., -np.pi/4., np.pi/2.])))
-  def test_activation(self, same_inputs, model, phi_name, get, abc):
+  def test_activation(self, same_inputs, model, phi_name, get, abc,
+                      approximate):
     platform = xla_bridge.get_backend().platform
     if platform == 'cpu':
       if abc != [0.3, 1.5, -np.pi/4]:
         raise absltest.SkipTest('Skipping Activation test on CPU to save time.')
+
+    if approximate and phi_name != 'Gelu':
+      raise absltest.SkipTest(
+          f'{phi_name} does not have an `approximate parameter.')
 
     a, b, c = abc
     if phi_name == 'Sin':
