@@ -17,8 +17,6 @@
 
 
 import os
-import sys
-
 import setuptools
 
 
@@ -58,15 +56,20 @@ setuptools.setup(
     name='neural-tangents',
     version=_get_version(),
     license='Apache 2.0',
-    author='Google',
-    author_email='neural-tangents-dev@google.com',
+    author='Neural Tangents developers',
+    author_email='nt@google.com',
     install_requires=INSTALL_REQUIRES,
     url='https://github.com/google/neural-tangents',
     download_url='https://pypi.org/project/neural-tangents/',
     project_urls={
         'Source Code': 'https://github.com/google/neural-tangents',
-        'Documentation': 'https://arxiv.org/abs/1912.02803',
+        'Paper': 'https://arxiv.org/abs/1912.02803',
+        'Video': 'https://iclr.cc/virtual_2020/poster_SklD9yrFPS.html',
+        'Documentation': 'https://neural-tangents.readthedocs.io/en/latest/?badge=latest',
         'Bug Tracker': 'https://github.com/google/neural-tangents/issues',
+        'Release Notes': 'https://github.com/google/neural-tangents/releases',
+        'PyPi': 'https://pypi.org/project/neural-tangents/',
+        'Tests': 'https://travis-ci.org/github/google/neural-tangents',
     },
     packages=setuptools.find_packages(exclude=('presentation',)),
     long_description=long_description,

@@ -3480,24 +3480,24 @@ def ImageResize(
   The `method` argument expects one of the following resize methods:
 
   `ResizeMethod.NEAREST`, `"nearest"`:
-    Nearest neighbor interpolation_. The values of `antialias` and `precision`
+    `Nearest neighbor interpolation`_. The values of `antialias` and `precision`
     are ignored.
 
   `ResizeMethod.LINEAR`, `"linear"`, `"bilinear"`, `"trilinear"`, `"triangle"`:
-    Linear interpolation_. If `antialias` is ``True``, uses a triangular filter
-    when downsampling.
+    `Linear interpolation`_. If `antialias` is ``True``, uses a triangular
+    filter when downsampling.
 
   The following methods are NOT SUPPORTED in `kernel_fn` (only `init_fn` and
   `apply_fn` work):
 
   `ResizeMethod.CUBIC`, `"cubic"`, `"bicubic"`, `"tricubic"`:
-    Cubic interpolation_, using the Keys cubic kernel.
+    `Cubic interpolation`_, using the Keys cubic kernel.
 
   `ResizeMethod.LANCZOS3`, `"lanczos3"`:
-    Lanczos resampling_, using a kernel of radius 3.
+    `Lanczos resampling`_, using a kernel of radius 3.
 
   `ResizeMethod.LANCZOS5`, `"lanczos5"`:
-    Lanczos resampling_, using a kernel of radius 5.
+    `Lanczos resampling`_, using a kernel of radius 5.
 
   .. _Nearest neighbor interpolation: https://en.wikipedia.org/wiki/Nearest-neighbor_interpolation
   .. _Linear interpolation: https://en.wikipedia.org/wiki/Bilinear_interpolation
