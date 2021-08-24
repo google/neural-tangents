@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.abspath('..'))
 # -- Project information -----------------------------------------------------
 
 project = u'Neural Tangents'
-copyright = u'2019, Google LLC.'
+copyright = u'2021, Google LLC.'
 author = u'The Neural Tangents Authors'
 
 
