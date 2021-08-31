@@ -2833,14 +2833,14 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
     assert len(lhs.shape) == len(rhs.shape)
     nspatial = len(lhs.shape) - 2
     dn = lax.conv_dimension_numbers(lhs.shape, rhs.shape, dimension_numbers)
-    in_shape = np.take(lhs.shape, dn.lhs_spec)
+    in_shape = onp.take(lhs.shape, dn.lhs_spec)
     in_sdims = in_shape[2:]
-    k_shape = np.take(rhs.shape, dn.rhs_spec)
+    k_shape = onp.take(rhs.shape, dn.rhs_spec)
     o_sdims = [in_sdims[i]*strides[i] for i in range(nspatial)]
     o_shape = [in_shape[0], k_shape[1]] + o_sdims
     out_spec_inv = [x[0] for x in
                     sorted(enumerate(dn.out_spec), key=lambda x: x[1])]
-    o_layout = np.take(np.array(o_shape), out_spec_inv)
+    o_layout = onp.take(onp.array(o_shape), out_spec_inv)
     placeholder = np.ones(o_layout, lhs.dtype)
 
     _, apply_fn, _ = stax.Conv(
