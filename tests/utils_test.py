@@ -20,8 +20,8 @@ from absl.testing import absltest
 import jax
 from jax import lax
 from jax import test_util as jtu
-from jax.api import device_get
-from jax.api import jit
+from jax import device_get
+from jax import jit
 from jax.config import config
 from jax.lib import xla_bridge
 import jax.numpy as np

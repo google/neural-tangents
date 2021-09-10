@@ -77,7 +77,7 @@ from jax import lax
 from jax import numpy as np
 from jax import ops
 from jax import random
-from jax.api import ShapeDtypeStruct, eval_shape, grad, ShapedArray, vmap, custom_jvp
+from jax import ShapeDtypeStruct, eval_shape, grad, ShapedArray, vmap, custom_jvp
 import jax.experimental.stax as ostax
 from jax.lib import xla_bridge
 from jax.scipy.special import erf

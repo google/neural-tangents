@@ -32,7 +32,7 @@ from functools import lru_cache
 from typing import Union, Tuple, Callable, Iterable, Optional, Dict, NamedTuple, Sequence, Generator
 
 import jax
-from jax.api import grad
+from jax import grad
 from jax.experimental import ode
 from jax.lib import xla_bridge
 import jax.numpy as np

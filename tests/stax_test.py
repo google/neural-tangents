@@ -26,7 +26,7 @@ from absl.testing import absltest
 from jax import lax
 from jax import ops
 from jax import test_util as jtu
-from jax.api import jit, vjp, jvp, jacfwd, jacrev
+from jax import jit, vjp, jvp, jacfwd, jacrev
 from jax.config import config
 from jax.lib import xla_bridge
 import jax.numpy as np
