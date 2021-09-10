@@ -2506,7 +2506,6 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
           'to_dense': to_dense
       }
                           for get in [
-                              'nngp',
                               'ntk',
                           ]
                           for same_input in [
@@ -2534,7 +2533,6 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
                               [p for p in range(len(shape) + 2)
                                if p not in (batch_axis, channel_axis)]))
                           for do_batch in ([
-                              False,
                               True
                           ] if batch_axis == 0 else [False])
                           for implementation in ['DENSE', 'SPARSE']
@@ -3280,8 +3278,6 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
               False
           ]
           for precision in [
-              lax.Precision.HIGHEST,
-              lax.Precision.HIGH,
               lax.Precision.DEFAULT
           ]
           for shape in [s[:n] for s in [
