@@ -18,17 +18,17 @@
 import math
 
 from absl.testing import absltest
+from jax import grad
+from jax import jit
 from jax import test_util as jtu
-from jax.api import grad
-from jax.api import jit
-from jax.api import vmap
+from jax import vmap
 from jax.config import config
 from jax.experimental import optimizers
 from jax.flatten_util import ravel_pytree
 from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.random as random
-from neural_tangents import monte_carlo_kernel_fn, empirical_kernel_fn
+from neural_tangents import empirical_kernel_fn, monte_carlo_kernel_fn
 from neural_tangents import predict
 from neural_tangents import stax
 from neural_tangents.utils import batch

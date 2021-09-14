@@ -21,9 +21,9 @@ prediction using the NTK. Data is loaded using tensorflow datasets.
 
 from absl import app
 from absl import flags
+from jax import grad
+from jax import jit
 from jax import random
-from jax.api import grad
-from jax.api import jit
 from jax.experimental import optimizers
 import jax.numpy as np
 import neural_tangents as nt

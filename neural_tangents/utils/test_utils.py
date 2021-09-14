@@ -18,8 +18,8 @@
 import logging
 
 import dataclasses
-from jax.api import jit
-from jax.api import vmap
+from jax import jit
+from jax import vmap
 from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.test_util as jtu

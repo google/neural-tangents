@@ -45,9 +45,9 @@ Example:
 from typing import Callable, Tuple, Union, Dict, Any, TypeVar, Iterable, Optional
 from functools import partial
 import warnings
-from jax.api import device_put, devices
-from jax.api import jit
-from jax.api import pmap
+from jax import device_put, devices
+from jax import jit
+from jax import pmap
 from jax.interpreters.pxla import ShardedDeviceArray
 from jax.lib import xla_bridge
 from jax import random

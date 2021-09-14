@@ -24,9 +24,9 @@ datasets.
 
 from absl import app
 from absl import flags
+from jax import grad
+from jax import jit
 from jax import random
-from jax.api import grad
-from jax.api import jit
 from jax.experimental import optimizers
 from jax.experimental.stax import logsoftmax
 import jax.numpy as np

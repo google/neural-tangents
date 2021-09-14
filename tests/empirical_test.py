@@ -17,8 +17,8 @@
 from functools import partial
 import operator
 from absl.testing import absltest
+from jax import jit, tree_map, tree_multimap
 from jax import test_util as jtu
-from jax.api import jit, tree_map, tree_multimap
 from jax.config import config
 import jax.numpy as np
 import jax.random as random

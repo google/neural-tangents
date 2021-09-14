@@ -17,7 +17,7 @@ from absl.testing import absltest
 
 from functools import partial
 from jax import test_util as jtu
-from jax.api import jit
+from jax import jit
 from jax.config import config
 import jax.numpy as np
 import jax.random as random
