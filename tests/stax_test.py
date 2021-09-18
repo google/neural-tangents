@@ -986,6 +986,90 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
                           rbf_gamma=gamma)
 
 
+
+class ElementwiseTest(test_utils.NeuralTangentsTestCase):
+
+  @jtu.parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              '_{}_{}_n={}_diag_batch={}_spatial={}'.format(
+                  phi[0].__name__, same_inputs, n, diagonal_batch,
+                  diagonal_spatial),
+                              'phi':
+                                  phi,
+                              'same_inputs':
+                                  same_inputs,
+                              'n':
+                                  n,
+                              'diagonal_batch':
+                                  diagonal_batch,
+                              'diagonal_spatial':
+                                  diagonal_spatial
+                          } for phi in [
+                              stax.Identity(),
+                              stax.Erf(),
+                              stax.Sin(),
+                              stax.Relu(),
+                          ]
+                          for same_inputs in [False, True, None]
+                          for n in [0, 1, 2]
+                          for diagonal_batch in [True, False]
+                          for diagonal_spatial in [True, False]))
+  def test_elementwise(self, same_inputs, phi, n, diagonal_batch,
+                       diagonal_spatial):
+    fn = lambda x: phi[1]((), x)
+
+    name = phi[0].__name__
+
+    def nngp_fn(cov12, var1, var2):
+      if 'Identity' in name:
+        res = cov12
+
+      elif 'Erf' in name:
+        prod = (1 + 2 * var1) * (1 + 2 * var2)
+        res = np.arcsin(2 * cov12 / np.sqrt(prod)) * 2 / np.pi
+
+      elif 'Sin' in name:
+        sum_ = (var1 + var2)
+        s1 = np.exp((-0.5 * sum_ + cov12))
+        s2 = np.exp((-0.5 * sum_ - cov12))
+        res = (s1 - s2) / 2
+
+      elif 'Relu' in name:
+        prod = var1 * var2
+        sqrt = stax._sqrt(prod - cov12 ** 2)
+        angles = np.arctan2(sqrt, cov12)
+        dot_sigma = (1 - angles / np.pi) / 2
+        res = sqrt / (2 * np.pi) + dot_sigma * cov12
+
+      else:
+        raise NotImplementedError(name)
+
+      return res
+
+    _, _, kernel_fn = stax.serial(stax.Dense(1), stax.Elementwise(fn, nngp_fn),
+                                  stax.Dense(1), stax.Elementwise(fn, nngp_fn))
+    _, _, kernel_fn_manual = stax.serial(stax.Dense(1), phi,
+                                         stax.Dense(1), phi)
+
+    key = random.PRNGKey(1)
+    shape = (4, 3, 2)[:n] + (1,)
+    x1 = random.normal(key, (5,) + shape)
+    if same_inputs is None:
+      x2 = None
+    elif same_inputs is True:
+      x2 = x1
+    else:
+      x2 = random.normal(key, (6,) + shape)
+
+    kwargs = dict(diagonal_batch=diagonal_batch,
+                  diagonal_spatial=diagonal_spatial)
+
+    k = kernel_fn(x1, x2, **kwargs)
+    k_manual = kernel_fn_manual(x1, x2, **kwargs).replace(is_gaussian=False)
+    self.assertAllClose(k_manual, k)
+
+
 class ElementwiseNumericalTest(test_utils.NeuralTangentsTestCase):
 
   @jtu.parameterized.named_parameters(
