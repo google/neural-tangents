@@ -215,7 +215,7 @@ def _flatten_kernel_dict(k: Dict[str, Any],
       k[key] = (shape[:batch_axis] +
                 (shape[batch_axis] * batch_size[key[-1]],) +
                 shape[batch_axis + 1:])
-    elif isinstance(k[key], np.ndarray):
+    elif isinstance(k[key], (onp.ndarray, np.ndarray)):
       k[key] = _flatten_batch_dimensions(value, is_parallel)
     else:
       pass
@@ -237,7 +237,7 @@ def _flatten_kernel(k: Kernel,
     return Kernel(**_flatten_kernel_dict(k.asdict(), x2_is_none, is_parallel))
   # pytype:enable=attribute-error
 
-  elif isinstance(k, np.ndarray):
+  elif isinstance(k, (onp.ndarray, np.ndarray)):
     return _flatten_batch_dimensions(k, is_parallel)
 
   raise TypeError(f'Expected kernel to be either a namedtuple, `Kernel`, or '
@@ -452,7 +452,7 @@ def _serial(kernel_fn: KernelFn,
                 x2: Optional[NTTree[Optional[np.ndarray]]] = None,
                 *args,
                 **kwargs) -> NTTree[Kernel]:
-    if utils.is_nt_tree_of(x1_or_kernel, np.ndarray):
+    if utils.is_nt_tree_of(x1_or_kernel, (onp.ndarray, np.ndarray)):
       return serial_fn_x1(x1_or_kernel, x2, *args, **kwargs)
     elif utils.is_nt_tree_of(x1_or_kernel, Kernel):
       if x2 is not None:
@@ -589,7 +589,7 @@ def _parallel(kernel_fn: KernelFn,
 
   @utils.wraps(kernel_fn)
   def parallel_fn(x1_or_kernel, x2=None, *args, **kwargs):
-    if utils.is_nt_tree_of(x1_or_kernel, np.ndarray):
+    if utils.is_nt_tree_of(x1_or_kernel, (onp.ndarray, np.ndarray)):
       return parallel_fn_x1(x1_or_kernel, x2, *args, **kwargs)
     elif utils.is_nt_tree_of(x1_or_kernel, Kernel):
       assert not x2
@@ -639,7 +639,8 @@ def _get_n_batches_and_batch_sizes(n1: int,
 def _is_np_ndarray(x) -> bool:
   if x is None:
     return False
-  return tree_all(tree_map(lambda y: isinstance(y, np.ndarray), x))
+  return tree_all(tree_map(
+      lambda y: isinstance(y, (onp.ndarray, np.ndarray)), x))
 
 
 def _get_jit_or_pmap_broadcast() -> Callable[[Callable, int], Callable]:

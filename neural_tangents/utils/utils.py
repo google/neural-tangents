@@ -242,7 +242,7 @@ def get_namedtuple(name):
 def x1_is_x2(x1: np.ndarray,
              x2: Optional[np.ndarray] = None,
              eps: float = 1e-12) -> Union[bool, np.ndarray]:
-  if not isinstance(x1, np.ndarray):
+  if not isinstance(x1, (onp.ndarray, np.ndarray)):
     raise TypeError('`x1` must be an ndarray. A {} is found.'.format(type(x1)))
 
   if x2 is None:
@@ -436,7 +436,7 @@ def reverse_zipped(
                         for i in range(ndim - 2, start_axis - 1, -2)
                         for j in (i, i + 1))
 
-    if isinstance(x, np.ndarray):
+    if isinstance(x, (onp.ndarray, np.ndarray)):
       target_axes = range(start_axis, ndim)
       x = np.moveaxis(x, source_axes, target_axes)
     else:
@@ -482,7 +482,7 @@ def get_masked_array(x: np.ndarray,
   elif isinstance(x, MaskedArray):
     x, mask_mat, _, _ = x.astuple()
 
-  elif isinstance(x, np.ndarray):
+  elif isinstance(x, (onp.ndarray, np.ndarray)):
     if mask_constant is None:
       mask_mat = None
     else:
@@ -743,7 +743,7 @@ def is_on_cpu(x: PyTree) -> bool:
     if hasattr(x, 'device_buffer'):
       return 'cpu' in str(x.device_buffer.device()).lower()
 
-    if isinstance(x, np.ndarray):
+    if isinstance(x, (onp.ndarray, np.ndarray)):
       return True
 
     raise NotImplementedError(type(x))
@@ -769,7 +769,7 @@ def _read_keys(key, x1, x2):
     warnings.warn('The value of `key[1]` might be replaced by a new value if '
                   'key[0] == key[1] and x1 != x2 or key[0] != key[1] and '
                   'x1 == x2.')
-  elif isinstance(key, np.ndarray):
+  elif isinstance(key, (onp.ndarray, np.ndarray)):
     key1 = key
     key2 = np.where(x1_is_x2(x1, x2), key1, random.fold_in(key, 1))
   else:

@@ -4142,8 +4142,8 @@ def _inputs_to_kernel(
     The `Kernel` object containing inputs covariance[s].
   """
 
-  if not (isinstance(x1, np.ndarray) and
-          (x2 is None or isinstance(x2, np.ndarray))):
+  if not (isinstance(x1, (onp.ndarray, np.ndarray)) and
+          (x2 is None or isinstance(x2, (onp.ndarray, np.ndarray)))):
     raise TypeError(('Wrong input types given. Found `x1` of type '
                      f'{type(x1)} and `x2` of type {type(x2)}, need both to be'
                      f'`np.ndarray`s (`x2` can be `None`).'))

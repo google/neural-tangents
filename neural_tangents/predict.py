@@ -40,6 +40,7 @@ import jax.scipy as sp
 from jax.tree_util import tree_map, tree_all
 from neural_tangents.utils import utils, dataclasses
 from neural_tangents.utils.typing import KernelFn, Axes, Get
+import numpy as onp
 import scipy as osp
 
 
@@ -817,7 +818,8 @@ def gradient_descent_mse_ensemble(
       args_test, _ = utils.split_kwargs(kernel_fn_test_test_kwargs, x_test)
 
       def is_array(x):
-        return tree_all(tree_map(lambda x: isinstance(x, np.ndarray), x))
+        return tree_all(tree_map(
+            lambda x: isinstance(x, (onp.ndarray, np.ndarray)), x))
 
       kwargs_td = dict(kernel_fn_train_train_kwargs)
       kwargs_tt = dict(kernel_fn_train_train_kwargs)
@@ -1222,7 +1224,7 @@ def _get_axes(x: np.ndarray):
 
 
 def _get_first(k) -> np.ndarray:
-  if isinstance(k, np.ndarray):
+  if isinstance(k, (onp.ndarray, np.ndarray)):
     return k
 
   for g in ('nngp', 'ntk'):
@@ -1235,6 +1237,6 @@ def _get_first(k) -> np.ndarray:
 
 
 def _get_attr(k, g: str) -> np.ndarray:
-  if isinstance(k, np.ndarray):
+  if isinstance(k, (onp.ndarray, np.ndarray)):
     return k
   return getattr(k, g)
