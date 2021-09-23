@@ -1,6 +1,7 @@
 """Tests for `examples/imdb.py`."""
 
 
+from absl.testing import absltest
 from jax import test_util as jtu
 from jax.config import config
 from examples import imdb
@@ -16,4 +17,4 @@ class ImdbTest(jtu.JaxTestCase):
 
 
 if __name__ == '__main__':
-  jtu.absltest.main()
+  absltest.main()

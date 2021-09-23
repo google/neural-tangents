@@ -18,6 +18,7 @@
 import math
 
 from absl.testing import absltest
+from absl.testing import parameterized
 from jax import grad
 from jax import jit
 from jax import test_util as jtu
@@ -188,7 +189,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
     x_test = random.normal(split, test_shape)
     return key, x_test, x_train, y_train
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_train={}_test={}_network={}_logits={}_{}_'
@@ -286,7 +287,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
     return np.einsum('itjk,itlk->tjl', x, x, optimize=True) / (x.shape[0] *
                                                                x.shape[-1])
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_train={}_test={}_network={}_logits={}'.format(
@@ -357,7 +358,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
     self._assertAllClose(cov_test_mc, cov_test_inf, rtol)
     self._assertAllClose(fx_test_mc, fx_test_inf, rtol)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_train={}_test={}_network={}_logits={}'.format(
@@ -404,7 +405,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
         self.assertAllClose(out[0], out2[1])
         self.assertAllClose(out[1], out2[0])
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_train={}_test={}_network={}_logits={}_get={}'.format(
@@ -447,7 +448,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
           self.assertAllClose(inf, inf_x)
           self.assertAllClose(inf_x, fin_x)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_train={}_test={}_network={}_logits={}'.format(
@@ -504,7 +505,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
         return out._replace(nngp=out.ntk)
     return always_ntk
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_train={}_test={}_network={}_logits={}'.format(
@@ -599,7 +600,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
           # Although, due to accumulation of numerical errors, only roughly.
           self.assertAllClose(nngp_cov, nngp_ntk_cov)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_train={}_test={}_network={}_logits={}'.format(
@@ -637,7 +638,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
             self.assertAllClose(cov, np.moveaxis(cov, -1, -2))
             self.assertGreater(np.min(np.linalg.eigh(cov)[0]), -1e-4)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_train={}_test={}_network={}_logits={}'.format(
@@ -958,7 +959,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
                 self.assertAllClose(y_test_shape, p_test.shape)
               self.assertAllClose(y_train_shape, p_train.shape)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               f'_train={train}_network={network}_logits={out_logits}_{name}' +
@@ -1035,7 +1036,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
 
 class PredictKwargsTest(test_utils.NeuralTangentsTestCase):
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': f'batch={do_batch}_mode={mode}',
           'do_batch': do_batch,

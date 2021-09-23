@@ -17,6 +17,7 @@
 import itertools
 
 from absl.testing import absltest
+from absl.testing import parameterized
 import jax
 from jax import lax
 from jax import test_util as jtu
@@ -66,7 +67,7 @@ class UtilsTest(jtu.JaxTestCase):
           self.assertFalse(utils.is_on_cpu(x()))
           self.assertFalse(utils.is_on_cpu(x_jit()))
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               f' [n={n}_{padding}_dn={lhs_spec, rhs_spec, out_spec}]',

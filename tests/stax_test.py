@@ -23,6 +23,7 @@ import time
 from typing import Tuple
 
 from absl.testing import absltest
+from absl.testing import parameterized
 from jax import lax
 from jax import ops
 from jax import test_util as jtu
@@ -328,7 +329,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
           use_pooling):
       raise absltest.SkipTest('FC models do not have these parameters.')
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}'.format(
@@ -392,7 +393,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
         net, same_inputs, use_dropout, is_ntk, RTOL)
 
   # pylint: disable=g-complex-comprehension
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_{}_{}_{}_{}_{}_{}_{}'.format(
@@ -445,7 +446,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
                    pool_type, layer_norm, parameterization, use_dropout)
     self._check_agreement_with_empirical(net, same_inputs, use_dropout, is_ntk)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_{}_{}_{}_{}_{}_{}'.format(
@@ -505,7 +506,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     self._check_agreement_with_empirical(net, same_inputs, use_dropout, is_ntk,
                                          0.07)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_{}_{}_{}_{}_{}_{}_{}_{}'.format(
@@ -596,7 +597,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     cov2 = np.broadcast_to(np.expand_dims(ker_unnorm, 0), ker.cov2.shape)
     self.assertAllClose((nngp, cov1, cov2), (ker.nngp, ker.cov1, ker.cov2))
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}'.format(
@@ -651,7 +652,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
                    pool_type, layer_norm, parameterization, use_dropout)
     self._check_agreement_with_empirical(net, same_inputs, use_dropout, is_ntk)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               f'_act={act}_kernel={kern}_do_stabilize={do_stabilize}',
@@ -729,7 +730,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     composed_ker_out = composed_ker_fn(x1, x2)
     self.assertAllClose(ker_out, composed_ker_out)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_avg_pool={}_same_inputs={}'.format(avg_pool,
                                                                 same_inputs),
@@ -906,7 +907,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
       test_utils.assert_close_matrices(self, analytic_kernel,
                                        direct_rbf_kernel, rtol)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_model={}_phi={}_{}_get={}_abc={}_approximate={}'.format(
@@ -960,7 +961,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
       raise absltest.SkipTest(f'Activation {phi_name} is not implemented.')
     self._test_activation(activation, same_inputs, model, get)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_{}_Rbf_{}_{}_{}'.format(
@@ -989,7 +990,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
 
 class ElementwiseTest(test_utils.NeuralTangentsTestCase):
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_{}_{}_n={}_diag_batch={}_spatial={}'.format(
@@ -1072,7 +1073,7 @@ class ElementwiseTest(test_utils.NeuralTangentsTestCase):
 
 class ElementwiseNumericalTest(test_utils.NeuralTangentsTestCase):
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_{}_{}_{}_{}'.format(
@@ -1137,7 +1138,7 @@ class ElementwiseNumericalTest(test_utils.NeuralTangentsTestCase):
                                      numerical_activation_kernel, rtol)
 
 
-@jtu.parameterized.parameters([
+@parameterized.parameters([
     {
         'same_inputs': True,
         'do_stabilize': True
@@ -1253,7 +1254,7 @@ class ABReluTest(test_utils.NeuralTangentsTestCase):
     self.assertAllClose(kernels_abs, kernels_ab_relu)
 
 
-@jtu.parameterized.parameters([
+@parameterized.parameters([
     {
         'same_inputs': True
     },
@@ -1361,7 +1362,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
         2: stax.Abs()
     }[i % 3]
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list(
           {
               'testcase_name':
@@ -1477,7 +1478,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
     empirical = kernel_fn_mc(X0_1, X0_2, get=get)
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list(
           {
               'testcase_name':
@@ -1614,7 +1615,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
 
 class ConvNDTest(test_utils.NeuralTangentsTestCase):
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               ' [{}_n={}_{}_{}_{}_{}_{}_{}]'.format(
@@ -1744,7 +1745,7 @@ class ConvNDTest(test_utils.NeuralTangentsTestCase):
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
 
-@jtu.parameterized.named_parameters(
+@parameterized.named_parameters(
     jtu.cases_from_list(
         {
             'testcase_name':
@@ -1846,7 +1847,7 @@ class DiagonalClassTest(test_utils.NeuralTangentsTestCase):
           self.assertEqual(ab_c, _ab_c)
 
 
-@jtu.parameterized.parameters([
+@parameterized.parameters([
     {
         'same_inputs': True
     },
@@ -1949,7 +1950,7 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
 
 class MaskingTest(test_utils.NeuralTangentsTestCase):
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list(
           {
               'testcase_name':
@@ -2042,7 +2043,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
     empirical = kernel_fn_mc(x1, x2, get=get, mask_constant=mask_constant)
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
           ' [{}_get={}_axis={}_mask={}_concat={}_{}_p={}_n={}_{}]'
@@ -2218,7 +2219,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
 
 class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               f'_same_inputs={same_inputs}_kernel_type={kernel_type}',
@@ -2259,7 +2260,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
                                      kernel_fn_empirical(x1, x2, kernel_type),
                                      rtol)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               f'_same_inputs={same_inputs}_kernel_type={kernel_type}',
@@ -2295,7 +2296,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
                                      kernel_fn_empirical(x1, x2, kernel_type),
                                      rtol)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               f'_same_inputs={same_inputs}_kernel_type={kernel_type}',
@@ -2347,7 +2348,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
 
     K_readout_fn(K_readin_fn(x1, x2))
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               f'_same_inputs={same_inputs}_kernel_type={kernel_type}',
@@ -2413,7 +2414,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
 
 class AttentionTest(test_utils.NeuralTangentsTestCase):
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               f'[same_inputs={same_inputs}_'
@@ -2567,7 +2568,7 @@ class AttentionTest(test_utils.NeuralTangentsTestCase):
 
 class AggregateTest(test_utils.NeuralTangentsTestCase):
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               f'{get}-{name}-same_inp={same_input}-{act_name}'
@@ -2838,7 +2839,7 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
 
 class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               f'_same_inputs={same_inputs}_{padding}_size={size}_'
@@ -2955,7 +2956,7 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
     )
     return apply_fn((params[0], 0.), lhs)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               f'size={size}_strides={strides}_filter={filter_shape}',
@@ -2986,7 +2987,7 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
 
 class DotGeneralTest(test_utils.NeuralTangentsTestCase):
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list(
           {
               'testcase_name':
@@ -3175,7 +3176,7 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
           test_utils.assert_close_matrices(
               self, get_empirical(get), getattr(exact, get), 0.01)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list(
           {
               'testcase_name': ' [{}_get={}_n={}_{}_{}_{}]'.format(
@@ -3305,7 +3306,7 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
 
 class ImageResizeTest(test_utils.NeuralTangentsTestCase):
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list(
           {
               'testcase_name':
@@ -3486,7 +3487,7 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
           test_utils.assert_close_matrices(
               self, get_empirical(get), getattr(exact, get), tol)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list(
           {
               'testcase_name': ' [{}_get={}_n={}_{}_{}_{}_shape={}]'.format(
@@ -3585,7 +3586,7 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
 
 class ConvLocalTest(test_utils.NeuralTangentsTestCase):
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': f'_diag_spatial={diagonal_spatial}_',
           'diagonal_spatial': diagonal_spatial,
@@ -3628,7 +3629,7 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
     else:
       self._test_against_mc(apply_fn, init_fn, k.nngp, x, None)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               f'_same_inputs={same_inputs}_{padding}_size={size}_'
@@ -3713,7 +3714,7 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
     tol = 0.005 if xla_bridge.get_backend().platform == 'tpu' else 0.001
     self.assertAllClose(k_conv, k, atol=tol, rtol=tol)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               f'_get={get}'
@@ -3877,7 +3878,7 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
 
 class AutodiffTest(test_utils.NeuralTangentsTestCase):
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               f'{get}-{same_inputs}-{phi.__name__}',
@@ -3980,7 +3981,7 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
       assert_close(np.moveaxis(k_fwd_1, (0, 2, 4), (1, 3, 5)), k_fwd_10)
       assert_close(np.moveaxis(k_rev_1, (0, 2, 4), (1, 3, 5)), k_rev_10)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
     jtu.cases_from_list({
         'testcase_name':
             f'{get}-{same_inputs}-{input_type}-{phi.__name__}-{do_jit}',

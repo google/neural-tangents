@@ -17,6 +17,7 @@
 from functools import partial
 import operator
 from absl.testing import absltest
+from absl.testing import parameterized
 from jax import jit, tree_map, tree_multimap
 from jax import test_util as jtu
 from jax.config import config
@@ -143,7 +144,7 @@ class EmpiricalTest(jtu.JaxTestCase):
                            0.)
                           ])
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_{}'.format(shape),
           'shape': shape
@@ -171,7 +172,7 @@ class EmpiricalTest(jtu.JaxTestCase):
                                                         do_shift_x=do_shift_x),
                               f_lin(x, params, do_alter, do_shift_x=do_shift_x))
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_{}'.format(shape),
           'shape': shape
@@ -222,7 +223,7 @@ class EmpiricalTest(jtu.JaxTestCase):
                                         do_shift_x=do_shift_x),
                               f_2(x, params, do_alter, do_shift_x=do_shift_x))
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_train_shape={}_test_shape={}_network={}_{}'.format(
               train, test, network, name),
@@ -265,7 +266,7 @@ class EmpiricalTest(jtu.JaxTestCase):
     self.assertAllClose(g, g_batched)
     self.assertAllClose(g, g_direct_batched)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_diagonal_axes={}_trace_axes={}'.format(
               diagonal_axes, trace_axes),
@@ -354,7 +355,7 @@ class EmpiricalTest(jtu.JaxTestCase):
       self.assertAllClose(g_direct, g_direct_batched)
       self.assertAllClose(g_direct, g_batched)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_same_inputs={}'.format(same_inputs),
           'same_inputs': same_inputs
@@ -395,7 +396,7 @@ class EmpiricalTest(jtu.JaxTestCase):
     self.assertEqual(nngp[0].shape, (3, 3 if same_inputs else 4))
     self.assertEqual(nngp[1].shape, (3, 3 if same_inputs else 4))
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_same_inputs={}'.format(same_inputs),
           'same_inputs': same_inputs
@@ -443,7 +444,7 @@ class EmpiricalTest(jtu.JaxTestCase):
     self.assertEqual(nngp[0][1].shape, nngp_shape)
     self.assertEqual(nngp[1].shape, nngp_shape)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_same_inputs={}'.format(same_inputs),
           'same_inputs': same_inputs

@@ -15,6 +15,7 @@
 """Tests for `utils/monte_carlo.py`."""
 
 from absl.testing import absltest
+from absl.testing import parameterized
 from jax import test_util as jtu
 from jax.config import config
 from jax.lib import xla_bridge
@@ -66,7 +67,7 @@ def _get_inputs_and_model(width=1, n_classes=2, use_conv=True):
 
 class MonteCarloTest(jtu.JaxTestCase):
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '[batch_size={}, '
                            'device_count={} '
@@ -98,7 +99,7 @@ class MonteCarloTest(jtu.JaxTestCase):
     one_sample_batch = sample_once_batch_fn(x1, x2, key, get)
     self.assertAllClose(one_sample, one_sample_batch)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '[batch_size={}, '
                            'device_count={} '
@@ -127,7 +128,7 @@ class MonteCarloTest(jtu.JaxTestCase):
     one_batch_sample = batch_sample_once_fn(x1, x2, key, get)
     self.assertAllClose(one_sample, one_batch_sample)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '[batch_size={}, '
                            'device_count={} '
@@ -155,7 +156,7 @@ class MonteCarloTest(jtu.JaxTestCase):
 
     test_utils.assert_close_matrices(self, ker_analytic, ker_empirical, 2e-2)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '[batch_size={}, '
                            'device_count={} '
@@ -184,7 +185,7 @@ class MonteCarloTest(jtu.JaxTestCase):
 
     test_utils.assert_close_matrices(self, ker_analytic, ker_empirical, 2e-2)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '[batch_size={}, '
                            'device_count={} '
@@ -259,7 +260,7 @@ class MonteCarloTest(jtu.JaxTestCase):
     self.assertAllClose(ker_analytic_12, s_12, atol=2., rtol=2.)
     self.assertAllClose(ker_analytic_12, ker_analytic_34)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               f'_same_inputs={same_inputs}_batch_size={batch_size}',

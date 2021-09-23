@@ -14,6 +14,7 @@
 """Tests for the Neural Tangents library."""
 
 from absl.testing import absltest
+from absl.testing import parameterized
 
 from functools import partial
 from jax import test_util as jtu
@@ -131,7 +132,7 @@ def _test_kernel_against_batched(cls,
 
 class BatchTest(test_utils.NeuralTangentsTestCase):
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_train_shape={}_test_shape={}_network={}_{}_batch_size={}'
@@ -165,7 +166,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
 
   # We also exclude tests for dropout + parallel. It is not clear what is the
   # best way to handle this case.
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list(
           {
               'testcase_name':
@@ -197,7 +198,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
                                  data_other, True)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_train_shape={}_test_shape={}_network={}_{}_batch_size={}'
@@ -238,7 +239,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
                                  data_other)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_train_shape={}_test_shape={}_network={}_{}_batch_size={}'
@@ -328,7 +329,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
       composed_ker_out = composed_ker_out.replace(x1_is_x2=ker_out.x1_is_x2)
     self.assertAllClose(ker_out, composed_ker_out)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_on_device={}_batch_size={}'.format(store_on_device, batch_size),
@@ -348,7 +349,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     test_utils.stub_out_pmap(batch, 2)
     self._test_analytic_kernel_composition(batch._parallel)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
               '_on_device={}_batch_size={}'.format(store_on_device, batch_size),
@@ -429,7 +430,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
           self.assertAllClose(res_1[0][1], res_2[0][1])
           self.assertAllClose(tree_map(broadcast, res_1[1]), res_2[1])
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_same_inputs={}'.format(same_inputs),
           'same_inputs': same_inputs
@@ -484,7 +485,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
         get_ntk(batch_K_readout_fn(batch_K_readin_fn(x1, x2))),
         RTOL)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name': '_same_inputs={}'.format(same_inputs),
           'same_inputs': same_inputs
@@ -531,7 +532,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
         batch_kernel_fn(x1, x2, params),
         RTOL)
 
-  @jtu.parameterized.named_parameters(
+  @parameterized.named_parameters(
       jtu.cases_from_list(
           ({
               'testcase_name': (f'_same_inputs={same_inputs}'
