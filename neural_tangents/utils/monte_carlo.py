@@ -58,7 +58,7 @@ def _sample_once_kernel_fn(kernel_fn: EmpiricalKernelFn,
     init_key, dropout_key = random.split(key, 2)
     shape = tree_map(lambda x: x.shape, x1)
     _, params = init_fn(init_key, shape)
-    return kernel_fn(x1, x2, get, params, rng=dropout_key, **apply_fn_kwargs)
+    return kernel_fn(x1, x2, get, params, rng=dropout_key, **apply_fn_kwargs)  # pytype: disable=wrong-keyword-args  # kwargs-checking
   return kernel_fn_sample_once
 
 

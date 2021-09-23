@@ -4226,7 +4226,7 @@ def _propagate_shape(init_fn: InitFn,
   """Statically, abstractly, evaluate the init_fn to get shape information."""
   def init_and_apply(rng, x):
     _, params = init_fn(rng, tree_map(lambda x: x.shape, x))
-    return apply_fn(params, x, rng=rng, **kwargs)
+    return apply_fn(params, x, rng=rng, **kwargs)  # pytype: disable=wrong-keyword-args  # kwargs-checking
   akey = ShapedArray((2,), np.uint32)
   try:
     shaped = eval_shape(init_and_apply, akey, shaped)
