@@ -18,6 +18,7 @@
 import logging
 
 import dataclasses
+import jax
 from jax import jit
 from jax import vmap
 from jax.lib import xla_bridge
@@ -41,6 +42,8 @@ def update_test_tolerance(f32_tol=5e-3, f64_tol=1e-5):
     tol = jtu._default_tolerance.copy()
     tol[onp.dtype(onp.float32)] = 5e-2
     return tol
+  # TODO(schsam): don't use JAX test_utils.
+  jax._src.test_util.default_tolerance = default_tolerance
   jtu.default_tolerance = default_tolerance
 
 
