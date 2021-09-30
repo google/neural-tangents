@@ -429,6 +429,7 @@ as an example. With `NVIDIA V100` 64-bit precision, `nt` took 316/330/508 GPU-ho
 
 Neural Tangents has been used in the following papers (newest first):
 
+1. [Data Summarization via Bilevel Optimization](https://arxiv.org/abs/2109.12534)
 1. [Neural Tangent Generalization Attacks](http://proceedings.mlr.press/v139/yuan21b.html)
 1. [Dataset Distillation with Infinitely Wide Convolutional Networks](https://arxiv.org/abs/2107.13034)
 1. [Neural Contextual Bandits without Regret](https://arxiv.org/abs/2107.03144)
