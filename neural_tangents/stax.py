@@ -1496,7 +1496,7 @@ def _Conv(
             size = out.shape[i]
             shape[i] = size
             idx += (np.arange(size).reshape(shape),) * 2
-          out = ops.index_add(out, idx, shift)
+          out = out.at[idx].add(shift)
 
       return out
 
@@ -5228,7 +5228,7 @@ def _diag_mul_full_spatial(
     shape[i] = size
     idx += (np.arange(size).reshape(shape),) * 2
 
-  x = ops.index_mul(x, idx, factor)
+  x = x.at[idx].mul(factor)
   return x
 
 
@@ -5243,7 +5243,7 @@ def _diag_mul_diagonal_spatial(
     if x.shape[0] != x.shape[1]:
       return x
     idx = np.diag_indices(x.shape[0]) + (Ellipsis,)
-    x = ops.index_mul(x, idx, factor)
+    x = x.at[idx].mul(factor)
 
   return x
 

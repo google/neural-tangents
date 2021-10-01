@@ -686,7 +686,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
 
     # a batch of dense inputs
     x_dense = random.normal(key, (input_count, input_size))
-    x_sparse = ops.index_update(x_dense, ops.index[:sparse_count, :], 0.)
+    x_sparse = x_dense.at[:sparse_count, :].set(0.)
 
     activation = (stax.Relu(do_stabilize=do_stabilize) if act == 'relu'
                   else stax.Erf())
