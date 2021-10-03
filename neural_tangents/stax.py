@@ -1006,7 +1006,7 @@ def Aggregate(
 def Dense(
     out_dim: int,
     W_std: float = 1.,
-    b_std: float = 0.,
+    b_std: Optional[float] = None,
     parameterization: str = 'ntk',
     batch_axis: int = 0,
     channel_axis: int = -1) -> InternalLayer:
@@ -1023,7 +1023,7 @@ def Dense(
       Specifies the standard deviation of the weights.
 
     b_std:
-      Specifies the standard deviation of the biases.
+      Specifies the standard deviation of the biases. `None` means no bias.
 
     parameterization:
       Either `"ntk"` or `"standard"`.
@@ -1064,16 +1064,19 @@ def Dense(
     rng1, rng2 = random.split(rng)
     W = random.normal(rng1, (input_shape[_channel_axis], out_dim))
 
-    b_shape = [1] * len(input_shape)
-    b_shape[channel_axis] = out_dim
-    b = random.normal(rng2, b_shape)
+    if b_std is None:
+      b = None
+    else:
+      b_shape = [1] * len(input_shape)
+      b_shape[channel_axis] = out_dim
+      b = random.normal(rng2, b_shape)
 
     return output_shape, (W, b)
 
   def standard_init_fn(rng, input_shape):
     output_shape, (W, b) = ntk_init_fn(rng, input_shape)
     return output_shape, (W * W_std / np.sqrt(input_shape[channel_axis]),
-                          b * b_std)
+                          b * b_std if b is not None else None)
 
   if parameterization == 'ntk':
     init_fn = ntk_init_fn
@@ -1089,9 +1092,13 @@ def Dense(
 
     if parameterization == 'ntk':
       norm = W_std / np.sqrt(inputs.shape[channel_axis])
-      outputs = norm * prod + b_std * b
+      outputs = norm * prod
+      if b is not None:
+        outputs += b_std * b
     elif parameterization == 'standard':
-      outputs = prod  + b
+      outputs = prod
+      if b is not None:
+        outputs += b
     else:
       raise ValueError(f'Parameterization not supported: {parameterization}')
 
@@ -1137,7 +1144,7 @@ def Conv(out_chan: int,
          strides: Optional[Sequence[int]] = None,
          padding: str = Padding.VALID.name,
          W_std: float = 1.0,
-         b_std: float = 0.0,
+         b_std: Optional[float] = None,
          dimension_numbers: Optional[Tuple[str, str, str]] = None,
          parameterization: str = 'ntk') -> InternalLayer:
   """Layer construction function for a general convolution layer.
@@ -1183,7 +1190,7 @@ def ConvTranspose(out_chan: int,
                   strides: Optional[Sequence[int]] = None,
                   padding: str = Padding.VALID.name,
                   W_std: float = 1.0,
-                  b_std: float = 0.0,
+                  b_std: Optional[float] = None,
                   dimension_numbers: Optional[Tuple[str, str, str]] = None,
                   parameterization: str = 'ntk') -> InternalLayer:
   """Layer construction function for a general transpose convolution layer.
@@ -1229,7 +1236,7 @@ def ConvLocal(out_chan: int,
               strides: Optional[Sequence[int]] = None,
               padding: str = Padding.VALID.name,
               W_std: float = 1.0,
-              b_std: float = 0.0,
+              b_std: Optional[float] = None,
               dimension_numbers: Optional[Tuple[str, str, str]] = None,
               parameterization: str = 'ntk') -> InternalLayer:
   """Layer construction function for a general unshared convolution layer.
@@ -1254,7 +1261,7 @@ def ConvLocal(out_chan: int,
     W_std:
       standard deviation of the weights.
     b_std:
-      standard deviation of the biases.
+      standard deviation of the biases. `None` means no bias.
     dimension_numbers:
       Specifies which axes should be convolved over. Should match the
       specification in `jax.lax.conv_general_dilated`.
@@ -1276,7 +1283,7 @@ def _Conv(
     strides: Optional[Sequence[int]],
     padding: str,
     W_std: float,
-    b_std: float,
+    b_std: Optional[float],
     dimension_numbers: Optional[Tuple[str, str, str]],
     parameterization: str,
     transpose: bool,
@@ -1302,7 +1309,7 @@ def _Conv(
     W_std:
       The standard deviation of the weights.
     b_std:
-      The standard deviation of the biases.
+      The standard deviation of the biases. `None` means no bias.
     dimension_numbers:
       Specifies which axes should be convolved over. Should match the
       specification in `jax.lax.dot_general_dilated`.
@@ -1344,16 +1351,29 @@ def _Conv(
                    padding=init_padding.name,
                    W_init=random.normal,
                    b_init=random.normal)
+
+  def get_ntk_init_fn(ostax_init_fn):
+    def ntk_init_fn(rng, input_shape):
+      output_shape, (W, b) = ostax_init_fn(rng, input_shape)
+      if b_std is None:
+        b = None
+      return output_shape, (W, b)
+    return ntk_init_fn
+
   if transpose:
     if not shared_weights:
       raise NotImplementedError('Unshared transpose CNN not implemented.')
 
     lax_conv = lax.conv_transpose
-    ntk_init_fn, _ = ostax.GeneralConvTranspose(**init_args)
+    ostax_init_fn, _ = ostax.GeneralConvTranspose(**init_args)
+    ntk_init_fn = get_ntk_init_fn(ostax_init_fn)
+
   else:
     if shared_weights:
       lax_conv = lax.conv_general_dilated
-      ntk_init_fn, _ = ostax.GeneralConv(**init_args)
+      ostax_init_fn, _ = ostax.GeneralConv(**init_args)
+      ntk_init_fn = get_ntk_init_fn(ostax_init_fn)
+
     else:
       lax_conv = functools.partial(utils.conv_general_dilated_local,
                                    filter_shape=filter_shape)
@@ -1382,7 +1402,8 @@ def _Conv(
         bias_shape = [output_shape[i] if c != 'N' else 1
                       for i, c in enumerate(out_spec)]
         k1, k2 = random.split(rng)
-        W, b = random.normal(k1, kernel_shape), random.normal(k2, bias_shape)
+        W = random.normal(k1, kernel_shape)
+        b = None if b_std is None else random.normal(k2, bias_shape)
         return output_shape, (W, b)
 
   def get_fan_in(input_shape):
@@ -1391,7 +1412,7 @@ def _Conv(
   def standard_init_fn(rng, input_shape):
     output_shape, (W, b) = ntk_init_fn(rng, input_shape)
     norm = W_std / np.sqrt(get_fan_in(input_shape))
-    return output_shape, (W * norm, b * b_std)
+    return output_shape, (W * norm, None if b_std is None else b * b_std)
 
   if parameterization == 'ntk':
     init_fn = ntk_init_fn
@@ -1409,6 +1430,8 @@ def _Conv(
     elif parameterization == 'standard':
       norm = 1.
       b_rescale = 1.
+    else:
+      raise NotImplementedError(parameterization)
 
     if padding == Padding.CIRCULAR and not transpose:
       spatial_axes = tuple(lhs_spec.index(c)
@@ -1435,7 +1458,9 @@ def _Conv(
                            for c in rhs_spec if c not in ('I', 'O'))
       res = _same_pad_for_filter_shape_transpose(res, spatial_axes, out_shape)
 
-    return res + b_rescale * b
+    if b is not None:
+      res += b_rescale * b
+    return res
 
   @_requires(batch_axis=lhs_spec.index('N'),
              channel_axis=lhs_spec.index('C'),
@@ -1486,23 +1511,26 @@ def _Conv(
     def affine(out, scale, shift, batch_ndim):
       if out is not None:
         out *= scale
-        if k.diagonal_spatial or shared_weights:
-          out += shift
+        if shift is not None:
+          if k.diagonal_spatial or shared_weights:
+            out += shift
 
-        else:
-          idx = (Ellipsis,)
-          for i in range(batch_ndim, out.ndim, 2):
-            shape = [1] * out.ndim
-            size = out.shape[i]
-            shape[i] = size
-            idx += (np.arange(size).reshape(shape),) * 2
-          out = out.at[idx].add(shift)
+          else:
+            idx = (Ellipsis,)
+            for i in range(batch_ndim, out.ndim, 2):
+              shape = [1] * out.ndim
+              size = out.shape[i]
+              shape[i] = size
+              idx += (np.arange(size).reshape(shape),) * 2
+            out = out.at[idx].add(shift)
 
       return out
 
+    b_std_sq = None if b_std is None else b_std**2
+
     def conv(lhs, batch_ndim):
       out = conv_unscaled(lhs, batch_ndim)
-      out = affine(out, W_std**2, b_std**2, batch_ndim)
+      out = affine(out, W_std**2, b_std_sq, batch_ndim)
       return out
 
     cov1 = conv(cov1, 1 if k.diagonal_batch else 2)
@@ -1519,7 +1547,7 @@ def _Conv(
         ntk = (get_fan_in(k.shape1) * nngp_unscaled +
                W_std ** 2 * conv_unscaled(ntk, 2))
         ntk = affine(ntk, 1, 1., 2)
-      nngp = affine(nngp_unscaled, W_std**2, b_std**2, 2)
+      nngp = affine(nngp_unscaled, W_std**2, b_std_sq, 2)
 
     res = k.replace(cov1=cov1,
                     nngp=nngp,
@@ -1536,7 +1564,6 @@ def _Conv(
     out_spec_kernel = tuple(c for c in out_spec if c not in ('N', 'C'))
     in_to_out_permutation = tuple(out_spec_kernel.index(c) for c in input_spec)
     res = res.transpose(in_to_out_permutation)
-
     return res
 
   def mask_fn(mask, input_shape):
@@ -2278,7 +2305,7 @@ def GlobalSelfAttention(
     W_value_std: float = 1.0,
     W_query_std: float = 1.0,
     W_out_std: float = 1.0,
-    b_std: float = 0.0,
+    b_std: Optional[float] = None,
     attention_mechanism: str = AttentionMechanism.SOFTMAX.name,
     pos_emb_type: str = PositionalEmbedding.NONE.name,
     pos_emb_p_norm: float = 2,
@@ -2353,7 +2380,7 @@ def GlobalSelfAttention(
       parameterization, influences computation only through the product
       `W_out_std * W_value_std`.
     b_std:
-      initial standard deviation of the bias values.
+      initial standard deviation of the bias values. `None` means no bias.
     attention_mechanism:
       a string, `"SOFTMAX"`, `"IDENTITY"`, `"ABS"`, or `"RELU"`, the
       transformation applied to dot product attention weights.
@@ -2464,9 +2491,12 @@ def GlobalSelfAttention(
     val_matrices = rand(rng_V, shape=(n_heads, n_chan_in_vals, n_chan_val))
     W_out = rand(rng_O, shape=(n_chan_val * n_heads, n_chan_out))
 
-    b_shape = [1] * len(input_shape)
-    b_shape[_channel_axis] = n_chan_out
-    b = rand(rng_b, shape=b_shape)
+    if b_std is None:
+      b = None
+    else:
+      b_shape = [1] * len(input_shape)
+      b_shape[_channel_axis] = n_chan_out
+      b = rand(rng_b, shape=b_shape)
 
     if linear_scaling:
       query_matrices = None
@@ -2580,7 +2610,9 @@ def GlobalSelfAttention(
 
     outputs = np.reshape(outputs, (n,) + spatial_shape + (n_chan_out,))
     outputs = np.moveaxis(outputs, (0, -1), (batch_axis, channel_axis))
-    return outputs + b_std * b
+    if b is not None:
+      outputs += b_std * b
+    return outputs
 
   @_requires(batch_axis=batch_axis,
              channel_axis=channel_axis,
@@ -2690,7 +2722,8 @@ def GlobalSelfAttention(
         ntk = None
       else:
         ntk = _weigh_kernel(ntk_interp if val_pos_emb else k.ntk,
-                            G1, G2) + 2 * (nngp - b_std**2)
+                            G1, G2) + 2 * (nngp if b_std is None
+                                                         else (nngp - b_std**2))
 
     elif attention_mechanism == AttentionMechanism.IDENTITY:
 
@@ -4515,7 +4548,7 @@ def _get_diagonal_outer_prods(cov1: np.ndarray,
 def _affine(
     mat: Optional[np.ndarray],
     W_std: float,
-    b_std: float) -> Optional[np.ndarray]:
+    b_std: Optional[float]) -> Optional[np.ndarray]:
   """Get covariances of affine outputs if inputs have covariances `nngp`.
 
   The output is assumed to be `xW + b`, where `x` is the input, `W` is a matrix
@@ -4530,15 +4563,19 @@ def _affine(
       standard deviation of a fully-connected layer weights.
     b_std:
       standard deviation of a fully-connected layer biases.
+      `None` means no bias.
 
   Returns:
     a `np.ndarray` containing sample-[sample-]position[-position] covariances
     of FC outputs. Has the same shape as `nngp`.
   """
-  if mat is None:
-    return mat
+  if mat is not None:
+    mat *= W_std**2
 
-  return  W_std**2 * mat + b_std**2
+    if b_std is not None:
+      mat += b_std**2
+
+  return mat
 
 
 def _proprocess_kernels_for_fan_in(ks: Kernels) -> Tuple[List[Kernel], bool]:
