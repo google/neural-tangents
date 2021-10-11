@@ -3389,6 +3389,214 @@ def Sign() -> InternalLayer:
 
 @layer
 @supports_masking(remask_kernel=True)
+def Exp(a: float = 1, b: float = 1) -> InternalLayer:
+  """Elementwise natural exponent function `a * np.exp(b * x)`.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+
+  def fn(x):
+    return a * np.exp(b * x)
+
+  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
+  def kernel_fn(k: Kernel) -> Kernel:
+    """Compute new kernels after an `Exp` layer."""
+    cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
+
+    sum11, sum12, sum22 = _get_diagonal_outer_prods(
+        cov1, cov2, k.diagonal_batch, k.diagonal_spatial, op.add)
+
+    def nngp_ntk_fn(nngp, sum_, ntk):
+      nngp = np.exp(b**2 * (sum_ / 2 + nngp))
+      if ntk is not None:
+        ntk *= b**2 * nngp
+      return nngp, ntk
+
+    def nngp_fn_diag(nngp):
+      return np.exp(2 * b**2 * nngp)
+
+    nngp, ntk = nngp_ntk_fn(nngp, sum12, ntk)
+
+    if k.diagonal_batch and k.diagonal_spatial:
+      cov1 = nngp_fn_diag(cov1)
+      if cov2 is not None:
+        cov2 = nngp_fn_diag(cov2)
+    else:
+      cov1, _ = nngp_ntk_fn(cov1, sum11, None)
+      if cov2 is not None:
+        cov2, _ = nngp_ntk_fn(cov2, sum22, None)
+
+    return k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk) * a
+
+  return _elementwise(fn, f'Exp({a}, {b})', kernel_fn)
+
+
+@layer
+@supports_masking(remask_kernel=True)
+def Gaussian(a: float = 1, b: float = -1) -> InternalLayer:
+  """Elementwise Gaussian function `a * np.exp(b * x**2)`.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  def fn(x):
+    return a * np.exp(b * x**2)
+
+  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
+  def kernel_fn(k: Kernel) -> Kernel:
+    cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
+
+    cov1_denom = 1 - 2 * b * cov1
+    cov2_denom = None if cov2 is None else 1 - 2 * b * cov2
+
+    prod11, prod12, prod22 = _get_diagonal_outer_prods(cov1_denom,
+                                                       cov2_denom,
+                                                       k.diagonal_batch,
+                                                       k.diagonal_spatial,
+                                                       op.mul)
+
+    factor = 4 * b**2
+
+    def nngp_ntk_fn(
+        nngp: np.ndarray,
+        prod: np.ndarray,
+        ntk: Optional[np.ndarray] = None
+    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+      det = _sqrt((prod - factor * nngp**2))
+
+      if ntk is not None:
+        ntk *= factor * nngp / det**3
+
+      nngp = 1 / det
+      return nngp, ntk
+
+    def nngp_fn_diag(nngp: np.ndarray) -> np.ndarray:
+      return 1 / _sqrt(1 - 4 * b * nngp)
+
+    nngp, ntk = nngp_ntk_fn(nngp, prod12, ntk)
+
+    if k.diagonal_batch and k.diagonal_spatial:
+      cov1 = nngp_fn_diag(cov1)
+      if cov2 is not None:
+        cov2 = nngp_fn_diag(cov2)
+    else:
+      cov1, _ = nngp_ntk_fn(cov1, prod11)
+      if cov2 is not None:
+        cov2, _ = nngp_ntk_fn(cov2, prod22)
+
+    return k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk) * a
+
+  return _elementwise(fn, f'Gaussian({a}, {b})', kernel_fn)
+
+
+@layer
+@supports_masking(remask_kernel=True)
+def ExpNormalized(
+    gamma: float = 1,
+    shift: float = -1,
+    do_clip: bool = False) -> InternalLayer:
+  """Simulates the "Gaussian normalized kernel".
+
+  Source: https://arxiv.org/abs/2003.02237.pdf, page 6.
+
+  Args:
+    gamma: exponent scalar coefficient.
+    shift: shift exponentiated normalized covariance by this much.
+    do_clip: True to clip normalized covariance, potentially improving accuracy.
+
+  Returns:
+    `(init_fn, apply_fn, `kernel_fn)`.
+
+  Raises:
+    NotImplementedError: if finite width `apply_fn` is called.
+  """
+  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
+  def kernel_fn(k: Kernel) -> Kernel:
+    cov1, cov2, nngp, ntk = k.cov1, k.cov2, k.nngp, k.ntk
+    prod11, prod12, prod22 = _get_diagonal_outer_prods(cov1,
+                                                       cov2,
+                                                       k.diagonal_batch,
+                                                       k.diagonal_spatial,
+                                                       op.mul)
+    tol = 1e-30
+    prod11 = _sqrt(prod11, tol)
+    prod12 = _sqrt(prod12, tol)
+    prod22 = _sqrt(prod22, tol) if prod22 is not None else None
+
+    def exp(cov, prod):
+      if cov is not None:
+        cov /= prod
+        if do_clip:
+          cov = np.clip(cov, -1, 1)
+        cov = np.exp(gamma * (cov + shift))
+      return cov
+
+    exp12 = exp(nngp, prod12)
+
+    return k.replace(
+        nngp=prod12 * exp12,
+        cov1=prod11 * exp(cov1, prod11),
+        cov2=None if cov2 is None else prod22 * exp(cov2, prod22),
+        ntk=ntk if ntk is None else gamma * ntk * exp12)
+
+  return _elementwise(None, 'ExpNormalized', kernel_fn)
+
+
+@layer
+@supports_masking(remask_kernel=True)
+def Hermite(degree: int) -> InternalLayer:
+  """Hermite polynomials.
+
+  Inputs to this layer are assumed to have unit norm, i.e.
+  `np.std(x, axis=channel_axis) == 1`. The Hermite polynomials are normailized
+  so that the L2 norm w.r.t. standard Gaussian is 1.
+
+  Args:
+    degree: an integer between 1 and 6.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+  """
+  if degree not in [1, 2, 3, 4, 5, 6]:
+    raise NotImplementedError('The `degree` must be an integer between '
+                              '`1` and `6`.')
+
+  def f1(x):
+    return x
+  def f2(x):
+    return (x**2 - 1.) / np.sqrt(2.)
+  def f3(x):
+    return (x**3 - 3*x) / np.sqrt(6.)
+  def f4(x):
+    return (x**4 - 6*x**2 + 3) / np.sqrt(24.)
+  def f5(x):
+    return (x**5 - 10*x**3 + 15*x) / np.sqrt(120.)
+  def f6(x):
+    return (x**6 - 15*x**4 + 45*x**2 - 15) / np.sqrt(720.)
+
+  hermite = {1: f1, 2: f2, 3: f3, 4: f4, 5: f5, 6: f6}
+  fn = hermite[degree]
+
+  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
+  def kernel_fn(k: Kernel) -> Kernel:
+    warnings.warn(
+        'Inputs to this layer are assumed to have unit norm across '
+        ' channels/features, i.e. np.std(x, axis=channel_axis) == 1.')
+
+    cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
+    ntk = None if ntk is None else degree * nngp**(degree - 1) * ntk
+    _power = lambda mat: mat**degree if mat is not None else None
+    nngp, cov1, cov2 = map(_power, (nngp, cov1, cov2))
+    k = k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
+    return k
+
+  return _elementwise(fn, f'{degree}-Hermite polynomial', kernel_fn)
+
+
+
+@layer
+@supports_masking(remask_kernel=True)
 def Elementwise(
     fn: Optional[Callable[[float], float]] = None,
     nngp_fn: Optional[Callable[[float, float, float], float]] = None,

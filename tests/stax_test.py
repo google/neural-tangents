@@ -25,7 +25,6 @@ from typing import Tuple
 from absl.testing import absltest
 from absl.testing import parameterized
 from jax import lax
-from jax import ops
 from jax import test_util as jtu
 from jax import jit, vjp, jvp, jacfwd, jacrev, value_and_grad
 from jax.config import config
@@ -34,7 +33,8 @@ import jax.numpy as np
 import jax.random as random
 import more_itertools
 from neural_tangents import stax
-from neural_tangents.utils import monte_carlo, test_utils, utils, batch
+from neural_tangents.utils import test_utils, utils, batch
+from neural_tangents.utils.monte_carlo import monte_carlo_kernel_fn
 import numpy as onp
 
 
@@ -698,14 +698,13 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     exact = kernel_fn(x_sparse, None, kernel)
 
     # TODO(http://b/160064607): set to `device_count=-1` when the bug is fixed.
-    mc = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn,
-                                           random.split(key, 2)[0],
-                                           samples,
-                                           vmap_axes=0,
-                                           device_count=0,
-                                           implementation=2)(x_sparse,
-                                                             None,
-                                                             kernel)
+    mc = monte_carlo_kernel_fn(init_fn,
+                               apply_fn,
+                               random.split(key, 2)[0],
+                               samples,
+                               vmap_axes=0,
+                               device_count=0,
+                               implementation=2)(x_sparse, None, kernel)
     mc = np.reshape(mc, exact.shape)
 
     assert not np.any(np.isnan(exact))
@@ -797,7 +796,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     del params
 
     def _get_empirical(n_samples, get):
-      kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
+      kernel_fn_empirical = monte_carlo_kernel_fn(
           init_fn, apply_fn, key, n_samples, device_count=device_count,
           trace_axes=(channel_axis,), batch_size=batch_size,
           implementation=2
@@ -891,7 +890,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
     init_fn, apply_fn, kernel_fn = stax.serial(
         *[affine, activation_fn]*depth, readout)
     analytic_kernel = kernel_fn(X0_1, X0_2, get)
-    mc_kernel_fn = monte_carlo.monte_carlo_kernel_fn(
+    mc_kernel_fn = monte_carlo_kernel_fn(
         init_fn, apply_fn, split, num_samplings, implementation=2,
         vmap_axes=0
     )
@@ -928,7 +927,13 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
           'approximate': approximate
       }
                           for model in ['fc', 'conv-pool', 'conv-flatten']
-                          for phi_name in ['Sin', 'Cos', 'Erf', 'Gelu', 'Sign']
+                          for phi_name in [
+                              'Sin',
+                              'Cos',
+                              'Erf',
+                              'Gelu',
+                              'Sign',
+                          ]
                           for same_inputs in [False]
                           for get in ['nngp', 'ntk']
                           for approximate in [True, False]
@@ -986,6 +991,140 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
     self._test_activation(activation, same_inputs, model, get,
                           rbf_gamma=gamma)
 
+  @parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name': f'{phi.__name__}_{same_inputs}_a={a}_b={b}_n={n}',
+          'same_inputs': same_inputs,
+          'a': a,
+          'b': b,
+          'n': n,
+          'phi': phi
+      }
+                          for a in [-0.5, 0.25]
+                          for b in [-0.5, -0.1, 0.1]
+                          for phi in [stax.Gaussian, stax.Exp]
+                          for same_inputs in [False, True, None]
+                          for n in [0]))
+  def test_nonlineariy(self, phi, same_inputs, a, b, n):
+    width = 2**10
+    n_samples = 2**9
+    init_fn, apply_fn, kernel_fn = stax.serial(
+        stax.Dense(width),
+        phi(a=a, b=b),
+        stax.Dense(width),
+        phi(a=a, b=b),
+        stax.Dense(1))
+
+    key1, key2, key_mc = random.split(random.PRNGKey(1), 3)
+    shape = (4, 3, 2)[:n] + (1,)
+    x1 = np.cos(random.normal(key1, (2,) + shape))
+    if same_inputs is None:
+      x2 = None
+    elif same_inputs is True:
+      x2 = x1
+    else:
+      x2 = np.cos(random.normal(key2, (3,) + shape))
+
+    k = kernel_fn(x1, x2)
+    mc_kernel_fn = monte_carlo_kernel_fn(init_fn, apply_fn, key_mc, n_samples)
+    k_mc = mc_kernel_fn(x1, x2, ('nngp', 'ntk'))
+    test_utils.assert_close_matrices(self, k_mc.nngp, k.nngp, 6e-2)
+    test_utils.assert_close_matrices(self, k_mc.ntk, k.ntk, 6e-2)
+
+  def test_exp_normalized(self):
+    key = random.PRNGKey(0)
+    x1 = random.normal(key, (2, 6, 7, 1))
+    x2 = random.normal(key, (4, 6, 7, 1))
+
+    for do_clip in [True, False]:
+      for gamma in [1., 2., 0.5]:
+        for get in ['nngp', 'ntk']:
+          with self.subTest(do_clip=do_clip, gamma=gamma, get=get):
+            _, _, kernel_fn = stax.serial(
+                stax.Conv(1, (3, 3)),
+                stax.ExpNormalized(gamma, do_clip),
+                stax.Conv(1, (3, 3)),
+                stax.ExpNormalized(gamma, do_clip),
+                stax.GlobalAvgPool(),
+                stax.Dense(1)
+            )
+            k_12 = kernel_fn(x1, x2, get=get)
+            self.assertEqual(k_12.shape, (x1.shape[0], x2.shape[0]))
+
+            k_11 = kernel_fn(x1, None, get=get)
+            self.assertEqual(k_11.shape, (x1.shape[0],) * 2)
+            self.assertGreater(np.min(np.linalg.eigvalsh(k_11)), 0)
+
+            k_22 = kernel_fn(x2, None, get=get)
+            self.assertEqual(k_22.shape, (x2.shape[0],) * 2)
+            self.assertGreater(np.min(np.linalg.eigvalsh(k_22)), 0)
+
+  def test_exp_normalized_ntk(self):
+    def nngp_fn(cov12, var1, var2):
+      prod = np.sqrt(var1 * var2)
+      return prod * np.exp(cov12 / prod - 1)
+
+    _, _, kernel_fn = stax.serial(stax.Dense(1),
+                                  stax.Elementwise(nngp_fn=nngp_fn))
+
+    _, _, kernel_fn_manual = stax.serial(stax.Dense(1),
+                                         stax.ExpNormalized())
+
+    key = random.PRNGKey(1)
+    x1 = random.normal(key, (5, 4, 3, 1))
+    x2 = random.normal(key, (6, 4, 3, 1))
+
+    k = kernel_fn(x1, x2)
+    k_manual = kernel_fn_manual(x1, x2)
+    self.assertAllClose(k_manual, k)
+
+  @parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+            '_{}_degree={}_get={}_readout={}'.format(
+                'Same_inputs' if same_inputs else 'Different_inputs',
+                degree,
+                get,
+                readout
+            ),
+          'same_inputs': same_inputs,
+          'degree': degree,
+          'get': get,
+          'readout': readout
+      }
+                          for same_inputs in [False, True]
+                          for degree in [1, 2, 3, 4, 5, 6]
+                          for get in ['ntk', 'nngp']
+                          for readout in ['pool', 'flatten']))
+  def test_hermite(self, same_inputs, degree, get, readout):
+    key = random.PRNGKey(1)
+    key1, key2, key = random.split(key, 3)
+    width = 10000
+    n_samples = 5000
+
+    if 'cpu' in xla_bridge.get_backend().platform:
+      if degree > 2:
+        raise absltest.SkipTest('Skip `cpu` test when `degree > 2`.')
+      else:
+        width = 10000
+        n_samples = 100
+
+    x1 = np.cos(random.normal(key1, [2, 6, 6, 3]))
+    x2 = x1 if same_inputs else np.cos(random.normal(key2, [3, 6, 6, 3]))
+
+    conv_layers = [
+        stax.Conv(width, (3, 3), W_std=2., b_std=0.5),
+        stax.LayerNorm(),
+        stax.Hermite(degree),
+        stax.GlobalAvgPool() if readout == 'pool' else stax.Flatten(),
+        stax.Dense(1) if get == 'ntk' else stax.Identity()]
+
+    init_fn, apply_fn, kernel_fn = stax.serial(*conv_layers)
+    analytic_kernel = kernel_fn(x1, x2, get)
+    mc_kernel_fn = monte_carlo_kernel_fn(init_fn, apply_fn, key, n_samples)
+    mc_kernel = mc_kernel_fn(x1, x2, get)
+    rot = degree / 2. * 1e-2
+    test_utils.assert_close_matrices(self, mc_kernel, analytic_kernel, rot)
 
 
 class ElementwiseTest(test_utils.NeuralTangentsTestCase):
@@ -1296,18 +1435,18 @@ class FlattenTest(test_utils.NeuralTangentsTestCase):
 
     n = 100
 
-    kernel_fc_mc = monte_carlo.monte_carlo_kernel_fn(init_fc, apply_fc, key,
-                                                     n, vmap_axes=0,
-                                                     implementation=2)
-    kernel_bot_mc = monte_carlo.monte_carlo_kernel_fn(init_bot, apply_bot, key,
-                                                      n, vmap_axes=0,
-                                                      implementation=2)
-    kernel_mid_mc = monte_carlo.monte_carlo_kernel_fn(init_mid, apply_mid, key,
-                                                      n, vmap_axes=0,
-                                                      implementation=2)
-    kernel_top_mc = monte_carlo.monte_carlo_kernel_fn(init_top, apply_top, key,
-                                                      n, vmap_axes=0,
-                                                      implementation=2)
+    kernel_fc_mc = monte_carlo_kernel_fn(init_fc, apply_fc, key,
+                                         n, vmap_axes=0,
+                                         implementation=2)
+    kernel_bot_mc = monte_carlo_kernel_fn(init_bot, apply_bot, key,
+                                          n, vmap_axes=0,
+                                          implementation=2)
+    kernel_mid_mc = monte_carlo_kernel_fn(init_mid, apply_mid, key,
+                                          n, vmap_axes=0,
+                                          implementation=2)
+    kernel_top_mc = monte_carlo_kernel_fn(init_top, apply_top, key,
+                                          n, vmap_axes=0,
+                                          implementation=2)
 
     K = kernel_fc(X0_1_flat, X0_2_flat)
 
@@ -1467,7 +1606,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
     else:
       raise ValueError(get)
 
-    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+    kernel_fn_mc = monte_carlo_kernel_fn(
         init_fn, apply_fn, key, n_samples,
         device_count=0 if axis in (0, -2) else -1,
         implementation=2,
@@ -1598,7 +1737,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
     init_fn, apply_fn, kernel_fn = stax.serial(
         nn, stax.Dense(1 if get == 'ntk' else width, 1.25, 0.5))
 
-    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+    kernel_fn_mc = monte_carlo_kernel_fn(
         init_fn,
         apply_fn,
         key,
@@ -1737,7 +1876,7 @@ class ConvNDTest(test_utils.NeuralTangentsTestCase):
     else:
       raise ValueError(get)
 
-    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+    kernel_fn_mc = monte_carlo_kernel_fn(
         init_fn, apply_fn, key, n_samples, implementation=2, vmap_axes=0)
 
     exact = kernel_fn(X0_1, X0_2, get=get)
@@ -1886,10 +2025,10 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
         stax.Dense(1024)
     )
 
-    correct_conv_fn_mc = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn,
-                                                           key, 400,
-                                                           implementation=2,
-                                                           vmap_axes=0)
+    correct_conv_fn_mc = monte_carlo_kernel_fn(init_fn, apply_fn,
+                                               key, 400,
+                                               implementation=2,
+                                               vmap_axes=0)
     K = correct_conv_fn(x1, x2, get='nngp')
     K_mc = correct_conv_fn_mc(x1, x2, get='nngp')
     self.assertAllClose(K, K_mc, atol=0.01, rtol=0.05)
@@ -1914,10 +2053,10 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
         stax.Dense(1024)
     )
 
-    correct_conv_fn_mc = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn,
-                                                           key, 300,
-                                                           implementation=2,
-                                                           vmap_axes=0)
+    correct_conv_fn_mc = monte_carlo_kernel_fn(init_fn, apply_fn,
+                                               key, 300,
+                                               implementation=2,
+                                               vmap_axes=0)
     K = correct_conv_fn(x1, x2, get='nngp')
     K_mc = correct_conv_fn_mc(x1, x2, get='nngp')
     self.assertAllClose(K, K_mc, atol=0.01, rtol=0.05)
@@ -1939,10 +2078,10 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
         stax.Dense(1)
     )
 
-    correct_conv_fn_mc = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn,
-                                                           key, 200,
-                                                           implementation=2,
-                                                           vmap_axes=0)
+    correct_conv_fn_mc = monte_carlo_kernel_fn(init_fn, apply_fn,
+                                               key, 200,
+                                               implementation=2,
+                                               vmap_axes=0)
     K = correct_conv_fn(x1, x2, get='ntk')
     K_mc = correct_conv_fn_mc(x1, x2, get='ntk')
     self.assertAllClose(K, K_mc, atol=0.01, rtol=0.05)
@@ -2031,7 +2170,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
     else:
       raise ValueError(get)
 
-    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+    kernel_fn_mc = monte_carlo_kernel_fn(
         init_fn, apply_fn, key, n_samples,
         device_count=0 if concat in (0, -2) else -1,
         implementation=2,
@@ -2204,7 +2343,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
     else:
       raise ValueError(get)
 
-    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+    kernel_fn_mc = monte_carlo_kernel_fn(
         init_fn, apply_fn, key, n_samples,
         device_count=0 if concat in (0, -n) else -1,
         implementation=2,
@@ -2250,7 +2389,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
 
     init_fn, apply_fn, kernel_fn = net(N if kernel_type == 'nngp' else 1)
 
-    kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
+    kernel_fn_empirical = monte_carlo_kernel_fn(
         init_fn, apply_fn, mc_key, N_SAMPLES, trace_axes=(-1,),
         implementation=2,
         vmap_axes=((0, 0), 0, {})
@@ -2286,7 +2425,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
 
     init_fn, apply_fn, kernel_fn = net(N if kernel_type == 'nngp' else 1)
 
-    kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
+    kernel_fn_empirical = monte_carlo_kernel_fn(
         init_fn, apply_fn, mc_key, N_SAMPLES, trace_axes=(-1,),
         implementation=2,
         vmap_axes=(0, [0, 0], {}))
@@ -2330,7 +2469,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
     K_readin_fn = jit(readin[2])
     K_readout_fn = jit(functools.partial(readout[2], get=kernel_type))
 
-    kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
+    kernel_fn_empirical = monte_carlo_kernel_fn(
         init_fn, apply_fn, mc_key, N_SAMPLES, trace_axes=(-1,),
         implementation=2,
         vmap_axes=((0, 0), [0, 0, 0], {})
@@ -2399,7 +2538,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
                         stax.GlobalAvgPool())),
         stax.Conv(N_in + 3, (2,)))
 
-    kernel_fn_empirical = monte_carlo.monte_carlo_kernel_fn(
+    kernel_fn_empirical = monte_carlo_kernel_fn(
         init_fn, apply_fn, mc_key, N_SAMPLES, implementation=2,
         vmap_axes=(((((0, 0), 0), 0), (((0, 0), 0), 0), {})
                    if platform == 'tpu' else None)
@@ -2552,7 +2691,7 @@ class AttentionTest(test_utils.NeuralTangentsTestCase):
     else:
       raise ValueError(get)
 
-    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+    kernel_fn_mc = monte_carlo_kernel_fn(
         init_fn, apply_fn, key, n_samples,
         device_count=-1,
         implementation=2,
@@ -2801,7 +2940,7 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
       self.assertAllClose(exact_dense, exact)
 
     # Test agreement with empirical kernel
-    kernel_mc_fn = monte_carlo.monte_carlo_kernel_fn(
+    kernel_mc_fn = monte_carlo_kernel_fn(
         init_fn=init_fn,
         apply_fn=apply_fn,
         key=random.PRNGKey(10),
@@ -2891,7 +3030,7 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
     if diagonal_spatial:
       diagonal_axes += (1,)
 
-    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+    kernel_fn_mc = monte_carlo_kernel_fn(
         init_fn, apply_fn, key, n_samples, diagonal_axes=diagonal_axes,
         device_count=0, implementation=2, vmap_axes=0)
     k_mc = kernel_fn_mc(x1, None if diagonal_batch else x2, 'nngp')
@@ -3146,7 +3285,7 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
             return (axis,), (0,)
           return (axis, axis + 1), (0, 1)
 
-        kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+        kernel_fn_mc = monte_carlo_kernel_fn(
             init_fn=init_fn,
             apply_fn=apply_fn,
             key=key1,
@@ -3260,7 +3399,7 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
             channel_axis=int(out_c_axis > out_b_axis or not do_pool))
     )
 
-    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+    kernel_fn_mc = monte_carlo_kernel_fn(
         init_fn, apply_fn, key1, n_samples,
         trace_axes=(int(out_c_axis > out_b_axis) if do_pool else 1,),
         device_count=0,
@@ -3443,7 +3582,7 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
 
           return axes
 
-        kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+        kernel_fn_mc = monte_carlo_kernel_fn(
             init_fn=init_fn,
             apply_fn=apply_fn,
             key=key1,
@@ -3565,7 +3704,7 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
         stax.Dense(width if get == 'nngp' else 1, 0.9, 0.1)
     )
 
-    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+    kernel_fn_mc = monte_carlo_kernel_fn(
         init_fn, apply_fn, key1, n_samples,
         device_count=0,
         implementation=2
@@ -3689,7 +3828,7 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
     if diagonal_spatial:
       diagonal_axes += (1,)
 
-    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+    kernel_fn_mc = monte_carlo_kernel_fn(
         init_fn, apply_fn, key_mc, n_samples=512, diagonal_axes=diagonal_axes,
         device_count=0,
         implementation=2,
@@ -3779,7 +3918,7 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
       self.assertAllClose(k_conv, k_local)
 
     # Test against MC.
-    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+    kernel_fn_mc = monte_carlo_kernel_fn(
         init_fn, apply_fn, key_mc, n_samples=512, device_count=0,
         implementation=2,
         vmap_axes=0
@@ -3867,7 +4006,7 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
     self._test_against_mc(apply_fn, init_fn, k_double.nngp, x1, x2, 0.05)
 
   def _test_against_mc(self, apply_fn, init_fn, k, x1, x2, tol=0.01, n=256):
-    kernel_fn_mc = monte_carlo.monte_carlo_kernel_fn(
+    kernel_fn_mc = monte_carlo_kernel_fn(
         init_fn, apply_fn, random.PRNGKey(2), n_samples=n, device_count=0,
         implementation=2,
         vmap_axes=0

@@ -16,7 +16,7 @@
 """Public Neural Tangents modules and functions."""
 
 
-__version__ = '0.3.8'
+__version__ = '0.3.9'
 
 
 from neural_tangents import predict
