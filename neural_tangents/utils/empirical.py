@@ -91,7 +91,6 @@ Example:
 import operator
 from typing import Union, Callable, Optional, Tuple, Dict
 from jax import eval_shape, jacobian, jvp, vjp, vmap, linear_transpose
-from jax._src.api import _std_basis, _unravel_array_into_pytree
 import jax.numpy as np
 from jax.tree_util import tree_flatten, tree_unflatten, tree_multimap, tree_reduce, tree_map
 from neural_tangents.utils import utils
@@ -662,9 +661,10 @@ def _empirical_implicit_ntk_fn(f: ApplyFn,
         return jvp(f1, (params,), delta_vjp(delta))[1]
 
       fx1, fx2 = eval_shape(f1, params), eval_shape(f2, params)
-      eye = _std_basis(fx1)
+      eye = utils.std_basis(fx1)
       ntk = vmap(linear_transpose(delta_vjp_jvp, fx2))(eye)
-      ntk = tree_map(lambda fx12: _unravel_array_into_pytree(fx1, 0, fx12), ntk)
+      ntk = tree_map(lambda fx12: utils.unravel_array_into_pytree(fx1, 0, fx12),
+                     ntk)
       ntk = _diagonal(ntk, fx1)
       return ntk
 

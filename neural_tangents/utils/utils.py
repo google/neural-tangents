@@ -22,10 +22,10 @@ import types
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Sized, Tuple, Union
 from .typing import Axes, PyTree
 import warnings
-
+from jax.tree_util import tree_flatten, tree_unflatten
 from . import dataclasses
 from jax import lax
-from jax import random
+from jax import random, dtypes
 from jax.lib import xla_bridge
 import jax.numpy as np
 from jax.tree_util import tree_all, tree_map
@@ -801,3 +801,25 @@ def split_kwargs(kwargs, x1=None, x2=None):
       kwargs1[k] = kwargs2[k] = v
 
   return kwargs1, kwargs2
+
+
+def std_basis(pytree: PyTree) -> PyTree:
+  """Similar to `jax.api._std_basis` without host-side ops."""
+  leaves, _ = tree_flatten(pytree)
+  ndim = sum(map(np.size, leaves))
+  dtype = dtypes.result_type(*leaves)
+  flat_basis = np.eye(ndim, dtype=dtype)
+  return unravel_array_into_pytree(pytree, 1, flat_basis)
+
+
+def unravel_array_into_pytree(pytree: PyTree,
+                              axis: int,
+                              arr: np.ndarray) -> PyTree:
+  """Similar to `jax.api._unravel_array_into_pytree` without host-side ops."""
+  leaves, treedef = tree_flatten(pytree)
+  if arr.ndim > 0:
+    axis %= arr.ndim
+  shapes = [arr.shape[:axis] + np.shape(l) + arr.shape[axis+1:] for l in leaves]
+  parts = np.split(arr, onp.cumsum([np.size(l) for l in leaves[:-1]]), axis)
+  reshaped_parts = [np.reshape(x, shape) for x, shape in zip(parts, shapes)]
+  return tree_unflatten(treedef, reshaped_parts)
