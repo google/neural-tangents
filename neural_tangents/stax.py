@@ -176,7 +176,7 @@ def _requires(**static_reqs):
                                  f'`{key} == {v}`.')
 
             elif key in ('batch_axis', 'channel_axis'):
-              ndim = len(k.shape1)
+              ndim = len(k.shape1)  # pytype: disable=attribute-error  # preserve-union-macros
               v_kernel = getattr(k, key)
               v_pos = v % ndim
               if v_kernel != v_pos:
@@ -883,10 +883,10 @@ def Aggregate(
           'Please file a bug at '
           'https://github.com/google/neural-tangents/issues/new.')
 
-    ndim = len(k.shape1)
+    ndim = len(k.shape1)  # pytype: disable=attribute-error  # preserve-union-macros
     agg_axes, batch_axis, channel_axis = get_agg_axes(ndim)
     agg_ndim = len(agg_axes)
-    agg_shape = tuple(k.shape1[a] for a in agg_axes)
+    agg_shape = tuple(k.shape1[a] for a in agg_axes)  # pytype: disable=attribute-error  # preserve-union-macros
     agg_size = functools.reduce(op.mul, agg_shape, 1)
 
     def bucket_axes(ndim, start_axis):
@@ -911,7 +911,7 @@ def Aggregate(
       pattern1 = None if pattern1 is None else to_dense(pattern1)
       pattern2 = None if pattern2 is None else to_dense(pattern2)
 
-      k = k.dot_general(
+      k = k.dot_general(  # pytype: disable=attribute-error  # preserve-union-macros
           other1=pattern1,
           other2=pattern2,
           is_lhs=False,
