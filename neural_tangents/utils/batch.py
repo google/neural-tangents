@@ -45,11 +45,11 @@ Example:
 from typing import Callable, Tuple, Union, Dict, Any, TypeVar, Iterable, Optional
 from functools import partial
 import warnings
+import jax
 from jax import device_put, devices
 from jax import jit
 from jax import pmap
 from jax.interpreters.pxla import ShardedDeviceArray
-from jax.lib import xla_bridge
 from jax import random
 import jax.numpy as np
 from jax.tree_util import tree_all
@@ -101,7 +101,7 @@ def batch(kernel_fn: KernelFn,
   input_req = getattr(kernel_fn, 'input_req', {})
   dropout_in_analytic_kernel = input_req.get('use_dropout', False)
   use_multidevice = device_count > 0 or (device_count == -1 and
-                                         xla_bridge.device_count() > 1)
+                                         jax.device_count() > 1)
   use_serial = bool(batch_size)
   if use_multidevice:
     kernel_fn = _parallel(kernel_fn, use_serial,
@@ -504,7 +504,7 @@ def _parallel(kernel_fn: KernelFn,
   """
 
   if device_count == -1:
-    device_count = xla_bridge.device_count()
+    device_count = jax.device_count()
 
   def _check_dropout(n1, n2, kwargs):
     dropout_in_empirical_kernel = getattr(kwargs, 'rng', None) is not None
@@ -681,7 +681,7 @@ def _get_jit_or_pmap_broadcast() -> Callable[[Callable, int], Callable]:
     key = (f, device_count)
 
     if device_count == -1:
-      device_count = xla_bridge.device_count()
+      device_count = jax.device_count()
 
     # TODO(romann): adapt this when JAX allows `axis_in` for `pmap`.
     def broadcast(arg: np.ndarray) -> np.ndarray:
