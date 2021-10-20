@@ -24,7 +24,7 @@ from jax import jit
 from jax import test_util as jtu
 from jax import vmap
 from jax.config import config
-from jax.experimental import optimizers
+from jax.example_libraries import optimizers
 from jax.flatten_util import ravel_pytree
 from jax.lib import xla_bridge
 import jax.numpy as np
