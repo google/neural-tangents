@@ -429,6 +429,7 @@ as an example. With `NVIDIA V100` 64-bit precision, `nt` took 316/330/508 GPU-ho
 
 Neural Tangents has been used in the following papers (newest first):
 
+1. [Neural Scene Representations for View Synthesis](https://digitalassets.lib.berkeley.edu/techreports/ucb/incoming/EECS-2020-223.pdf)
 1. [Neural Tangent Kernel Eigenvalues Accurately Predict Generalization](https://arxiv.org/abs/2110.03922)
 1. [Uniform Generalization Bounds for Overparameterized Neural Networks](https://arxiv.org/abs/2109.06099)
 1. [Data Summarization via Bilevel Optimization](https://arxiv.org/abs/2109.12534)
