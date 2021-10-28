@@ -78,7 +78,7 @@ from jax import numpy as np
 from jax import ops
 from jax import random
 from jax import ShapeDtypeStruct, eval_shape, grad, ShapedArray, vmap, custom_jvp
-import jax.example_libraries.stax as ostax
+import jax.experimental.stax as ostax
 from jax.lib import xla_bridge
 from jax.scipy.special import erf
 from jax.tree_util import tree_map
@@ -1991,7 +1991,7 @@ def _Pool(
       del dims, strides, padding  # Unused.
       return lambda outputs, inputs, spec: outputs / onp.prod(window_shape)
 
-    pool_fn = ostax._pooling_layer(lax.add, 0., rescaler)
+    pool_fn = _pooling_layer(lax.add, 0., rescaler)
     init_fn, apply_fn = pool_fn(window_shape, strides, padding.name, spec)
 
   @_requires(batch_axis=batch_axis,
@@ -5740,6 +5740,38 @@ def _pool_mask(
                        f'please submit a bug to '
                        f'https://github.com/google/neural-tangents/issues/new.')
   return mask
+
+
+def _pooling_layer(reducer, init_val, rescaler=None):
+  """Adapted from `jax.example_libraries.stax`."""
+  def PoolingLayer(window_shape, strides=None, padding='VALID', spec=None):
+    """Layer construction function for a pooling layer."""
+    window_shape = tuple(window_shape)
+    strides = strides or (1,) * len(window_shape)
+    rescale = rescaler(window_shape, strides, padding) if rescaler else None
+
+    if spec is None:
+      non_spatial_axes = 0, len(window_shape) + 1
+    else:
+      non_spatial_axes = spec.index('N'), spec.index('C')
+
+    for i in sorted(non_spatial_axes):
+      window_shape = window_shape[:i] + (1,) + window_shape[i:]
+      strides = strides[:i] + (1,) + strides[i:]
+
+    def init_fun(rng, input_shape):
+      padding_vals = lax.padtype_to_pads(input_shape, window_shape,
+                                         strides, padding)
+      ones = (1,) * len(window_shape)
+      out_shape = lax.reduce_window_shape_tuple(
+          input_shape, window_shape, strides, padding_vals, ones, ones)
+      return out_shape, ()
+    def apply_fun(params, inputs, **kwargs):
+      out = lax.reduce_window(inputs, init_val, reducer, window_shape,
+                              strides, padding)
+      return rescale(out, inputs, spec) if rescale else out
+    return init_fun, apply_fun
+  return PoolingLayer
 
 
 # POSITIONAL EMBEDDINGS
