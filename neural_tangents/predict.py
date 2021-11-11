@@ -305,7 +305,7 @@ def gradient_descent(
     >>> kernel_fn = empirical_ntk_fn(f)
     >>> k_test_train = kernel_fn(x_test, x_train, params)
     >>>
-    >>> from jax.experimental import stax
+    >>> from jax.example_libraries import stax
     >>> cross_entropy = lambda fx, y_hat: -np.mean(stax.logsoftmax(fx) * y_hat)
     >>> predict_fn = predict.gradient_descent(cross_entropy, k_train_train,
     >>>                                       y_train, learning_rate, momentum)

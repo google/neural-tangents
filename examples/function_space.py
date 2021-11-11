@@ -24,7 +24,7 @@ from absl import flags
 from jax import grad
 from jax import jit
 from jax import random
-from jax.experimental import optimizers
+from jax.example_libraries import optimizers
 import jax.numpy as np
 import neural_tangents as nt
 from neural_tangents import stax

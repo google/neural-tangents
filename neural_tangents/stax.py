@@ -15,7 +15,7 @@
 """Closed-form NNGP and NTK library.
 
 This library contains layer constructors mimicking those in
-`jax.experimental.stax` with similar API apart apart from:
+`jax.example_libraries.stax` with similar API apart apart from:
 
 1) Instead of `(init_fn, apply_fn)` tuple, layer constructors return a triple
 `(init_fn, apply_fn, kernel_fn)`, where the added `kernel_fn` maps a
@@ -78,7 +78,7 @@ from jax import numpy as np
 from jax import ops
 from jax import random
 from jax import ShapeDtypeStruct, eval_shape, grad, ShapedArray, vmap, custom_jvp
-import jax.experimental.stax as ostax
+import jax.example_libraries.stax as ostax
 from jax.lib import xla_bridge
 from jax.scipy.special import erf
 from jax.tree_util import tree_map
@@ -306,7 +306,7 @@ def supports_masking(remask_kernel: bool):
 def serial(*layers: Layer) -> InternalLayer:
   """Combinator for composing layers in serial.
 
-  Based on `jax.experimental.stax.serial`.
+  Based on `jax.example_libraries.stax.serial`.
 
   Args:
     *layers:
@@ -335,7 +335,7 @@ def parallel(*layers: Layer) -> InternalLayer:
   """Combinator for composing layers in parallel.
 
   The layer resulting from this combinator is often used with the `FanOut` and
-  `FanInSum`/`FanInConcat` layers. Based on `jax.experimental.stax.parallel`.
+  `FanInSum`/`FanInConcat` layers. Based on `jax.example_libraries.stax.parallel`.
 
   Args:
     *layers:
@@ -1012,7 +1012,7 @@ def Dense(
     channel_axis: int = -1) -> InternalLayer:
   r"""Layer constructor function for a dense (fully-connected) layer.
 
-  Based on `jax.experimental.stax.Dense`.
+  Based on `jax.example_libraries.stax.Dense`.
 
   Args:
     out_dim:
@@ -1149,7 +1149,7 @@ def Conv(out_chan: int,
          parameterization: str = 'ntk') -> InternalLayer:
   """Layer construction function for a general convolution layer.
 
-  Based on `jax.experimental.stax.GeneralConv`.
+  Based on `jax.example_libraries.stax.GeneralConv`.
 
   Args:
     out_chan:
@@ -1195,7 +1195,7 @@ def ConvTranspose(out_chan: int,
                   parameterization: str = 'ntk') -> InternalLayer:
   """Layer construction function for a general transpose convolution layer.
 
-  Based on `jax.experimental.stax.GeneralConvTranspose`.
+  Based on `jax.example_libraries.stax.GeneralConvTranspose`.
 
   Args:
     out_chan:
@@ -1291,7 +1291,7 @@ def _Conv(
 ) -> InternalLayer:
   """Layer construction function for a general convolution layer.
 
-  Based on `jax.experimental.stax.GeneralConv`.
+  Based on `jax.example_libraries.stax.GeneralConv`.
 
   Args:
     out_chan:
@@ -1378,7 +1378,7 @@ def _Conv(
       lax_conv = functools.partial(utils.conv_general_dilated_local,
                                    filter_shape=filter_shape)
       def ntk_init_fn(rng, input_shape):
-        """Adapted from `jax.experimental.GeneralConv`."""
+        """Adapted from `jax.example_libraries.stax.GeneralConv`."""
         filter_shape_iter = iter(filter_shape)
         conv_kernel_shape = [out_chan if c == 'O' else
                              input_shape[lhs_spec.index('C')] if c == 'I' else
@@ -1748,7 +1748,7 @@ def FanInProd() -> InternalLayer:
 def FanInConcat(axis: int = -1) -> InternalLayer:
   """Layer construction function for a fan-in concatenation layer.
 
-  Based on `jax.experimental.stax.FanInConcat`.
+  Based on `jax.example_libraries.stax.FanInConcat`.
 
   Args:
     axis: Specifies the axis along which input tensors should be concatenated.
@@ -1863,7 +1863,7 @@ def AvgPool(window_shape: Sequence[int],
             channel_axis: int = -1) -> InternalLayer:
   """Layer construction function for an average pooling layer.
 
-  Based on `jax.experimental.stax.AvgPool`.
+  Based on `jax.example_libraries.stax.AvgPool`.
 
   Args:
     window_shape: The number of pixels over which pooling is to be performed.
@@ -1897,7 +1897,7 @@ def SumPool(window_shape: Sequence[int],
             channel_axis: int = -1) -> InternalLayer:
   """Layer construction function for a 2D sum pooling layer.
 
-  Based on `jax.experimental.stax.SumPool`.
+  Based on `jax.example_libraries.stax.SumPool`.
 
   Args:
     window_shape: The number of pixels over which pooling is to be performed.
@@ -1928,7 +1928,7 @@ def _Pool(
     channel_axis: int) -> InternalLayer:
   """Layer construction function for a 2D pooling layer.
 
-  Based on `jax.experimental.stax.AvgPool` and `jax.experimental.stax.SumPool`.
+  Based on `jax.example_libraries.stax.AvgPool` and `jax.example_libraries.stax.SumPool`.
 
   Args:
     pool_type: specifies whether average or sum pooling should be performed.
@@ -2169,7 +2169,7 @@ def _GlobalPool(
 def Flatten(batch_axis: int = 0, batch_axis_out: int = 0) -> InternalLayer:
   """Layer construction function for flattening all non-batch dimensions.
 
-  Based on `jax.experimental.stax.Flatten`, but allows to specify batch axes.
+  Based on `jax.example_libraries.stax.Flatten`, but allows to specify batch axes.
 
   Args:
     batch_axis: Specifies the input batch dimension. Defaults to `0`, the
@@ -2260,7 +2260,7 @@ def Flatten(batch_axis: int = 0, batch_axis_out: int = 0) -> InternalLayer:
 def Identity() -> InternalLayer:
   """Layer construction function for an identity layer.
 
-  Based on `jax.experimental.stax.Identity`.
+  Based on `jax.example_libraries.stax.Identity`.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -2898,7 +2898,7 @@ def LayerNorm(
 def Dropout(rate: float, mode: str = 'train') -> InternalLayer:
   """Dropout layer.
 
-  Based on `jax.experimental.stax.Dropout`.
+  Based on `jax.example_libraries.stax.Dropout`.
 
   Args:
     rate:
@@ -5442,7 +5442,7 @@ def _pool_kernel(
 
 def _normalize(lhs, out, normalize_edges, padding, strides, window_shape):
   if padding == Padding.SAME and normalize_edges:
-    # `SAME` padding in `jax.experimental.stax.AvgPool` normalizes by actual
+    # `SAME` padding in `jax.example_libraries.stax.AvgPool` normalizes by actual
     # window size, which is smaller at the edges.
     one = np.ones_like(lhs, lhs.dtype)
     window_sizes = lax.reduce_window(one, 0., lax.add, window_shape, strides,

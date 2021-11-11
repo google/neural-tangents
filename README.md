@@ -93,7 +93,7 @@ Our library closely follows JAX's API for specifying neural networks,  [`stax`](
 
 ```python
 from jax import random
-from jax.experimental import stax
+from jax.example_libraries import stax
 
 init_fn, apply_fn = stax.serial(
     stax.Dense(512), stax.Relu,
@@ -241,12 +241,12 @@ The `neural_tangents` (`nt`) package contains the following modules and function
 ## Technical gotchas
 
 
-### [`nt.stax`](https://github.com/google/neural-tangents/blob/main/neural_tangents/stax.py) vs [`jax.experimental.stax`](https://github.com/google/jax/blob/main/jax/experimental/stax.py)
+### [`nt.stax`](https://github.com/google/neural-tangents/blob/main/neural_tangents/stax.py) vs [`jax.example_libraries.stax`](https://github.com/google/jax/blob/main/jax/experimental/stax.py)
 We remark the following differences between our library and the JAX one.
 
-* All `nt.stax` layers are instantiated with a function call, i.e. `nt.stax.Relu()` vs `jax.experimental.stax.Relu`.
+* All `nt.stax` layers are instantiated with a function call, i.e. `nt.stax.Relu()` vs `jax.example_libraries.stax.Relu`.
 * All layers with trainable parameters use the _NTK parameterization_ by default (see [[10]](#10-neural-tangent-kernel-convergence-and-generalization-in-neural-networks), Remark 1). However, Dense and Conv layers also support the _standard parameterization_ via a `parameterization` keyword argument (see [[15]](#15-on-the-infinite-width-limit-of-neural-networks-with-a-standard-parameterization)).
-* `nt.stax` and `jax.experimental.stax` may have different layers and options available (for example `nt.stax` layers support `CIRCULAR` padding, have `LayerNorm`, but no `BatchNorm`.).
+* `nt.stax` and `jax.example_libraries.stax` may have different layers and options available (for example `nt.stax` layers support `CIRCULAR` padding, have `LayerNorm`, but no `BatchNorm`.).
 
 
 ### CPU and TPU performance

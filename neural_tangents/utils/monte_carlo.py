@@ -135,11 +135,11 @@ def monte_carlo_kernel_fn(
   Args:
     init_fn:
       a function initializing parameters of the neural network. From
-      `jax.experimental.stax`: "takes an rng key and an input shape and returns
+      `jax.example_libraries.stax`: "takes an rng key and an input shape and returns
       an `(output_shape, params)` pair".
     apply_fn:
       a function computing the output of the neural network.
-      From `jax.experimental.stax`: "takes params, inputs, and an rng key and
+      From `jax.example_libraries.stax`: "takes params, inputs, and an rng key and
       applies the layer".
     key:
       RNG (`jax.random.PRNGKey`) for sampling random networks. Must have
