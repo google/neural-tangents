@@ -1,0 +1,7 @@
+@inproceedings{neuraltangents2020,
+    title={Neural Tangents: Fast and Easy Infinite Neural Networks in Python},
+    author={Roman Novak and Lechao Xiao and Jiri Hron and Jaehoon Lee and Alexander A. Alemi and Jascha Sohl-Dickstein and Samuel S. Schoenholz},
+    booktitle={International Conference on Learning Representations},
+    year={2020},
+    url={https://github.com/google/neural-tangents}
+}
