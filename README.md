@@ -1,3 +1,7 @@
+# News: 
+
+Today (Dec 14) we are at the [NeurIPS Bayesian Deep Learning Workshop](https://neurips.cc/virtual/2021/workshop/21827) at poster **3E**, talking about upcoming speed-ups to the finite width NTK (`nt.empirical`). See also our [PDF note](http://bayesiandeeplearning.org/2021/papers/60.pdf).
+
 # Neural Tangents
 [**ICLR 2020 Video**](https://iclr.cc/virtual_2020/poster_SklD9yrFPS.html)
 | [**Paper**](https://arxiv.org/abs/1912.02803)
