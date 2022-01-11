@@ -622,7 +622,7 @@ def conv_general_dilated_local(
     rhs: a rank `n+2` dimensional array of kernel weights. Unlike in regular
       CNNs, its spatial coordinates (`H`, `W`, ...) correspond to output spatial
       locations, while input spatial locations are fused with the input channel
-      locations in the single `I` dimension, in the oreder of
+      locations in the single `I` dimension, in the order of
       `"C" + ''.join(c for c in rhs_spec if c not in 'OI')` order, where
       `rhs_spec = dimension_numbers[1]`. For example, if `rhs_spec == "WHIO",
       the unfolded kernel shape is
@@ -641,9 +641,9 @@ def conv_general_dilated_local(
     rhs_dilation: `None`, or a sequence of `n` integers, giving the
       dilation factor to apply in each input spatial dimension of `rhs`.
       RHS dilation is also known as atrous convolution.
-    dimension_numbers: either `None`, a `ConvDimensionNumbers` object, or
-      a 3-tuple `(lhs_spec, rhs_spec, out_spec)`, where each element is a string
-      of length `n+2`.
+    dimension_numbers: either `None`, or a 3-tuple
+      `(lhs_spec, rhs_spec, out_spec)`, where each element is a string of
+      length `n+2`.
     precision: Optional. Either ``None``, which means the default precision for
       the backend, or a ``lax.Precision`` enum value (``Precision.DEFAULT``,
       ``Precision.HIGH`` or ``Precision.HIGHEST``).
