@@ -62,10 +62,11 @@ def stub_out_pmap(batch, count):
       batch.xla_bridge = xla_bridge_stub()
 
 
-def _log(relative_error, expected, actual, did_pass):
+def _log(relative_error, absolute_error, expected, actual, did_pass):
   msg = 'PASSED' if did_pass else 'FAILED'
   logging.info(f'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n'
-               f'\n{msg} with {relative_error} relative error: \n'
+               f'\n{msg} with {relative_error} relative error \n'
+               f'and {absolute_error} absolute error: \n'
                f'---------------------------------------------\n'
                f'EXPECTED: \n'
                f'{expected}\n'
@@ -76,7 +77,7 @@ def _log(relative_error, expected, actual, did_pass):
                )
 
 
-def assert_close_matrices(self, expected, actual, rtol):
+def assert_close_matrices(self, expected, actual, rtol, atol=0.1):
   @utils.nt_tree_fn()
   def assert_close(expected, actual):
     self.assertEqual(expected.shape, actual.shape)
@@ -84,19 +85,24 @@ def assert_close_matrices(self, expected, actual, rtol):
         np.linalg.norm(actual - expected) /
         np.maximum(np.linalg.norm(expected), 1e-12))
 
+    absolute_error = np.mean(np.abs(actual - expected))
+
     if np.isnan(relative_error):
       self.assertAllClose(expected, actual)
 
-    elif relative_error > rtol:
-      _log(relative_error, expected, actual, False)
+    elif relative_error > rtol or absolute_error > atol:
+      _log(relative_error, absolute_error, expected, actual, False)
       self.fail(self.failureException('Relative ERROR: ',
                                       float(relative_error),
                                       'EXPECTED:' + ' ' * 50,
                                       expected,
                                       'ACTUAL:' + ' ' * 50,
-                                      actual))
+                                      actual,
+                                      ' ' * 50,
+                                      'Absolute ERROR: ',
+                                      float(absolute_error)))
     else:
-      _log(relative_error, expected, actual, True)
+      _log(relative_error, absolute_error, expected, actual, True)
 
   assert_close(expected, actual)
 

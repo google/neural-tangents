@@ -1121,7 +1121,9 @@ def Dense(
     elif parameterization == 'standard':
       input_width = k.shape1[channel_axis]
       if ntk is not None:
-        ntk = input_width * nngp + 1. + W_std**2 * ntk
+        ntk = input_width * nngp + W_std**2 * ntk
+        if b_std is not None:
+          ntk += 1.
       cov1, nngp, cov2 = map(fc, (cov1, nngp, cov2))
 
     return k.replace(cov1=cov1,
@@ -1546,7 +1548,8 @@ def _Conv(
       if ntk is not None:
         ntk = (get_fan_in(k.shape1) * nngp_unscaled +
                W_std ** 2 * conv_unscaled(ntk, 2))
-        ntk = affine(ntk, 1, 1., 2)
+        if b_std is not None:
+          ntk = affine(ntk, 1, 1., 2)
       nngp = affine(nngp_unscaled, W_std**2, b_std_sq, 2)
 
     res = k.replace(cov1=cov1,

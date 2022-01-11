@@ -57,6 +57,8 @@ N_SAMPLES = 100
 
 RTOL = 0.041
 
+ATOL = 0.1
+
 FILTER_SHAPES = [
     (2, 1),
     (3, 2)
@@ -103,6 +105,8 @@ PARAMETERIZATIONS = [
 ]
 
 test_utils.update_test_tolerance()
+
+prandom.seed(1)
 
 
 def _skip_test(msg='Skipping large tests for speed.', platforms=('cpu',)):
@@ -183,10 +187,16 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
     )
 
   def conv(out_chan):
-    return stax.Conv(out_chan=out_chan, filter_shape=filter_shape,
-                     strides=strides, padding=padding, W_std=W_std,
-                     b_std=b_std, dimension_numbers=dimension_numbers,
-                     parameterization=parameterization)
+    return stax.Conv(
+        out_chan=out_chan,
+        filter_shape=filter_shape,
+        strides=strides,
+        padding=padding,
+        W_std=W_std,
+        b_std=b_std,
+        dimension_numbers=dimension_numbers,
+        parameterization=parameterization
+    )
 
   affine = conv(width) if is_conv else fc(width)
 
@@ -272,13 +282,17 @@ def _get_net_pool(width, is_ntk, pool_type, padding,
   parameterization = 'ntk'
 
   fc = functools.partial(
-      stax.Dense, W_std=W_std, b_std=b_std, parameterization=parameterization)
+      stax.Dense,
+      W_std=W_std / width if pool_type == 'SUM' else W_std,
+      b_std=b_std,
+      parameterization=parameterization)
+
   conv = functools.partial(
       stax.Conv,
-      filter_shape=(3, 2),
+      filter_shape=filter_shape,
       strides=None,
       padding='SAME',
-      W_std=W_std,
+      W_std=W_std / onp.prod(filter_shape) if pool_type == 'SUM' else W_std,
       b_std=b_std,
       parameterization=parameterization)
 
@@ -297,8 +311,14 @@ def _get_net_pool(width, is_ntk, pool_type, padding,
   device_count = 0
 
   return stax.serial(
-      conv(width), phi, pool, conv(width), phi, global_pool_fn(),
-      fc(1 if is_ntk else width)), INPUT_SHAPE, device_count, -1
+      conv(width),
+      phi,
+      pool,
+      conv(width),
+      phi,
+      global_pool_fn(),
+      fc(1 if is_ntk else width)
+  ), INPUT_SHAPE, device_count, -1
 
 
 def _mask(x, mask_constant, mask_axis, key, p):
@@ -390,17 +410,20 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
                    padding, phi, strides, width, is_ntk, proj_into_2d,
                    pool_type, layer_norm, parameterization, use_dropout)
     self._check_agreement_with_empirical(
-        net, same_inputs, use_dropout, is_ntk, RTOL)
+        net, same_inputs, use_dropout, is_ntk, RTOL, 1.)
 
   # pylint: disable=g-complex-comprehension
   @parameterized.named_parameters(
       jtu.cases_from_list({
           'testcase_name':
-              '_{}_{}_{}_{}_{}_{}_{}'.format(
-                  model, width, 'same_inputs'
-                  if same_inputs else 'different_inputs', 'filter_shape=%s' %
-                  str(filter_shape), proj_into_2d, 'NTK' if is_ntk else 'NNGP',
-                  'parameterization=%s' % str(parameterization)),
+              f'_model={model}'
+              f'_width={width}'
+              f'_same_inputs={same_inputs}'
+              f'_filter_shape={filter_shape}'
+              f'_proj={proj_into_2d}_'
+              f'_is_ntk={is_ntk}_'
+              f'_b_std={b_std}_'
+              f'_param={parameterization}',
           'model':
               model,
           'width':
@@ -413,19 +436,38 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
               proj_into_2d,
           'is_ntk':
               is_ntk,
+          'b_std':
+              b_std,
           'parameterization':
               parameterization
-      } for model in MODELS for width in WIDTHS
+      }
+                          for model in MODELS
+                          for width in WIDTHS
                           for same_inputs in [False]
                           for is_ntk in [False, True]
                           for filter_shape in FILTER_SHAPES
                           for proj_into_2d in PROJECTIONS[:2]
+                          for b_std in [None, 0., 0.5**0.5]
                           for parameterization in PARAMETERIZATIONS))
-  def test_parameterizations(self, model, width, same_inputs, is_ntk,
-                             filter_shape, proj_into_2d, parameterization):
+  def test_parameterizations(
+      self,
+      model,
+      width,
+      same_inputs,
+      is_ntk,
+      filter_shape,
+      proj_into_2d,
+      b_std,
+      parameterization
+  ):
     is_conv = 'conv' in model
 
-    W_std, b_std = 2.**0.5, 0.5**0.5
+    W_std = 2.**0.5
+    if parameterization == 'STANDARD':
+      W_std /= width**0.5
+      if b_std is not None:
+        b_std /= width**0.5
+
     padding = PADDINGS[0]
     strides = STRIDES[0]
     phi = stax.Relu()
@@ -438,13 +480,31 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     if is_conv:
       if xla_bridge.get_backend().platform == 'cpu':
         raise absltest.SkipTest('Not running CNN models on CPU to save time.')
-    elif proj_into_2d != PROJECTIONS[0]:
+    elif proj_into_2d != PROJECTIONS[0] or filter_shape != FILTER_SHAPES[0]:
       raise absltest.SkipTest('FC models do not have these parameters.')
 
-    net = _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res,
-                   padding, phi, strides, width, is_ntk, proj_into_2d,
-                   pool_type, layer_norm, parameterization, use_dropout)
-    self._check_agreement_with_empirical(net, same_inputs, use_dropout, is_ntk)
+    net = _get_net(W_std=W_std,
+                   b_std=b_std,
+                   filter_shape=filter_shape,
+                   is_conv=is_conv,
+                   use_pooling=use_pooling,
+                   is_res=is_res,
+                   padding=padding,
+                   phi=phi,
+                   strides=strides,
+                   width=width,
+                   is_ntk=is_ntk,
+                   proj_into_2d=proj_into_2d,
+                   pool_type=pool_type,
+                   layer_norm=layer_norm,
+                   parameterization=parameterization,
+                   use_dropout=use_dropout)
+    self._check_agreement_with_empirical(net=net,
+                                         same_inputs=same_inputs,
+                                         use_dropout=use_dropout,
+                                         is_ntk=is_ntk,
+                                         rtol=0.02,
+                                         atol=0.2)
 
   @parameterized.named_parameters(
       jtu.cases_from_list({
@@ -773,7 +833,8 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
       same_inputs,
       use_dropout,
       is_ntk,
-      rtol=RTOL
+      rtol=RTOL,
+      atol=ATOL
   ):
     ((init_fn, apply_fn, kernel_fn),
      input_shape, device_count, channel_axis) = net
@@ -811,7 +872,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     else:
       exact, shape1, shape2 = kernel_fn(x1, x2, ('nngp', 'shape1', 'shape2'))
       empirical = _get_empirical(num_samples, 'nngp')
-    test_utils.assert_close_matrices(self, exact, empirical, rtol)
+    test_utils.assert_close_matrices(self, exact, empirical, rtol, atol)
     self.assertEqual(shape1, x1_out_shape)
     self.assertEqual(shape2, x2_out_shape)
 
@@ -2140,22 +2201,22 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
         stax.FanOut(3),
         stax.parallel(
             stax.serial(
-                stax.Dense(width, 1.5, 0.1),
+                stax.Dense(width, 1., 0.1),
                 stax.Abs(),
-                stax.DotGeneral(lhs=2.),
-                stax.Dense(width, 1.5, 0.1),
+                stax.DotGeneral(lhs=-0.2),
+                stax.Dense(width, 1.5, 0.01),
             ),
             stax.serial(
-                stax.Dense(width, 1.5, 0.1),
-                stax.DotGeneral(rhs=3.),
+                stax.Dense(width, 1.1, 0.1),
+                stax.DotGeneral(rhs=0.7),
                 stax.Erf(),
                 stax.Dense(width if concat != 1 else 512, 1.5, 0.1),
             ),
             stax.serial(
                 stax.DotGeneral(rhs=0.5),
-                stax.Dense(width, 1.5, 0.1),
+                stax.Dense(width, 1.2),
                 stax.ABRelu(-0.2, 0.4),
-                stax.Dense(width if concat != 1 else 1024, 3, 0.5),
+                stax.Dense(width if concat != 1 else 1024, 1.3, 0.2),
             )
         ),
         (stax.FanInSum() if concat is None else stax.FanInConcat(concat)),
@@ -2164,9 +2225,9 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
     )
 
     if get == 'nngp':
-      init_fn, apply_fn, kernel_fn = stax.serial(nn, stax.Dense(width, 2., 0.5))
+      init_fn, apply_fn, kernel_fn = stax.serial(nn, stax.Dense(width, 1., 0.1))
     elif get == 'ntk':
-      init_fn, apply_fn, kernel_fn = stax.serial(nn, stax.Dense(1, 2., 0.5))
+      init_fn, apply_fn, kernel_fn = stax.serial(nn, stax.Dense(1, 1., 0.1))
     else:
       raise ValueError(get)
 
@@ -2273,14 +2334,14 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
                     b_std=0.2),
                 stax.LayerNorm(axis=(1, -1)),
                 stax.Abs(),
-                stax.DotGeneral(rhs=1.5),
+                stax.DotGeneral(rhs=0.9),
                 conv(
                     dimension_numbers=dimension_numbers,
                     out_chan=width,
                     strides=strides,
                     filter_shape=filter_shape,
                     padding='VALID',
-                    W_std=2.,
+                    W_std=1.2,
                     b_std=0.1),
             ),
             stax.serial(
@@ -2300,7 +2361,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
                     strides=strides,
                     filter_shape=filter_shape,
                     padding='VALID',
-                    W_std=1.5,
+                    W_std=0.9,
                     b_std=1.),
             ),
             stax.serial(
@@ -2671,10 +2732,10 @@ class AttentionTest(test_utils.NeuralTangentsTestCase):
           pos_emb_decay_fn=pos_emb_fns[pos_emb_decay_fn],
           val_pos_emb=val_pos_emb,
           W_key_std=0.9,
-          W_out_std=1.2,
+          W_out_std=0.8,
           W_query_std=0.7,
-          W_value_std=1.5,
-          b_std=0.9
+          W_value_std=1.2,
+          b_std=0.5
       )
 
     nn = stax.serial(
@@ -2702,7 +2763,7 @@ class AttentionTest(test_utils.NeuralTangentsTestCase):
     exact = kernel_fn(X0_1, X0_2, get, mask_constant=mask_constant)
 
     empirical = kernel_fn_mc(X0_1, X0_2, get=get, mask_constant=mask_constant)
-    test_utils.assert_close_matrices(self, empirical, exact, tol)
+    test_utils.assert_close_matrices(self, empirical, exact, tol, 2.)
 
 
 class AggregateTest(test_utils.NeuralTangentsTestCase):
@@ -2787,7 +2848,6 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
       raise absltest.SkipTest('Batching of empirical kernel does not work for '
                               '`diagonal_axes != ()`.')
 
-    prandom.seed(1)
     batch1, batch2 = 8, 4
     num_channels = 1
     output_dims = 1 if get == 'ntk' else 2**6
@@ -2973,7 +3033,7 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
     else:
       raise ValueError(get)
 
-    test_utils.assert_close_matrices(self, exact, empirical, rtol)
+    test_utils.assert_close_matrices(self, exact, empirical, rtol, 0.2)
 
 
 class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
@@ -3182,6 +3242,11 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
     if xla_bridge.get_backend().platform == 'cpu' and n != 2:
       raise absltest.SkipTest(f'Skipping n = {n} on CPU.')
 
+    if xla_bridge.get_backend().platform == 'tpu':
+      atol = 1.
+    else:
+      atol = 0.1
+
     n_b = 2
     n_c = 1
     key1, key2, key3 = random.split(random.PRNGKey(1), 3)
@@ -3313,7 +3378,7 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
 
         with self.subTest(get=get):
           test_utils.assert_close_matrices(
-              self, get_empirical(get), getattr(exact, get), 0.01)
+              self, get_empirical(get), getattr(exact, get), 0.01, atol)
 
   @parameterized.named_parameters(
       jtu.cases_from_list(
@@ -3836,7 +3901,7 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
     )
     k_mc = kernel_fn_mc(x1, None if get == 'cov1' else x2,
                         'nngp' if get == 'cov1' else get)
-    test_utils.assert_close_matrices(self, k_mc, getattr(k, get), 0.011)
+    test_utils.assert_close_matrices(self, k_mc, getattr(k, get), 0.011, 1.)
 
     # Compared diagonal entries to CNN
     _, _, kernel_fn_conv = stax.Conv(**conv_kwargs)
@@ -3924,7 +3989,7 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
         vmap_axes=0
     )
     k_mc = kernel_fn_mc(x1, x2, get)
-    test_utils.assert_close_matrices(self, k_mc, k_local, 0.015)
+    test_utils.assert_close_matrices(self, k_mc, k_local, 0.015, 1.)
 
   def test_conv_local_conv(self):
     _skip_test(platforms=('cpu', 'tpu'))
