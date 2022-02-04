@@ -1,7 +1,3 @@
-# News: 
-
-We are at the [Advances in Approximate Bayesian Inference Symposium](http://approximateinference.org/) at poster **27** on Feb 1 (19:30 GMT), and with a contributed talk on Feb 2 (17:00 GMT), talking about upcoming speed-ups to the finite width NTK (`nt.empirical`). See also our [PDF note](https://openreview.net/forum?id=ym68T6OoO6L).
-
 # Neural Tangents
 [**ICLR 2020 Video**](https://iclr.cc/virtual_2020/poster_SklD9yrFPS.html)
 | [**Paper**](https://arxiv.org/abs/1912.02803)

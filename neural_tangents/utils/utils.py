@@ -440,7 +440,7 @@ def reverse_zipped(
       target_axes = range(start_axis, ndim)
       x = np.moveaxis(x, source_axes, target_axes)
     else:
-      x = x[:start_axis] + type(x)(x[i] for i in source_axes)
+      x = x[:start_axis] + type(x)(x[i] for i in source_axes)  # pytype: disable=wrong-arg-count  # py39-upgrade
   return x
 
 
