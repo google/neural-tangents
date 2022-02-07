@@ -29,7 +29,6 @@ from jax import random, dtypes
 from jax.lib import xla_bridge
 import jax.numpy as np
 from jax.tree_util import tree_all, tree_map
-from .kernel import Kernel
 import numpy as onp
 
 
@@ -157,7 +156,7 @@ def _output_to_dict(output):
   if isinstance(output, dict):
     return output
 
-  if isinstance(output, Kernel):
+  if hasattr(output, 'asdict'):
     return output.asdict()
 
   if hasattr(output, '_asdict'):

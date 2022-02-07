@@ -144,12 +144,8 @@ class EmpiricalTest(jtu.JaxTestCase):
                            0.)
                           ])
 
-  @parameterized.named_parameters(
-      jtu.cases_from_list({
-          'testcase_name': '_{}'.format(shape),
-          'shape': shape
-      } for shape in TAYLOR_MATRIX_SHAPES))
-  def testLinearization(self, shape):
+  @classmethod
+  def _get_init_data(cls, shape):
     key = random.PRNGKey(0)
     key, s1, s2, s3, = random.split(key, 4)
     w1 = random.normal(s1, shape)
@@ -157,9 +153,17 @@ class EmpiricalTest(jtu.JaxTestCase):
     w2 = random.normal(s2, shape)
     b = random.normal(s3, (1,) * (len(shape) - 1) + (shape[-1],))
     params = (w1, w2, b)
-
     key, split = random.split(key)
     x0 = random.normal(split, (shape[-1], 1))
+    return key, params, x0
+
+  @parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name': '_{}'.format(shape),
+          'shape': shape
+      } for shape in TAYLOR_MATRIX_SHAPES))
+  def testLinearization(self, shape):
+    key, params, x0 = self._get_init_data(shape)
 
     f_lin = empirical.linearize(EmpiricalTest.f, x0)
 
@@ -197,16 +201,7 @@ class EmpiricalTest(jtu.JaxTestCase):
                              0.)
                             ])
 
-    key = random.PRNGKey(0)
-    key, s1, s2, s3, = random.split(key, 4)
-    w1 = random.normal(s1, shape)
-    w1 = 0.5 * (w1 + w1.T)
-    w2 = random.normal(s2, shape)
-    b = random.normal(s3, (1,) * (len(shape) - 1) + (shape[-1],))
-    params = (w1, w2, b)
-
-    key, split = random.split(key)
-    x0 = random.normal(split, (shape[-1], 1))
+    key, params, x0 = self._get_init_data(shape)
 
     f_lin = empirical.taylor_expand(EmpiricalTest.f, x0, 1)
     f_2 = empirical.taylor_expand(EmpiricalTest.f, x0, 2)

@@ -47,8 +47,8 @@ def _get_version() -> str:
     for line in fp:
       if line.startswith(version):
         g = {}
-        exec(line, g)  # pylint: disable=exec-used
-        return g[version]  # pytype: disable=key-error
+        exec(line, g)
+        return g[version]
     raise ValueError(f'`{version}` not defined in `{path}`.')
 
 

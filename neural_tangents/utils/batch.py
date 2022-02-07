@@ -277,8 +277,11 @@ def _reshape_kernel_for_pmap(k: Kernel,
 
 
 @utils.nt_tree_fn()
-def _set_cov2_is_none(k: Kernel) -> Kernel:
-  return k.replace(cov2=None)
+def _set_cov2_to_none(
+    k: Union[Kernel, np.ndarray]) -> Union[Kernel, np.ndarray]:
+  if isinstance(k, Kernel):
+    k = k.replace(cov2=None)
+  return k
   # pytype: enable=attribute-error
 
 
@@ -444,7 +447,7 @@ def _serial(kernel_fn: KernelFn,
                                                              k.cov2 is None)(k)
     _, k = _scan(row_fn, 0, (n1s, kwargs_np1))
     if cov2_is_none:
-      k = _set_cov2_is_none(k)
+      k = _set_cov2_to_none(k)
     return flatten(k, cov2_is_none)
 
   @utils.wraps(kernel_fn)
@@ -584,7 +587,7 @@ def _parallel(kernel_fn: KernelFn,
     kernel = _reshape_kernel_for_pmap(kernel, _device_count, n1_per_device)
     kernel = _kernel_fn(kernel, *args, **kwargs)
     if cov2_is_none:
-      kernel = _set_cov2_is_none(kernel)
+      kernel = _set_cov2_to_none(kernel)
     return _flatten_kernel(kernel, cov2_is_none, True)
 
   @utils.wraps(kernel_fn)

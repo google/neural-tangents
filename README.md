@@ -89,7 +89,7 @@ set -e; for f in tests/*.py; do python $f; done
 
 <b>See this [Colab](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/neural_tangents_cookbook.ipynb) for a detailed tutorial. Below is a very quick introduction.</b>
 
-Our library closely follows JAX's API for specifying neural networks,  [`stax`](https://github.com/google/jax/blob/main/jax/experimental/stax.py). In `stax` a network is defined by a pair of functions `(init_fn, apply_fn)` initializing the trainable parameters and computing the outputs of the network respectively. Below is an example of defining a 3-layer network and computing it's outputs `y` given inputs `x`.
+Our library closely follows JAX's API for specifying neural networks,  [`stax`](https://github.com/google/jax/blob/main/jax/experimental/stax.py). In `stax` a network is defined by a pair of functions `(init_fn, apply_fn)` initializing the trainable parameters and computing the outputs of the network respectively. Below is an example of defining a 3-layer network and computing its outputs `y` given inputs `x`.
 
 ```python
 from jax import random
@@ -127,7 +127,7 @@ x2 = random.normal(key2, (20, 100))
 kernel = kernel_fn(x1, x2, 'nngp')
 ```
 
-Note that `kernel_fn` can compute _two_ covariance matrices corresponding to the Neural Network Gaussian Process (NNGP) and Neural Tangent (NT) kernels respectively. The NNGP kernel corresponds to the _Bayesian_ infinite neural network [[1-5]](#5-deep-neural-networks-as-gaussian-processes). The NTK corresponds to the _(continuous) gradient descent trained_ infinite network [[10]](#10-neural-tangent-kernel-convergence-and-generalization-in-neural-networks). In the above example, we compute the NNGP kernel but we could compute the NTK or both:
+Note that `kernel_fn` can compute _two_ covariance matrices corresponding to the Neural Network Gaussian Process (NNGP) and Neural Tangent (NT) kernels respectively. The NNGP kernel corresponds to the _Bayesian_ infinite neural network [[1-5]](#5-deep-neural-networks-as-gaussian-processes). The NTK corresponds to the _(continuous) gradient descent trained_ infinite network [[10]](#10-neural-tangent-kernel-convergence-and-generalization-in-neural-networks). In the above example, we compute the NNGP kernel, but we could compute the NTK or both:
 
 ```python
 # Get kernel of a single type
@@ -270,7 +270,7 @@ For this, we provide two convenient functions:
 * `nt.linearize`, and
 * `nt.taylor_expand`,
 
-which allow to linearize or get an arbitrary-order Taylor expansion of any function `apply_fn(params, x)` around some initial parameters `params_0` as `apply_fn_lin = nt.linearize(apply_fn, params_0)`.
+which allow us to linearize or get an arbitrary-order Taylor expansion of any function `apply_fn(params, x)` around some initial parameters `params_0` as `apply_fn_lin = nt.linearize(apply_fn, params_0)`.
 
 One can use `apply_fn_lin(params, x)` exactly as you would any other function
 (including as an input to JAX optimizers). This makes it easy to compare the
@@ -348,7 +348,7 @@ dependent. However, some rules of thumb that we've observed are:
      agreement by the time the layer-width is 512 (RMSE of about 0.05 at the
      end of training).
 
-   * For convolutional networks one generally observes reasonable agreement
+   * For convolutional networks one generally observes reasonable
      agreement by the time the number of channels is 512.
 
 2. Convergence at small learning rates.

@@ -24,8 +24,6 @@ from jax import vmap
 from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.test_util as jtu
-from .kernel import Kernel
-from neural_tangents.utils import utils
 import numpy as onp
 
 
@@ -78,7 +76,6 @@ def _log(relative_error, absolute_error, expected, actual, did_pass):
 
 
 def assert_close_matrices(self, expected, actual, rtol, atol=0.1):
-  @utils.nt_tree_fn()
   def assert_close(expected, actual):
     self.assertEqual(expected.shape, actual.shape)
     relative_error = (
@@ -104,7 +101,7 @@ def assert_close_matrices(self, expected, actual, rtol, atol=0.1):
     else:
       _log(relative_error, absolute_error, expected, actual, True)
 
-  assert_close(expected, actual)
+  jax.tree_map(assert_close, expected, actual)
 
 
 class NeuralTangentsTestCase(jtu.JaxTestCase):
@@ -124,15 +121,15 @@ class NeuralTangentsTestCase(jtu.JaxTestCase):
           x, y, check_dtypes=check_dtypes, atol=atol, rtol=rtol,
           canonicalize_dtypes=canonicalize_dtypes, err_msg=err_msg)
 
-    if isinstance(x, Kernel):
-      self.assertIsInstance(y, Kernel)
-      for field in dataclasses.fields(Kernel):
-        name = field.name
-        x_name, y_name = getattr(x, name), getattr(y, name)
+    if dataclasses.is_dataclass(x):
+      self.assertIs(type(y), type(x))
+      for field in dataclasses.fields(x):
+        key = field.name
+        x_value, y_value = getattr(x, key), getattr(y, key)
         is_pytree_node = field.metadata.get('pytree_node', True)
         if is_pytree_node:
-          assert_close(x_name, y_name)
+          assert_close(x_value, y_value)
         else:
-          self.assertEqual(x_name, y_name, name)
+          self.assertEqual(x_value, y_value, key)
     else:
       assert_close(x, y)

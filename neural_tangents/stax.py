@@ -994,7 +994,7 @@ def Aggregate(
       k = k.replace(nngp=nngp, ntk=ntk, cov1=cov1, cov2=cov2)
 
     else:
-      raise ValueError(f'Unregocnized `implementation == {implementation}.')
+      raise ValueError(f'Unrecognized `implementation == {implementation}.')
 
     return k
 
@@ -1632,7 +1632,7 @@ def FanInSum() -> InternalLayer:
   init_fn, apply_fn = ostax.FanInSum
 
   def kernel_fn(ks: Kernels, **kwargs) -> Kernel:
-    ks, is_reversed = _proprocess_kernels_for_fan_in(ks)
+    ks, is_reversed = _preprocess_kernels_for_fan_in(ks)
     if not all([k.shape1 == ks[0].shape1 and
                 k.shape2 == ks[0].shape2 for k in ks[1:]]):
       raise ValueError('All shapes should be equal in `FanInSum/FanInProd`, '
@@ -1686,7 +1686,7 @@ def FanInProd() -> InternalLayer:
   """Layer construction function for a fan-in product layer.
 
   This layer takes a number of inputs (e.g. produced by `FanOut`) and
-  elementwisely multiply the inputs to produce a single output.
+  elementwise multiplies the inputs to produce a single output.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -1697,7 +1697,7 @@ def FanInProd() -> InternalLayer:
     return functools.reduce(np.multiply, inputs)
 
   def kernel_fn(ks: Kernels, **kwargs) -> Kernel:
-    ks, is_reversed = _proprocess_kernels_for_fan_in(ks)
+    ks, is_reversed = _preprocess_kernels_for_fan_in(ks)
     if not all([k.shape1 == ks[0].shape1 and
                 k.shape2 == ks[0].shape2 for k in ks[1:]]):
       raise ValueError('All shapes should be equal in `FanInProd`.')
@@ -1762,7 +1762,7 @@ def FanInConcat(axis: int = -1) -> InternalLayer:
   init_fn, apply_fn = ostax.FanInConcat(axis)
 
   def kernel_fn(ks: Kernels, **kwargs) -> Kernel:
-    ks, is_reversed = _proprocess_kernels_for_fan_in(ks)
+    ks, is_reversed = _preprocess_kernels_for_fan_in(ks)
 
     diagonal_batch = ks[0].diagonal_batch
     diagonal_spatial = ks[0].diagonal_spatial
@@ -3901,7 +3901,7 @@ def ImageResize(
                             precision=precision)
 
   def mask_fn(mask, input_shape):
-    # Interploation (except for "NEAREST") is done in float format:
+    # Interpolation (except for "NEAREST") is done in float format:
     # https://github.com/google/jax/issues/3811. Float converted back to bool
     # rounds up all non-zero elements to `True`, so naively resizing the `mask`
     # will mark any output that has at least one contribution from a masked
@@ -3920,7 +3920,7 @@ def ImageResize(
     # >>> DeviceArray([[ True,  True],
     # >>>              [ True,  True]], dtype=bool)
     #
-    # Therefore, througout `stax` we rather follow the convention of marking
+    # Therefore, throughout `stax` we rather follow the convention of marking
     # outputs as masked if they _only_ have contributions from masked elements
     # (in other words, we don't let the mask destroy information; let content
     # have preference over mask). For this we invert the mask before and after
@@ -4271,7 +4271,7 @@ def _cov(
     channel_axis: Specifies which axis is the channel / feature axis.
       For `kernel_fn`, channel size is considered to be infinite.
   Returns:
-    Matrix of uncentred batch covariances with shape
+    Matrix of uncentered batch covariances with shape
     `(batch_size_1, batch_size_2, <S spatial dimensions>)`
     if `diagonal_spatial` is `True`, or
     `(batch_size_1, batch_size_2, <2*S spatial dimensions>)`
@@ -4789,7 +4789,7 @@ def _affine(
   return mat
 
 
-def _proprocess_kernels_for_fan_in(ks: Kernels) -> Tuple[List[Kernel], bool]:
+def _preprocess_kernels_for_fan_in(ks: Kernels) -> Tuple[List[Kernel], bool]:
   # Check diagonal requirements.
   if not all(k.diagonal_batch == ks[0].diagonal_batch and
              k.diagonal_spatial == ks[0].diagonal_spatial and

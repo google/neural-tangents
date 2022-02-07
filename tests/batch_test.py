@@ -441,10 +441,14 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     input_key1, input_key2 = random.split(rng, 2)
 
     x1_1, x1_2, x1_3 = random.normal(input_key1, (3, 4, 1))
-    x2_1, x2_2, x2_3 = random.normal(input_key2, (3, 8, 1))
 
     x1 = (x1_1, (x1_2, x1_3))
-    x2 = (x2_1, (x2_2, x2_3))
+
+    if same_inputs:
+      x2 = None
+    else:
+      x2_1, x2_2, x2_3 = random.normal(input_key2, (3, 8, 1))
+      x2 = (x2_1, (x2_2, x2_3))
 
     N = WIDTH
 
@@ -496,10 +500,13 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     input_key1, input_key2, net_key = random.split(rng, 3)
 
     x1_1, x1_2, x1_3 = random.normal(input_key1, (3, 4, 1))
-    x2_1, x2_2, x2_3 = random.normal(input_key2, (3, 8, 1))
-
     x1 = (x1_1, (x1_2, x1_3))
-    x2 = (x2_1, (x2_2, x2_3))
+
+    if same_inputs:
+      x2 = None
+    else:
+      x2_1, x2_2, x2_3 = random.normal(input_key2, (3, 8, 1))
+      x2 = (x2_1, (x2_2, x2_3))
 
     def net(N_out):
       return stax.parallel(stax.Dense(N_out),
