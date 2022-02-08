@@ -14,8 +14,12 @@
 
 """Tests for `utils/predict.py`."""
 
+import itertools
+
 from absl.testing import absltest
+from absl.testing import parameterized
 import jax
+from jax import lax
 from jax import test_util as jtu
 from jax import device_get
 from jax import jit
@@ -62,6 +66,81 @@ class UtilsTest(jtu.JaxTestCase):
         else:
           self.assertFalse(utils.is_on_cpu(x()))
           self.assertFalse(utils.is_on_cpu(x_jit()))
+
+  @parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              f' [n={n}_{padding}_dn={lhs_spec, rhs_spec, out_spec}]',
+          'n': n,
+          'padding': padding,
+          'lhs_spec': lhs_spec,
+          'rhs_spec': rhs_spec,
+          'out_spec': out_spec
+      }
+                          for n in [0, 1, 2]
+                          for padding in [
+                              'SAME',
+                              'VALID'
+                          ]
+                          for lhs_spec in [
+                              ''.join(s)
+                              for s in itertools.permutations('NCHWD'[:n + 2])]
+                          for rhs_spec in [
+                              ''.join(s)
+                              for s in itertools.permutations('OIHWDX'[:n + 2])]
+                          for out_spec in [
+                              ''.join(s)
+                              for s in itertools.permutations('NCHWDX'[:n + 2])]
+                          ))
+  def test_conv_local_general_dilated(self, n, padding, lhs_spec, rhs_spec,
+                                      out_spec):
+    """Make sure LCN with tiled CNN kernel matches CNN."""
+    if xla_bridge.get_backend().platform == 'cpu' and n > 1:
+      raise absltest.SkipTest('Skipping large tests on CPU.')
+
+    lhs_spec_default = 'NCHWDX'[:n + 2]
+    rhs_spec_default = 'OIHWDX'[:n + 2]
+
+    lhs_default = random.normal(random.PRNGKey(1), (2, 4, 7, 6, 5, 8)[:n + 2])
+    rhs_default = random.normal(random.PRNGKey(2), (3, 4, 2, 3, 1, 2)[:n + 2])
+
+    window_strides = (1, 2, 3, 4)[:n]
+    rhs_dilation = (2, 1, 3, 2)[:n]
+
+    lhs_perm = [lhs_spec_default.index(c) for c in lhs_spec]
+    lhs = np.transpose(lhs_default, lhs_perm)
+
+    rhs_perm = [rhs_spec_default.index(c) for c in rhs_spec]
+    rhs = np.transpose(rhs_default, rhs_perm)
+
+    kwargs = dict(
+        lhs=lhs,
+        window_strides=window_strides,
+        padding=padding,
+        rhs_dilation=rhs_dilation,
+        dimension_numbers=(lhs_spec, rhs_spec, out_spec)
+    )
+
+    out_conv = lax.conv_general_dilated(rhs=rhs, **kwargs)
+
+    rhs_local = np.moveaxis(rhs, (rhs_spec.index('O'), rhs_spec.index('I')),
+                            (0, 1))
+    rhs_local = rhs_local.reshape((rhs_local.shape[0], -1) + (1,) * n)
+
+    rhs_shape = (rhs_local.shape[:2] +
+                 tuple(out_conv.shape[out_spec.index(c)]
+                       for c in rhs_spec_default[2:]))
+
+    rhs_local = np.broadcast_to(rhs_local, rhs_shape)
+    rhs_local = np.transpose(rhs_local, rhs_perm)
+
+    filter_shape = [rhs.shape[i]
+                    for i in range(n + 2) if rhs_spec[i] not in ('O', 'I')]
+    out_local = utils.conv_general_dilated_local(rhs=rhs_local,
+                                                 filter_shape=filter_shape,
+                                                 **kwargs)
+
+    self.assertAllClose(out_conv, out_local, atol=1e-5, rtol=1e-5)
 
 
 if __name__ == '__main__':

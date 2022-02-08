@@ -1377,7 +1377,7 @@ def _Conv(
       ntk_init_fn = get_ntk_init_fn(ostax_init_fn)
 
     else:
-      lax_conv = functools.partial(lax.conv_general_dilated_local,
+      lax_conv = functools.partial(utils.conv_general_dilated_local,
                                    filter_shape=filter_shape)
       def ntk_init_fn(rng, input_shape):
         """Adapted from `jax.example_libraries.stax.GeneralConv`."""
