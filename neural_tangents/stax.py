@@ -192,7 +192,7 @@ def _requires(**static_reqs):
 
       return kernel_fn(k, **kwargs)
 
-    setattr(new_kernel_fn, _INPUT_REQ, frozendict.frozendict(static_reqs))
+    _set_req(new_kernel_fn, frozendict.frozendict(static_reqs))
     return new_kernel_fn
 
   return req
@@ -287,10 +287,8 @@ def supports_masking(remask_kernel: bool):
           k = replace_fn(k, mask1, mask2)
         return k
 
-      if hasattr(kernel_fn, _INPUT_REQ):
-        setattr(kernel_fn_with_masking,
-                _INPUT_REQ,
-                getattr(kernel_fn, _INPUT_REQ))
+      if _has_req(kernel_fn):
+        _set_req(kernel_fn_with_masking, _get_req(kernel_fn))
 
       return init_fn, apply_fn_with_masking, kernel_fn_with_masking
 
@@ -3996,6 +3994,20 @@ _CONV_KERNEL_DIMENSION_NUMBERS = ('NCHW', 'OIHW', 'NCHW')
 _INPUT_REQ = 'input_req'
 
 
+def _get_req(
+    f: Callable,
+    default: Optional[frozendict.frozendict] = None) -> frozendict.frozendict:
+  return getattr(f, _INPUT_REQ, default)
+
+
+def _set_req(f: Callable, req: frozendict.frozendict):
+  setattr(f, _INPUT_REQ, req)
+
+
+def _has_req(f: Callable) -> bool:
+  return hasattr(f, _INPUT_REQ)
+
+
 _DEFAULT_INPUT_REQ = frozendict.frozendict({'diagonal_batch': True,
                                             'diagonal_spatial': False,
                                             'batch_axis': 0,
@@ -4131,7 +4143,7 @@ def _get_input_req_attr(
   req = {}
 
   for f in kernel_fns:
-    req_f = getattr(f, _INPUT_REQ, {})
+    req_f = _get_req(f, default=frozendict.frozendict())
 
     for k, v in req_f.items():
       if k == 'use_dropout':
@@ -4545,7 +4557,7 @@ def _preprocess_kernel_fn(
     to either a `Kernel' or a pair of `np.ndarrray`s.
   """
   # Set empty requirements if none specified.
-  if not hasattr(kernel_fn, _INPUT_REQ):
+  if not _has_req(kernel_fn):
     kernel_fn = _requires()(kernel_fn)
 
   def kernel_fn_kernel(kernel, **kwargs):
@@ -4554,7 +4566,7 @@ def _preprocess_kernel_fn(
 
   def kernel_fn_x1(x1, x2, get, **kwargs):
     # Get input requirements requested by network layers, user, or defaults.
-    kernel_fn_reqs = getattr(kernel_fn, _INPUT_REQ)
+    kernel_fn_reqs = _get_req(kernel_fn)
     reqs = _fuse_requirements(kernel_fn_reqs, _DEFAULT_INPUT_REQ, **kwargs)
     compute_ntk = (get is None) or ('ntk' in get)
 
@@ -4643,7 +4655,7 @@ def _preprocess_kernel_fn(
                         mask_constant=mask_constant,
                         **kwargs)
 
-  setattr(kernel_fn_any, _INPUT_REQ, getattr(kernel_fn, _INPUT_REQ))
+  _set_req(kernel_fn_any, _get_req(kernel_fn))
   return kernel_fn_any
 
 

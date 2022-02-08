@@ -98,6 +98,7 @@ def batch(kernel_fn: KernelFn,
     kernel by batching over the dataset in parallel with the specified
     `batch_size` using `device_count` devices.
   """
+  # TODO(romann): find a way to avoid reading requirements.
   input_req = getattr(kernel_fn, 'input_req', {})
   dropout_in_analytic_kernel = input_req.get('use_dropout', False)
   use_multidevice = device_count > 0 or (device_count == -1 and
