@@ -26,14 +26,14 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from jax import lax
 from jax import test_util as jtu
-from jax import jit, vjp, jvp, jacfwd, jacrev, value_and_grad
+from jax import jit, vjp, jvp, jacfwd, jacrev, value_and_grad, grad
 from jax.config import config
 from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.random as random
 import more_itertools
 from neural_tangents import stax
-from neural_tangents.utils import test_utils, utils, batch
+from neural_tangents.utils import test_utils, utils, batch, empirical
 from neural_tangents.utils.monte_carlo import monte_carlo_kernel_fn
 import numpy as onp
 
@@ -410,7 +410,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
                    padding, phi, strides, width, is_ntk, proj_into_2d,
                    pool_type, layer_norm, parameterization, use_dropout)
     self._check_agreement_with_empirical(
-        net, same_inputs, use_dropout, is_ntk, RTOL, 1.)
+        net, same_inputs, use_dropout, is_ntk, RTOL, 1.05)
 
   # pylint: disable=g-complex-comprehension
   @parameterized.named_parameters(
@@ -2271,7 +2271,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
                           for proj in ['flatten', 'avg']
                           for same_inputs in [False]
                           for get in ['ntk']
-                          for n in [0, 1, 2]
+                          for n in [0, 1]
                           for concat in [None] + list(range(n + 1))
                           for mask_constant in [10.]
                           for p in [0.5]
@@ -3731,8 +3731,8 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
   )
   def test_image_resize_nn(self, same_inputs, get, n, do_pool, bottom_layer,
       method, shape):
-    # if xla_bridge.get_backend().platform == 'cpu' and n != 2:
-    #   raise absltest.SkipTest(f'Skipping n = {n} on CPU.')
+    if xla_bridge.get_backend().platform == 'cpu' and n != 2:
+      raise absltest.SkipTest(f'Skipping n = {n} on CPU.')
 
     width = 2**7
     n_samples = 2**7
@@ -4188,86 +4188,131 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
   @parameterized.named_parameters(
     jtu.cases_from_list({
         'testcase_name':
-            f'{get}-{same_inputs}-{input_type}-{phi.__name__}-{do_jit}',
+            f'get={get}-'
+            f'param={parameterization}-'
+            f'param_out={parameterization_out}-'
+            f'x1={x1_type}-'
+            f'x2={x2_type}-'
+            f'phi={phi.__name__}-'
+            f'b_std={b_std}-'
+            f'jit={do_jit}-',
         'get': get,
-        'same_inputs': same_inputs,
+        'parameterization': parameterization,
+        'parameterization_out': parameterization_out,
+        'x1_type': x1_type,
+        'x2_type': x2_type,
         'phi': phi,
-        'input_type': input_type,
+        'b_std': b_std,
         'do_jit': do_jit
     }
                         for get in [
                             'ntk',
                             'nngp'
                         ]
-                        for do_jit in [True, False]
-                        for input_type in ['zeros', 'ones', 'random']
-                        for same_inputs in [True, False, None]
+                        for parameterization in [
+                            'standard',
+                            'ntk'
+                        ]
+                        for parameterization_out in [
+                            'ntk'
+                        ]
+                        for do_jit in [
+                            True,
+                        ]
+                        for x1_type in [
+                            'zeros',
+                            'ones',
+                            'random',
+                        ]
+                        for x2_type in [
+                            'zeros',
+                            'ones',
+                            'random',
+                            'x1',
+                            'none',
+                        ]
+                        for b_std in [
+                            None,
+                            0.1,
+                        ]
                         for phi in [
-                            stax.Erf,
+                            # stax.Identity,
+                            # stax.Erf,
                             stax.Abs,
-                            stax.Gelu,
+                            # stax.Gelu,
                             stax.Relu,
+                            # stax.Sigmoid_like,
+                            stax.ABRelu,
+                            # stax.Exp,
+                            # stax.ExpNormalized,
+                            # stax.Gaussian,
+                            stax.Sign,
+                            # stax.Rbf,
+                            # stax.Cos,
+                            # stax.Sin
                         ]))
-  def test_issue_123(self, get, input_type, same_inputs, phi, do_jit):
-    """Tests https://github.com/google/neural-tangents/issues/123."""
-    def WideResnetBlock(channels, strides=(1, 1), channel_mismatch=False):
-      main = stax.serial(
-          phi(),
-          stax.Conv(
-              channels, (3, 3), strides, padding='SAME',
-              parameterization='standard'
-          ),
-          phi(),
-          stax.Conv(channels, (3, 3), padding='SAME',
-                    parameterization='standard'),
-      )
-      shortcut = (
-          stax.Identity()
-          if not channel_mismatch
-          else stax.Conv(
-              channels, (3, 3), strides, padding='SAME',
-              parameterization='standard'
-          )
-      )
-      return stax.serial(stax.FanOut(2), stax.parallel(main, shortcut),
-                         stax.FanInSum())
+  def test_activations(
+      self,
+      get,
+      parameterization,
+      parameterization_out,
+      x1_type,
+      x2_type,
+      b_std,
+      phi,
+      do_jit
+  ):
+    """Tests forward- and reverse-mode autodiff for nonlinearities."""
+    if phi == stax.ABRelu:
+      phi_ = phi(0.25, 0.5)
+    else:
+      phi_ = phi()
 
-    def WideResnetGroup(n, channels, strides=(1, 1)):
-      blocks = []
-      blocks += [WideResnetBlock(channels, strides, channel_mismatch=True)]
-      for _ in range(n - 1):
-          blocks += [WideResnetBlock(channels, (1, 1))]
-      return stax.serial(*blocks)
+    if xla_bridge.get_backend().platform == 'cpu' and phi not in [stax.Relu]:
+      raise absltest.SkipTest('Skipping non-relu tests on CPU to save time.')
 
-    def WideResnet(block_size, k, num_classes):
-      return stax.serial(
-          stax.Conv(16, (3, 3), padding='SAME', parameterization='standard'),
-          WideResnetGroup(block_size, int(16 * k)),
-          stax.GlobalAvgPool(),
-          stax.Dense(num_classes, 1.0, 0.0, parameterization='standard'),
-      )
+    n_out = 1 if get == 'ntk' else 1024
+    width = 2**10
 
-    _, _, kernel_fn = WideResnet(block_size=1, k=1, num_classes=1)
+    W_std_in = width**(-0.5) if parameterization_out == 'standard' else 1.
+    if phi == stax.Exp:
+      W_std_in /= 10.
 
-    def get_x(key):
-      shape = (1, 8, 8, 3)
-      if input_type == 'zeros':
+    init_fn, apply_fn, kernel_fn = stax.serial(
+        stax.Dense(
+            width,
+            W_std=W_std_in,
+            b_std=b_std,
+            parameterization=parameterization),
+        phi_,
+        stax.Dense(
+            n_out,
+            b_std=b_std,
+            parameterization=parameterization_out
+        ),
+    )
+
+    def get_x(x_type, key):
+      shape = (1, 2)
+      if x_type == 'zeros':
         x = np.zeros(shape)
-      elif input_type == 'ones':
+      elif x_type == 'ones':
         x = np.ones(shape)
-      elif input_type == 'random':
+      elif x_type == 'random':
         x = random.normal(random.PRNGKey(key), shape)
+      elif x_type == 'sin':
+        x = np.sin(random.normal(random.PRNGKey(key), shape))
+      elif x_type == 'none':
+        return None
       else:
-        raise ValueError(input_type)
+        raise ValueError(x_type)
       return x
 
-    x1 = get_x(1)
-    if same_inputs is None:
-      x2 = None
-    elif same_inputs:
+    x1 = get_x(x1_type, 1)
+    if x2_type == 'x1':
       x2 = x1
     else:
-      x2 = get_x(2)
+      x2 = get_x(x2_type, 2)
 
     def kernel_scalar(x1, x2):
       return kernel_fn(x1, x2, get)[0, 0]
@@ -4276,8 +4321,198 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
       kernel_scalar = jit(kernel_scalar)
 
     k1 = kernel_scalar(x1, x2)
-    k2 = value_and_grad(kernel_scalar)(x1, x2)[0]
+    k2, k2_grad = value_and_grad(kernel_scalar)(x1, x2)
     self.assertAllClose(k1, k2)
+
+    # Compare to forward-mode.
+    k2_fwd, _ = jvp(kernel_scalar, (x1, x2), (x1, x2))
+    k2_grad_fwd = jacfwd(kernel_scalar)(x1, x2)
+    self.assertAllClose(k1, k2_fwd)
+    self.assertAllClose(k2_grad, k2_grad_fwd)
+
+    # `stax.ExpNormalized` has no forward pass.
+    # `stax.Sign` is discontinuous at `0`, so NTK MC kernel does not converge to
+    # infinite-width kernel.
+    if phi == stax.ExpNormalized or (get == 'ntk' and phi == stax.Sign):
+      raise absltest.SkipTest('Not comparing against MC kernels.')
+
+    _kernel_scalar_mc = monte_carlo_kernel_fn(
+        init_fn,
+        apply_fn,
+        key=random.PRNGKey(3),
+        n_samples=1,
+        device_count=0,
+    )
+
+    def kernel_scalar_mc(x1, x2):
+      return _kernel_scalar_mc(x1, x2, get)[0, 0]
+
+    k_mc = kernel_scalar_mc(x1, x2)
+    k_mc2, k_mc2_grad = value_and_grad(kernel_scalar_mc)(x1, x2)
+    self.assertAllClose(k_mc, k_mc2)
+
+    # Compare MC to forward-mode.
+    k_mc2_fwd, _ = jvp(kernel_scalar_mc, (x1, x2), (x1, x2))
+    k_mc2_grad_fwd = jacfwd(kernel_scalar_mc)(x1, x2)
+    self.assertAllClose(k_mc, k_mc2_fwd)
+    self.assertAllClose(k_mc2_grad, k_mc2_grad_fwd)
+
+    def kernel_fn_emp(x1, x2, get, params):
+      return empirical.empirical_kernel_fn(apply_fn)(x1, x2, get, params)[0, 0]
+
+    kernel_fn_emp_g = jit(value_and_grad(kernel_fn_emp), static_argnums=(2,))
+
+    def kernel_scalar_mc_grad_mean(x1, x2):
+      key = random.PRNGKey(4)
+      n_samples = 2**9
+      k, k_grad = 0., 0.
+
+      for _ in range(n_samples):
+        _, params = init_fn(key, x1.shape)
+        k_mc2, k_mc2_grad = kernel_fn_emp_g(x1, x2, get, params)
+        k += k_mc2
+        k_grad += k_mc2_grad
+        key, _ = random.split(key)
+
+      k /= n_samples
+      k_grad /= n_samples
+      return k, k_grad
+
+    k_mc2_mean, k_mc2_grad_mean = kernel_scalar_mc_grad_mean(x1, x2)
+
+    # Compare kernels.
+    self.assertAllClose(k1, k_mc2_mean, atol=4e-3, rtol=4e-2)
+
+    if phi == stax.Sign and get == 'nngp':
+      raise absltest.SkipTest('Derivative of the empirical NNGP of a '
+                              'discontinuous function does not converge '
+                              'to the derivative of the infinite width NNGP.')
+
+    if (phi in [stax.Abs, stax.Relu, stax.LeakyRelu, stax.ABRelu] and
+        get == 'ntk'):
+      raise absltest.SkipTest('Derivative of the empirical NTK of a '
+                              'non-differentiable function does not converge '
+                              'to the derivative of the infinite width NTK.')
+
+    atol = 1e-2
+
+    # Compare gradient of the analytic kernel to empirical kernel.
+    if np.max(np.abs(k2_grad - k_mc2_grad_mean)) > atol:
+      test_utils.assert_close_matrices(self,
+                                       k_mc2_grad_mean,
+                                       k2_grad,
+                                       rtol=0.05,
+                                       atol=10.)
+
+  @parameterized.named_parameters(
+      jtu.cases_from_list({
+          'testcase_name':
+              f'get={get}-'
+              f'architecture={architecture}-'
+              f'jit={do_jit}-',
+          'get': get,
+          'architecture': architecture,
+          'do_jit': do_jit
+      }
+                          for architecture in [
+                              'conv',
+                              'wrn'
+                          ]
+                          for get in [
+                              'ntk',
+                              'nngp'
+                          ]
+                          for do_jit in [
+                              True,
+                          ]))
+  def test_issue_123(
+      self,
+      get,
+      architecture,
+      do_jit
+  ):
+    """Tests https://github.com/google/neural-tangents/issues/123."""
+    if architecture == 'wrn':
+      # https://github.com/google/neural-tangents/issues/123#issue-992927376
+      def WideResnetBlock(channels, strides=(1, 1), channel_mismatch=False):
+        main = stax.serial(
+            stax.Relu(),
+            stax.Conv(
+                channels, (3, 3), strides, padding="SAME",
+                parameterization="standard"
+            ),
+            stax.Relu(),
+            stax.Conv(channels, (3, 3), padding="SAME",
+                      parameterization="standard"),
+        )
+        shortcut = (
+            stax.Identity()
+            if not channel_mismatch
+            else stax.Conv(
+                channels, (3, 3), strides, padding="SAME",
+                parameterization="standard"
+            )
+        )
+        return stax.serial(stax.FanOut(2), stax.parallel(main, shortcut),
+                           stax.FanInSum())
+
+      def WideResnetGroup(n, channels, strides=(1, 1)):
+        blocks = []
+        blocks += [WideResnetBlock(channels, strides, channel_mismatch=True)]
+        for _ in range(n - 1):
+          blocks += [WideResnetBlock(channels, (1, 1))]
+        return stax.serial(*blocks)
+
+      def WideResnet(block_size, k, num_classes):
+        return stax.serial(
+            stax.Conv(16, (3, 3), padding="SAME", parameterization="standard"),
+            WideResnetGroup(block_size, int(16 * k)),
+            WideResnetGroup(block_size, int(32 * k), (2, 2)),
+            WideResnetGroup(block_size, int(64 * k), (2, 2)),
+            stax.AvgPool((8, 8), padding="SAME"),
+            stax.Flatten(),
+            stax.Dense(num_classes, 1.0, 0.0, parameterization="standard"),
+        )
+
+      init_fn, apply_fn, kernel_fn = WideResnet(block_size=1,
+                                                k=1,
+                                                num_classes=1)
+
+    elif architecture == 'conv':
+      # https://github.com/google/neural-tangents/issues/123#issuecomment-932809224
+      init_fn, apply_fn, kernel_fn = stax.serial(
+          stax.Conv(
+              1,
+              (3, 3)
+          ),
+          stax.Relu(),
+          stax.Flatten(),
+      )
+
+    else:
+      raise ValueError(architecture)
+
+    x1 = x2 = np.zeros((1, 8, 8, 3))
+
+    def kernel_scalar(x1, x2):
+      return kernel_fn(x1, x2, get)[0, 0]
+
+    if do_jit:
+      kernel_scalar = jit(kernel_scalar)
+
+    # Compare forward pass to `value_and_grad`.
+    k1 = kernel_scalar(x1, x2)
+    k2, k2_grad = value_and_grad(kernel_scalar)(x1, x2)
+    self.assertAllClose(k1, k2)
+
+    # Compare to forward-mode.
+    k2_fwd, _ = jvp(kernel_scalar, (x1, x2), (x1, x2))
+    k2_grad_fwd = jacfwd(kernel_scalar)(x1, x2)
+    self.assertAllClose(k1, k2_fwd)
+    self.assertAllClose(k2_grad, k2_grad_fwd)
+
+    # Compare to 0.
+    self.assertAllClose(grad(kernel_scalar)(x1, x2), np.zeros_like(x1))
 
 
 if __name__ == '__main__':

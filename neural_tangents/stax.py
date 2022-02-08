@@ -844,7 +844,7 @@ def Aggregate(
       out = np.moveaxis(out, dst_axes, src_axes)
 
     else:
-      raise ValueError(f'Unregocnized `implementation == {implementation}.')
+      raise ValueError(f'Unrecognized `implementation == {implementation}.')
 
     return out
 
@@ -1208,7 +1208,7 @@ def ConvTranspose(out_chan: int,
       number of spatial dimensions in `dimension_numbers`.
     strides:
       The stride of the convolution. The shape of the tuple should agree with
-      the number of spatial dimensions in `dimension_nubmers`.
+      the number of spatial dimensions in `dimension_numbers`.
     padding:
       Specifies padding for the convolution. Can be one of `"VALID"`, `"SAME"`,
       or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
@@ -3282,8 +3282,8 @@ def ABRelu(
                                                        op.mul)
 
     def nngp_ntk_fn(nngp, prod, ntk=None):
-      square_root = _sqrt(prod - nngp ** 2)
-      angles = np.arctan2(square_root, nngp)
+      square_root = _sqrt(prod - nngp**2)
+      angles = _arctan2(square_root, nngp)
 
       factor = (a - b)**2 / (2 * np.pi)
       dot_sigma = (a**2 + b**2) / 2 - factor * angles
@@ -3381,9 +3381,11 @@ def Sign() -> InternalLayer:
                                              k.diagonal_batch,
                                              k.diagonal_spatial,
                                              op.mul)
-    nngp = 1 - np.arctan2(_sqrt(prod12 - nngp**2), nngp) * 2 / np.pi
-    cov1 = np.ones_like(cov1)
-    cov2 = cov2 if cov2 is None else np.ones_like(cov2)
+
+    angles = _arctan2(_sqrt(prod12 - nngp**2), nngp)
+    nngp = 1 -  angles * 2 / np.pi
+    cov1 = np.where(cov1 == 0., 0., 1.)
+    cov2 = cov2 if cov2 is None else np.where(cov2 == 0, 0., 1.)
     k = k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
     return k
 
@@ -4695,6 +4697,26 @@ def _sqrt_jvp(tol, primals, tangents):
   square_root = _sqrt(x, safe_tol)
   square_root_out = _sqrt(x, tol)
   return square_root_out, np.where(x > safe_tol, x_dot / (2 * square_root), 0.)
+
+
+@functools.partial(custom_jvp, nondiff_argnums=(2,))
+def _arctan2(x, y, fill_zero: Optional[float] = np.pi / 2):
+  if fill_zero is not None:
+    return np.where(np.bitwise_and(x == 0., y == 0.),
+                    fill_zero,
+                    np.arctan2(x, y))
+  return np.arctan2(x, y)
+
+
+@getattr(_arctan2, 'defjvp', lambda f: f)  # Equivalent to `@_arctan2.defjvp`.
+def _arctan2_jvp(fill_zero, primals, tangents):
+  x, y = primals
+  x_dot, y_dot = tangents
+  primal_out = _arctan2(x, y, fill_zero)
+  safe_tol = 1e-30
+  denom = np.maximum(x**2 + y**2, safe_tol)
+  tangent_out = x_dot * (y / denom) - y_dot * (x / denom)
+  return primal_out, tangent_out
 
 
 def _get_diagonal(

@@ -1056,13 +1056,25 @@ class PredictKwargsTest(test_utils.NeuralTangentsTestCase):
     pattern_train = random.normal(rng, (8, 7, 7))
     pattern_test = random.normal(rng, (4, 7, 7))
 
+    if xla_bridge.get_backend().platform == 'tpu':
+      # TODO(romann): figure out why TPU accuracy is so low.
+      diag_reg = 1e-2
+      atol = 3e-3
+      rtol = 0.4
+      width = 512
+    else:
+      diag_reg = 1e-4
+      atol = 5e-4
+      rtol = 1e-2
+      width = 64
+
     init_fn, apply_fn, kernel_fn = stax.serial(
-        stax.Dense(8),
+        stax.Dense(width, W_std=2**0.5),
         stax.Relu(),
-        stax.Dropout(rate=0.4),
+        stax.Dropout(rate=0.7),
         stax.Aggregate(),
         stax.GlobalAvgPool(),
-        stax.Dense(1)
+        stax.Dense(width)
     )
 
     kw_dd = dict(pattern=(pattern_train, pattern_train))
@@ -1099,17 +1111,24 @@ class PredictKwargsTest(test_utils.NeuralTangentsTestCase):
     k_tt = kernel_fn(x_test, None, **kw_tt)
 
     # Infinite time NNGP/NTK.
-    predict_fn_gp = predict.gp_inference(k_dd, y_train)
+    predict_fn_gp = predict.gp_inference(
+        k_dd,
+        y_train,
+        diag_reg=diag_reg
+    )
     out_gp = predict_fn_gp(k_test_train=k_td, k_test_test=k_tt.nngp)
 
     if mode == 'empirical':
       for kw in (kw_dd, kw_td, kw_tt):
         kw.pop('get')
 
-    predict_fn_ensemble = predict.gradient_descent_mse_ensemble(kernel_fn,
-                                                                x_train,
-                                                                y_train,
-                                                                **kw_dd)
+    predict_fn_ensemble = predict.gradient_descent_mse_ensemble(
+        kernel_fn,
+        x_train,
+        y_train,
+        diag_reg=diag_reg,
+        **kw_dd
+    )
     out_ensemble = predict_fn_ensemble(x_test=x_test, compute_cov=True, **kw_tt)
     self.assertAllClose(out_gp, out_ensemble)
 
@@ -1124,20 +1143,44 @@ class PredictKwargsTest(test_utils.NeuralTangentsTestCase):
                                        x_test=x_test,
                                        compute_cov=False,
                                        **kw_tt)
-    self.assertAllClose(out_mse, out_ensemble)
+    self.assertAllClose(out_mse, out_ensemble, atol=atol, rtol=rtol)
+
+    # Finite time NTK train.
+    out_mse = predict_fn_mse(t=0.5,
+                             fx_train_0=0.,
+                             fx_test_0=None,
+                             k_test_train=k_td.ntk)
+    out_ensemble = predict_fn_ensemble(t=0.5,
+                                       get='ntk',
+                                       x_test=None,
+                                       compute_cov=False,
+                                       **kw_dd)
+    self.assertAllClose(out_mse, out_ensemble, atol=atol, rtol=rtol)
+
+    # Finite time NNGP test.
+    predict_fn_mse = predict.gradient_descent_mse(k_dd.nngp, y_train)
+    out_mse = predict_fn_mse(t=1.,
+                             fx_train_0=None,
+                             fx_test_0=0.,
+                             k_test_train=k_td.nngp)
+    out_ensemble = predict_fn_ensemble(t=1.,
+                                       get='nngp',
+                                       x_test=x_test,
+                                       compute_cov=False,
+                                       **kw_tt)
+    self.assertAllClose(out_mse, out_ensemble, atol=atol, rtol=rtol)
 
     # Finite time NNGP train.
-    predict_fn_mse = predict.gradient_descent_mse(k_dd.nngp, y_train)
-    out_mse = predict_fn_mse(t=2.,
+    out_mse = predict_fn_mse(t=5.,
                              fx_train_0=0.,
                              fx_test_0=None,
                              k_test_train=k_td.nngp)
-    out_ensemble = predict_fn_ensemble(t=2.,
+    out_ensemble = predict_fn_ensemble(t=5.,
                                        get='nngp',
                                        x_test=None,
                                        compute_cov=False,
                                        **kw_dd)
-    self.assertAllClose(out_mse, out_ensemble)
+    self.assertAllClose(out_mse, out_ensemble, atol=atol, rtol=rtol)
 
 
 if __name__ == '__main__':

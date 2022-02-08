@@ -84,10 +84,7 @@ def assert_close_matrices(self, expected, actual, rtol, atol=0.1):
 
     absolute_error = np.mean(np.abs(actual - expected))
 
-    if np.isnan(relative_error):
-      self.assertAllClose(expected, actual)
-
-    elif relative_error > rtol or absolute_error > atol:
+    if np.isnan(relative_error) or relative_error > rtol or absolute_error > atol:
       _log(relative_error, absolute_error, expected, actual, False)
       self.fail(self.failureException('Relative ERROR: ',
                                       float(relative_error),
@@ -115,11 +112,23 @@ class NeuralTangentsTestCase(jtu.JaxTestCase):
       atol=None,
       rtol=None,
       canonicalize_dtypes=True,
-      err_msg=''):
+      err_msg='',
+  ):
+    def is_finite(x):
+      self.assertTrue(np.all(np.isfinite(x)))
+
+    jax.tree_map(is_finite, x)
+    jax.tree_map(is_finite, y)
+
     def assert_close(x, y):
       super(NeuralTangentsTestCase, self).assertAllClose(
-          x, y, check_dtypes=check_dtypes, atol=atol, rtol=rtol,
-          canonicalize_dtypes=canonicalize_dtypes, err_msg=err_msg)
+          x, y,
+          check_dtypes=check_dtypes,
+          atol=atol,
+          rtol=rtol,
+          canonicalize_dtypes=canonicalize_dtypes,
+          err_msg=err_msg,
+      )
 
     if dataclasses.is_dataclass(x):
       self.assertIs(type(y), type(x))
