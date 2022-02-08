@@ -275,7 +275,7 @@ which allow us to linearize or get an arbitrary-order Taylor expansion of any fu
 One can use `apply_fn_lin(params, x)` exactly as you would any other function
 (including as an input to JAX optimizers). This makes it easy to compare the
 training trajectory of neural networks with that of its linearization.
-Previous theory and experiments have examined the linearization of neural
+Prior theory and experiments have examined the linearization of neural
 networks from inputs to logits or pre-activations, rather than from inputs to
 post-activations which are substantially more nonlinear.
 
