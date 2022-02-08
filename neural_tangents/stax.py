@@ -2972,7 +2972,6 @@ def Erf(
   def fn(x):
     return a * erf(b * x) + c
 
-  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     k *= b
 
@@ -3055,7 +3054,6 @@ def Gelu(
   def fn(x):
     return jax.nn.gelu(x, approximate=approximate)
 
-  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     """Compute kernels after a `Gelu` layer; NNGP see `arXiv:2002.08517`."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -3133,7 +3131,6 @@ def Sin(
   def fn(x):
     return a * np.sin(b * x + c)
 
-  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
@@ -3205,7 +3202,6 @@ def Rbf(
   def fn(x):
     return np.sqrt(2) * np.sin(np.sqrt(2 * gamma) * x + np.pi/4)
 
-  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     """Compute new kernels after an `Rbf` layer."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -3260,7 +3256,6 @@ def ABRelu(
   def fn(x):
     return a * np.minimum(x, 0) + b * np.maximum(x, 0)
 
-  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     """Compute new kernels after an `ABRelu` layer.
 
@@ -3371,7 +3366,6 @@ def Sign() -> InternalLayer:
   def fn(x):
     return np.sign(x)
 
-  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
     if ntk is not None:
@@ -3404,7 +3398,6 @@ def Exp(a: float = 1, b: float = 1) -> InternalLayer:
   def fn(x):
     return a * np.exp(b * x)
 
-  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     """Compute new kernels after an `Exp` layer."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -3448,7 +3441,6 @@ def Gaussian(a: float = 1, b: float = -1) -> InternalLayer:
   def fn(x):
     return a * np.exp(b * x**2)
 
-  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
@@ -3516,7 +3508,6 @@ def ExpNormalized(
   Raises:
     NotImplementedError: if finite width `apply_fn` is called.
   """
-  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     cov1, cov2, nngp, ntk = k.cov1, k.cov2, k.nngp, k.ntk
     prod11, prod12, prod22 = _get_diagonal_outer_prods(cov1,
@@ -3583,7 +3574,6 @@ def Hermite(degree: int) -> InternalLayer:
   hermite = {1: f1, 2: f2, 3: f3, 4: f4, 5: f5, 6: f6}
   fn = hermite[degree]
 
-  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     warnings.warn(
         'Inputs to this layer are assumed to have unit norm across '
@@ -3683,7 +3673,6 @@ def Elementwise(
           'https://jax.readthedocs.io/en/latest/faq.html#gradients-contain-nan-where-using-where.')
       d_nngp_fn = np.vectorize(grad(nngp_fn))
 
-    @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
     def kernel_fn(k: Kernel) -> Kernel:
       cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
@@ -3745,7 +3734,6 @@ def ElementwiseNumerical(
         'https://jax.readthedocs.io/en/latest/faq.html#gradients-contain-nan-where-using-where.')
     df = np.vectorize(grad(fn))
 
-  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def kernel_fn(k: Kernel) -> Kernel:
     """Kernel transformation of activation function using quadrature."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -4669,6 +4657,7 @@ def _elementwise(fn: Optional[Callable[[float], float]],
       raise NotImplementedError(fn)
     return fn(inputs)  # pytype:disable=not-callable
 
+  @_requires(diagonal_spatial=_Diagonal())  # pytype:disable=wrong-keyword-args
   def new_kernel_fn(k: Kernel, **kwargs) -> Kernel:
     if kernel_fn is None:
       raise NotImplementedError(kernel_fn)
