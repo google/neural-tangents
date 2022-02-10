@@ -259,7 +259,7 @@ def supports_masking(remask_kernel: bool):
         masked_inputs = utils.get_masked_array(inputs, mask_constant)
         inputs = utils.nt_tree_fn()(lambda x: x.masked_value)(masked_inputs)
         mask = utils.nt_tree_fn()(lambda x: x.mask)(masked_inputs)
-        # inputs, mask = inputs.masked_value, inputs.mask
+
         outputs = apply_fn(params, inputs, mask=mask, **kwargs)
         outputs_mask = mask_fn(mask,
                                inputs.shape if isinstance(inputs, np.ndarray)
