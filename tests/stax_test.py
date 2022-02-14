@@ -268,9 +268,7 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
     raise ValueError(proj_into_2d)
   readout = stax.serial(proj_layer, fc(1 if is_ntk else width))
 
-  device_count = 0
-  # TODO(http://b/160064607): uncomment when the bug is fixed.
-  # device_count = -1 if spec.index('N') == 0 else 0
+  device_count = -1 if spec.index('N') == 0 else 0
 
   return stax.serial(block, readout), input_shape, device_count, channel_axis_fc
 
@@ -307,8 +305,7 @@ def _get_net_pool(width, is_ntk, pool_type, padding,
 
   pool = pool_fn(filter_shape, strides, padding)
 
-  # TODO(http://b/160064607): set to `-1` when the bug is fixed.
-  device_count = 0
+  device_count = -1
 
   return stax.serial(
       conv(width),
@@ -757,13 +754,12 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
         stax.Dense(1 if kernel == 'ntk' else width))
     exact = kernel_fn(x_sparse, None, kernel)
 
-    # TODO(http://b/160064607): set to `device_count=-1` when the bug is fixed.
     mc = monte_carlo_kernel_fn(init_fn,
                                apply_fn,
                                random.split(key, 2)[0],
                                samples,
                                vmap_axes=0,
-                               device_count=0,
+                               device_count=-1,
                                implementation=2)(x_sparse, None, kernel)
     mc = np.reshape(mc, exact.shape)
 
@@ -2915,17 +2911,13 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
 
         pattern = np.concatenate(pattern, 2)
 
-        # TODO(romann): make masking work for NTK after
-        # https://github.com/google/jax/issues/7538.
-        if get != 'ntk':
-          mask = random.bernoulli(rng, p=0.2, shape=pattern.shape[:2])
-          # Make sure the receivers are masked to large negative number.
-          # The number needs to be larger than maximum size of `pattern` along
-          # any of the shape axes, to make `jax.ops.at` ignore these entries in
-          # `sparse_to_dense` above, otherwise they are treated as regular
-          # negative indices.
-          pattern = pattern.at[mask].set(-10000)
-
+        mask = random.bernoulli(rng, p=0.2, shape=pattern.shape[:2])
+        # Make sure the receivers are masked to large negative number.
+        # The number needs to be larger than maximum size of `pattern` along
+        # any of the shape axes, to make `jax.ops.at` ignore these entries in
+        # `sparse_to_dense` above, otherwise they are treated as regular
+        # negative indices.
+        pattern = pattern.at[mask].set(-10000)
         return pattern
 
       pattern1 = get_sparse_pattern(batch1, split1)
@@ -4144,7 +4136,7 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
         ('Relu' in name or 'Abs' in name)):
       # TODO(romann): revisit numerical issues of second derivative of `Relu`
       _d2k = 0
-      tol = 0.02
+      tol = 0.01
     else:
       _d2k = d2k(x1, x2)
       tol = 2e-3 if name == 'ElementwiseNumerical' else 1e-4
