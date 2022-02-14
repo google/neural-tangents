@@ -3276,7 +3276,7 @@ def ABRelu(
 
     def nngp_ntk_fn(nngp, prod, ntk=None):
       square_root = _sqrt(prod - nngp**2)
-      angles = _arctan2(square_root, nngp)
+      angles = _arctan2(square_root, nngp, fill_zero=np.pi / 2)
 
       factor = (a - b)**2 / (2 * np.pi)
       dot_sigma = (a**2 + b**2) / 2 - factor * angles
@@ -3374,7 +3374,7 @@ def Sign() -> InternalLayer:
                                              k.diagonal_spatial,
                                              op.mul)
 
-    angles = _arctan2(_sqrt(prod12 - nngp**2), nngp)
+    angles = _arctan2(_sqrt(prod12 - nngp**2), nngp, fill_zero=np.pi / 2)
     nngp = 1 -  angles * 2 / np.pi
     cov1 = np.where(cov1 == 0., 0., 1.)
     cov2 = cov2 if cov2 is None else np.where(cov2 == 0, 0., 1.)
@@ -4701,7 +4701,7 @@ def _sqrt_jvp(tol, primals, tangents):
 
 
 @functools.partial(custom_jvp, nondiff_argnums=(2,))
-def _arctan2(x, y, fill_zero: Optional[float] = np.pi / 2):
+def _arctan2(x, y, fill_zero: Optional[float] = None):
   if fill_zero is not None:
     return np.where(np.bitwise_and(x == 0., y == 0.),
                     fill_zero,
