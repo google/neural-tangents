@@ -12,17 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for `neural_tangents/_src/utils/utils.py`."""
+"""Tests for `utils/predict.py`."""
 
 from absl.testing import absltest
 import jax
+from jax import test_util as jtu
 from jax import device_get
 from jax import jit
-from jax import test_util as jtu
 from jax.config import config
+from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.random as random
-from neural_tangents._src.utils import utils
+from neural_tangents.utils import utils
 
 
 config.parse_flags_with_absl()
@@ -55,7 +56,7 @@ class UtilsTest(jtu.JaxTestCase):
         # self.assertTrue(utils.is_on_cpu(x_cpu_jit()))
         self.assertTrue(utils.is_on_cpu(x_cpu_jit_cpu()))
 
-        if jax.default_backend() == 'cpu':
+        if xla_bridge.get_backend().platform == 'cpu':
           self.assertTrue(utils.is_on_cpu(x()))
           self.assertTrue(utils.is_on_cpu(x_jit()))
         else:

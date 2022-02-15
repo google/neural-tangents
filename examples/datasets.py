@@ -91,11 +91,8 @@ def minibatch(x_train, y_train, batch_size, train_epochs):
 
     if end > x_train.shape[0]:
       key, split = random.split(key)
-      permutation = random.permutation(
-          split,
-          np.arange(x_train.shape[0], dtype=np.int64),
-          independent=True
-      )
+      permutation = random.shuffle(split,
+                                   np.arange(x_train.shape[0], dtype=np.int64))
       x_train = x_train[permutation]
       y_train = y_train[permutation]
       epoch += 1

@@ -16,7 +16,7 @@
 
 from typing import Tuple, Callable, Union, List, Any, Optional, Sequence, Generator, TypeVar, Dict
 import jax.numpy as np
-from .kernel import Kernel
+from neural_tangents.utils.kernel import Kernel
 
 
 # Missing JAX Types.

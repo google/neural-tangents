@@ -19,9 +19,9 @@ This code was copied and adapted from https://github.com/google/flax/struct.py.
 Accessed on 03/23/2020.
 """
 
-import dataclasses
-from typing import Any, Dict, Tuple
+from typing import Dict, Any, Tuple
 
+import dataclasses
 import jax
 
 
@@ -34,7 +34,7 @@ def dataclass(clz):
   passed safely to Jax. For example:
 
   >>>  from jax import jit, numpy as np
-  >>>  from neural_tangents._src.utils import dataclasses
+  >>>  from neural_tangents.utils import dataclasses
   >>>
   >>>  @dataclasses.dataclass
   >>>  class Data:
