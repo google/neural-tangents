@@ -20,15 +20,18 @@ import inspect
 import operator
 import types
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Sized, Tuple, Union
+
+import jax
+
 from .typing import Axes, PyTree
 import warnings
-from jax.tree_util import tree_flatten, tree_unflatten
+
 from . import dataclasses
+from jax import dtypes, random
 from jax import lax
-from jax import random, dtypes
-from jax.lib import xla_bridge
 import jax.numpy as np
 from jax.tree_util import tree_all, tree_map
+from jax.tree_util import tree_flatten, tree_unflatten
 import numpy as onp
 
 
@@ -253,7 +256,7 @@ def x1_is_x2(x1: np.ndarray,
   if x1.shape != x2.shape:
     return False
 
-  if xla_bridge.get_backend().platform == 'tpu':
+  if jax.default_backend() == 'tpu':
     eps = 1e-4
 
   return np.all(np.abs(x1 - x2) < eps)

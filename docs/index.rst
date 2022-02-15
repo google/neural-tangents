@@ -9,10 +9,10 @@ neural networks.
    :caption: Topics:
 
    neural_tangents.stax
-   neural_tangents.empirical
+   neural_tangents._src.empirical
    neural_tangents.predict
-   neural_tangents.batching
-   neural_tangents.monte_carlo
+   neural_tangents._src.batching
+   neural_tangents._src.monte_carlo
 
 Indices and tables
 ==================

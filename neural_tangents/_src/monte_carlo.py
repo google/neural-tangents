@@ -28,16 +28,16 @@ function, as the resulting empirical kernel function is JITted internally.
 
 from functools import partial
 import operator
-from typing import Union, Tuple, Generator, Set, Iterable, Optional
+from typing import Generator, Iterable, Optional, Set, Tuple, Union
 
+from .batching import batch
+from .empirical import empirical_kernel_fn
 from jax import random
 import jax.numpy as np
 from jax.tree_util import tree_map
 from jax.tree_util import tree_multimap
-from neural_tangents.utils import batch
-from neural_tangents.utils import empirical
-from neural_tangents.utils import utils
-from neural_tangents.utils.typing import PRNGKey, InitFn, ApplyFn, MonteCarloKernelFn, Axes, Get, EmpiricalKernelFn, PyTree, NTTree, VMapAxes
+from .utils import utils
+from .utils.typing import ApplyFn, Axes, EmpiricalKernelFn, Get, InitFn, MonteCarloKernelFn, NTTree, PRNGKey, PyTree, VMapAxes
 
 
 def _sample_once_kernel_fn(kernel_fn: EmpiricalKernelFn,
@@ -45,7 +45,7 @@ def _sample_once_kernel_fn(kernel_fn: EmpiricalKernelFn,
                            batch_size: int = 0,
                            device_count: int = -1,
                            store_on_device: bool = True):
-  @partial(batch.batch,
+  @partial(batch,
            batch_size=batch_size,
            device_count=device_count,
            store_on_device=store_on_device)
@@ -124,7 +124,7 @@ def monte_carlo_kernel_fn(
     diagonal_axes: Axes = (),
     vmap_axes: Optional[VMapAxes] = None,
     implementation: int = 1
-    ) -> MonteCarloKernelFn:
+) -> MonteCarloKernelFn:
   r"""Return a Monte Carlo sampler of NTK and NNGP kernels of a given function.
 
   Note that the returned function is appropriately batched / parallelized. You
@@ -135,12 +135,12 @@ def monte_carlo_kernel_fn(
   Args:
     init_fn:
       a function initializing parameters of the neural network. From
-      `jax.example_libraries.stax`: "takes an rng key and an input shape and returns
-      an `(output_shape, params)` pair".
+      `jax.example_libraries.stax`: "takes an rng key and an input shape and
+      returns an `(output_shape, params)` pair".
     apply_fn:
       a function computing the output of the neural network.
-      From `jax.example_libraries.stax`: "takes params, inputs, and an rng key and
-      applies the layer".
+      From `jax.example_libraries.stax`: "takes params, inputs, and an rng key
+      and applies the layer".
     key:
       RNG (`jax.random.PRNGKey`) for sampling random networks. Must have
       shape `(2,)`.
@@ -268,11 +268,11 @@ def monte_carlo_kernel_fn(
     >>>   print(n, kernel)
     >>>   # `kernel` is a tuple of NNGP and NTK MC estimate using `n` samples.
   """
-  kernel_fn = empirical.empirical_kernel_fn(apply_fn,
-                                            trace_axes=trace_axes,
-                                            diagonal_axes=diagonal_axes,
-                                            vmap_axes=vmap_axes,
-                                            implementation=implementation)
+  kernel_fn = empirical_kernel_fn(apply_fn,
+                                  trace_axes=trace_axes,
+                                  diagonal_axes=diagonal_axes,
+                                  vmap_axes=vmap_axes,
+                                  implementation=implementation)
 
   kernel_fn_sample_once = _sample_once_kernel_fn(kernel_fn,
                                                  init_fn,

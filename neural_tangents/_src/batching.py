@@ -55,9 +55,9 @@ import jax.numpy as np
 from jax.tree_util import tree_all
 from jax.tree_util import tree_map
 from jax.tree_util import tree_multimap, tree_flatten, tree_unflatten
-from neural_tangents.utils.kernel import Kernel
-from neural_tangents.utils import utils
-from neural_tangents.utils.typing import KernelFn, NTTree
+from .utils.kernel import Kernel
+from .utils import utils
+from .utils.typing import KernelFn, NTTree
 
 import numpy as onp
 
@@ -79,15 +79,18 @@ def batch(kernel_fn: KernelFn,
       `kernel_fn(x1, x2, *args, **kwargs)`. Here `x1` and `x2` are
       `np.ndarray`s of shapes `(n1,) + input_shape` and `(n2,) + input_shape`.
       The kernel function should return a `PyTree`.
+
     batch_size:
       specifies the size of each batch that gets processed per physical device.
       Because we parallelize the computation over columns it should be the case
       that `x1.shape[0]` is divisible by `device_count * batch_size` and
       `x2.shape[0]` is divisible by `batch_size`.
+
     device_count:
       specifies the number of physical devices to be used. If
       `device_count == -1` all devices are used. If `device_count == 0`, no
       device parallelism is used (a single default device is used).
+
     store_on_device:
       specifies whether the output should be kept on device or brought back to
       CPU RAM as it is computed. Defaults to `True`. Set to `False` to store
@@ -249,7 +252,6 @@ def _flatten_kernel(k: Kernel,
 def _reshape_kernel_for_pmap(k: Kernel,
                              device_count: int,
                              n1_per_device: int) -> Kernel:
-  # pytype: disable=attribute-error
   cov2 = k.cov2
   if cov2 is None:
     cov2 = k.cov1
@@ -283,7 +285,6 @@ def _set_cov2_to_none(
   if isinstance(k, Kernel):
     k = k.replace(cov2=None)
   return k
-  # pytype: enable=attribute-error
 
 
 def _serial(kernel_fn: KernelFn,
@@ -444,8 +445,7 @@ def _serial(kernel_fn: KernelFn,
       in_kernel = slice_kernel(k, n1_slice, n2_slice)
       return (n1, kwargs1), kernel_fn(in_kernel, *args, **kwargs_merge)
 
-    cov2_is_none = utils.nt_tree_fn(reduce=lambda k: all(k))(lambda k:
-                                                             k.cov2 is None)(k)
+    cov2_is_none = utils.nt_tree_fn(reduce=all)(lambda k: k.cov2 is None)(k)
     _, k = _scan(row_fn, 0, (n1s, kwargs_np1))
     if cov2_is_none:
       k = _set_cov2_to_none(k)
@@ -520,7 +520,7 @@ def _parallel(kernel_fn: KernelFn,
           'Using `serial` (i.e. use a non-zero batch_size in the '
           '`batch` function.) could enforce square batch size in each device.')
 
-  def _get_n_per_device(n1, n2):
+  def _get_n_per_device(n1):
     _device_count = device_count
 
     n1_per_device, ragged = divmod(n1, device_count)
@@ -549,7 +549,7 @@ def _parallel(kernel_fn: KernelFn,
     n2 = n1 if x2_is_none else get_batch_size(x2)
 
     _check_dropout(n1, n2, kwargs)
-    n1_per_device, _device_count = _get_n_per_device(n1, n2)
+    n1_per_device, _device_count = _get_n_per_device(n1)
 
     _kernel_fn = _jit_or_pmap_broadcast(kernel_fn, _device_count)
 
@@ -579,7 +579,7 @@ def _parallel(kernel_fn: KernelFn,
 
     n1, n2 = get_batch_sizes(kernel)
     _check_dropout(n1, n2, kwargs)
-    n1_per_device, _device_count = _get_n_per_device(n1, n2)
+    n1_per_device, _device_count = _get_n_per_device(n1)
 
     _kernel_fn = _jit_or_pmap_broadcast(kernel_fn, _device_count)
 

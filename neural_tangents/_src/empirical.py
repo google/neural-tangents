@@ -17,11 +17,11 @@
 All functions in this module are applicable to any JAX functions of proper
 signatures (not only those from `nt.stax`).
 
-NNGP and NTK are computed using `empirical_nngp_fn`, `empirical_ntk_fn`, or
-`empirical_kernel_fn` (for both). The kernels have a very specific output shape
-convention that may be unexpected. Further, NTK has multiple implementations
-that may perform differently depending on the task. Please read individual
-functions' docstrings.
+NNGP and NTK are computed using `empirical_nngp_fn`, `nt.empirical_ntk_fn`, or
+`nt.empirical_kernel_fn` (for both). The kernels have a very specific output
+shape convention that may be unexpected. Further, NTK has multiple
+implementations that may perform differently depending on the task. Please read
+individual functions' docstrings.
 
 Example:
   >>>  from jax import random
@@ -49,18 +49,18 @@ Example:
   >>>  # Default setting: reducing over logits; pass `vmap_axes=0` because the
   >>>  # network is iid along the batch axis, no BatchNorm. Use default
   >>>  # `implementation=1` since the network has few trainable parameters.
-  >>>  kernel_fn = nt.empirical_kernel_fn(f, trace_axes=(-1,),
-  >>>                                     vmap_axes=0, implementation=1)
+  >>>  kernel_fn = nt.empirical_kernel_fn(
+  >>>      f, trace_axes=(-1,), vmap_axes=0, implementation=1)
   >>>
   >>>  # (5, 20) np.ndarray test-train NNGP/NTK
-  >>>  nngp_test_train = kernel_fn(x_test, x_train, 'nngp', params)
-  >>>  ntk_test_train = kernel_fn(x_test, x_train, 'ntk', params)
+  >>>  nngp_test_train = empirical_kernel_fn(x_test, x_train, 'nngp', params)
+  >>>  ntk_test_train = empirical_kernel_fn(x_test, x_train, 'ntk', params)
   >>>
   >>>  # Full kernel: not reducing over logits.
   >>>  kernel_fn = nt.empirical_kernel_fn(f, trace_axes=(), vmap_axes=0)
   >>>
   >>>  # (5, 20, 10, 10) np.ndarray test-train NNGP/NTK namedtuple.
-  >>>  k_test_train = kernel_fn(x_test, x_train, params)
+  >>>  k_test_train = empirical_kernel_fn(x_test, x_train, params)
   >>>
   >>>  # A wide FCN with lots of parameters
   >>>  init_fn, f, _ = stax.serial(
@@ -79,13 +79,13 @@ Example:
   >>>  ntk_fn = nt.empirical_ntk_fn(f, vmap_axes=0, implementation=2)
   >>>
   >>>  # (5, 5) np.ndarray test-test NTK
-  >>>  ntk_test_train = ntk_fn(x_test, None, params)
+  >>>  ntk_test_train = empirical_ntk_fn(x_test, None, params)
   >>>
   >>>  # Compute only output variances:
   >>>  nngp_fn = nt.empirical_nngp_fn(f, diagonal_axes=(0,))
   >>>
   >>>  # (20,) np.ndarray train-train diagonal NNGP
-  >>>  nngp_train_train_diag = nngp_fn(x_train, None, params)
+  >>>  nngp_train_train_diag = empirical_nngp_fn(x_train, None, params)
 """
 
 import operator
@@ -93,8 +93,8 @@ from typing import Union, Callable, Optional, Tuple, Dict
 from jax import eval_shape, jacobian, jvp, vjp, vmap, linear_transpose
 import jax.numpy as np
 from jax.tree_util import tree_flatten, tree_unflatten, tree_multimap, tree_reduce, tree_map
-from neural_tangents.utils import utils
-from neural_tangents.utils.typing import ApplyFn, EmpiricalKernelFn, NTTree, PyTree, Axes, VMapAxes
+from .utils import utils
+from .utils.typing import ApplyFn, EmpiricalKernelFn, NTTree, PyTree, Axes, VMapAxes
 
 
 def linearize(f: Callable[..., PyTree],
@@ -183,7 +183,7 @@ def empirical_kernel_fn(
     f: ApplyFn,
     trace_axes: Axes = (-1,),
     diagonal_axes: Axes = (),
-    vmap_axes: VMapAxes = None,
+    vmap_axes: Optional[VMapAxes] = None,
     implementation: int = 1
 ) -> EmpiricalKernelFn:
   r"""Returns a function that computes single draws from NNGP and NT kernels.
@@ -468,7 +468,7 @@ def empirical_nngp_fn(f: ApplyFn,
 def empirical_ntk_fn(f: ApplyFn,
                      trace_axes: Axes = (-1,),
                      diagonal_axes: Axes = (),
-                     vmap_axes: VMapAxes = None,
+                     vmap_axes: Optional[VMapAxes] = None,
                      implementation: int = 1
                      ) -> Callable[[NTTree[np.ndarray],
                                     Optional[NTTree[np.ndarray]],
@@ -589,22 +589,22 @@ def empirical_ntk_fn(f: ApplyFn,
                 vmap_axes=vmap_axes)
 
   if implementation == 1:
-    return _empirical_direct_ntk_fn(**kwargs)
+    return _direct_ntk_fn(**kwargs)
 
   if implementation == 2:
-    return _empirical_implicit_ntk_fn(**kwargs)
+    return _implicit_ntk_fn(**kwargs)
 
   raise ValueError(implementation)
 
 
-def _empirical_implicit_ntk_fn(f: ApplyFn,
-                               trace_axes: Axes = (-1,),
-                               diagonal_axes: Axes = (),
-                               vmap_axes: VMapAxes = None
-                               ) -> Callable[[NTTree[np.ndarray],
-                                              Optional[NTTree[np.ndarray]],
-                                              PyTree],
-                                             NTTree[np.ndarray]]:
+def _implicit_ntk_fn(f: ApplyFn,
+                     trace_axes: Axes = (-1,),
+                     diagonal_axes: Axes = (),
+                     vmap_axes: Optional[VMapAxes] = None
+                     ) -> Callable[[NTTree[np.ndarray],
+                                    Optional[NTTree[np.ndarray]],
+                                    PyTree],
+                                   NTTree[np.ndarray]]:
   """Compute NTK implicitly without instantiating full Jacobians."""
 
   def ntk_fn(x1: NTTree[np.ndarray],
@@ -647,7 +647,7 @@ def _empirical_implicit_ntk_fn(f: ApplyFn,
              for k in keys)
 
     def get_ntk(x1, x2, *args):
-      args1, args2 = args[:len(args) // 2], args[len(args) // 2 :]
+      args1, args2 = args[:len(args) // 2], args[len(args) // 2 :]  # pytype:disable=wrong-arg-types,unsupported-operands
       _kwargs1 = {k: v for k, v in zip(keys, args1)}
       _kwargs2 = {k: v for k, v in zip(keys, args2)}
 
@@ -687,14 +687,14 @@ def _empirical_implicit_ntk_fn(f: ApplyFn,
   return ntk_fn
 
 
-def _empirical_direct_ntk_fn(f: ApplyFn,
-                             trace_axes: Axes = (-1,),
-                             diagonal_axes: Axes = (),
-                             vmap_axes: VMapAxes = None
-                             ) -> Callable[[NTTree[np.ndarray],
-                                            Optional[NTTree[np.ndarray]],
-                                            PyTree],
-                                           NTTree[np.ndarray]]:
+def _direct_ntk_fn(f: ApplyFn,
+                   trace_axes: Axes = (-1,),
+                   diagonal_axes: Axes = (),
+                   vmap_axes: Optional[VMapAxes] = None
+                   ) -> Callable[[NTTree[np.ndarray],
+                                  Optional[NTTree[np.ndarray]],
+                                  PyTree],
+                                 NTTree[np.ndarray]]:
   """Compute NTK by directly instantiating Jacobians and contracting."""
 
   @utils.nt_tree_fn(tree_structure_argnum=0)

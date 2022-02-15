@@ -17,7 +17,7 @@
 In this example we train a neural network and a linear model corresponding to
 the first order Taylor seres of the network about its initial parameters. The
 network is a fully-connected network with one hidden layer. We use momentum and
-minibatching on the full MNIST dataset. Data is loaded using tensorflow
+minibatching on the full MNIST dataset. Data is loaded using tensorflow.
 datasets.
 """
 

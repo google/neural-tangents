@@ -12,20 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for `utils/monte_carlo.py`."""
-
+"""Tests for `neural_tangents/_src/monte_carlo.py`."""
+import jax
 from absl.testing import absltest
 from absl.testing import parameterized
 from jax import test_util as jtu
 from jax.config import config
-from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.random as random
+import neural_tangents as nt
 from neural_tangents import stax
-from neural_tangents.utils import batch
-from neural_tangents.utils import empirical
-from neural_tangents.utils import monte_carlo
-from neural_tangents.utils import test_utils
+from neural_tangents._src import batching
+from neural_tangents._src import monte_carlo
+from neural_tangents.tests import test_utils
 
 config.parse_flags_with_absl()
 config.update('jax_numpy_rank_promotion', 'raise')
@@ -86,10 +85,10 @@ class MonteCarloTest(jtu.JaxTestCase):
                           for get in ALL_GET))
   def test_sample_once_batch(self, batch_size, device_count, store_on_device,
                              get):
-    test_utils.stub_out_pmap(batch, device_count)
+    test_utils.stub_out_pmap(batching, device_count)
 
     x1, x2, init_fn, apply_fn, _, key = _get_inputs_and_model()
-    kernel_fn = empirical.empirical_kernel_fn(apply_fn)
+    kernel_fn = nt.empirical_kernel_fn(apply_fn)
 
     sample_once_fn = monte_carlo._sample_once_kernel_fn(kernel_fn, init_fn)
     sample_once_batch_fn = monte_carlo._sample_once_kernel_fn(
@@ -116,14 +115,14 @@ class MonteCarloTest(jtu.JaxTestCase):
                           for get in ALL_GET))
   def test_batch_sample_once(self, batch_size, device_count, store_on_device,
                              get):
-    test_utils.stub_out_pmap(batch, device_count)
+    test_utils.stub_out_pmap(batching, device_count)
 
     x1, x2, init_fn, apply_fn, _, key = _get_inputs_and_model()
-    kernel_fn = empirical.empirical_kernel_fn(apply_fn)
+    kernel_fn = nt.empirical_kernel_fn(apply_fn)
     sample_once_fn = monte_carlo._sample_once_kernel_fn(
         kernel_fn, init_fn, device_count=0)
-    batch_sample_once_fn = batch.batch(sample_once_fn, batch_size,
-                                       device_count, store_on_device)
+    batch_sample_once_fn = batching.batch(sample_once_fn, batch_size,
+                                          device_count, store_on_device)
     one_sample = sample_once_fn(x1, x2, key, get)
     one_batch_sample = batch_sample_once_fn(x1, x2, key, get)
     self.assertAllClose(one_sample, one_batch_sample)
@@ -142,10 +141,10 @@ class MonteCarloTest(jtu.JaxTestCase):
                           for store_on_device in STORE_ON_DEVICE))
   def test_sample_vs_analytic_nngp(self, batch_size, device_count,
                                    store_on_device):
-    test_utils.stub_out_pmap(batch, device_count)
+    test_utils.stub_out_pmap(batching, device_count)
 
     x1, x2, init_fn, apply_fn, stax_kernel_fn, key = _get_inputs_and_model(
-        WIDTH, 256, xla_bridge.get_backend().platform == 'tpu')
+        WIDTH, 256, jax.default_backend() == 'tpu')
 
     sample = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn, key, 200,
                                                batch_size, device_count,
@@ -170,10 +169,10 @@ class MonteCarloTest(jtu.JaxTestCase):
                           for store_on_device in STORE_ON_DEVICE))
   def test_monte_carlo_vs_analytic_ntk(self, batch_size, device_count,
                                        store_on_device):
-    test_utils.stub_out_pmap(batch, device_count)
+    test_utils.stub_out_pmap(batching, device_count)
 
     x1, x2, init_fn, apply_fn, stax_kernel_fn, key = _get_inputs_and_model(
-        WIDTH, 2, xla_bridge.get_backend().platform == 'tpu')
+        WIDTH, 2, jax.default_backend() == 'tpu')
 
     sample = monte_carlo.monte_carlo_kernel_fn(init_fn, apply_fn, key, 100,
                                                batch_size, device_count,
@@ -202,7 +201,7 @@ class MonteCarloTest(jtu.JaxTestCase):
                           for get in ALL_GET))
   def test_monte_carlo_generator(self, batch_size, device_count,
                                  store_on_device, get):
-    test_utils.stub_out_pmap(batch, device_count)
+    test_utils.stub_out_pmap(batching, device_count)
 
     x1, x2, init_fn, apply_fn, stax_kernel_fn, key = _get_inputs_and_model(8, 1)
     x3, x4, _, _, _, _ = _get_inputs_and_model(8, 1)

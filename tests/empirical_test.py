@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for `utils/empirical.py`."""
+"""Tests for `neural_tangents/_src/empirical.py`."""
 
 from functools import partial
 import operator
@@ -23,10 +23,9 @@ from jax import test_util as jtu
 from jax.config import config
 import jax.numpy as np
 import jax.random as random
+import neural_tangents as nt
 from neural_tangents import stax
-from neural_tangents.utils import empirical
-from neural_tangents.utils import test_utils
-from neural_tangents.utils import utils
+from neural_tangents.tests import test_utils
 
 
 config.parse_flags_with_absl()
@@ -85,18 +84,22 @@ def _kernel_fns(key,
                 vmap_axes=None):
   init_fn, f, _ = _build_network(input_shape, network, out_logits)
   _, params = init_fn(key, (-1,) + input_shape)
-  implicit_kernel_fn = jit(empirical._empirical_implicit_ntk_fn(f,
-                                                                trace_axes,
-                                                                diagonal_axes,
-                                                                vmap_axes))
-  direct_kernel_fn = jit(empirical._empirical_direct_ntk_fn(f,
-                                                            trace_axes,
-                                                            diagonal_axes,
-                                                            vmap_axes))
+  implicit_kernel_fn = jit(nt.empirical_ntk_fn(
+      f,
+      trace_axes,
+      diagonal_axes,
+      vmap_axes,
+      implementation=2
+  ))
+  direct_kernel_fn = jit(nt.empirical_ntk_fn(
+      f,
+      trace_axes,
+      diagonal_axes,
+      vmap_axes,
+      implementation=1
+  ))
 
-  nngp_kernel_fn = jit(empirical.empirical_nngp_fn(f,
-                                                   trace_axes,
-                                                   diagonal_axes))
+  nngp_kernel_fn = jit(nt.empirical_nngp_fn(f, trace_axes, diagonal_axes))
 
   return (partial(implicit_kernel_fn, params=params),
           partial(direct_kernel_fn, params=params),
@@ -165,7 +168,7 @@ class EmpiricalTest(jtu.JaxTestCase):
   def testLinearization(self, shape):
     key, params, x0 = self._get_init_data(shape)
 
-    f_lin = empirical.linearize(EmpiricalTest.f, x0)
+    f_lin = nt.linearize(EmpiricalTest.f, x0)
 
     for _ in range(TAYLOR_RANDOM_SAMPLES):
       for do_alter in [True, False]:
@@ -203,8 +206,8 @@ class EmpiricalTest(jtu.JaxTestCase):
 
     key, params, x0 = self._get_init_data(shape)
 
-    f_lin = empirical.taylor_expand(EmpiricalTest.f, x0, 1)
-    f_2 = empirical.taylor_expand(EmpiricalTest.f, x0, 2)
+    f_lin = nt.taylor_expand(EmpiricalTest.f, x0, 1)
+    f_2 = nt.taylor_expand(EmpiricalTest.f, x0, 2)
 
     for _ in range(TAYLOR_RANDOM_SAMPLES):
       for do_alter in [True, False]:
@@ -299,8 +302,8 @@ class EmpiricalTest(jtu.JaxTestCase):
     data_self = random.normal(self_split, (4, 5, 6, 3))
     data_other = random.normal(other_split, (2, 5, 6, 3))
 
-    _diagonal_axes = utils.canonicalize_axis(diagonal_axes, data_self)
-    _trace_axes = utils.canonicalize_axis(trace_axes, data_self)
+    _diagonal_axes = tuple(d % data_self.ndim for d in diagonal_axes)
+    _trace_axes = tuple(t % data_self.ndim for t in trace_axes)
 
     if any(d == c for d in _diagonal_axes for c in _trace_axes):
       raise absltest.SkipTest(
@@ -372,12 +375,12 @@ class EmpiricalTest(jtu.JaxTestCase):
 
     _, params = init_fn(net_key, (x1_1.shape, x1_2.shape))
 
-    implicit_kernel_fn = jit(empirical._empirical_implicit_ntk_fn(apply_fn))
-    direct_kernel_fn = jit(empirical._empirical_direct_ntk_fn(apply_fn))
-    implicit_batched_kernel_fn = jit(empirical._empirical_implicit_ntk_fn(
-        apply_fn, vmap_axes=(0, 0)))
-    direct_batched_kernel_fn = jit(empirical._empirical_direct_ntk_fn(
-        apply_fn, vmap_axes=(0, 0)))
+    implicit_kernel_fn = jit(nt.empirical_ntk_fn(apply_fn, implementation=2))
+    direct_kernel_fn = jit(nt.empirical_ntk_fn(apply_fn, implementation=1))
+    implicit_batched_kernel_fn = jit(nt.empirical_ntk_fn(
+        apply_fn, vmap_axes=(0, 0), implementation=2))
+    direct_batched_kernel_fn = jit(nt.empirical_ntk_fn(
+        apply_fn, vmap_axes=(0, 0), implementation=1))
 
     k_direct = direct_kernel_fn(x1, x2, params)
 
@@ -385,7 +388,7 @@ class EmpiricalTest(jtu.JaxTestCase):
     self.assertAllClose(k_direct, direct_batched_kernel_fn(x1, x2, params))
     self.assertAllClose(k_direct, implicit_batched_kernel_fn(x1, x2, params))
 
-    nngp_kernel_fn = jit(empirical.empirical_nngp_fn(apply_fn))
+    nngp_kernel_fn = jit(nt.empirical_nngp_fn(apply_fn))
     nngp = nngp_kernel_fn(x1, x2, params)
     self.assertEqual(len(nngp), 2)
     self.assertEqual(nngp[0].shape, (3, 3 if same_inputs else 4))
@@ -416,13 +419,13 @@ class EmpiricalTest(jtu.JaxTestCase):
     init_fn, apply_fn, _ = stax.serial(layer(1024), layer(1))
 
     _, params = init_fn(net_key, tree_map(np.shape, x1))
-    implicit_kernel_fn = jit(empirical._empirical_implicit_ntk_fn(apply_fn))
-    direct_kernel_fn = jit(empirical._empirical_direct_ntk_fn(apply_fn))
+    implicit_kernel_fn = jit(nt.empirical_ntk_fn(apply_fn, implementation=2))
+    direct_kernel_fn = jit(nt.empirical_ntk_fn(apply_fn, implementation=1))
 
-    implicit_batched_kernel_fn = jit(empirical._empirical_implicit_ntk_fn(
-        apply_fn, vmap_axes=([0, 0], 0)))
-    direct_batched_kernel_fn = jit(empirical._empirical_direct_ntk_fn(
-        apply_fn, vmap_axes=([0, 0], 0)))
+    implicit_batched_kernel_fn = jit(nt.empirical_ntk_fn(
+        apply_fn, vmap_axes=([0, 0], 0), implementation=2))
+    direct_batched_kernel_fn = jit(nt.empirical_ntk_fn(
+        apply_fn, vmap_axes=([0, 0], 0), implementation=1))
 
     k_direct = direct_kernel_fn(x1, x2, params)
 
@@ -430,7 +433,7 @@ class EmpiricalTest(jtu.JaxTestCase):
     self.assertAllClose(k_direct, direct_batched_kernel_fn(x1, x2, params))
     self.assertAllClose(k_direct, implicit_batched_kernel_fn(x1, x2, params))
 
-    nngp_kernel_fn = jit(empirical.empirical_nngp_fn(apply_fn))
+    nngp_kernel_fn = jit(nt.empirical_nngp_fn(apply_fn))
     nngp = nngp_kernel_fn(x1, x2, params)
 
     self.assertEqual(len(nngp), 2)
@@ -489,13 +492,15 @@ class EmpiricalTest(jtu.JaxTestCase):
     )
 
     _, params = init_fn(random.PRNGKey(3), tree_map(np.shape, x1))
-    implicit = jit(empirical._empirical_implicit_ntk_fn(apply_fn))
-    direct = jit(empirical._empirical_direct_ntk_fn(apply_fn))
+    implicit = jit(nt.empirical_ntk_fn(apply_fn, implementation=2))
+    direct = jit(nt.empirical_ntk_fn(apply_fn, implementation=1))
 
-    implicit_batched = jit(empirical._empirical_implicit_ntk_fn(
-        apply_fn, vmap_axes=([(0, 1), 2], [-2, -3], dict(pattern=0))))
-    direct_batched = jit(empirical._empirical_direct_ntk_fn(
-        apply_fn, vmap_axes=([(-2, -2), -2], [0, 1], dict(pattern=-3))))
+    implicit_batched = jit(nt.empirical_ntk_fn(
+        apply_fn, vmap_axes=([(0, 1), 2], [-2, -3], dict(pattern=0)),
+        implementation=2))
+    direct_batched = jit(nt.empirical_ntk_fn(
+        apply_fn, vmap_axes=([(-2, -2), -2], [0, 1], dict(pattern=-3)),
+        implementation=1))
 
     k = direct(x1, x2, params, pattern=(p1, p2))
 

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for `utils/predict.py`."""
+"""Tests for `neural_tangents/predict.py`."""
 
 
 import math
@@ -26,16 +26,12 @@ from jax import vmap
 from jax.config import config
 from jax.example_libraries import optimizers
 from jax.flatten_util import ravel_pytree
-from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.random as random
-from neural_tangents import empirical_kernel_fn, monte_carlo_kernel_fn
-from neural_tangents import predict
-from neural_tangents import stax
-from neural_tangents.utils import batch
-from neural_tangents.utils import empirical
-from neural_tangents.utils import test_utils
-from neural_tangents.utils import utils
+import jax.tree_util
+import neural_tangents as nt
+from neural_tangents import predict, stax
+from neural_tangents.tests import test_utils
 
 
 config.parse_flags_with_absl()
@@ -92,7 +88,7 @@ def _build_network(input_shape, network, out_logits):
 def _empirical_kernel(key, input_shape, network, out_logits):
   init_fn, f, _ = _build_network(input_shape, network, out_logits)
   _, params = init_fn(key, (-1,) + input_shape)
-  _kernel_fn = empirical.empirical_kernel_fn(f, trace_axes=(), vmap_axes=0)
+  _kernel_fn = nt.empirical_kernel_fn(f, trace_axes=(), vmap_axes=0)
   kernel_fn = lambda x1, x2, get: _kernel_fn(x1, x2, get, params)
   return params, f, jit(kernel_fn, static_argnums=(2,))
 
@@ -325,7 +321,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
     self.assertEqual(cov_train_inf.shape[1], x_train.shape[0])
     self.assertGreater(np.min(np.linalg.eigh(cov_train_inf)[0]), -1e-8)
 
-    _kernel_fn = empirical.empirical_kernel_fn(f)
+    _kernel_fn = nt.empirical_kernel_fn(f)
     kernel_fn = jit(lambda x1, x2, params: _kernel_fn(x1, x2, 'ntk', params))
 
     def predict_empirical(key):
@@ -734,7 +730,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
         stax.Dense(32, 2., 0.5),
         stax.Relu(),
         stax.Dense(10, 2., 0.5))
-    kernel_fn_empirical = empirical.empirical_kernel_fn(apply_fn)
+    kernel_fn_empirical = nt.empirical_kernel_fn(apply_fn)
     y_train = random.normal(key, (4, 10))
     for kernel_fn_is_analytic in [True, False]:
       if kernel_fn_is_analytic:
@@ -865,8 +861,8 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
                 device_count=device_count,
                 get=get,
                 x=x):
-              kernel_fn_batched = batch.batch(kernel_fn, 2, device_count,
-                                              store_on_device)
+              kernel_fn_batched = nt.batch(kernel_fn, 2, device_count,
+                                           store_on_device)
               predictor = predict.gradient_descent_mse_ensemble(
                   kernel_fn_batched, x_train, y_train)
 
@@ -876,10 +872,17 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
               self.assertAllClose(predict_none, predict_inf)
 
               if x is not None:
-                on_cpu = (not store_on_device or
-                          xla_bridge.get_backend().platform == 'cpu')
-                self.assertEqual(on_cpu, utils.is_on_cpu(predict_inf))
-                self.assertEqual(on_cpu, utils.is_on_cpu(predict_none))
+                on_cpu = not store_on_device or jax.default_backend() == 'cpu'
+
+                def is_on_cpu(x):
+                  return jax.tree_util.tree_all(
+                      jax.tree_map(
+                          lambda x: 'cpu' in str(x.device_buffer.device()
+                                                 ).lower(),
+                          x))
+
+                self.assertEqual(on_cpu, is_on_cpu(predict_inf))
+                self.assertEqual(on_cpu, is_on_cpu(predict_none))
 
   def testPredictND(self):
     n_chan = 6
@@ -914,8 +917,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
             x = x if x is None else random.normal(key, (n_test,) + im_shape)
             fx_test_0 = None if x is None else apply_fn(params, x)
 
-            kernel_fn = empirical.empirical_kernel_fn(apply_fn,
-                                                      trace_axes=trace_axes)
+            kernel_fn = nt.empirical_kernel_fn(apply_fn, trace_axes=trace_axes)
 
             # TODO(romann): investigate the SIGTERM error on CPU.
             # kernel_fn = jit(kernel_fn, static_argnums=(2,))
@@ -1056,7 +1058,7 @@ class PredictKwargsTest(test_utils.NeuralTangentsTestCase):
     pattern_train = random.normal(rng, (8, 7, 7))
     pattern_test = random.normal(rng, (4, 7, 7))
 
-    if xla_bridge.get_backend().platform == 'tpu':
+    if jax.default_backend() == 'tpu':
       # TODO(romann): figure out why TPU accuracy is so low.
       diag_reg = 1e-2
       atol = 3e-3
@@ -1082,11 +1084,11 @@ class PredictKwargsTest(test_utils.NeuralTangentsTestCase):
     kw_tt = dict(pattern=(pattern_test, pattern_test))
 
     if mode == 'mc':
-      kernel_fn = monte_carlo_kernel_fn(init_fn, apply_fn, rng, 2,
-                                        batch_size=2 if do_batch else 0)
+      kernel_fn = nt.monte_carlo_kernel_fn(init_fn, apply_fn, rng, 2,
+                                           batch_size=2 if do_batch else 0)
 
     elif mode == 'empirical':
-      kernel_fn = empirical_kernel_fn(apply_fn)
+      kernel_fn = nt.empirical_kernel_fn(apply_fn)
       if do_batch:
         raise absltest.SkipTest('Batching of empirical kernel is not '
                                 'implemented with keyword arguments.')
@@ -1101,7 +1103,7 @@ class PredictKwargsTest(test_utils.NeuralTangentsTestCase):
 
     elif mode == 'analytic':
       if do_batch:
-        kernel_fn = batch.batch(kernel_fn, batch_size=2)
+        kernel_fn = nt.batch(kernel_fn, batch_size=2)
 
     else:
       raise ValueError(mode)
