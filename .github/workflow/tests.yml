@@ -50,6 +50,12 @@ jobs:
         pip install pytest-xdist
         pip install pytest-cov
 
+    - name: Pytype Python Checker
+      if: ${{ (matrix.python-version == 3.7) && (matrix.JAX_ENABLE_X64 == 0) }}
+      run: |
+        pip install --upgrade pytype
+        pytype .
+
     - name: Test with pytest and generate coverage report (Windows)
       if: ${{ (matrix.JAX_ENABLE_X64 == 0) && (matrix.os == 'windows-latest') }}
       run: |

@@ -214,8 +214,8 @@ class MonteCarloTest(jtu.JaxTestCase):
         store_on_device, vmap_axes=0)
 
     if get is None:
-      samples_12 = sample_generator(x1, x2, None)
-      samples_34 = sample_generator(x3, x4, None)
+      samples_12 = sample_generator(x1, x2)
+      samples_34 = sample_generator(x3, x4)
 
       count = 0
       for n, s_12, s_34 in zip(n_samples, samples_12, samples_34):
@@ -224,8 +224,8 @@ class MonteCarloTest(jtu.JaxTestCase):
                                                       device_count,
                                                       store_on_device,
                                                       vmap_axes=0)
-        sample_12 = sample_fn(x1, x2, None)
-        sample_34 = sample_fn(x3, x4, None)
+        sample_12 = sample_fn(x1, x2)
+        sample_34 = sample_fn(x3, x4)
         self.assertAllClose(s_12, sample_12)
         self.assertAllClose(s_12, s_34)
         self.assertAllClose(s_12, sample_34)
