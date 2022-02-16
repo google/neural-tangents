@@ -55,8 +55,13 @@ jobs:
       run: |
         pytest -n auto --cov=neural_tangents --cov-report=xml --cov-report=term
 
-    - name: Test with pytest and generate coverage report (Unix)
-      if: ${{ (matrix.os != 'windows-latest') }}
+    - name: Test with pytest and generate coverage report (macOS)
+      if: ${{ (matrix.os != 'macos-latest') && (matrix.JAX_ENABLE_X64 == 0) }}
+      run: |
+        pytest -n auto --cov=neural_tangents --cov-report=xml --cov-report=term
+
+    - name: Test with pytest and generate coverage report (Ubuntu)
+      if: ${{ (matrix.os == 'ubuntu-latest') }}
       run: |
         JAX_ENABLE_X64=${{ matrix.JAX_ENABLE_X64 }} pytest -n auto --cov=neural_tangents --cov-report=xml --cov-report=term
 
