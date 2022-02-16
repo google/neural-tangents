@@ -266,7 +266,7 @@ def supports_masking(remask_kernel: bool):
                                else [i.shape for i in inputs])
         if outputs_mask is None:
           return outputs
-        return utils.MaskedArray(outputs, outputs_mask)
+        return utils.MaskedArray(outputs, outputs_mask)  # pytype:disable=wrong-arg-count
 
       def kernel_fn_with_masking(k: NTTree[Kernel], **user_reqs):
         mask1 = utils.nt_tree_fn()(lambda k: k.mask1)(k)
@@ -356,7 +356,7 @@ def parallel(*layers: Layer) -> InternalLayer:
 
   @_requires(**_get_input_req_attr(kernel_fns, fold=op.and_))
   def kernel_fn(ks: NTTree[Kernel], **kwargs) -> NTTree[Kernel]:
-    return type(ks)(f(k, **kwargs) for k, f in zip(ks, kernel_fns))
+    return type(ks)(f(k, **kwargs) for k, f in zip(ks, kernel_fns))  # pytype:disable=wrong-arg-count
 
   return init_fn, apply_fn, kernel_fn
 

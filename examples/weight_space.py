@@ -17,13 +17,12 @@
 In this example we train a neural network and a linear model corresponding to
 the first order Taylor seres of the network about its initial parameters. The
 network is a fully-connected network with one hidden layer. We use momentum and
-minibatching on the full MNIST dataset. Data is loaded using tensorflow
+minibatching on the full MNIST dataset. Data is loaded using tensorflow.
 datasets.
 """
 
 
 from absl import app
-from absl import flags
 from jax import grad
 from jax import jit
 from jax import random
@@ -36,15 +35,9 @@ from examples import datasets
 from examples import util
 
 
-flags.DEFINE_float('learning_rate', 1.0,
-                   'Learning rate to use during training.')
-flags.DEFINE_integer('batch_size', 128,
-                     'Batch size to use during training.')
-flags.DEFINE_integer('train_epochs', 10,
-                     'Number of epochs to train for.')
-
-
-FLAGS = flags.FLAGS
+_LEARNING_RATE = 1.0  # Learning rate to use during training.
+_BATCH_SIZE = 128  # Batch size to use during training.
+_TRAIN_EPOCHS = 10  # Number of epochs to train for.
 
 
 def main(unused_argv):
@@ -66,8 +59,7 @@ def main(unused_argv):
   f_lin = nt.linearize(f, params)
 
   # Create and initialize an optimizer for both f and f_lin.
-  opt_init, opt_apply, get_params = optimizers.momentum(FLAGS.learning_rate,
-                                                        0.9)
+  opt_init, opt_apply, get_params = optimizers.momentum(_LEARNING_RATE, 0.9)
   opt_apply = jit(opt_apply)
 
   state = opt_init(params)
@@ -87,10 +79,10 @@ def main(unused_argv):
   print('------------------------------------------')
 
   epoch = 0
-  steps_per_epoch = 50000 // FLAGS.batch_size
+  steps_per_epoch = 50000 // _BATCH_SIZE
 
   for i, (x, y) in enumerate(datasets.minibatch(
-      x_train, y_train, FLAGS.batch_size, FLAGS.train_epochs)):
+      x_train, y_train, _BATCH_SIZE, _TRAIN_EPOCHS)):
 
     params = get_params(state)
     state = opt_apply(i, grad_loss(params, x, y), state)

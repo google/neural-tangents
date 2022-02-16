@@ -20,7 +20,6 @@ prediction using the NTK. Data is loaded using tensorflow datasets.
 """
 
 from absl import app
-from absl import flags
 from jax import grad
 from jax import jit
 from jax import random
@@ -32,25 +31,18 @@ from examples import datasets
 from examples import util
 
 
-flags.DEFINE_float('learning_rate', 1.0,
-                   'Learning rate to use during training.')
-flags.DEFINE_integer('train_size', 128,
-                     'Dataset size to use for training.')
-flags.DEFINE_integer('test_size', 128,
-                     'Dataset size to use for testing.')
-flags.DEFINE_float('train_time', 1000.0,
-                   'Continuous time denoting duration of training.')
-
-
-FLAGS = flags.FLAGS
+_LEARNING_RATE = 1.0  # Learning rate to use during training.
+_TRAIN_SIZE = 128  # Dataset size to use for training.
+_TEST_SIZE = 128  # Dataset size to use for testing.
+_TRAIN_TIME = 1000.0  # Continuous time denoting duration of training.
 
 
 def main(unused_argv):
   # Build data pipelines.
   print('Loading data.')
   x_train, y_train, x_test, y_test = datasets.get_dataset('mnist',
-                                                          FLAGS.train_size,
-                                                          FLAGS.test_size)
+                                                          _TRAIN_SIZE,
+                                                          _TEST_SIZE)
 
   # Build the network
   init_fn, apply_fn, _ = stax.serial(
@@ -62,7 +54,7 @@ def main(unused_argv):
   _, params = init_fn(key, (-1, 784))
 
   # Create and initialize an optimizer.
-  opt_init, opt_apply, get_params = optimizers.sgd(FLAGS.learning_rate)
+  opt_init, opt_apply, get_params = optimizers.sgd(_LEARNING_RATE)
   state = opt_init(params)
 
   # Create an mse loss function and a gradient function.
@@ -81,7 +73,7 @@ def main(unused_argv):
   fx_test = apply_fn(params, x_test)
 
   # Train the network.
-  train_steps = int(FLAGS.train_time // FLAGS.learning_rate)
+  train_steps = int(_TRAIN_TIME // _LEARNING_RATE)
   print('Training for {} steps'.format(train_steps))
 
   for i in range(train_steps):
@@ -90,7 +82,7 @@ def main(unused_argv):
 
   # Get predictions from analytic computation.
   print('Computing analytic prediction.')
-  fx_train, fx_test = predictor(FLAGS.train_time, fx_train, fx_test, g_td)
+  fx_train, fx_test = predictor(_TRAIN_TIME, fx_train, fx_test, g_td)
 
   # Print out summary data comparing the linear / nonlinear model.
   util.print_summary('train', y_train, apply_fn(params, x_train), fx_train,

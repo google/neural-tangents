@@ -94,7 +94,7 @@ from jax import eval_shape, jacobian, jvp, vjp, vmap, linear_transpose
 import jax.numpy as np
 from jax.tree_util import tree_flatten, tree_unflatten, tree_multimap, tree_reduce, tree_map
 from neural_tangents.utils import utils
-from neural_tangents.utils.typing import ApplyFn, EmpiricalKernelFn, NTTree, PyTree, Axes, VMapAxes
+from neural_tangents.utils.typing import ApplyFn, EmpiricalKernelFn, NTTree, PyTree, Axes, VMapAxes, VMapAxisTriple
 
 
 def linearize(f: Callable[..., PyTree],
@@ -647,6 +647,7 @@ def _empirical_implicit_ntk_fn(f: ApplyFn,
              for k in keys)
 
     def get_ntk(x1, x2, *args):
+      args = tuple(args)
       args1, args2 = args[:len(args) // 2], args[len(args) // 2 :]
       _kwargs1 = {k: v for k, v in zip(keys, args1)}
       _kwargs2 = {k: v for k, v in zip(keys, args2)}
@@ -894,10 +895,10 @@ def _diagonal(ntk, fx):
   return tree_unflatten(fx_tree, diag)
 
 
-def _canonicalize_axes(vmap_axes: Optional[VMapAxes],
+def _canonicalize_axes(vmap_axes: VMapAxes,
                        x: NTTree[np.ndarray],
                        fx: NTTree[np.ndarray],
-                       **kwargs) -> VMapAxes:
+                       **kwargs) -> VMapAxisTriple:
   if isinstance(vmap_axes, tuple) and len(vmap_axes) == 3:
     x_axis, fx_axis, kw_axes = vmap_axes
   else:

@@ -7,7 +7,8 @@
 | [**Release notes**](https://github.com/google/neural-tangents/releases)
 
 [![PyPI](https://img.shields.io/pypi/v/neural-tangents)](https://pypi.org/project/neural-tangents/) [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/neural-tangents)](https://pypi.org/project/neural-tangents/)
-[![Build Status](https://travis-ci.org/google/neural-tangents.svg?branch=main)](https://travis-ci.org/google/neural-tangents)
+[![Tests](https://github.com/google/neural-tangents/actions/workflows/tests.yml/badge.svg)](https://github.com/google/neural-tangents/actions/workflows/tests.yml)
+[![Coverage](https://codecov.io/gh/google/neural-tangents/branch/main/graph/badge.svg)](https://codecov.io/gh/google/neural-tangents)
 [![Readthedocs](https://readthedocs.org/projects/neural-tangents/badge/?version=latest)](https://neural-tangents.readthedocs.io/en/latest/?badge=latest)
 [![PyPI - License](https://img.shields.io/pypi/l/neural_tangents)](https://github.com/google/neural-tangents/blob/main/LICENSE)
 
@@ -48,8 +49,7 @@ An easy way to get started with Neural Tangents is by playing around with the fo
 - [Weight Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/weight_space_linearization.ipynb)
 - [Function Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/function_space_linearization.ipynb)
 - [Neural Network Phase Diagram](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/phase_diagram.ipynb)
-- [Performance Benchmark](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/myrtle_kernel_with_neural_tangents.ipynb)
-: Simple benchmark for Myrtle kernels used in [[16]](#16-neural-kernels-without-tangents). Also see [Performance](#myrtle-network).
+- [Performance Benchmark](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/myrtle_kernel_with_neural_tangents.ipynb): simple benchmark for Myrtle kernels used in [[16]](#16-neural-kernels-without-tangents). Also see [Performance](#myrtle-network).
 
 ## Installation
 
@@ -71,15 +71,15 @@ git clone https://github.com/google/neural-tangents; cd neural-tangents
 pip install -e .
 ```
 
-You can now run the examples (using [`tensorflow_datasets`](https://github.com/tensorflow/datasets))
-and tests by calling:
+You can now run the examples and tests by calling:
 
 ```
-pip install tensorflow tensorflow-datasets more-itertools --upgrade
+pip install .[testing]
 
 python examples/infinite_fcn.py
 python examples/weight_space.py
 python examples/function_space.py
+python examples/imdb.py
 
 set -e; for f in tests/*.py; do python $f; done
 ```

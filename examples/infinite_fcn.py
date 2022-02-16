@@ -19,7 +19,6 @@ By default, this example does inference on a small CIFAR10 subset.
 
 import time
 from absl import app
-from absl import flags
 import jax.numpy as np
 import neural_tangents as nt
 from neural_tangents import stax
@@ -27,23 +26,17 @@ from examples import datasets
 from examples import util
 
 
-flags.DEFINE_integer('train_size', 1000,
-                     'Dataset size to use for training.')
-flags.DEFINE_integer('test_size', 1000,
-                     'Dataset size to use for testing.')
-flags.DEFINE_integer('batch_size', 0,
-                     'Batch size for kernel computation. 0 for no batching.')
-
-
-FLAGS = flags.FLAGS
+_TRAIN_SIZE = 1000  # Dataset size to use for training.
+_TEST_SIZE = 1000  # Dataset size to use for testing.
+_BATCH_SIZE = 0  # Batch size for kernel computation. 0 for no batching.
 
 
 def main(unused_argv):
   # Build data pipelines.
   print('Loading data.')
   x_train, y_train, x_test, y_test = datasets.get_dataset('cifar10',
-                                                          FLAGS.train_size,
-                                                          FLAGS.test_size)
+                                                          _TRAIN_SIZE,
+                                                          _TEST_SIZE)
 
   # Build the infinite network.
   _, _, kernel_fn = stax.serial(
@@ -55,7 +48,7 @@ def main(unused_argv):
   # Optionally, compute the kernel in batches, in parallel.
   kernel_fn = nt.batch(kernel_fn,
                        device_count=0,
-                       batch_size=FLAGS.batch_size)
+                       batch_size=_BATCH_SIZE)
 
   start = time.time()
   # Bayesian and infinite-time gradient descent inference with infinite network.

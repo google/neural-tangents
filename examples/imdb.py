@@ -12,7 +12,6 @@ import time
 from typing import Tuple
 
 from absl import app
-from absl import flags
 from jax import random
 import jax.numpy as np
 import neural_tangents as nt
@@ -21,23 +20,12 @@ from examples import datasets
 from examples import util
 
 
-flags.DEFINE_integer('n_train', 300,
-                     'Dataset size to use for training.')
-flags.DEFINE_integer('n_test', 300,
-                     'Dataset size to use for testing.')
-flags.DEFINE_integer('batch_size', 15,
-                     'Batch size for kernel computation. 0 for no batching.')
-flags.DEFINE_integer('max_sentence_length', 500,
-                     'Pad/truncate sentences to this length.')
-flags.DEFINE_string('glove_path',
-                    '/tmp/glove.6B.50d.txt',
-                    'Path to GloVe word embeddings.')
-flags.DEFINE_string('imdb_path',
-                    '/tmp/imdb_reviews',
-                    'Path to imdb sentences.')
-
-
-FLAGS = flags.FLAGS
+_TRAIN_SIZE = 300  # Dataset size to use for training.
+_TEST_SIZE = 300  # Dataset size to use for testing.
+_BATCH_SIZE = 15  # Batch size for kernel computation. 0 for no batching.
+_MAX_SENTENCE_LENGTH = 500  # Pad/truncate sentences to this length.
+_GLOVE_PATH = '/tmp/glove.6B.50d.txt'  # Path to GloVe word embeddings.
+_IMDB_PATH = '/tmp/imdb_reviews'  # Path to imdb sentences.
 
 
 def main(*args, use_dummy_data: bool = False, **kwargs) -> None:
@@ -51,17 +39,17 @@ def main(*args, use_dummy_data: bool = False, **kwargs) -> None:
     print('Loading IMDb data.')
     x_train, y_train, x_test, y_test = datasets.get_dataset(
         name='imdb_reviews',
-        n_train=FLAGS.n_train,
-        n_test=FLAGS.n_test,
+        n_train=_TRAIN_SIZE,
+        n_test=_TEST_SIZE,
         do_flatten_and_normalize=False,
-        data_dir=FLAGS.imdb_path,
+        data_dir=_IMDB_PATH,
         input_key='text')
 
     # Embed words and pad / truncate sentences to a fixed size.
     x_train, x_test = datasets.embed_glove(
         xs=[x_train, x_test],
-        glove_path=FLAGS.glove_path,
-        max_sentence_length=FLAGS.max_sentence_length,
+        glove_path=_GLOVE_PATH,
+        max_sentence_length=_MAX_SENTENCE_LENGTH,
         mask_constant=mask_constant)
 
   # Build the infinite network.
@@ -83,7 +71,7 @@ def main(*args, use_dummy_data: bool = False, **kwargs) -> None:
   )
 
   # Optionally, compute the kernel in batches, in parallel.
-  kernel_fn = nt.batch(kernel_fn, device_count=-1, batch_size=FLAGS.batch_size)
+  kernel_fn = nt.batch(kernel_fn, device_count=-1, batch_size=_BATCH_SIZE)
 
   start = time.time()
   # Bayesian and infinite-time gradient descent inference with infinite network.
@@ -135,8 +123,8 @@ def _get_dummy_data(mask_constant: float
     return y
 
   rng_train, rng_test = random.split(random.PRNGKey(1), 2)
-  x_train = get_x((n_train, FLAGS.max_sentence_length, 50), rng_train)
-  x_test = get_x((n_test, FLAGS.max_sentence_length, 50), rng_test)
+  x_train = get_x((n_train, _MAX_SENTENCE_LENGTH, 50), rng_train)
+  x_test = get_x((n_test, _MAX_SENTENCE_LENGTH, 50), rng_test)
 
   y_train, y_test = get_y(x_train), get_y(x_test)
   return x_train, y_train, x_test, y_test

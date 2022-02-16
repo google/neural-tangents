@@ -117,9 +117,9 @@ A kernel function that produces an estimate of an `AnalyticKernel`
 by monte carlo sampling given a `PRNGKey`.
 """
 MonteCarloKernelFn = Callable[
-    [NTTree[np.ndarray], Optional[NTTree[np.ndarray]], Get],
-    Union[NTTree[np.ndarray],
-          Generator[NTTree[np.ndarray], None, None]]]
+  [NTTree[np.ndarray], Optional[NTTree[np.ndarray]], Get],
+  Union[NTTree[np.ndarray],
+        Generator[NTTree[np.ndarray], None, None]]]
 
 
 KernelFn = Union[AnalyticKernelFn, EmpiricalKernelFn, MonteCarloKernelFn]
@@ -140,4 +140,5 @@ Kernels = Union[List[Kernel], Tuple[Kernel, ...]]
 """Specifies `(input, output, kwargs)` axes for `vmap` in empirical NTK.
 """
 _VMapAxis = Optional[NTTree[int]]
-VMapAxes = Tuple[_VMapAxis, _VMapAxis, Dict[str, _VMapAxis]]
+VMapAxisTriple = Tuple[_VMapAxis, _VMapAxis, Dict[str, _VMapAxis]]
+VMapAxes = Union[_VMapAxis, VMapAxisTriple]

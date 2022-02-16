@@ -31,6 +31,11 @@ INSTALL_REQUIRES = [
     'frozendict>=1.2',
 ]
 
+TESTS_REQUIRES = [
+    'more-itertools',
+    'tensorflow',
+    'tensorflow-datasets',
+]
 
 def _get_version() -> str:
   """Returns the package version.
@@ -59,6 +64,9 @@ setuptools.setup(
     author='Neural Tangents',
     author_email='neural-tangents-dev@google.com',
     install_requires=INSTALL_REQUIRES,
+    extras_require={
+        "testing": TESTS_REQUIRES,
+    },
     url='https://github.com/google/neural-tangents',
     download_url='https://pypi.org/project/neural-tangents/',
     project_urls={
@@ -80,6 +88,7 @@ setuptools.setup(
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
         'License :: OSI Approved :: Apache Software License',
         'Operating System :: MacOS',
         'Operating System :: POSIX :: Linux',
