@@ -16,12 +16,12 @@
 
 
 import operator as op
-from typing import Dict, Tuple, Optional, Callable, Any, Sequence, List
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from . import dataclasses
+from . import utils
 from jax import lax
 import jax.numpy as np
-from neural_tangents.utils import dataclasses
-from neural_tangents.utils import utils
 
 
 @dataclasses.dataclass

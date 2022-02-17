@@ -16,7 +16,7 @@
 
 from typing import Tuple, Callable, Union, List, Any, Optional, Sequence, Generator, TypeVar, Dict
 import jax.numpy as np
-from neural_tangents.utils.kernel import Kernel
+from .kernel import Kernel
 
 
 # Missing JAX Types.
@@ -117,9 +117,9 @@ A kernel function that produces an estimate of an `AnalyticKernel`
 by monte carlo sampling given a `PRNGKey`.
 """
 MonteCarloKernelFn = Callable[
-  [NTTree[np.ndarray], Optional[NTTree[np.ndarray]], Get],
-  Union[NTTree[np.ndarray],
-        Generator[NTTree[np.ndarray], None, None]]]
+    [NTTree[np.ndarray], Optional[NTTree[np.ndarray]], Get],
+    Union[NTTree[np.ndarray],
+          Generator[NTTree[np.ndarray], None, None]]]
 
 
 KernelFn = Union[AnalyticKernelFn, EmpiricalKernelFn, MonteCarloKernelFn]

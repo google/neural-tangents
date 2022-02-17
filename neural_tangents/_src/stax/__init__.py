@@ -11,17 +11,3 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-"""Public `neural_tangents.predict` API. See `_src/predict.py` for details."""
-
-from ._src.predict import (
-    gradient_descent,
-    gradient_descent_mse,
-    gradient_descent_mse_ensemble,
-    gp_inference,
-
-    max_learning_rate,
-
-    ODEState,
-    Gaussian
-)

@@ -235,7 +235,7 @@ The `neural_tangents` (`nt`) package contains the following modules and function
 
 * `monte_carlo_kernel_fn` - compute a Monte Carlo kernel estimate  of _any_ `(init_fn, apply_fn)`, not necessarily specified via `nt.stax`, enabling the kernel computation of infinite networks without closed-form expressions.
 
-* Tools to investigate training dynamics of _wide but finite_ neural networks, like `linearize`, `taylor_expand`, `empirical_kernel_fn` and more. See [Training dynamics of wide but finite networks](#training-dynamics-of-wide-but-finite-networks) for details.
+* Tools to investigate training dynamics of _wide but finite_ neural networks, like `linearize`, `taylor_expand`, `empirical.kernel_fn` and more. See [Training dynamics of wide but finite networks](#training-dynamics-of-wide-but-finite-networks) for details.
 
 
 ## Technical gotchas
@@ -311,9 +311,11 @@ import jax.random as random
 import jax.numpy as np
 import neural_tangents as nt
 
+
 def apply_fn(params, x):
   W, b = params
   return np.dot(x, W) + b
+
 
 W_0 = np.array([[1., 0.], [0., 1.]])
 b_0 = np.zeros((2,))

@@ -41,7 +41,7 @@ _TRAIN_EPOCHS = 10  # Number of epochs to train for.
 
 
 def main(unused_argv):
-  # Build data and .
+  # Load data and preprocess it.
   print('Loading data.')
   x_train, y_train, x_test, y_test = datasets.get_dataset('mnist',
                                                           permute_train=True)

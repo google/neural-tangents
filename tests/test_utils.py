@@ -15,13 +15,12 @@
 """Utilities for testing."""
 
 
+import dataclasses
 import logging
 
-import dataclasses
 import jax
 from jax import jit
 from jax import vmap
-from jax.lib import xla_bridge
 import jax.numpy as np
 import jax.test_util as jtu
 import numpy as onp
@@ -54,7 +53,7 @@ def stub_out_pmap(batch, count):
       def device_count(self):
         return count
 
-    platform = xla_bridge.get_backend().platform
+    platform = jax.default_backend()
     if platform == 'gpu' or platform == 'cpu':
       batch.pmap = _jit_vmap
       batch.xla_bridge = xla_bridge_stub()
@@ -84,7 +83,9 @@ def assert_close_matrices(self, expected, actual, rtol, atol=0.1):
 
     absolute_error = np.mean(np.abs(actual - expected))
 
-    if np.isnan(relative_error) or relative_error > rtol or absolute_error > atol:
+    if (np.isnan(relative_error) or
+        relative_error > rtol or
+        absolute_error > atol):
       _log(relative_error, absolute_error, expected, actual, False)
       self.fail(self.failureException('Relative ERROR: ',
                                       float(relative_error),
@@ -101,7 +102,23 @@ def assert_close_matrices(self, expected, actual, rtol, atol=0.1):
   jax.tree_map(assert_close, expected, actual)
 
 
+def skip_test(self, msg='Skipping large tests for speed.', platforms=('cpu',)):
+  if jax.default_backend() in platforms:
+    raise jtu.JaxTestCase.skipTest(self, msg)
+
+
+def mask(x, mask_constant, mask_axis, key, p):
+  if mask_constant is not None:
+    mask_shape = [1 if i in mask_axis else s
+                  for i, s in enumerate(x.shape)]
+    mask_mat = jax.random.bernoulli(key, p=p, shape=mask_shape)
+    x = np.where(mask_mat, mask_constant, x)
+    x = np.sort(x, 1)
+  return x
+
+
 class NeuralTangentsTestCase(jtu.JaxTestCase):
+  """Helper class for comparing `Kernel`s."""
 
   def assertAllClose(
       self,
@@ -112,8 +129,7 @@ class NeuralTangentsTestCase(jtu.JaxTestCase):
       atol=None,
       rtol=None,
       canonicalize_dtypes=True,
-      err_msg='',
-  ):
+      err_msg=''):
     def is_finite(x):
       self.assertTrue(np.all(np.isfinite(x)))
 
