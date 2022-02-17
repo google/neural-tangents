@@ -56,7 +56,7 @@ jobs:
         pytest -n auto --cov=neural_tangents --cov-report=xml --cov-report=term
 
     - name: Test with pytest and generate coverage report (macOS)
-      if: ${{ (matrix.os == 'macos-latest') && (matrix.JAX_ENABLE_X64 == 0) }}
+      if: ${{ (matrix.os != 'macos-latest') && (matrix.JAX_ENABLE_X64 == 0) }}
       run: |
         pytest -n auto --cov=neural_tangents --cov-report=xml --cov-report=term
 
