@@ -46,6 +46,8 @@ extensions = [
     'sphinx_autodoc_typehints',
 ]
 
+set_type_checking_flag = False
+
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
 
@@ -97,7 +99,7 @@ html_theme = 'sphinx_rtd_theme'
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static']
+# html_static_path = ['_static']
 
 # Custom sidebar templates, must be a dictionary that maps document names
 # to template names.
@@ -169,6 +171,17 @@ texinfo_documents = [
      'Neural Tangents: Fast and Easy Infinite Neural Networks in Python',
      'Miscellaneous'),
 ]
+
+# add_module_names = False
+
+
+def remove_module_docstring(app, what, name, obj, options, lines):
+  if what == "module" and name == "neural_tangents":
+    del lines[:]
+
+
+def setup(app):
+  app.connect("autodoc-process-docstring", remove_module_docstring)
 
 
 # -- Options for Epub output -------------------------------------------------

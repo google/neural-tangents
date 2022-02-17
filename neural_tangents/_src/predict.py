@@ -50,6 +50,7 @@ ArrayOrScalar = Union[None, int, float, np.ndarray]
 
 class PredictFn(Protocol):
   """A type alias for a predictor function."""
+
   def __call__(
       self,
       t: Optional[ArrayOrScalar] = None,
@@ -270,7 +271,9 @@ class ODEState:
 
 class PredictFnODE(Protocol):
   """A type alias for a predictor function operating on an `ODEState`."""
+
   def __call__(
+      self,
       t: Optional[ArrayOrScalar] = None,
       fx_train_or_state_0: Union[ArrayOrScalar, ODEState] = 0.,
       fx_test_0: Optional[ArrayOrScalar] = None,

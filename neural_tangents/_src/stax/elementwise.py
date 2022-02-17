@@ -14,7 +14,6 @@
 
 """Elementwise nonlinearities / activation functions."""
 
-
 import functools
 import operator as op
 from typing import Callable, Optional, Tuple

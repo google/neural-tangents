@@ -14,7 +14,7 @@
 
 """Common Type Definitions."""
 
-from typing import Tuple, Callable, Union, List, Any, Optional, Sequence, Generator, TypeVar, Dict
+from typing import Tuple, Union, List, Any, Optional, Sequence, Generator, TypeVar, Dict, TYPE_CHECKING
 from typing_extensions import Protocol
 import jax.numpy as np
 from .kernel import Kernel
@@ -46,7 +46,7 @@ Axes = Union[int, Sequence[int]]
 """Neural Tangents Trees.
 
 Trees of kernels and arrays naturally emerge in certain neural
-network computations computations (for example, when neural networks have nested
+network computations computations (for examcdple, when neural networks have nested
 parallel layers).
 
 Mimicking JAX, we use a lightweight tree structure called an NTTree. NTTrees
@@ -54,8 +54,14 @@ have internal nodes that are either Lists or Tuples and leaves which are either
 array or kernel objects.
 """
 T = TypeVar('T')
-NTTree = Union[List['NTTree[T]'], Tuple['NTTree[T]', ...], T]
-NTTrees = Union[List[NTTree[T]], Tuple[NTTree[T], ...]]
+if TYPE_CHECKING:
+  NTTree = Union[List['NTTree[T]'], Tuple['NTTree[T]', ...], T]
+  NTTrees = Union[List['NTTree[T]'], Tuple['NTTree[T]', ...]]
+else:
+  # Can't use recursive types with `sphinx-autodoc-typehints`.
+  NTTree = Union[List[T], Tuple[T, ...], T]
+  NTTrees = Union[List[T], Tuple[T, ...]]
+
 
 Shapes = NTTree[Tuple[int, ...]]
 
@@ -70,6 +76,7 @@ class InitFn(Protocol):
   random key and an input shape. Specifically, they produce a tuple giving the
   output shape and a PyTree of parameters.
   """
+
   def __call__(
       self,
       rng: PRNGKey,
@@ -86,6 +93,7 @@ class ApplyFn(Protocol):
   functions that take a PyTree of parameters and an array of inputs and produce
   an array of outputs.
   """
+
   def __call__(
       self,
       params: PyTree,
@@ -96,19 +104,39 @@ class ApplyFn(Protocol):
     ...
 
 
+class MaskFn(Protocol):
+  """A type alias for a masking functions.
+
+  Forward-propagate a mask in a layer of a finite-width network.
+  """
+
+  def __call__(
+      self,
+      mask: Union[np.ndarray, Sequence[np.ndarray]],
+      input_shape: Shapes,
+  ) -> Union[np.ndarray, Sequence[np.ndarray]]:
+    ...
+
+
 KernelOrInput = Union[NTTree[Kernel], NTTree[np.ndarray]]
 
 
 Get = Union[Tuple[str, ...], str, None]
 
 
-"""A type alias for pure kernel functions.
+class LayerKernelFn(Protocol):
+  """A type alias for pure kernel functions.
 
-A pure kernel function takes a PyTree of Kernel object(s) and produces a
-PyTree of Kernel object(s). These functions are used to define new layer
-types.
-"""
-LayerKernelFn = Callable[[NTTree[Kernel]], NTTree[Kernel]]
+  A pure kernel function takes a PyTree of Kernel object(s) and produces a
+  PyTree of Kernel object(s). These functions are used to define new layer
+  types.
+  """
+
+  def __call__(
+      self,
+      k: NTTree[Kernel]
+  ) -> NTTree[Kernel]:
+    ...
 
 
 class AnalyticKernelFn(Protocol):
@@ -119,6 +147,7 @@ class AnalyticKernelFn(Protocol):
     should be computed by the kernel. Returns either a `Kernel` object or
     `np.ndarray`s for kernels specified by `get`.
     """
+
     def __call__(
         self,
         x1: KernelOrInput,
@@ -138,6 +167,7 @@ class EmpiricalGetKernelFn(Protocol):
   Equivalent to `EmpiricalKernelFn`, but accepts a `get` argument, which can be
   for example `get=("nngp", "ntk")`, to compute both kernels together.
   """
+
   def __call__(
       self,
       x1: NTTree[np.ndarray],
@@ -157,6 +187,7 @@ class EmpiricalKernelFn(Protocol):
 
   Equivalent to `EmpiricalGetKernelFn` with `get="nngp"` or `get="ntk"`.
   """
+
   def __call__(
       self,
       x1: NTTree[np.ndarray],
@@ -173,6 +204,7 @@ class MonteCarloKernelFn(Protocol):
   A kernel function that produces an estimate of an `AnalyticKernel`
   by monte carlo sampling given a `PRNGKey`.
   """
+
   def __call__(
       self,
       x1: NTTree[np.ndarray],
@@ -191,8 +223,8 @@ KernelFn = Union[
 ]
 
 
-InternalLayer = Union[Tuple[InitFn, ApplyFn, LayerKernelFn],
-                      Tuple[InitFn, ApplyFn, LayerKernelFn, Callable]]
+InternalLayer = Tuple[InitFn, ApplyFn, LayerKernelFn]
+InternalLayerMasked = Tuple[InitFn, ApplyFn, LayerKernelFn, MaskFn]
 
 
 Layer = Tuple[InitFn, ApplyFn, AnalyticKernelFn]

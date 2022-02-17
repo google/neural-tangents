@@ -89,7 +89,7 @@ Example:
 """
 
 import operator
-from typing import Union, Callable, Optional, Tuple, Dict
+from typing import Union, Optional, Tuple, Dict
 from jax import eval_shape, jacobian, jvp, vjp, vmap, linear_transpose
 import jax.numpy as np
 from jax.tree_util import tree_flatten, tree_unflatten, tree_multimap, tree_reduce, tree_map
@@ -411,10 +411,10 @@ def empirical_nngp_fn(f: ApplyFn,
   Returns:
      A function to draw a single sample the NNGP of a given network `f`.
   """
-  def nngp_fn(x1: np.ndarray,
-              x2: Optional[np.ndarray],
+  def nngp_fn(x1: NTTree[np.ndarray],
+              x2: Optional[NTTree[np.ndarray]],
               params: PyTree,
-              **apply_fn_kwargs) -> np.ndarray:
+              **apply_fn_kwargs) -> NTTree[np.ndarray]:
     """Computes a single sample of the empirical NNGP.
 
     Args:

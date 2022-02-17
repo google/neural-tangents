@@ -122,20 +122,25 @@ def supports_masking(remask_kernel: bool):
   """Returns a decorator that turns layers into layers supporting masking.
 
   Specifically:
-  1) `init_fn` is left unchanged.
-  2) `apply_fn` is turned from
-    a function that accepts a `mask=None` keyword argument (which indicates
-      `inputs[mask]` must be masked), into
-    a function that accepts a `mask_constant=None` keyword argument (which
-      indicates `inputs[inputs == mask_constant]` must be masked).
-  3) `kernel_fn` is modified to
-    3.a) propagate the `kernel.mask1` and `kernel.mask2` through intermediary
-      layers, and,
-    3.b) if `remask_kernel == True`, zeroes-out covariances between entries of
-      which at least one is masked.
-  4) If the decorated layers has a `mask_fn`, it is used to propagate masks
-    forward through the layer, in both `apply_fn` and `kernel_fn`. If not, it is
-     assumed the mask remains unchanged.
+
+  1. `init_fn` is left unchanged.
+
+  2. `apply_fn` is turned from a function that accepts a `mask=None` keyword
+  argument (which indicates `inputs[mask]` must be masked), into a function
+  that accepts a `mask_constant=None` keyword argument (which indicates
+  `inputs[inputs == mask_constant]` must be masked).
+
+  3. `kernel_fn` is modified to
+
+    3.a. propagate the `kernel.mask1` and `kernel.mask2` through intermediary
+    layers, and,
+
+    3.b. if `remask_kernel == True`, zeroes-out covariances between entries of
+    which at least one is masked.
+
+  4. If the decorated layers has a `mask_fn`, it is used to propagate masks
+  forward through the layer, in both `apply_fn` and `kernel_fn`. If not, it is
+  assumed the mask remains unchanged.
 
   Must be applied before the `layer` decorator.
 
@@ -153,7 +158,7 @@ def supports_masking(remask_kernel: bool):
   def supports_masking(layer):
 
     @utils.wraps(layer)
-    def layer_with_masking(*args, **kwargs):
+    def layer_with_masking(*args, **kwargs) -> InternalLayer:
       layer_fns = layer(*args, **kwargs)
       init_fn, apply_fn, kernel_fn = layer_fns[:3]
 
@@ -179,7 +184,7 @@ def supports_masking(remask_kernel: bool):
         masked_inputs = utils.get_masked_array(inputs, mask_constant)
         inputs = utils.nt_tree_fn()(lambda x: x.masked_value)(masked_inputs)
         mask = utils.nt_tree_fn()(lambda x: x.mask)(masked_inputs)
-        # inputs, mask = inputs.masked_value, inputs.mask
+
         outputs = apply_fn(params, inputs, mask=mask, **kwargs)
         outputs_mask = mask_fn(mask,
                                inputs.shape if isinstance(inputs, np.ndarray)
@@ -276,10 +281,10 @@ class Diagonal:
 
   Must be endowed with
     1) A commutative, associative, idempotent `AND` (`&`) operation,
-      corresponding to combining requirements of two layers in parallel.
+    corresponding to combining requirements of two layers in parallel.
 
     2) An associative composition `>>` operation, corresponding to the
-      requirement of a composition of two layers.
+    requirement of a composition of two layers.
 
   Attributes:
     input:

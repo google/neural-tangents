@@ -19,6 +19,7 @@ This code was copied and adapted from https://github.com/google/flax/struct.py.
 Accessed on 03/23/2020.
 """
 
+import functools
 import dataclasses
 from typing import Any, Dict, Tuple
 
@@ -83,12 +84,15 @@ def dataclass(clz):
                                      iterate_clz,
                                      clz_from_iterable)
 
+  @functools.wraps(dataclasses.replace)
   def replace(self: data_clz, **kwargs) -> data_clz:
     return dataclasses.replace(self, **kwargs)
 
+  @functools.wraps(dataclasses.asdict)
   def asdict(self: data_clz) -> Dict[str, Any]:
     return dataclasses.asdict(self)
 
+  @functools.wraps(dataclasses.astuple)
   def astuple(self: data_clz) -> Tuple[Any, ...]:
     return dataclasses.astuple(self)
 
