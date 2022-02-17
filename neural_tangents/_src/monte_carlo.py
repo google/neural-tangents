@@ -37,10 +37,10 @@ import jax.numpy as np
 from jax.tree_util import tree_map
 from jax.tree_util import tree_multimap
 from .utils import utils
-from .utils.typing import ApplyFn, Axes, EmpiricalKernelFn, Get, InitFn, MonteCarloKernelFn, NTTree, PRNGKey, PyTree, VMapAxes
+from .utils.typing import ApplyFn, Axes, EmpiricalGetKernelFn, Get, InitFn, MonteCarloKernelFn, NTTree, PRNGKey, PyTree, VMapAxes
 
 
-def _sample_once_kernel_fn(kernel_fn: EmpiricalKernelFn,
+def _sample_once_kernel_fn(kernel_fn: EmpiricalGetKernelFn,
                            init_fn: InitFn,
                            batch_size: int = 0,
                            device_count: int = -1,

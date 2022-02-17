@@ -7,8 +7,10 @@
 | [**Release notes**](https://github.com/google/neural-tangents/releases)
 
 [![PyPI](https://img.shields.io/pypi/v/neural-tangents)](https://pypi.org/project/neural-tangents/) [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/neural-tangents)](https://pypi.org/project/neural-tangents/)
-[![Tests](https://github.com/google/neural-tangents/actions/workflows/tests.yml/badge.svg)](https://github.com/google/neural-tangents/actions/workflows/tests.yml)
-[![Coverage](https://codecov.io/gh/google/neural-tangents/branch/main/graph/badge.svg)](https://codecov.io/gh/google/neural-tangents)
+[![Linux](https://github.com/romanngg/neural-tangents/actions/workflows/linux_tests.yml/badge.svg)](https://github.com/romanngg/neural-tangents/actions/workflows/linux_tests.yml)
+[![macOS](https://github.com/romanngg/neural-tangents/actions/workflows/macos_tests.yml/badge.svg)](https://github.com/romanngg/neural-tangents/actions/workflows/macos_tests.yml)
+[![Pytype](https://github.com/romanngg/neural-tangents/actions/workflows/pytype.yml/badge.svg)](https://github.com/romanngg/neural-tangents/actions/workflows/pytype.yml)
+[![Coverage](https://codecov.io/gh/romanngg/neural-tangents/branch/main/graph/badge.svg)](https://codecov.io/gh/romanngg/neural-tangents)
 [![Readthedocs](https://readthedocs.org/projects/neural-tangents/badge/?version=latest)](https://neural-tangents.readthedocs.io/en/latest/?badge=latest)
 [![PyPI - License](https://img.shields.io/pypi/l/neural_tangents)](https://github.com/google/neural-tangents/blob/main/LICENSE)
 

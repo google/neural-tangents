@@ -94,11 +94,10 @@ from jax import eval_shape, jacobian, jvp, vjp, vmap, linear_transpose
 import jax.numpy as np
 from jax.tree_util import tree_flatten, tree_unflatten, tree_multimap, tree_reduce, tree_map
 from .utils import utils
-from .utils.typing import ApplyFn, EmpiricalKernelFn, NTTree, PyTree, Axes, VMapAxes, VMapAxisTriple
+from .utils.typing import ApplyFn, EmpiricalKernelFn, EmpiricalGetKernelFn, NTTree, PyTree, Axes, VMapAxes, VMapAxisTriple
 
 
-def linearize(f: Callable[..., PyTree],
-              params: PyTree) -> Callable[..., PyTree]:
+def linearize(f: ApplyFn, params: PyTree) -> ApplyFn:
   """Returns a function `f_lin`, the first order taylor approximation to `f`.
 
   Example:
@@ -111,6 +110,7 @@ def linearize(f: Callable[..., PyTree],
       A function that we would like to linearize. It should have the signature
       `f(params, *args, **kwargs)` where params is a `PyTree` and `f` should
       return a `PyTree`.
+
     params:
       Initial parameters to the function that we would like to take the
       Taylor series about. This can be any structure that is compatible with the
@@ -129,9 +129,7 @@ def linearize(f: Callable[..., PyTree],
   return f_lin
 
 
-def taylor_expand(f: Callable[..., PyTree],
-                  params: PyTree,
-                  degree: int) -> Callable[..., PyTree]:
+def taylor_expand(f: ApplyFn, params: PyTree, degree: int) -> ApplyFn:
   """Returns a function `f_tayl`, Taylor approximation to `f` of order `degree`.
 
   Example:
@@ -144,10 +142,12 @@ def taylor_expand(f: Callable[..., PyTree],
       A function that we would like to Taylor expand. It should have the
       signature `f(params, *args, **kwargs)` where `params` is a `PyTree`, and
       `f` returns a `PyTree`.
+
     params:
       Initial parameters to the function that we would like to take the Taylor
       series about. This can be any structure that is compatible with the JAX
       tree operations.
+
     degree:
       The degree of the Taylor expansion.
 
@@ -185,7 +185,7 @@ def empirical_kernel_fn(
     diagonal_axes: Axes = (),
     vmap_axes: VMapAxes = None,
     implementation: int = 1
-) -> EmpiricalKernelFn:
+) -> EmpiricalGetKernelFn:
   r"""Returns a function that computes single draws from NNGP and NT kernels.
 
   WARNING: resulting kernel shape is *nearly* `zip(f(x1).shape, f(x2).shape)`
@@ -355,10 +355,7 @@ def empirical_kernel_fn(
 def empirical_nngp_fn(f: ApplyFn,
                       trace_axes: Axes = (-1,),
                       diagonal_axes: Axes = ()
-                      ) -> Callable[[NTTree[np.ndarray],
-                                     Optional[NTTree[np.ndarray]],
-                                     PyTree],
-                                    NTTree[np.ndarray]]:
+                      ) -> EmpiricalKernelFn:
   """Returns a function to draw a single sample the NNGP of a given network `f`.
 
   The Neural Network Gaussian Process (NNGP) kernel is defined as
@@ -470,10 +467,7 @@ def empirical_ntk_fn(f: ApplyFn,
                      diagonal_axes: Axes = (),
                      vmap_axes: VMapAxes = None,
                      implementation: int = 1
-                     ) -> Callable[[NTTree[np.ndarray],
-                                    Optional[NTTree[np.ndarray]],
-                                    PyTree],
-                                   NTTree[np.ndarray]]:
+                     ) -> EmpiricalKernelFn:
   r"""Returns a function to draw a single sample the NTK of a given network `f`.
 
   The Neural Tangent Kernel is defined as :math:`J(X_1) J(X_2)^T` where
@@ -601,10 +595,7 @@ def _implicit_ntk_fn(f: ApplyFn,
                      trace_axes: Axes = (-1,),
                      diagonal_axes: Axes = (),
                      vmap_axes: VMapAxes = None
-                     ) -> Callable[[NTTree[np.ndarray],
-                                    Optional[NTTree[np.ndarray]],
-                                    PyTree],
-                                   NTTree[np.ndarray]]:
+                     ) -> EmpiricalKernelFn:
   """Compute NTK implicitly without instantiating full Jacobians."""
 
   def ntk_fn(x1: NTTree[np.ndarray],
@@ -692,10 +683,7 @@ def _direct_ntk_fn(f: ApplyFn,
                    trace_axes: Axes = (-1,),
                    diagonal_axes: Axes = (),
                    vmap_axes: VMapAxes = None
-                   ) -> Callable[[NTTree[np.ndarray],
-                                  Optional[NTTree[np.ndarray]],
-                                  PyTree],
-                                 NTTree[np.ndarray]]:
+                   ) -> EmpiricalKernelFn:
   """Compute NTK by directly instantiating Jacobians and contracting."""
 
   @utils.nt_tree_fn(tree_structure_argnum=0)

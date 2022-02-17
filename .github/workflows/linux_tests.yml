@@ -1,0 +1,79 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# Copied from github.com/google/jax-md and github.com/google/jax
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: linux_tests
+
+on:
+  push:
+    branches:
+    - main
+    - 'test_*'
+
+  pull_request:
+    branches:
+    - main
+
+jobs:
+  Linux_tests:
+
+    timeout-minutes: 120
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        python-version: [3.7, 3.8, 3.9, 3]  # 3 == 3.10 currently.
+        JAX_ENABLE_X64: [0, 1]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+
+    - name: Cancel previous
+      uses: styfle/cancel-workflow-action@0.9.1
+      with:
+        access_token: ${{ github.token }}
+    - uses: actions/checkout@v2.4.0
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        pip install numpy jaxlib --upgrade
+        pip install  -e .
+        pip install -e .[testing]
+        pip install pytest
+        pip install pytest-xdist
+        pip install pytest-cov
+
+    - name: Test with pytest and generate coverage report (Ubuntu)
+      run: |
+        JAX_ENABLE_X64=${{ matrix.JAX_ENABLE_X64 }} pytest -n auto --cov=neural_tangents --cov-report=xml --cov-report=term
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v2.1.0
+      with:
+        file: ./coverage.xml
+
+    # The below step just reports the success or failure of tests as a "commit status".
+    # This is needed for copybara integration.
+    - name: Report success or failure as github status
+      if: always()
+      shell: bash
+      run: |
+        status="${{ job.status }}"
+        lowercase_status=$(echo $status | tr '[:upper:]' '[:lower:]')
+        curl -sS --request POST \
+        --url https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }} \
+        --header 'authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' \
+        --header 'content-type: application/json' \
+        --data '{
+           "state": "'$lowercase_status'",
+           "target_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+           "description": "'$status'",
+           "context": "github-actions/Build"
+           }'

@@ -62,10 +62,15 @@ from .utils.typing import KernelFn, NTTree
 import numpy as onp
 
 
-def batch(kernel_fn: KernelFn,
+# A type variable to indicate that `nt.batch` and other functions here do not
+# change the function signature.
+_KernelFn = TypeVar('_KernelFn', bound=KernelFn)
+
+
+def batch(kernel_fn: _KernelFn,
           batch_size: int = 0,
           device_count: int = -1,
-          store_on_device: bool = True) -> KernelFn:
+          store_on_device: bool = True) -> _KernelFn:
   """Returns a function that computes a kernel in batches over all devices.
 
   Note that you typically should not apply the `jax.jit` decorator to the
@@ -287,9 +292,9 @@ def _set_cov2_to_none(
   return k
 
 
-def _serial(kernel_fn: KernelFn,
+def _serial(kernel_fn: _KernelFn,
             batch_size: int,
-            store_on_device: bool = True) -> KernelFn:
+            store_on_device: bool = True) -> _KernelFn:
   """Returns a function that computes a kernel in batches serially.
 
   This function computes the kernel over data in batches where each batch is
@@ -309,8 +314,10 @@ def _serial(kernel_fn: KernelFn,
       `kernel_fn(kernel_in)`. Here x1 and x2 are `np.ndarray`s of floats of
       shape `(n1,) + input_shape` and `(n2,) + input_shape`; `kernel_in` is a
       `Kernel` object. The kernel function should return a `PyTree`.
+
     batch_size:
       Integer specifying the size of batches in which to split the data.
+
     store_on_device:
       A boolean that species whether the computed kernel should be kept on
       device or brought back to CPU as it is computed. Defaults to `True`.
@@ -468,11 +475,11 @@ def _serial(kernel_fn: KernelFn,
   return serial_fn
 
 
-def _parallel(kernel_fn: KernelFn,
+def _parallel(kernel_fn: _KernelFn,
               use_serial: bool = True,
               dropout_in_analytic_kernel: bool = False,
               device_count: int = -1,
-              ) -> KernelFn:
+              ) -> _KernelFn:
   """Returns a function that computes a kernel in batches in parallel.
 
   When batching in parallel, the data is split over a set number of devices.
@@ -490,13 +497,16 @@ def _parallel(kernel_fn: KernelFn,
       `kernel_fn(kernel_in)`. Here `x1` and `x2` are `np.ndarray`s of floats of
       shape `(n1,) + input_shape` and `(n2,) + input_shape`; `kernel_in` is a
       Kernel object. The kernel function should return a `PyTree`.
+
     use_serial:
       Whether `serial` will be called after `_parallel`. The only use case is to
       make sure when `dropout` is used in the analytic/empirical kernel, the
       batch size in each device is square.
+
     dropout_in_analytic_kernel:
       whether `dropout` is used in the analytic kernel. See `use_serial` above
       for the only use case.
+
     device_count:
       Integer specifying the number of devices over which to split the data. If
       `device_count == 0`, the computation is parallelized over all available
@@ -647,7 +657,7 @@ def _is_np_ndarray(x) -> bool:
       lambda y: isinstance(y, (onp.ndarray, np.ndarray)), x))
 
 
-def _get_jit_or_pmap_broadcast() -> Callable[[Callable, int], Callable]:
+def _get_jit_or_pmap_broadcast():
   """Initializes a cache of pmapped functions closed over non-`np.ndarray` args.
 
   Returns:
@@ -665,6 +675,7 @@ def _get_jit_or_pmap_broadcast() -> Callable[[Callable, int], Callable]:
         function to pmap. First argument must be an `np.ndarray` or a Kernel.
         In either case, ndarrays should have a leading axis having the size of
         `device_count`.
+
       device_count:
         number of XLA devices. `-1` means all available devices. `0` means to
         just `jit` the function.

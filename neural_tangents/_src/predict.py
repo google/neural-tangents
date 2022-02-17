@@ -29,8 +29,9 @@ that closed-form kernels currently only support a single `channel_axis`).
 
 import collections
 from functools import lru_cache
-from typing import Callable, Dict, Generator, Iterable, NamedTuple, Optional, Sequence, Tuple, Union
+from typing import Callable, Dict, Generator, Iterable, NamedTuple, Optional, Tuple, Union
 
+from typing_extensions import Protocol
 import jax
 from jax import grad
 from jax.experimental import ode
@@ -47,6 +48,18 @@ from .utils.typing import Axes, Get, KernelFn
 ArrayOrScalar = Union[None, int, float, np.ndarray]
 
 
+class PredictFn(Protocol):
+  """A type alias for a predictor function."""
+  def __call__(
+      self,
+      t: Optional[ArrayOrScalar] = None,
+      fx_train_0: ArrayOrScalar = 0.,
+      fx_test_0: Optional[ArrayOrScalar] = None,
+      k_test_train: Optional[np.ndarray] = None
+  ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+    ...
+
+
 def gradient_descent_mse(
     k_train_train: np.ndarray,
     y_train: np.ndarray,
@@ -54,13 +67,7 @@ def gradient_descent_mse(
     diag_reg: float = 0.,
     diag_reg_absolute_scale: bool = False,
     trace_axes: Axes = (-1,)
-) -> Callable[
-    [ArrayOrScalar,
-     ArrayOrScalar,
-     ArrayOrScalar,
-     Optional[np.ndarray]],
-    Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]
-]:
+) -> PredictFn:
   r"""Predicts the outcome of function space gradient descent training on MSE.
 
   Solves in closed form for the continuous-time version of gradient descent.
@@ -261,6 +268,17 @@ class ODEState:
   qx_test: Optional[np.ndarray] = None
 
 
+class PredictFnODE(Protocol):
+  """A type alias for a predictor function operating on an `ODEState`."""
+  def __call__(
+      t: Optional[ArrayOrScalar] = None,
+      fx_train_or_state_0: Union[ArrayOrScalar, ODEState] = 0.,
+      fx_test_0: Optional[ArrayOrScalar] = None,
+      k_test_train: Optional[np.ndarray] = None
+  ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray], ODEState]:
+    ...
+
+
 def gradient_descent(
     loss: Callable[[np.ndarray, np.ndarray], float],
     k_train_train: np.ndarray,
@@ -268,13 +286,7 @@ def gradient_descent(
     learning_rate: float = 1.,
     momentum: Optional[float] = None,
     trace_axes: Axes = (-1,)
-) -> Callable[
-    [ArrayOrScalar,
-     Union[ArrayOrScalar, ODEState],
-     ArrayOrScalar,
-     Optional[np.ndarray]],
-    Union[np.ndarray, Tuple[np.ndarray, np.ndarray], ODEState]
-]:
+) -> PredictFnODE:
   r"""Predicts the outcome of function space training using gradient descent.
 
   Uses an ODE solver. If `momentum != None`, solves a continuous-time version of
@@ -772,7 +784,7 @@ def gradient_descent_mse_ensemble(
 
   k_dd_cache = {}
 
-  def get_k_train_train(get: Sequence[str]) -> _Kernel:
+  def get_k_train_train(get: Tuple[str, ...]) -> _Kernel:
     if len(get) == 1:
       get = get[0]
       if get not in k_dd_cache:

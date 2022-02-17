@@ -124,9 +124,9 @@ class DiagonalClassTest(test_utils.NeuralTangentsTestCase):
   def test_diagonal_compose_is_associative(self):
     for inp_a, inp_b, inp_c in itertools.product(stax.Bool, repeat=3):
       for out_a, out_b, out_c in itertools.product(stax.Bool, repeat=3):
-        a = stax.Diagonal(inp_a, out_a)
-        b = stax.Diagonal(inp_b, out_b)
-        c = stax.Diagonal(inp_c, out_c)
+        a = stax.Diagonal(inp_a, out_a)  # pytype:disable=wrong-arg-count
+        b = stax.Diagonal(inp_b, out_b)  # pytype:disable=wrong-arg-count
+        c = stax.Diagonal(inp_c, out_c)  # pytype:disable=wrong-arg-count
         with self.subTest(a=a, b=b, c=c):
           ab_c = (a >> b) >> c
           a_bc = a >> (b >> c)

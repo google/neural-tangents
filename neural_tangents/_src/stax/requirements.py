@@ -267,6 +267,7 @@ class Diagonal:
 
   The intended behavior is to be diagonal-only iff
     a) output off-diagonal entries are all zeros, and
+
     b) diagonal-only `Kernel` is sufficient for all steps of computation.
 
   Note that currently this parameter is shared between all parallel branches,
@@ -276,6 +277,7 @@ class Diagonal:
   Must be endowed with
     1) A commutative, associative, idempotent `AND` (`&`) operation,
       corresponding to combining requirements of two layers in parallel.
+
     2) An associative composition `>>` operation, corresponding to the
       requirement of a composition of two layers.
 
