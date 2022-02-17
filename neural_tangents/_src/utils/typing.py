@@ -55,7 +55,7 @@ array or kernel objects.
 """
 T = TypeVar('T')
 NTTree = Union[List['NTTree[T]'], Tuple['NTTree[T]', ...], T]
-
+NTTrees = Union[List[NTTree[T]], Tuple[NTTree[T], ...]]
 
 Shapes = NTTree[Tuple[int, ...]]
 

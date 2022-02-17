@@ -300,7 +300,12 @@ class Kernel:
       (input_cs, other_cs), (input_bs, other_bs) = dimension_numbers
 
     n_input = len(self.shape1)
-    n_other = other1.ndim if other1 is not None else other2.ndim  # pytype:disable=attribute-error
+    if other1 is not None:
+      n_other = other1.ndim
+    elif other2 is not None:
+      n_other = other2.ndim
+    else:
+      raise ValueError(other1, other2)
 
     input_cs = utils.mod(input_cs, n_input)
     input_bs = utils.mod(input_bs, n_input)

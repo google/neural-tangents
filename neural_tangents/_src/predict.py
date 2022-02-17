@@ -1005,7 +1005,7 @@ def gradient_descent_mse_ensemble(
                 optimize=_optimize())
             term_2 = np.einsum(
                 'mj,ji,ti,ki,lk->tml',
-                ktd_g, evecs, neg_inv_expm1, evecs, utils.make_2d(k_td.nngp),  # pytype:disable=attribute-error
+                ktd_g, evecs, neg_inv_expm1, evecs, utils.make_2d(k_td.nngp),
                 optimize=_optimize())
             term_2 += np.moveaxis(term_2, 1, 2)
             cov = np.einsum(
