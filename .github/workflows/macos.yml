@@ -2,7 +2,7 @@
 # Copied from github.com/google/jax-md and github.com/google/jax
 # For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
 
-name: macos_tests
+name: macos
 
 on:
   push:
@@ -15,17 +15,16 @@ on:
     - main
 
 jobs:
-  MacOS_tests:
+  MacOS:
 
     timeout-minutes: 120
 
     strategy:
       matrix:
-        os: [macos-latest]
         python-version: [3.7, 3.8, 3.9, 3]  # 3 == 3.10 currently.
         JAX_ENABLE_X64: [0]
 
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
 
     steps:
 

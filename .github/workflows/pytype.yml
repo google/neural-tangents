@@ -19,13 +19,7 @@ jobs:
 
     timeout-minutes: 120
 
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-        python-version: [3.7]  # 3 == 3.10 currently.
-        JAX_ENABLE_X64: [0]
-
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
 
     steps:
 
@@ -35,10 +29,10 @@ jobs:
         access_token: ${{ github.token }}
     - uses: actions/checkout@v2.4.0
 
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: Set up Python 3.7
       uses: actions/setup-python@v2
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: 3.7
 
     - name: Install dependencies
       run: |
@@ -48,7 +42,6 @@ jobs:
         pip install -e .[testing]
 
     - name: Pytype Python Checker
-      if: ${{ (matrix.python-version == 3.7) && (matrix.JAX_ENABLE_X64 == 0) }}
       run: |
         pip install --upgrade pytype
         pytype .
