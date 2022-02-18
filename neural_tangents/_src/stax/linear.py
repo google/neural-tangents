@@ -33,7 +33,7 @@ import numpy as onp
 from .requirements import Bool, Diagonal, get_diagonal_outer_prods, layer, mean_and_var, requires, supports_masking
 from ..utils import utils
 from ..utils.kernel import Kernel
-from ..utils.typing import Axes, InternalLayer, NTTree, PyTree
+from ..utils.typing import Axes, InternalLayer, InternalLayerMasked, NTTree, PyTree
 
 
 # Enums
@@ -86,7 +86,7 @@ def DotGeneral(
     precision: Optional[lax.Precision] = None,
     batch_axis: int = 0,
     channel_axis: int = -1
-) -> InternalLayer:
+) -> InternalLayerMasked:
   r"""Layer constructor for a constant (non-trainable) rhs/lhs Dot General.
 
   Dot General allows to express any linear transformation on the inputs,
@@ -149,9 +149,8 @@ def DotGeneral(
       as `Identity`.
 
     dimension_numbers:
-      a tuple of tuples of the form
-      `((lhs_contracting_dims, rhs_contracting_dims),
-        (lhs_batch_dims, rhs_batch_dims))`.
+      a tuple of tuples of the form `((lhs_contracting_dims,
+      rhs_contracting_dims), (lhs_batch_dims, rhs_batch_dims))`.
 
     precision:
       Optional. Either `None`, which means the default precision for the
@@ -728,7 +727,7 @@ def Dense(
     b_std: Optional[float] = None,
     parameterization: str = 'ntk',
     batch_axis: int = 0,
-    channel_axis: int = -1) -> InternalLayer:
+    channel_axis: int = -1) -> InternalLayerMasked:
   r"""Layer constructor function for a dense (fully-connected) layer.
 
   Based on `jax.example_libraries.stax.Dense`.
@@ -867,7 +866,7 @@ def Conv(out_chan: int,
          W_std: float = 1.0,
          b_std: Optional[float] = None,
          dimension_numbers: Optional[Tuple[str, str, str]] = None,
-         parameterization: str = 'ntk') -> InternalLayer:
+         parameterization: str = 'ntk') -> InternalLayerMasked:
   """Layer construction function for a general convolution layer.
 
   Based on `jax.example_libraries.stax.GeneralConv`.
@@ -913,7 +912,7 @@ def ConvTranspose(out_chan: int,
                   W_std: float = 1.0,
                   b_std: Optional[float] = None,
                   dimension_numbers: Optional[Tuple[str, str, str]] = None,
-                  parameterization: str = 'ntk') -> InternalLayer:
+                  parameterization: str = 'ntk') -> InternalLayerMasked:
   """Layer construction function for a general transpose convolution layer.
 
   Based on `jax.example_libraries.stax.GeneralConvTranspose`.
@@ -959,7 +958,7 @@ def ConvLocal(out_chan: int,
               W_std: float = 1.0,
               b_std: Optional[float] = None,
               dimension_numbers: Optional[Tuple[str, str, str]] = None,
-              parameterization: str = 'ntk') -> InternalLayer:
+              parameterization: str = 'ntk') -> InternalLayerMasked:
   """Layer construction function for a general unshared convolution layer.
 
   Also known and "Locally connected networks" or LCNs, these are equivalent to
@@ -1009,7 +1008,7 @@ def _Conv(
     parameterization: str,
     transpose: bool,
     shared_weights: bool
-) -> InternalLayer:
+) -> InternalLayerMasked:
   """Layer construction function for a general convolution layer.
 
   Based on `jax.example_libraries.stax.GeneralConv`.
@@ -1325,7 +1324,7 @@ def AvgPool(window_shape: Sequence[int],
             padding: str = Padding.VALID.name,
             normalize_edges: bool = False,
             batch_axis: int = 0,
-            channel_axis: int = -1) -> InternalLayer:
+            channel_axis: int = -1) -> InternalLayerMasked:
   """Layer construction function for an average pooling layer.
 
   Based on `jax.example_libraries.stax.AvgPool`.
@@ -1359,7 +1358,7 @@ def SumPool(window_shape: Sequence[int],
             strides: Optional[Sequence[int]] = None,
             padding: str = Padding.VALID.name,
             batch_axis: int = 0,
-            channel_axis: int = -1) -> InternalLayer:
+            channel_axis: int = -1) -> InternalLayerMasked:
   """Layer construction function for a 2D sum pooling layer.
 
   Based on `jax.example_libraries.stax.SumPool`.
@@ -1390,7 +1389,7 @@ def _Pool(
     padding: str,
     normalize_edges: bool,
     batch_axis: int,
-    channel_axis: int) -> InternalLayer:
+    channel_axis: int) -> InternalLayerMasked:
   """Layer construction function for a 2D pooling layer.
 
   Based on `jax.example_libraries.stax.AvgPool` and
@@ -1505,7 +1504,10 @@ def _Pool(
 
 @layer
 @supports_masking(remask_kernel=False)
-def GlobalSumPool(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
+def GlobalSumPool(
+    batch_axis: int = 0,
+    channel_axis: int = -1
+) -> InternalLayerMasked:
   """Layer construction function for a global sum pooling layer.
 
   Sums over and removes (`keepdims=False`) all spatial dimensions, preserving
@@ -1526,7 +1528,10 @@ def GlobalSumPool(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
 
 @layer
 @supports_masking(remask_kernel=False)
-def GlobalAvgPool(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
+def GlobalAvgPool(
+    batch_axis: int = 0,
+    channel_axis: int = -1
+) -> InternalLayerMasked:
   """Layer construction function for a global average pooling layer.
 
   Averages over and removes (`keepdims=False`) all spatial dimensions,
@@ -1548,7 +1553,8 @@ def GlobalAvgPool(batch_axis: int = 0, channel_axis: int = -1) -> InternalLayer:
 def _GlobalPool(
     pool_type: _Pooling,
     batch_axis: int,
-    channel_axis: int) -> InternalLayer:
+    channel_axis: int
+) -> InternalLayerMasked:
   """Layer construction function for a global pooling layer.
 
   Pools over and removes (`keepdims=False`) all spatial dimensions, preserving
@@ -1632,7 +1638,10 @@ def _GlobalPool(
 
 @layer
 @supports_masking(remask_kernel=False)
-def Flatten(batch_axis: int = 0, batch_axis_out: int = 0) -> InternalLayer:
+def Flatten(
+    batch_axis: int = 0,
+    batch_axis_out: int = 0
+) -> InternalLayerMasked:
   """Layer construction function for flattening all non-batch dimensions.
 
   Based on `jax.example_libraries.stax.Flatten`, but allows to specify batch
@@ -1766,7 +1775,7 @@ def GlobalSelfAttention(
     W_pos_emb_std: float = 1.0,
     val_pos_emb: bool = False,
     batch_axis: int = 0,
-    channel_axis: int = -1) -> InternalLayer:
+    channel_axis: int = -1) -> InternalLayerMasked:
   """Layer construction function for (global) scaled dot-product self-attention.
 
   Infinite width results based on https://arxiv.org/abs/2006.10540.
@@ -2408,7 +2417,7 @@ def ImageResize(
     precision: lax.Precision = lax.Precision.HIGHEST,
     batch_axis: int = 0,
     channel_axis: int = -1
-) -> InternalLayer:
+) -> InternalLayerMasked:
   """Image resize function mimicking `jax.image.resize`.
 
   Docstring adapted from

@@ -61,7 +61,7 @@ class FlattenTest(test_utils.NeuralTangentsTestCase):
     X0_2 = None if same_inputs else random.normal(key, (2, 4, 3, 2))
 
     X0_1_flat = np.reshape(X0_1, (X0_1.shape[0], -1))
-    X0_2_flat = None if same_inputs else np.reshape(X0_2, (X0_2.shape[0], -1))
+    X0_2_flat = None if X0_2 is None else np.reshape(X0_2, (X0_2.shape[0], -1))
 
     dense = stax.Dense(512, 1.7, 0.1)
     init_fc, apply_fc, kernel_fc = stax.serial(dense,
@@ -530,7 +530,7 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
       mask1 = random.bernoulli(split1, p=0.3, shape=shape1)
       x1 = np.where(mask1, mask_constant, x1)
 
-      if not same_input:
+      if x2 is not None:
         shape2 = list(x2.shape)
         shape2[channel_axis] = 1
         mask2 = random.bernoulli(split2, p=0.2, shape=shape2)

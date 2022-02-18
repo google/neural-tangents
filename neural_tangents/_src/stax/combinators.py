@@ -22,7 +22,7 @@ import frozendict
 import jax.example_libraries.stax as ostax
 from .requirements import Diagonal, get_req, layer, requires
 from ..utils.kernel import Kernel
-from ..utils.typing import InternalLayer, Layer, LayerKernelFn, NTTree
+from ..utils.typing import InternalLayer, Layer, LayerKernelFn, NTTree, NTTrees
 
 
 @layer
@@ -78,10 +78,10 @@ def parallel(*layers: Layer) -> InternalLayer:
     return type(input_shape)(init_fn_stax(rng, input_shape))
 
   def apply_fn(params, inputs, **kwargs):
-    return type(inputs)(apply_fn_stax(params, inputs, **kwargs))  # pytype:disable=wrong-arg-count
+    return type(inputs)(apply_fn_stax(params, inputs, **kwargs))
 
   @requires(**_get_input_req_attr(kernel_fns, fold=op.and_))
-  def kernel_fn(ks: NTTree[Kernel], **kwargs) -> NTTree[Kernel]:
+  def kernel_fn(ks: NTTrees[Kernel], **kwargs) -> NTTrees[Kernel]:
     return type(ks)(f(k, **kwargs) for k, f in zip(ks, kernel_fns))
 
   return init_fn, apply_fn, kernel_fn

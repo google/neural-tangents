@@ -26,7 +26,7 @@ from jax import numpy as np
 import jax.example_libraries.stax as ostax
 from .requirements import layer, supports_masking
 from ..utils.kernel import Kernel
-from ..utils.typing import InternalLayer, Kernels
+from ..utils.typing import InternalLayer, InternalLayerMasked, Kernels
 
 
 @layer
@@ -50,7 +50,7 @@ def FanOut(num: int) -> InternalLayer:
 
 @layer
 @supports_masking(remask_kernel=False)
-def FanInSum() -> InternalLayer:
+def FanInSum() -> InternalLayerMasked:
   """Layer construction function for a fan-in sum layer.
 
   This layer takes a number of inputs (e.g. produced by `FanOut`) and sums the
@@ -112,7 +112,7 @@ def FanInSum() -> InternalLayer:
 
 @layer
 @supports_masking(remask_kernel=False)
-def FanInProd() -> InternalLayer:
+def FanInProd() -> InternalLayerMasked:
   """Layer construction function for a fan-in product layer.
 
   This layer takes a number of inputs (e.g. produced by `FanOut`) and
@@ -178,7 +178,7 @@ def FanInProd() -> InternalLayer:
 
 @layer
 @supports_masking(remask_kernel=False)
-def FanInConcat(axis: int = -1) -> InternalLayer:
+def FanInConcat(axis: int = -1) -> InternalLayerMasked:
   """Layer construction function for a fan-in concatenation layer.
 
   Based on `jax.example_libraries.stax.FanInConcat`.

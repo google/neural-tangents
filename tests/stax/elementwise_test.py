@@ -656,7 +656,7 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
       return kernel_fn(x1, x2, get)
 
     dx1 = random.normal(random.PRNGKey(3), x1.shape) * 0.01
-    if same_inputs is None:
+    if x2 is None:
       dx2 = None
     else:
       dx2 = random.normal(random.PRNGKey(4), x2.shape) * 0.01

@@ -123,12 +123,12 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
 
     if momentum is not None:
       # Test state-based prediction
-      state_0 = predict.ODEState(fx_train_0, fx_test_0)
+      state_0 = predict.ODEState(fx_train_0, fx_test_0)  # pytype:disable=wrong-arg-count
       state_t0 = predictor(0.0, state_0, None, g_td)
       self.assertAllClose(state_0.fx_train, state_t0.fx_train)
       self.assertAllClose(state_0.fx_test, state_t0.fx_test)
 
-      state_train_only_0 = predict.ODEState(fx_train_0)
+      state_train_only_0 = predict.ODEState(fx_train_0)  # pytype:disable=wrong-arg-count
       state_train_only_t0 = predictor(0.0, state_0, None, g_td)
       self.assertAllClose(state_train_only_0.fx_train,
                           state_train_only_t0.fx_train)
@@ -162,7 +162,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
     self.assertAllClose(fx_test_concat, fx_test_single)
 
     if momentum is not None:
-      state_0 = predict.ODEState(fx_train_0, fx_test_0)
+      state_0 = predict.ODEState(fx_train_0, fx_test_0)  # pytype:disable=wrong-arg-count
       t_1 = (0, 0, 2)
       state_1 = predictor(ts[t_1], state_0, None, g_td)
       self.assertAllClose(fx_train_single[t_1], state_1.fx_train)

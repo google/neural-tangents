@@ -1,0 +1,66 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# Copied from github.com/google/jax-md and github.com/google/jax
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: pytype
+
+on:
+  push:
+    branches:
+    - main
+    - 'test_*'
+
+  pull_request:
+    branches:
+    - main
+
+jobs:
+  Pytype:
+
+    timeout-minutes: 120
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - name: Cancel previous
+      uses: styfle/cancel-workflow-action@0.9.1
+      with:
+        access_token: ${{ github.token }}
+    - uses: actions/checkout@v2.4.0
+
+    - name: Set up Python 3.7
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.7
+
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        pip install numpy jaxlib --upgrade
+        pip install  -e .
+        pip install -e .[testing]
+
+    - name: Pytype Python Checker
+      run: |
+        pip install --upgrade pytype
+        pytype .
+
+    # The below step just reports the success or failure of tests as a "commit status".
+    # This is needed for copybara integration.
+    - name: Report success or failure as github status
+      if: always()
+      shell: bash
+      run: |
+        status="${{ job.status }}"
+        lowercase_status=$(echo $status | tr '[:upper:]' '[:lower:]')
+        curl -sS --request POST \
+        --url https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }} \
+        --header 'authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' \
+        --header 'content-type: application/json' \
+        --data '{
+           "state": "'$lowercase_status'",
+           "target_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+           "description": "'$status'",
+           "context": "github-actions/pytype"
+           }'
