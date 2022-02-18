@@ -8,11 +8,11 @@ neural networks.
    :maxdepth: 2
    :caption: Topics:
 
-   neural_tangents.stax
-   neural_tangents._src.empirical
-   neural_tangents.predict
-   neural_tangents._src.batching
-   neural_tangents._src.monte_carlo
+   stax
+   empirical
+   predict
+   batching
+   monte_carlo
 
 Indices and tables
 ==================
