@@ -79,7 +79,7 @@ Example:
   >>>  ntk_fn = nt.empirical_ntk_fn(f, vmap_axes=0, implementation=2)
   >>>
   >>>  # (5, 5) np.ndarray test-test NTK
-  >>>  ntk_test_train = ntk_fn(x_test, None, params)
+  >>>  ntk_test_test = ntk_fn(x_test, None, params)
   >>>
   >>>  # Compute only output variances:
   >>>  nngp_fn = nt.empirical_nngp_fn(f, diagonal_axes=(0,))
