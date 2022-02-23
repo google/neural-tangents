@@ -1,5 +1,5 @@
 **WARNING:**
-Our next major release (v0.5.0; [already in GitHub](https://github.com/google/neural-tangents/commit/4b183cec5e14b5ada427a0c63303f0ebe6b97854)) will include significant refactoring, and could break your code if you use internal function like `nt.utils.typing`, `nt.utils.utils`, `nt.utils.Kernel` etc. (public [API](https://neural-tangents.readthedocs.io/en/latest/) will remain unchanged). This should be easily fixed by updating the imports, e.g. `nt.utils -> nt._src.utils`.
+Our latest release (v0.5.0) includes significant refactoring, and could break your code if you use internal function like `nt.utils.typing`, `nt.utils.utils`, `nt.utils.Kernel` etc. (public [API](https://neural-tangents.readthedocs.io/en/latest/) will remain unchanged). This should be easily fixed by updating the imports, e.g. `nt.utils -> nt._src.utils`.
 
 # Neural Tangents
 [**ICLR 2020 Video**](https://iclr.cc/virtual_2020/poster_SklD9yrFPS.html)
