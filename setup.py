@@ -80,7 +80,10 @@ setuptools.setup(
         'Bug Tracker': 'https://github.com/google/neural-tangents/issues',
         'Release Notes': 'https://github.com/google/neural-tangents/releases',
         'PyPi': 'https://pypi.org/project/neural-tangents/',
-        'Tests': 'https://travis-ci.org/github/google/neural-tangents',
+        'Linux Tests': 'https://github.com/google/neural-tangents/actions/workflows/linux.yml',
+        'macOS Tests': 'https://github.com/google/neural-tangents/actions/workflows/macos.yml',
+        'Pytype': 'https://github.com/google/neural-tangents/actions/workflows/pytype.yml',
+        'Coverage': 'https://app.codecov.io/gh/google/neural-tangents'
     },
     packages=setuptools.find_packages(exclude=('presentation',)),
     long_description=long_description,

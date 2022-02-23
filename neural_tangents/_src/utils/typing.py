@@ -17,6 +17,7 @@
 from typing import Any, Dict, Generator, List, Optional, Sequence, TYPE_CHECKING, Tuple, TypeVar, Union
 
 import jax.numpy as np
+from jax import random
 from .kernel import Kernel
 from typing_extensions import Protocol
 
@@ -27,14 +28,6 @@ from typing_extensions import Protocol
   for details.
 """
 PyTree = Any
-
-
-"""A type alias for PRNGKeys.
-
-  See https://jax.readthedocs.io/en/latest/jax.random.html#jax.random.PRNGKey
-  for details.
-"""
-PRNGKey = np.ndarray
 
 
 """A type alias for axes specification.
@@ -81,7 +74,7 @@ class InitFn(Protocol):
 
   def __call__(
       self,
-      rng: PRNGKey,
+      rng: random.KeyArray,
       input_shape: Shapes,
       **kwargs
   ) -> Tuple[Shapes, PyTree]:

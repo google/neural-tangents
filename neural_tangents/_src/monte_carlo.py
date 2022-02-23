@@ -37,7 +37,7 @@ import jax.numpy as np
 from jax.tree_util import tree_map
 from jax.tree_util import tree_multimap
 from .utils import utils
-from .utils.typing import ApplyFn, Axes, EmpiricalGetKernelFn, Get, InitFn, MonteCarloKernelFn, NTTree, PRNGKey, PyTree, VMapAxes
+from .utils.typing import ApplyFn, Axes, EmpiricalGetKernelFn, Get, InitFn, MonteCarloKernelFn, NTTree, PyTree, VMapAxes
 
 
 def _sample_once_kernel_fn(kernel_fn: EmpiricalGetKernelFn,
@@ -52,7 +52,7 @@ def _sample_once_kernel_fn(kernel_fn: EmpiricalGetKernelFn,
   def kernel_fn_sample_once(
       x1: NTTree[np.ndarray],
       x2: Optional[NTTree[np.ndarray]],
-      key: PRNGKey,
+      key: random.KeyArray,
       get: Get,
       **apply_fn_kwargs):
     init_key, dropout_key = random.split(key, 2)
@@ -64,7 +64,7 @@ def _sample_once_kernel_fn(kernel_fn: EmpiricalGetKernelFn,
 
 def _sample_many_kernel_fn(
     kernel_fn_sample_once,
-    key: PRNGKey,
+    key: random.KeyArray,
     n_samples: Set[int],
     get_generator: bool):
   def normalize(sample: PyTree, n: int) -> PyTree:
@@ -115,7 +115,7 @@ def _sample_many_kernel_fn(
 def monte_carlo_kernel_fn(
     init_fn: InitFn,
     apply_fn: ApplyFn,
-    key: PRNGKey,
+    key: random.KeyArray,
     n_samples: Union[int, Iterable[int]],
     batch_size: int = 0,
     device_count: int = -1,
