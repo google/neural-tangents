@@ -16,7 +16,7 @@ else:
   from neural_tangents.stax import _pool_kernel, Padding, Pooling
 
 from sketching import TensorSRHT2, PolyTensorSRHT
-"""Implementation for NTK Sketching and Random Features"""
+""" Implementation for NTK Sketching and Random Features """
 
 
 def _prod(tuple_):

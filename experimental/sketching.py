@@ -46,6 +46,13 @@ class TensorSRHT2:
     return np.concatenate((out.real, out.imag), 1)
 
 
+# Function implementation of TensorSRHT of degree 2 (duplicated)
+def tensorsrht(x1, x2, rand_inds, rand_signs):
+  x1fft = np.fft.fftn(x1 * rand_signs[0, :], axes=(-1,))[:, rand_inds[0, :]]
+  x2fft = np.fft.fftn(x2 * rand_signs[1, :], axes=(-1,))[:, rand_inds[1, :]]
+  return np.sqrt(1 / rand_inds.shape[1]) * (x1fft * x2fft)
+
+
 # TensorSRHT of degree p. This operates the same input vectors.
 class PolyTensorSRHT:
 

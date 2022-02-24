@@ -9,8 +9,7 @@ from neural_tangents import stax
 from features import _inputs_to_features, DenseFeatures, ReluFeatures, serial
 
 seed = 1
-n = 6
-d = 4
+n, d = 6, 4
 
 key1, key2 = random.split(random.PRNGKey(seed))
 x1 = random.normal(key1, (n, d))

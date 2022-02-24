@@ -96,6 +96,7 @@ feature_fn = jit(feature_fn)
 init_nngp_feat_shape = x.shape
 init_ntk_feat_shape = (-1, 0)
 init_feat_shape = (init_nngp_feat_shape, init_ntk_feat_shape)
+
 inputs_shape, feat_fn_inputs = init_fn(key2, init_feat_shape)
 
 f0 = _inputs_to_features(x)
