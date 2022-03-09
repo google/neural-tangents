@@ -1,6 +1,7 @@
 import os
-
 os.environ['CUDA_VISIBLE_DEVICES'] = ''
+import sys
+sys.path.append("./")
 import functools
 from numpy.linalg import norm
 from jax.config import config
@@ -12,7 +13,7 @@ import jax.numpy as np
 from jax import random
 
 from neural_tangents import stax
-from features import ReluFeatures, ConvFeatures, AvgPoolFeatures, serial, FlattenFeatures, DenseFeatures, _inputs_to_features
+from experimental.features import ReluFeatures, ConvFeatures, AvgPoolFeatures, serial, FlattenFeatures, DenseFeatures, _inputs_to_features
 
 layer_factor = {5: [2, 1, 1], 7: [2, 2, 2], 10: [3, 3, 3]}
 width = 1

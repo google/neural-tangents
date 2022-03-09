@@ -2,11 +2,13 @@ from numpy.linalg import norm
 from jax import random
 from jax.config import config
 from jax import jit
+import sys
+sys.path.append("./")
 
 config.update("jax_enable_x64", True)
 from neural_tangents import stax
 
-from features import _inputs_to_features, DenseFeatures, ReluFeatures, serial
+from experimental.features import _inputs_to_features, DenseFeatures, ReluFeatures, serial
 
 seed = 1
 n, d = 6, 4

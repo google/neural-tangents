@@ -1,7 +1,7 @@
 from jax import random
 from jax import numpy as np
-from neural_tangents._src.utils import utils, dataclasses
-from neural_tangents._src.utils.typing import Optional
+from neural_tangents._src.utils import dataclasses
+from typing import Optional, Callable
 
 
 # TensorSRHT of degree 2. This version allows different input vectors.
@@ -20,9 +20,9 @@ class TensorSRHT2:
   rand_inds1: Optional[np.ndarray] = None
   rand_inds2: Optional[np.ndarray] = None
 
-  replace = ...
+  replace = ...  # type: Callable[..., 'TensorSRHT2']
 
-  def init_sketches(self):
+  def init_sketches(self) -> 'TensorSRHT2':
     rng1, rng2, rng3, rng4 = random.split(self.rng, 4)
     rand_signs1 = random.choice(rng1, 2, shape=(self.input_dim1,)) * 2 - 1
     rand_signs2 = random.choice(rng2, 2, shape=(self.input_dim2,)) * 2 - 1
@@ -53,7 +53,8 @@ def tensorsrht(x1, x2, rand_inds, rand_signs):
   return np.sqrt(1 / rand_inds.shape[1]) * (x1fft * x2fft)
 
 
-# TensorSRHT of degree p. This operates the same input vectors.
+# pytype: disable=attribute-error
+# TODO: Improve faster TensorSRHT.
 class PolyTensorSRHT:
 
   def __init__(self, rng, input_dim, sketch_dim, coeffs):
@@ -133,3 +134,4 @@ class PolyTensorSRHT:
           p = p // 2
       U[j] = V[log_degree - 1][0, :, :].clone()
     return U
+# pytype: enable=attribute-error
