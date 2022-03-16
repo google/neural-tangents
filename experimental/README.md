@@ -59,10 +59,9 @@ For more complex CNTK features, please check `test_myrtle_networks.py`.
 
 # Modules
 
-All modules return a triple functions `(init_fn, apply_fn, feature_fn)`. Instead of kernel function `kernel_fn` in [Neural Tangents](https://github.com/google/neural-tangents) library, we replace it with the feature map function `feature_fn`. 
+All modules return a tuple functions `(init_fn, feature_fn)`. Instead of kernel function `kernel_fn` in [Neural Tangents](https://github.com/google/neural-tangents) library, we replace it with the feature map function `feature_fn`. 
 
 - `init_fn` takes (1) random seed and (2) a pair of shapes of input features for both NNGP and NTK. It returns (1) a pair of shapes of output features and (2) parameters used for approximating the features (e.g., random vectors for Random Features approach).
-- `apply_fn` does nothing (dummy functions).
 - `feature_fn` takes (1) feature structure `features.Feature` and (2) parameters used for feature approximation (initialized by `init_fn`). It returns `features.Feature` including approximate features of the corresponding module.
 
 

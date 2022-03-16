@@ -73,26 +73,25 @@ def _inputs_to_features(x: np.ndarray,
 # Followed https://github.com/google/neural-tangents/blob/main/neural_tangents/stax.py
 def serial(*layers):
   init_fns, apply_fns, feature_fns = zip(*layers)
-  init_fn, apply_fn = ostax.serial(*zip(init_fns, apply_fns))
+  init_fn, _ = ostax.serial(*zip(init_fns, apply_fns))
 
-  # import time
   def feature_fn(k, inputs, **kwargs):
     for f, input_ in zip(feature_fns, inputs):
-      # print(f)
-      # tic = time.time()
       k = f(k, input_, **kwargs)
-      # print(f"toc: {time.time() - tic:.2f} sec")
     return k
 
-  return init_fn, apply_fn, feature_fn
+  return init_fn, feature_fn
 
 
 def DenseFeatures(out_dim: int,
                   W_std: float = 1.,
-                  b_std: float = 1.,
-                  parameterization: str = 'ntk',
+                  b_std: float = 0.,
                   batch_axis: int = 0,
                   channel_axis: int = -1):
+  
+  if b_std != 0.0:
+    raise NotImplementedError('Non-zero b_std is not implemented yet .'
+                              ' Please set b_std to be `0`.')
 
   def init_fn(rng, input_shape):
     nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
@@ -100,10 +99,7 @@ def DenseFeatures(out_dim: int,
                                                  ntk_feat_shape[-1],)
     return (nngp_feat_shape, new_ntk_feat_shape), ()
 
-  def apply_fn(**kwargs):
-    return None
-
-  def kernel_fn(f: Features, input, **kwargs):
+  def feature_fn(f: Features, input, **kwargs):
     nngp_feat, ntk_feat = f.nngp_feat, f.ntk_feat
     nngp_feat *= W_std
     ntk_feat *= W_std
@@ -115,7 +111,7 @@ def DenseFeatures(out_dim: int,
 
     return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
 
-  return init_fn, apply_fn, kernel_fn
+  return init_fn, feature_fn
 
 
 def ReluFeatures(
@@ -170,9 +166,6 @@ def ReluFeatures(
       new_ntk_feat_shape = ntk_feat_shape[:-1] + (_prod(ntk_feat_shape[:-1]),)
       return (new_nngp_feat_shape, new_ntk_feat_shape), ()
 
-  def apply_fn(**kwargs):
-    return None
-
   def feature_fn(f: Features, input=None, **kwargs) -> Features:
 
     input_shape = f.nngp_feat.shape[:-1]
@@ -211,10 +204,10 @@ def ReluFeatures(
 
     return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
 
-  return init_fn, apply_fn, feature_fn
+  return init_fn, feature_fn
 
 
-def conv_feat(X, filter_size):
+def _conv_feat(X, filter_size):
   N, H, W, C = X.shape
   out = np.zeros((N, H, W, C * filter_size))
   out = out.at[:, :, :, :C].set(X)
@@ -227,8 +220,8 @@ def conv_feat(X, filter_size):
   return out
 
 
-def conv2d_feat(X, filter_size):
-  return conv_feat(np.moveaxis(conv_feat(X, filter_size), 1, 2), filter_size)
+def _conv2d_feat(X, filter_size):
+  return _conv_feat(np.moveaxis(_conv_feat(X, filter_size), 1, 2), filter_size)
 
 
 def ConvFeatures(out_dim: int,
@@ -236,6 +229,10 @@ def ConvFeatures(out_dim: int,
                  W_std: float = 1.0,
                  b_std: float = 0.,
                  channel_axis: int = -1):
+
+  if b_std != 0.0:
+    raise NotImplementedError('Non-zero b_std is not implemented yet .'
+                              ' Please set b_std to be `0`.')
 
   def init_fn(rng, input_shape):
     nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
@@ -245,23 +242,20 @@ def ConvFeatures(out_dim: int,
         (nngp_feat_shape[-1] + ntk_feat_shape[-1]) * filter_size**2,)
     return (new_nngp_feat_shape, new_ntk_feat_shape), ()
 
-  def apply_fn(**kwargs):
-    return None
-
   def feature_fn(f, input, **kwargs):
     nngp_feat, ntk_feat = f.nngp_feat, f.ntk_feat
 
-    nngp_feat = conv2d_feat(nngp_feat, filter_size) / filter_size * W_std
+    nngp_feat = _conv2d_feat(nngp_feat, filter_size) / filter_size * W_std
 
     if ntk_feat.ndim == 0:  # check if ntk_feat is empty
       ntk_feat = nngp_feat
     else:
-      ntk_feat = conv2d_feat(ntk_feat, filter_size) / filter_size * W_std
+      ntk_feat = _conv2d_feat(ntk_feat, filter_size) / filter_size * W_std
       ntk_feat = np.concatenate((ntk_feat, nngp_feat), axis=channel_axis)
 
     return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
 
-  return init_fn, apply_fn, feature_fn
+  return init_fn, feature_fn
 
 
 def AvgPoolFeatures(window_size: int,
@@ -282,9 +276,6 @@ def AvgPoolFeatures(window_size: int,
         ntk_feat_shape[2] // window_size) + ntk_feat_shape[-1:]
     return (new_nngp_feat_shape, new_ntk_feat_shape), ()
 
-  def apply_fn(**kwargs):
-    return None
-
   def feature_fn(f, input=None, **kwargs):
     window_shape_kernel = (1,) + (window_size,) * 2 + (1,)
     strides_kernel = (1,) + (window_size,) * 2 + (1,)
@@ -296,7 +287,7 @@ def AvgPoolFeatures(window_size: int,
 
     return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
 
-  return init_fn, apply_fn, feature_fn
+  return init_fn, feature_fn
 
 
 def FlattenFeatures(batch_axis: int = 0, batch_axis_out: int = 0):
@@ -307,9 +298,6 @@ def FlattenFeatures(batch_axis: int = 0, batch_axis_out: int = 0):
     new_ntk_feat_shape = ntk_feat_shape[:1] + (_prod(ntk_feat_shape[1:]),)
     return (new_nngp_feat_shape, new_ntk_feat_shape), ()
 
-  def apply_fn(**kwargs):
-    return None
-
   def feature_fn(f, input=None, **kwargs):
     batch_size = f.nngp_feat.shape[0]
     nngp_feat = f.nngp_feat.reshape(batch_size, -1) / np.sqrt(
@@ -319,4 +307,4 @@ def FlattenFeatures(batch_axis: int = 0, batch_axis_out: int = 0):
 
     return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
 
-  return init_fn, apply_fn, feature_fn
+  return init_fn, feature_fn
