@@ -72,8 +72,8 @@ def _inputs_to_features(x: np.ndarray,
 # Modified the serial process of feature map blocks.
 # Followed https://github.com/google/neural-tangents/blob/main/neural_tangents/stax.py
 def serial(*layers):
-  init_fns, apply_fns, feature_fns = zip(*layers)
-  init_fn, _ = ostax.serial(*zip(init_fns, apply_fns))
+  init_fns, feature_fns = zip(*layers)
+  init_fn, _ = ostax.serial(*zip(init_fns, init_fns))
 
   def feature_fn(k, inputs, **kwargs):
     for f, input_ in zip(feature_fns, inputs):
@@ -88,7 +88,7 @@ def DenseFeatures(out_dim: int,
                   b_std: float = 0.,
                   batch_axis: int = 0,
                   channel_axis: int = -1):
-  
+
   if b_std != 0.0:
     raise NotImplementedError('Non-zero b_std is not implemented yet .'
                               ' Please set b_std to be `0`.')

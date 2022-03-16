@@ -91,7 +91,7 @@ relufeat_arg = {
     'sketch_dim': sketch_dim,
 }
 
-init_fn, _, feature_fn = MyrtleNetworkFeatures(5, **relufeat_arg)
+init_fn, feature_fn = MyrtleNetworkFeatures(5, **relufeat_arg)
 feature_fn = jit(feature_fn)
 
 init_nngp_feat_shape = x.shape

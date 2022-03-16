@@ -20,9 +20,9 @@ width = 512  # this does not matter the output
 
 print("================= Result of Neural Tangent Library =================")
 
-init_fn, apply_fn, kernel_fn = stax.serial(stax.Dense(width), stax.Relu(),
-                                           stax.Dense(width), stax.Relu(),
-                                           stax.Dense(1))
+init_fn, _, kernel_fn = stax.serial(stax.Dense(width), stax.Relu(),
+                                    stax.Dense(width), stax.Relu(),
+                                    stax.Dense(1))
 
 nt_kernel = kernel_fn(x1, None)
 
@@ -49,10 +49,10 @@ relufeat_arg = {
     'sketch_dim': sketch_dim,
 }
 
-init_fn, _, features_fn = serial(DenseFeatures(width),
-                                 ReluFeatures(**relufeat_arg),
-                                 DenseFeatures(width),
-                                 ReluFeatures(**relufeat_arg), DenseFeatures(1))
+init_fn, features_fn = serial(DenseFeatures(width),
+                              ReluFeatures(**relufeat_arg),
+                              DenseFeatures(width),
+                              ReluFeatures(**relufeat_arg), DenseFeatures(1))
 
 # Initialize random vectors and sketching algorithms
 init_nngp_feat_shape = x1.shape
@@ -84,10 +84,10 @@ print("================= (Debug) Exact NTK Feature Maps =================")
 
 relufeat_arg = {'method': 'exact'}
 
-init_fn, _, features_fn = serial(DenseFeatures(width),
-                                 ReluFeatures(**relufeat_arg),
-                                 DenseFeatures(width),
-                                 ReluFeatures(**relufeat_arg), DenseFeatures(1))
+init_fn, features_fn = serial(DenseFeatures(width),
+                              ReluFeatures(**relufeat_arg),
+                              DenseFeatures(width),
+                              ReluFeatures(**relufeat_arg), DenseFeatures(1))
 f0 = _inputs_to_features(x1)
 feats = jit(features_fn)(f0, feat_fn_inputs)
 
