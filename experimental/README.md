@@ -20,7 +20,7 @@ relufeat_arg = {
     'method': 'rf',
 }
 
-init_fn, _, feature_fn = serial(
+init_fn, feature_fn = serial(
     DenseFeatures(512), ReluFeatures(**relufeat_arg),
     DenseFeatures(512), ReluFeatures(**relufeat_arg),
     DenseFeatures(1)
@@ -42,7 +42,7 @@ For more details of fully connected NTK features, please check `test_fc_ntk.py`.
 
 ### Convolutional NTK approximation via Random Features:
 ```python
-init_fn, _, feature_fn = serial(
+init_fn, feature_fn = serial(
     ConvFeatures(512, filter_size=3), ReluFeatures(**relufeat_arg),
     AvgPoolFeatures(2, 2), FlattenFeatures()
 )
@@ -59,7 +59,7 @@ For more complex CNTK features, please check `test_myrtle_networks.py`.
 
 # Modules
 
-All modules return a tuple functions `(init_fn, feature_fn)`. Instead of kernel function `kernel_fn` in [Neural Tangents](https://github.com/google/neural-tangents) library, we replace it with the feature map function `feature_fn`. 
+All modules return a pair of functions `(init_fn, feature_fn)`. Instead of kernel function `kernel_fn` in [Neural Tangents](https://github.com/google/neural-tangents) library, we replace it with the feature map function `feature_fn`. We do not return `apply_fn` functions.
 
 - `init_fn` takes (1) random seed and (2) a pair of shapes of input features for both NNGP and NTK. It returns (1) a pair of shapes of output features and (2) parameters used for approximating the features (e.g., random vectors for Random Features approach).
 - `feature_fn` takes (1) feature structure `features.Feature` and (2) parameters used for feature approximation (initialized by `init_fn`). It returns `features.Feature` including approximate features of the corresponding module.
@@ -75,7 +75,7 @@ x = random.normal(key1, shape=(3, 2))
 _, _, kernel_fn = stax.Dense(width)
 nt_kernel = kernel_fn(x)
 
-_, _, feat_fn = DenseFeatures(width)
+_, feat_fn = DenseFeatures(width)
 feat = feat_fn(_inputs_to_features(x), ())
 
 assert np.linalg.norm(nt_kernel.ntk - feat.ntk_feat @ feat.ntk_feat.T) <= 1e-12
@@ -91,7 +91,7 @@ To use the Random Features approach, set the parameter `method` to `rf` (default
 ```python
 x = random.normal(key1, shape=(3, 32))
 
-init_fn, _ , feat_fn = serial(
+init_fn, feat_fn = serial(
     DenseFeatures(1),
     ReluFeatures(method='rf', feature_dim0=10, feature_dim1=20, sketch_dim=30)
 )
@@ -106,7 +106,7 @@ assert out_feat.ntk_feat.shape == (3, 30)
 
 To use the exact feature map (based on Cholesky decomposition), set the parameter `method` to `exact`, e.g.,
 ```python
-init_fn, _ , feat_fn = serial(DenseFeatures(1), ReluFeatures(method='exact'))
+init_fn, feat_fn = serial(DenseFeatures(1), ReluFeatures(method='exact'))
 _, params = init_fn(key1, (x.shape,(-1, 0)))
 out_feat = feat_fn(_inputs_to_features(x), params)
 
