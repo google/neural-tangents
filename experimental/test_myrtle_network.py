@@ -13,7 +13,7 @@ import jax.numpy as np
 from jax import random
 
 from neural_tangents import stax
-from experimental.features import ReluFeatures, ConvFeatures, AvgPoolFeatures, serial, FlattenFeatures, DenseFeatures, _inputs_to_features
+from experimental.features import ReluFeatures, ConvFeatures, AvgPoolFeatures, serial, FlattenFeatures, DenseFeatures
 
 layer_factor = {5: [2, 1, 1], 7: [2, 2, 2], 10: [3, 3, 3]}
 width = 1
@@ -94,19 +94,16 @@ relufeat_arg = {
 init_fn, feature_fn = MyrtleNetworkFeatures(5, **relufeat_arg)
 feature_fn = jit(feature_fn)
 
-init_nngp_feat_shape = x.shape
-init_ntk_feat_shape = (-1, 0)
-init_feat_shape = (init_nngp_feat_shape, init_ntk_feat_shape)
+feat_shape, feat_fn_inputs = init_fn(key2, x.shape)
 
-inputs_shape, feat_fn_inputs = init_fn(key2, init_feat_shape)
+feats = feature_fn(x, feat_fn_inputs)
 
-f0 = _inputs_to_features(x)
-feats = feature_fn(f0, feat_fn_inputs)
-
+print(f"f_nngp shape: {feat_shape[0]}")
 print("K_nngp (approx):")
 print(feats.nngp_feat @ feats.nngp_feat.T)
 print()
 
+print(f"f_ntk shape: {feat_shape[1]}")
 print("K_ntk (approx):")
 print(feats.ntk_feat @ feats.ntk_feat.T)
 print()

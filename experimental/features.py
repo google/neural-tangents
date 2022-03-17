@@ -69,8 +69,56 @@ def _inputs_to_features(x: np.ndarray,
                   channel_axis=channel_axis)  # pytype:disable=wrong-keyword-args
 
 
+# For flexible `feature_fn` with both input `np.ndarray` and with `Feature`.
+# Followed https://github.com/google/neural-tangents/blob/main/neural_tangents/_src/stax/requirements.py
+def _preprocess_feature_fn(feature_fn):
+
+  def feature_fn_feature(feature, input, **kwargs):
+    return feature_fn(feature, input, **kwargs)
+
+  def feature_fn_x(x, input, **kwargs):
+    feature = _inputs_to_features(x, **kwargs)
+    return feature_fn(feature, input, **kwargs)
+
+  def feature_fn_any(x_or_feature, input=None, **kwargs):
+    if isinstance(x_or_feature, Features):
+      return feature_fn_feature(x_or_feature, input, **kwargs)
+    return feature_fn_x(x_or_feature, input, **kwargs)
+
+  return feature_fn_any
+
+
+def _is_sinlge_shape(input_shape):
+  if all(isinstance(n, int) for n in input_shape):
+    return True
+  return False
+
+def _preprocess_init_fn(init_fn):
+  
+  def init_fn_any(rng, input_shape_any, **kwargs):
+    if _is_sinlge_shape(input_shape_any):
+      input_shape = (input_shape_any, (-1,0))
+      return init_fn(rng, input_shape, **kwargs)
+    else:
+      return init_fn(rng, input_shape_any, **kwargs)
+
+  return init_fn_any
+
+
+def layer(layer_fn):
+
+  def new_layer_fns(*args, **kwargs):
+    init_fn, feature_fn = layer_fn(*args, **kwargs)
+    feature_fn = _preprocess_feature_fn(feature_fn)
+    init_fn = _preprocess_init_fn(init_fn)
+    return init_fn, feature_fn
+
+  return new_layer_fns
+
+
 # Modified the serial process of feature map blocks.
 # Followed https://github.com/google/neural-tangents/blob/main/neural_tangents/stax.py
+@layer
 def serial(*layers):
   init_fns, feature_fns = zip(*layers)
   init_fn, _ = ostax.serial(*zip(init_fns, init_fns))
@@ -83,6 +131,7 @@ def serial(*layers):
   return init_fn, feature_fn
 
 
+@layer
 def DenseFeatures(out_dim: int,
                   W_std: float = 1.,
                   b_std: float = 0.,
@@ -114,6 +163,7 @@ def DenseFeatures(out_dim: int,
   return init_fn, feature_fn
 
 
+@layer
 def ReluFeatures(
     feature_dim0: int = 1,
     feature_dim1: int = 1,
@@ -224,6 +274,7 @@ def _conv2d_feat(X, filter_size):
   return _conv_feat(np.moveaxis(_conv_feat(X, filter_size), 1, 2), filter_size)
 
 
+@layer
 def ConvFeatures(out_dim: int,
                  filter_size: int,
                  W_std: float = 1.0,
@@ -258,6 +309,7 @@ def ConvFeatures(out_dim: int,
   return init_fn, feature_fn
 
 
+@layer
 def AvgPoolFeatures(window_size: int,
                     stride_size: int = 2,
                     padding: str = stax.Padding.VALID.name,
@@ -290,6 +342,7 @@ def AvgPoolFeatures(window_size: int,
   return init_fn, feature_fn
 
 
+@layer
 def FlattenFeatures(batch_axis: int = 0, batch_axis_out: int = 0):
 
   def init_fn(rng, input_shape):

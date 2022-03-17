@@ -11,7 +11,7 @@ Implementations developed in [[1]](#1-scaling-neural-tangent-kernels-via-sketchi
 
 ```python
 from jax import random
-from features import _inputs_to_features, DenseFeatures, ReluFeatures, serial
+from experimental.features import DenseFeatures, ReluFeatures, serial
 
 relufeat_arg = {
     'feature_dim0': 128,
@@ -29,12 +29,8 @@ init_fn, feature_fn = serial(
 key1, key2 = random.split(random.PRNGKey(1))
 x = random.normal(key1, (5, 4))
 
-initial_nngp_feat_shape = x.shape
-initial_ntk_feat_shape = (-1,0)
-initial_feat_shape = (initial_nngp_feat_shape, initial_ntk_feat_shape)
-
-_, feat_fn_inputs = init_fn(key2, initial_feat_shape)
-feats = feature_fn(_inputs_to_features(x), feat_fn_inputs)
+_, feat_fn_inputs = init_fn(key2, x.shape)
+feats = feature_fn(x, feat_fn_inputs)
 # feats.nngp_feat is a feature map of NNGP kernel
 # feats.ntk_feat is a feature map of NTK
 ```
@@ -42,16 +38,19 @@ For more details of fully connected NTK features, please check `test_fc_ntk.py`.
 
 ### Convolutional NTK approximation via Random Features:
 ```python
+from experimental.features import ConvFeatures, AvgPoolFeatures, FlattenFeatures
+
 init_fn, feature_fn = serial(
     ConvFeatures(512, filter_size=3), ReluFeatures(**relufeat_arg),
     AvgPoolFeatures(2, 2), FlattenFeatures()
 )
 
 n, H, W, C = 5, 8, 8, 3
+key1, key2 = random.split(random.PRNGKey(1))
 x = random.normal(key1, shape=(n, H, W, C))
 
-_, feat_fn_inputs = init_fn(key2, (x.shape, (-1, 0))
-feats = feature_fn(_inputs_to_features(x), feat_fn_inputs)
+_, feat_fn_inputs = init_fn(key2, x.shape)
+feats = feature_fn(x, feat_fn_inputs)
 # feats.nngp_feat is a feature map of NNGP kernel
 # feats.ntk_feat is a feature map of NTK
 ```
@@ -61,7 +60,7 @@ For more complex CNTK features, please check `test_myrtle_networks.py`.
 
 All modules return a pair of functions `(init_fn, feature_fn)`. Instead of kernel function `kernel_fn` in [Neural Tangents](https://github.com/google/neural-tangents) library, we replace it with the feature map function `feature_fn`. We do not return `apply_fn` functions.
 
-- `init_fn` takes (1) random seed and (2) a pair of shapes of input features for both NNGP and NTK. It returns (1) a pair of shapes of output features and (2) parameters used for approximating the features (e.g., random vectors for Random Features approach).
+- `init_fn` takes (1) random seed and (2) input shape. It returns (1) a pair of shapes of both NNGP and NTK features and (2) parameters used for approximating the features (e.g., random vectors for Random Features approach).
 - `feature_fn` takes (1) feature structure `features.Feature` and (2) parameters used for feature approximation (initialized by `init_fn`). It returns `features.Feature` including approximate features of the corresponding module.
 
 
@@ -69,6 +68,7 @@ All modules return a pair of functions `(init_fn, feature_fn)`. Instead of kerne
 `features.DenseFeatures` provides features for fully-connected dense layer and corresponds to `stax.Dense` module in [Neural Tangents](https://github.com/google/neural-tangents). We assume that the input is a tabular dataset (i.e., a n-by-d matrix). Its `feature_fn` updates the NTK features by concatenating NNGP features and NTK features. This is because `stax.Dense` updates a new NTK kernel matrix `(N x D)` by adding the previous NNGP and NTK kernel matrices. The features of dense layer are exact and no approximations are applied. 
 ```python
 import numpy as np
+from neural_tangents import stax
 
 width = 1
 x = random.normal(key1, shape=(3, 2))
@@ -76,7 +76,7 @@ _, _, kernel_fn = stax.Dense(width)
 nt_kernel = kernel_fn(x)
 
 _, feat_fn = DenseFeatures(width)
-feat = feat_fn(_inputs_to_features(x), ())
+feat = feat_fn(x, ())
 
 assert np.linalg.norm(nt_kernel.ntk - feat.ntk_feat @ feat.ntk_feat.T) <= 1e-12
 assert np.linalg.norm(nt_kernel.nngp - feat.nngp_feat @ feat.nngp_feat.T) <= 1e-12
@@ -96,9 +96,9 @@ init_fn, feat_fn = serial(
     ReluFeatures(method='rf', feature_dim0=10, feature_dim1=20, sketch_dim=30)
 )
 
-_, params = init_fn(key1, (x.shape,(-1, 0)))
+_, params = init_fn(key1, x.shape)
 
-out_feat = feat_fn(_inputs_to_features(x), params)
+out_feat = feat_fn(x, params)
 
 assert out_feat.nngp_feat.shape == (3, 20)
 assert out_feat.ntk_feat.shape == (3, 30)
@@ -107,8 +107,8 @@ assert out_feat.ntk_feat.shape == (3, 30)
 To use the exact feature map (based on Cholesky decomposition), set the parameter `method` to `exact`, e.g.,
 ```python
 init_fn, feat_fn = serial(DenseFeatures(1), ReluFeatures(method='exact'))
-_, params = init_fn(key1, (x.shape,(-1, 0)))
-out_feat = feat_fn(_inputs_to_features(x), params)
+_, params = init_fn(key1, x.shape)
+out_feat = feat_fn(x, params)
 
 assert out_feat.nngp_feat.shape == (3, 3)
 assert out_feat.ntk_feat.shape == (3, 3)

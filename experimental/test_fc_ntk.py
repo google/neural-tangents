@@ -8,13 +8,13 @@ sys.path.append("./")
 config.update("jax_enable_x64", True)
 from neural_tangents import stax
 
-from experimental.features import _inputs_to_features, DenseFeatures, ReluFeatures, serial
+from experimental.features import DenseFeatures, ReluFeatures, serial
 
 seed = 1
 n, d = 6, 4
 
 key1, key2 = random.split(random.PRNGKey(seed))
-x1 = random.normal(key1, (n, d))
+x = random.normal(key1, (n, d))
 
 width = 512  # this does not matter the output
 
@@ -24,7 +24,7 @@ init_fn, _, kernel_fn = stax.serial(stax.Dense(width), stax.Relu(),
                                     stax.Dense(width), stax.Relu(),
                                     stax.Dense(1))
 
-nt_kernel = kernel_fn(x1, None)
+nt_kernel = kernel_fn(x, None)
 
 print("K_nngp :")
 print(nt_kernel.nngp)
@@ -40,8 +40,6 @@ kappa0_feat_dim = 10000
 kappa1_feat_dim = 10000
 sketch_dim = 20000
 
-f0 = _inputs_to_features(x1)
-
 relufeat_arg = {
     'method': 'rf',
     'feature_dim0': kappa0_feat_dim,
@@ -55,20 +53,18 @@ init_fn, features_fn = serial(DenseFeatures(width),
                               ReluFeatures(**relufeat_arg), DenseFeatures(1))
 
 # Initialize random vectors and sketching algorithms
-init_nngp_feat_shape = x1.shape
-init_ntk_feat_shape = (-1, 0)
-init_feat_shape = (init_nngp_feat_shape, init_ntk_feat_shape)
-_, feat_fn_inputs = init_fn(key2, init_feat_shape)
+feat_shape, feat_fn_inputs = init_fn(key2, x.shape)
 
 # Transform input vectors to NNGP/NTK feature map
-f0 = _inputs_to_features(x1)
-feats = jit(features_fn)(f0, feat_fn_inputs)
+feats = jit(features_fn)(x, feat_fn_inputs)
 
-print("K_nngp :")
+print(f"f_nngp shape: {feat_shape[0]}")
+print("K_nngp (approx):")
 print(feats.nngp_feat @ feats.nngp_feat.T)
 print()
 
-print("K_ntk :")
+print(f"f_ntk shape: {feat_shape[1]}")
+print("K_ntk (approx):")
 print(feats.ntk_feat @ feats.ntk_feat.T)
 print()
 
@@ -88,8 +84,8 @@ init_fn, features_fn = serial(DenseFeatures(width),
                               ReluFeatures(**relufeat_arg),
                               DenseFeatures(width),
                               ReluFeatures(**relufeat_arg), DenseFeatures(1))
-f0 = _inputs_to_features(x1)
-feats = jit(features_fn)(f0, feat_fn_inputs)
+
+feats = jit(features_fn)(x, feat_fn_inputs)
 
 print("K_nngp :")
 print(feats.nngp_feat @ feats.nngp_feat.T)
