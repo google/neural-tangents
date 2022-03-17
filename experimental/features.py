@@ -61,7 +61,7 @@ def _inputs_to_features(x: np.ndarray,
 
   # Followed the same initialization of Neural Tangents library.
   nngp_feat = x / x.shape[channel_axis]**0.5
-  ntk_feat = np.empty((), dtype=nngp_feat.dtype)
+  ntk_feat = np.array([0.0], dtype=nngp_feat.dtype)
 
   return Features(nngp_feat=nngp_feat,
                   ntk_feat=ntk_feat,
@@ -93,11 +93,16 @@ def _is_sinlge_shape(input_shape):
     return True
   return False
 
+
+def _is_defaut_feature(feat):
+  return feat.ndim == 1
+
+
 def _preprocess_init_fn(init_fn):
-  
+
   def init_fn_any(rng, input_shape_any, **kwargs):
     if _is_sinlge_shape(input_shape_any):
-      input_shape = (input_shape_any, (-1,0))
+      input_shape = (input_shape_any, (-1, 0))
       return init_fn(rng, input_shape, **kwargs)
     else:
       return init_fn(rng, input_shape_any, **kwargs)
@@ -153,7 +158,7 @@ def DenseFeatures(out_dim: int,
     nngp_feat *= W_std
     ntk_feat *= W_std
 
-    if ntk_feat.ndim == 0:  # check if ntk_feat is empty
+    if _is_defaut_feature(ntk_feat):  # check if ntk_feat is empty
       ntk_feat = nngp_feat
     else:
       ntk_feat = np.concatenate((ntk_feat, nngp_feat), axis=channel_axis)
@@ -298,7 +303,7 @@ def ConvFeatures(out_dim: int,
 
     nngp_feat = _conv2d_feat(nngp_feat, filter_size) / filter_size * W_std
 
-    if ntk_feat.ndim == 0:  # check if ntk_feat is empty
+    if _is_defaut_feature(ntk_feat):  # check if ntk_feat is empty
       ntk_feat = nngp_feat
     else:
       ntk_feat = _conv2d_feat(ntk_feat, filter_size) / filter_size * W_std
@@ -355,8 +360,12 @@ def FlattenFeatures(batch_axis: int = 0, batch_axis_out: int = 0):
     batch_size = f.nngp_feat.shape[0]
     nngp_feat = f.nngp_feat.reshape(batch_size, -1) / np.sqrt(
         _prod(f.nngp_feat.shape[1:-1]))
-    ntk_feat = f.ntk_feat.reshape(batch_size, -1) / np.sqrt(
-        _prod(f.ntk_feat.shape[1:-1]))
+
+    if _is_defaut_feature(f.ntk_feat):  # check if ntk_feat is empty
+      ntk_feat = f.ntk_feat
+    else:
+      ntk_feat = f.ntk_feat.reshape(batch_size, -1) / np.sqrt(
+          _prod(f.ntk_feat.shape[1:-1]))
 
     return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
 
