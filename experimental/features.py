@@ -360,7 +360,6 @@ def FlattenFeatures(batch_axis: int = 0, batch_axis_out: int = 0):
     batch_size = f.nngp_feat.shape[0]
     nngp_feat = f.nngp_feat.reshape(batch_size, -1) / np.sqrt(
         _prod(f.nngp_feat.shape[1:-1]))
-
     if _is_defaut_feature(f.ntk_feat):  # check if ntk_feat is empty
       ntk_feat = f.ntk_feat
     else:
