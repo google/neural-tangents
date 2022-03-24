@@ -8,6 +8,8 @@ Created on Tue Mar 22 16:56:26 2022
 
 import numpy as onp
 import quadprog
+from jax import numpy as jnp
+from jaxopt import OSQP
 
 
 from matplotlib import pyplot as plt
@@ -15,17 +17,14 @@ from matplotlib import pyplot as plt
 
 
 def quadprog_solve_qp(P, q, G=None, h=None, A=None, b=None):
-    qp_G = .5 * (P + P.T +1e-5*onp.eye(P.shape[0]))   # make sure P is symmetric
-    qp_a = -q
+    qp_Q = .5 * (P + P.T +1e-5*jnp.eye(P.shape[0]))   # make sure P is symmetric
+    
+    qp = OSQP()
     if A is not None:
-        qp_C = -onp.vstack([A, G]).T
-        qp_b = -onp.hstack([b, h])
-        meq = A.shape[0]
-    else:  # no equality constraint
-        qp_C = -G.T
-        qp_b = -h
-        meq = 0
-    return quadprog.solve_qp(qp_G, qp_a, qp_C, qp_b, meq)[0]
+        sol = qp.run(params_obj=(qp_Q, q), params_eq=(A, b), params_ineq=(G, h)).params
+    else:
+        sol = qp.run(params_obj=(qp_Q, q), params_eq=None, params_ineq=(G, h)).params
+    return onp.array(sol.primal)
 
 
 
@@ -47,7 +46,10 @@ def kappa1_coeffs(degree,h):
     w = y
     U = Z.T
 
-    beta_ = quadprog_solve_qp(onp.dot(U, U.T), -onp.dot(U,w) , onp.concatenate((Z[0:grid_len-1,:]-Z[1:grid_len,:], -onp.eye(degree+1)),axis=0), onp.zeros(degree+grid_len), Z[grid_len-1,:][onp.newaxis,:],y[grid_len-1])
+    beta_ = quadprog_solve_qp(onp.dot(U, U.T), -onp.dot(U,w) , 
+                              onp.concatenate((Z[0:grid_len-1,:]-Z[1:grid_len,:], 
+                                               -onp.eye(degree+1)),axis=0), onp.zeros(degree+grid_len), 
+                              Z[grid_len-1,:][onp.newaxis,:],onp.array([y[grid_len-1]]))
     beta_[beta_ < 1e-5] = 0
     
     return beta_
@@ -73,7 +75,9 @@ def kappa0_coeffs(degree,h):
     w = y 
     U = Z.T 
 
-    beta_ = quadprog_solve_qp(onp.dot(U, U.T), -onp.dot(U,w) , onp.concatenate((Z[0:grid_len-1,:]-Z[1:grid_len,:], -onp.eye(degree+1)),axis=0), onp.zeros(degree+grid_len))#, Z[200,:][np.newaxis,:],y[200])
+    beta_ = quadprog_solve_qp(onp.dot(U, U.T), -onp.dot(U,w) , 
+                              onp.concatenate((Z[0:grid_len-1,:]-Z[1:grid_len,:], 
+                                               -onp.eye(degree+1)),axis=0), onp.zeros(degree+grid_len))
     beta_[beta_ < 1e-5] = 0
     
     return beta_

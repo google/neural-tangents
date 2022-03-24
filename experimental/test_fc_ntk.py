@@ -39,9 +39,9 @@ print("================= Result of NTK Random Features =================")
 
 kappa0_feat_dim = 2048
 kappa1_feat_dim = 2048
-sketch_dim = 2048
+sketch_dim = 4096
 poly_degree = 4
-poly_sketch_dim = 2048
+poly_sketch_dim = 4096
 
 relufeat_arg = {
     'method': 'psrf',

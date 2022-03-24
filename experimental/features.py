@@ -228,17 +228,17 @@ def ReluFeatures(
             kappa1_coeff = kappa1_coeffs(poly_degree,layer_count-1)
             
             # PolySketch expansion for nngp features.
-            polysketch = PolyTensorSketch(rng1, nngp_feat_shape[-1], 
+            polysketch = PolyTensorSketch(rng1, nngp_feat_shape[-1]//(1+(layer_count>1)),  
                                           poly_sketch_dim, poly_degree).init_sketch()
             # TensorSRHT of degree 2 for approximating tensor product.
-            tensorsrht = TensorSRHT2(input_dim1=ntk_feat_shape[-1], 
+            tensorsrht = CmplxTensorSRHT(input_dim1=ntk_feat_shape[-1]//(1+(layer_count>1)), 
                                          input_dim2=feature_dim0, 
                                          sketch_dim=sketch_dim , rng=rng2).init_sketches()
 
             # Random vectors for random features of arc-cosine kernel of order 0.
             # W0 = random.choice(rng3, 2, shape=(nngp_feat_shape[-1], feature_dim0//2)) * 2 - 1
             if layer_count ==1:
-                W0 = random.normal(rng3, (nngp_feat_shape[-1], feature_dim0//2))
+                W0 = random.normal(rng3, (2*nngp_feat_shape[-1], feature_dim0//2))
             else:
                 W0 = random.normal(rng3, (nngp_feat_shape[-1], feature_dim0//2),dtype='float32')
 
@@ -288,15 +288,17 @@ def ReluFeatures(
             ts2: TensorSRHT2 = input[2]
             
             kappa0_feat = (nngp_feat_2d @ W0 > 0) / np.sqrt(W0.shape[-1])
+            del W0
             nngp_feat = (np.maximum(nngp_feat_2d @ W1, 0) /
                          np.sqrt(W1.shape[-1])).reshape(input_shape + (-1,))
+            del W1
             ntk_feat = ts2.sketch(ntk_feat_2d,
                                   kappa0_feat).reshape(input_shape + (-1,))
         
         elif method == 'psrf':  # Combination of Poly Sketch and Random Features.
             W0: np.ndarray = input[0]
             polysketch: PolyTensorSketch = input[1]
-            ts2: TensorSRHT2 = input[2]
+            tensorsrht: CmplxTensorSRHT = input[2]
             kappa1_coeff: np.ndarray = input[3][0]
             layer_count = input[3][1]
             
@@ -305,17 +307,16 @@ def ReluFeatures(
             del polysketch_feats
             nngp_feat = polysketch.standardsrht(kappa1_feat, polysketch.rand_inds, 
                                                 polysketch.rand_signs).reshape(input_shape + (-1,))
-            nngp_feat = np.concatenate((nngp_feat.real, nngp_feat.imag), axis=1)
+            # nngp_feat = np.concatenate((nngp_feat.real, nngp_feat.imag), axis=1)
 
-            nngp_proj = np.dot(nngp_feat_2d , W0)
-            
+            nngp_proj = np.dot(np.concatenate((nngp_feat_2d.real, nngp_feat_2d.imag), axis=1) , W0)
             
             kappa0_feat = np.concatenate(((nngp_proj > 0), (nngp_proj <= 0)), axis=1) / np.sqrt(W0.shape[-1])
             del W0
-            ntk_feat = ts2.sketch(ntk_feat_2d, kappa0_feat).reshape(input_shape + (-1,))
+            ntk_feat = tensorsrht.sketch(ntk_feat_2d, kappa0_feat).reshape(input_shape + (-1,))
             if top_layer:
-                ntk_feat = (1 / 2**(layer_count/2))*ntk_feat
-                nngp_feat = (1 / 2**(layer_count/2))*nngp_feat
+                ntk_feat = (1 / 2**(layer_count/2))*np.concatenate((ntk_feat.real, ntk_feat.imag), axis=1)
+                nngp_feat = (1 / 2**(layer_count/2))*np.concatenate((nngp_feat.real, nngp_feat.imag), axis=1)
 
           
         elif method == 'ps':
