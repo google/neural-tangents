@@ -47,8 +47,7 @@ def kappa1_coeffs(degree,h):
     U = Z.T
 
     beta_ = quadprog_solve_qp(onp.dot(U, U.T), -onp.dot(U,w) , 
-                              onp.concatenate((Z[0:grid_len-1,:]-Z[1:grid_len,:], 
-                                               -onp.eye(degree+1)),axis=0), onp.zeros(degree+grid_len), 
+                              -onp.eye(degree+1), onp.zeros(degree+1), 
                               Z[grid_len-1,:][onp.newaxis,:],onp.array([y[grid_len-1]]))
     beta_[beta_ < 1e-5] = 0
     
@@ -76,8 +75,7 @@ def kappa0_coeffs(degree,h):
     U = Z.T 
 
     beta_ = quadprog_solve_qp(onp.dot(U, U.T), -onp.dot(U,w) , 
-                              onp.concatenate((Z[0:grid_len-1,:]-Z[1:grid_len,:], 
-                                               -onp.eye(degree+1)),axis=0), onp.zeros(degree+grid_len))
+                              -onp.eye(degree+1), onp.zeros(degree+1))
     beta_[beta_ < 1e-5] = 0
     
     return beta_
