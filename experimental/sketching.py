@@ -45,6 +45,76 @@ class TensorSRHT2:
     out = np.sqrt(1 / self.rand_inds1.shape[-1]) * (x1fft * x2fft)
     return np.concatenate((out.real, out.imag), 1)
 
+# Standard SRHT with real valued output
+@dataclasses.dataclass
+class SRHT:
+
+  input_dim: int
+  sketch_dim: int
+
+  rng: np.ndarray
+  shape: Optional[np.ndarray] = None
+
+  rand_signs: Optional[np.ndarray] = None
+  rand_inds: Optional[np.ndarray] = None
+
+  replace = ...  # type: Callable[..., 'TensorSRHT2']
+
+  def init_sketches(self) -> 'SRHT':
+    rng1, rng2 = random.split(self.rng, 2)
+    rand_signs = random.choice(rng1, 2, shape=(self.input_dim,)) * 2 - 1
+    rand_inds = random.choice(rng2, self.input_dim,
+                               shape=(self.sketch_dim // 2,))
+    shape = (self.input_dim, self.sketch_dim)
+    return self.replace(shape=shape,
+                        rand_signs=rand_signs,
+                        rand_inds=rand_inds)
+
+  def sketch(self, x):
+    xfft = np.fft.fftn(x * self.rand_signs, axes=(-1,))[:, self.rand_inds]
+    out = np.sqrt(1 / self.rand_inds.shape[-1]) * xfft
+    return np.concatenate((out.real, out.imag), 1)
+
+# TensorSRHT of degree 2 with complex valued output. This version allows different input vectors.
+@dataclasses.dataclass
+class CmplxTensorSRHT:
+
+    input_dim1: int
+    input_dim2: int
+    sketch_dim: int
+    
+    rng: np.ndarray
+    shape: Optional[np.ndarray] = None
+    
+    rand_signs1: Optional[np.ndarray] = None
+    rand_signs2: Optional[np.ndarray] = None
+    rand_inds1: Optional[np.ndarray] = None
+    rand_inds2: Optional[np.ndarray] = None
+    
+    replace = ...  # type: Callable[..., 'TensorSRHT2']
+    
+    def init_sketches(self) -> 'CmplxTensorSRHT':
+        rng1, rng2, rng3, rng4 = random.split(self.rng, 4)
+        rand_signs1 = random.choice(rng1, 2, shape=(self.input_dim1,)) * 2 - 1
+        rand_signs2 = random.choice(rng2, 2, shape=(self.input_dim2,)) * 2 - 1
+        rand_inds1 = random.choice(rng3,self.input_dim1,
+                                   shape=(self.sketch_dim // 2,))
+        rand_inds2 = random.choice(rng4,self.input_dim2,
+                                   shape=(self.sketch_dim // 2,))
+        shape = (self.input_dim1, self.input_dim2, self.sketch_dim)
+        return self.replace(shape=shape,
+                            rand_signs1=rand_signs1,
+                            rand_signs2=rand_signs2,
+                            rand_inds1=rand_inds1,
+                            rand_inds2=rand_inds2)
+    
+    def sketch(self, x1, x2):
+        x1fft = np.fft.fftn(x1 * self.rand_signs1, axes=(-1,))[:, self.rand_inds1]
+        x2fft = np.fft.fftn(x2 * self.rand_signs2, axes=(-1,))[:, self.rand_inds2]
+        out = np.sqrt(1 / self.rand_inds1.shape[-1]) * (x1fft * x2fft)
+        return out
+
+
 # Standard SRHT as a function
 def standardsrht(x, rand_inds, rand_signs):
     xfft = np.fft.fftn(x * rand_signs, axes=(-1,))[:, rand_inds]
@@ -72,7 +142,7 @@ class PolyTensorSketch:
         tree_rand_inds = [0 for i in range((self.degree - 1).bit_length())]
         rng1, rng3 = random.split(self.rng, 2)
     
-        ske_dim_ = self.sketch_dim // 4
+        ske_dim_ = self.sketch_dim // 4 -1
         deg_ = self.degree // 2
         
         for i in range((self.degree - 1).bit_length()):
@@ -92,9 +162,9 @@ class PolyTensorSketch:
             deg_ = deg_ // 2
         
         rng1, rng2 = random.split(rng3,2)
-        rand_signs = random.choice(rng1, 2, shape=(self.degree * ske_dim_,)) * 2 - 1
+        rand_signs = random.choice(rng1, 2, shape=(1+self.degree * ske_dim_,)) * 2 - 1
         rand_inds = random.choice(rng2,
-                                  self.degree * ske_dim_,shape=(self.sketch_dim // 2,))
+                                  1+self.degree * ske_dim_,shape=(self.sketch_dim // 2,))
         
         return self.replace(tree_rand_signs=tree_rand_signs,
                             tree_rand_inds=tree_rand_inds,
@@ -136,7 +206,7 @@ class PolyTensorSketch:
                                    self.tree_rand_signs[i][j, :, :]))
         
         U = [0 for i in range(2**log_degree)]
-        U[0] = V[log_degree - 1][0, :, :].clone()
+        U[0] = V[log_degree - 1][0, :, :]
                 
         SetE1 = set()
         
@@ -153,14 +223,27 @@ class PolyTensorSketch:
                                    self.tree_rand_signs[i][p, 0, :]))
                 else:
                     if (i-1,2*p) in SetE1:
-                        V[i] = V[i].at[p, :, :].set(V[i-1][2*p+1,:,:].clone())
+                        V[i] = V[i].at[p, :, :].set(V[i-1][2*p+1,:,:])
                     else:
                         V[i] = V[i].at[p, :, :].set(
                             self.tensorsrht(V[i - 1][2 * p, :, :], V[i - 1][2 * p + 1, :, :],
                                    self.tree_rand_inds[i][p, :, :],
                                    self.tree_rand_signs[i][p, :, :]))
             p = p // 2
-          U[j] = V[log_degree - 1][0, :, :].clone()
+          U[j] = V[log_degree - 1][0, :, :]
 
         return U
+    
+    def expand_feats(self, polysketch_feats, coeffs):
+        n, sktch_dim = polysketch_feats[0].shape
+        Z = np.zeros((len(self.rand_signs),n), dtype=np.complex64)
+        Z = Z.at[1,:].set(np.sqrt(coeffs[0]) * np.ones(n))
+        degree = len(polysketch_feats)
+        for i in range(degree):
+            Z = Z.at[sktch_dim*i+1:sktch_dim*(i+1)+1,:].set(np.sqrt( coeffs[i+1] ) * 
+                                                      polysketch_feats[degree-i-1].T)
+        
+        return Z.T
+
+        
 # pytype: enable=attribute-error

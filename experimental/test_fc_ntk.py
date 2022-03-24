@@ -8,7 +8,7 @@ sys.path.append("./")
 config.update("jax_enable_x64", True)
 from neural_tangents import stax
 
-from experimental.features import DenseFeatures, ReluFeatures, serial
+from features import DenseFeatures, ReluFeatures, serial
 
 seed = 1
 n, d = 6, 4
@@ -21,6 +21,7 @@ width = 512  # this does not matter the output
 print("================= Result of Neural Tangent Library =================")
 
 init_fn, _, kernel_fn = stax.serial(stax.Dense(width), stax.Relu(),
+                                    stax.Dense(width), stax.Relu(),
                                     stax.Dense(width), stax.Relu(),
                                     stax.Dense(1))
 
@@ -36,9 +37,9 @@ print()
 
 print("================= Result of NTK Random Features =================")
 
-kappa0_feat_dim = 10000
-kappa1_feat_dim = 10000
-sketch_dim = 20000
+kappa0_feat_dim = 2048
+kappa1_feat_dim = 2048
+sketch_dim = 2048
 
 relufeat_arg = {
     'method': 'rf',
@@ -47,10 +48,20 @@ relufeat_arg = {
     'sketch_dim': sketch_dim,
 }
 
+relufeat_arg_top = {
+    'method': 'rf',
+    'feature_dim0': kappa0_feat_dim,
+    'feature_dim1': kappa1_feat_dim,
+    'sketch_dim': sketch_dim,
+    'top_layer': True
+}
+
 init_fn, features_fn = serial(DenseFeatures(width),
                               ReluFeatures(**relufeat_arg),
                               DenseFeatures(width),
-                              ReluFeatures(**relufeat_arg), DenseFeatures(1))
+                              ReluFeatures(**relufeat_arg),
+                              DenseFeatures(width),
+                              ReluFeatures(**relufeat_arg_top), DenseFeatures(1))
 
 # Initialize random vectors and sketching algorithms
 feat_shape, feat_fn_inputs = init_fn(key2, x.shape)
@@ -79,11 +90,18 @@ print()
 print("================= (Debug) Exact NTK Feature Maps =================")
 
 relufeat_arg = {'method': 'exact'}
+relufeat_arg_top = {'method': 'exact', 'top_layer': True}
+
 
 init_fn, features_fn = serial(DenseFeatures(width),
                               ReluFeatures(**relufeat_arg),
                               DenseFeatures(width),
-                              ReluFeatures(**relufeat_arg), DenseFeatures(1))
+                              ReluFeatures(**relufeat_arg),
+                              DenseFeatures(width),
+                              ReluFeatures(**relufeat_arg_top), DenseFeatures(1))
+
+# Initialize random vectors and sketching algorithms
+feat_shape, feat_fn_inputs = init_fn(key2, x.shape)
 
 feats = jit(features_fn)(x, feat_fn_inputs)
 

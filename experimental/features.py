@@ -3,13 +3,15 @@ from jax import random
 from jax import numpy as np
 from jax.numpy.linalg import cholesky
 import jax.example_libraries.stax as ostax
+from jax.numpy import linalg as LA
 
 from neural_tangents import stax
 from neural_tangents._src.utils import dataclasses
 from neural_tangents._src.stax.linear import _pool_kernel, Padding
 from neural_tangents._src.stax.linear import _Pooling as Pooling
 
-from experimental.sketching import TensorSRHT2
+from sketching import TensorSRHT2
+from poly_fitting import kappa0_coeffs, kappa1_coeffs
 """ Implementation for NTK Sketching and Random Features """
 
 
@@ -32,20 +34,21 @@ def _sqrt(x):
 def kappa0(x):
   xxt = x @ x.T
   prod = np.outer(np.linalg.norm(x, axis=-1)**2, np.linalg.norm(x, axis=-1)**2)
-  return (1 - _arccos(xxt / _sqrt(prod)) / np.pi) / 2
+  return (1 - _arccos(xxt / _sqrt(prod)) / np.pi)
 
 
 def kappa1(x):
   xxt = x @ x.T
   prod = np.outer(np.linalg.norm(x, axis=-1)**2, np.linalg.norm(x, axis=-1)**2)
   return (_sqrt(prod - xxt**2) +
-          (np.pi - _arccos(xxt / _sqrt(prod))) * xxt) / np.pi / 2
+          (np.pi - _arccos(xxt / _sqrt(prod))) * xxt) / np.pi
 
 
 @dataclasses.dataclass
 class Features:
   nngp_feat: Optional[np.ndarray] = None
   ntk_feat: Optional[np.ndarray] = None
+  norms: Optional[np.ndarray] = None
 
   batch_axis: int = 0
   channel_axis: int = -1
@@ -61,10 +64,15 @@ def _inputs_to_features(x: np.ndarray,
 
   # Followed the same initialization of Neural Tangents library.
   nngp_feat = x / x.shape[channel_axis]**0.5
+  norms = LA.norm(nngp_feat, axis=channel_axis)
+  norms = np.where(norms>0, norms, 1.0)
+  nngp_feat = (nngp_feat.T / norms).T
+
   ntk_feat = np.array([0.0], dtype=nngp_feat.dtype)
 
   return Features(nngp_feat=nngp_feat,
                   ntk_feat=ntk_feat,
+                  norms=norms,
                   batch_axis=batch_axis,
                   channel_axis=channel_axis)  # pytype:disable=wrong-keyword-args
 
@@ -151,7 +159,11 @@ def DenseFeatures(out_dim: int,
     nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
     new_ntk_feat_shape = nngp_feat_shape[:-1] + (nngp_feat_shape[-1] +
                                                  ntk_feat_shape[-1],)
-    return (nngp_feat_shape, new_ntk_feat_shape), ()
+    
+    if len(input_shape) > 2:
+        return (nngp_feat_shape, new_ntk_feat_shape, input_shape[2]+'D'), ()
+    else:
+        return (nngp_feat_shape, new_ntk_feat_shape, 'D'), ()
 
   def feature_fn(f: Features, input, **kwargs):
     nngp_feat, ntk_feat = f.nngp_feat, f.ntk_feat
@@ -178,88 +190,103 @@ def ReluFeatures(
     poly_sketch_dim0: int = 1,
     poly_sketch_dim1: int = 1,
     method: str = 'rf',
+    top_layer: bool = False
 ):
 
-  method = method.lower()
-  assert method in ['rf', 'ps', 'exact']
-
-  def init_fn(rng, input_shape):
-    nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
-    new_nngp_feat_shape = nngp_feat_shape[:-1] + (feature_dim1,)
-    new_ntk_feat_shape = ntk_feat_shape[:-1] + (sketch_dim,)
-
-    if method == 'rf':
-      rng1, rng2, rng3 = random.split(rng, 3)
-      # Random vectors for random features of arc-cosine kernel of order 0.
-      W0 = random.normal(rng1, (nngp_feat_shape[-1], feature_dim0))
-      # Random vectors for random features of arc-cosine kernel of order 1.
-      W1 = random.normal(rng2, (nngp_feat_shape[-1], feature_dim1))
-      # TensorSRHT of degree 2 for approximating tensor product.
-      ts2 = TensorSRHT2(rng=rng3,
-                        input_dim1=ntk_feat_shape[-1],
-                        input_dim2=feature_dim0,
-                        sketch_dim=sketch_dim).init_sketches()  # pytype:disable=wrong-keyword-args
-      return (new_nngp_feat_shape, new_ntk_feat_shape), (W0, W1, ts2)
-
-    elif method == 'ps':
-      # rng1, rng2, rng3 = random.split(rng, 3)
-      # # PolySketch algorithm for arc-cosine kernel of order 0.
-      # ps0 = PolyTensorSRHT(rng1, nngp_feat_shape[-1], poly_sketch_dim0,
-      #                      poly_degree0)
-      # # PolySketch algorithm for arc-cosine kernel of order 1.
-      # ps1 = PolyTensorSRHT(rng2, nngp_feat_shape[-1], poly_sketch_dim1,
-      #                      poly_degree1)
-      # # TensorSRHT of degree 2 for approximating tensor product.
-      # ts2 = TensorSRHT2(rng3, ntk_feat_shape[-1], feature_dim0, sketch_dim)
-      # return (new_nngp_feat_shape, new_ntk_feat_shape), (ps0, ps1, ts2)
-      raise NotImplementedError
-
-    elif method == 'exact':
-      # The exact feature map computation is for debug.
-      new_nngp_feat_shape = nngp_feat_shape[:-1] + (_prod(
-          nngp_feat_shape[:-1]),)
-      new_ntk_feat_shape = ntk_feat_shape[:-1] + (_prod(ntk_feat_shape[:-1]),)
-      return (new_nngp_feat_shape, new_ntk_feat_shape), ()
-
-  def feature_fn(f: Features, input=None, **kwargs) -> Features:
-
-    input_shape = f.nngp_feat.shape[:-1]
-    nngp_feat_dim = f.nngp_feat.shape[-1]
-    ntk_feat_dim = f.ntk_feat.shape[-1]
-
-    nngp_feat_2d = f.nngp_feat.reshape(-1, nngp_feat_dim)
-    ntk_feat_2d = f.ntk_feat.reshape(-1, ntk_feat_dim)
-
-    if method == 'rf':  # Random Features approach.
-      W0: np.ndarray = input[0]
-      W1: np.ndarray = input[1]
-      ts2: TensorSRHT2 = input[2]
-
-      kappa0_feat = (nngp_feat_2d @ W0 > 0) / np.sqrt(W0.shape[-1])
-      nngp_feat = (np.maximum(nngp_feat_2d @ W1, 0) /
-                   np.sqrt(W1.shape[-1])).reshape(input_shape + (-1,))
-      ntk_feat = ts2.sketch(ntk_feat_2d,
-                            kappa0_feat).reshape(input_shape + (-1,))
-
-    elif method == 'ps':
-      # ps0: PolyTensorSRHT = input[0]
-      # ps1: PolyTensorSRHT = input[1]
-      # ts2: TensorSRHT2 = input[2]
-      raise NotImplementedError
-
-    elif method == 'exact':  # Exact feature extraction via Cholesky decomposition.
-      nngp_feat = cholesky(kappa1(nngp_feat_2d)).reshape(input_shape + (-1,))
-
-      ntk = ntk_feat_2d @ ntk_feat_2d.T
-      kappa0_mat = kappa0(nngp_feat_2d)
-      ntk_feat = cholesky(ntk * kappa0_mat).reshape(input_shape + (-1,))
-
-    else:
-      raise NotImplementedError
-
-    return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
-
-  return init_fn, feature_fn
+    method = method.lower()
+    assert method in ['rf', 'ps', 'exact']
+    
+    def init_fn(rng, input_shape):
+        nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
+        new_nngp_feat_shape = nngp_feat_shape[:-1] + (feature_dim1,)
+        new_ntk_feat_shape = ntk_feat_shape[:-1] + (sketch_dim,)
+        net_shape = input_shape[2]
+        layer_count = len(net_shape)//2+1
+        
+        if method == 'rf':
+            rng1, rng2, rng3 = random.split(rng, 3)
+            # Random vectors for random features of arc-cosine kernel of order 0.
+            W0 = random.normal(rng1, (nngp_feat_shape[-1], feature_dim0))
+            # Random vectors for random features of arc-cosine kernel of order 1.
+            W1 = random.normal(rng2, (nngp_feat_shape[-1], feature_dim1))
+            # TensorSRHT of degree 2 for approximating tensor product.
+            ts2 = TensorSRHT2(rng=rng3,
+                              input_dim1=ntk_feat_shape[-1],
+                              input_dim2=feature_dim0,
+                              sketch_dim=sketch_dim).init_sketches()  # pytype:disable=wrong-keyword-args
+            return (new_nngp_feat_shape, new_ntk_feat_shape, net_shape+'R'), (W0, W1, ts2)
+          
+        elif method == 'ps':
+          # rng1, rng2, rng3 = random.split(rng, 3)
+          # # PolySketch algorithm for arc-cosine kernel of order 0.
+          # ps0 = PolyTensorSRHT(rng1, nngp_feat_shape[-1], poly_sketch_dim0,
+          #                      poly_degree0)
+          # # PolySketch algorithm for arc-cosine kernel of order 1.
+          # ps1 = PolyTensorSRHT(rng2, nngp_feat_shape[-1], poly_sketch_dim1,
+          #                      poly_degree1)
+          # # TensorSRHT of degree 2 for approximating tensor product.
+          # ts2 = TensorSRHT2(rng3, ntk_feat_shape[-1], feature_dim0, sketch_dim)
+          # return (new_nngp_feat_shape, new_ntk_feat_shape), (ps0, ps1, ts2)
+          raise NotImplementedError
+          
+        elif method == 'exact':
+            # The exact feature map computation is for debug.
+            new_nngp_feat_shape = nngp_feat_shape[:-1] + (_prod(
+                nngp_feat_shape[:-1]),)
+            new_ntk_feat_shape = ntk_feat_shape[:-1] + (_prod(ntk_feat_shape[:-1]),)
+            
+            return (new_nngp_feat_shape, new_ntk_feat_shape, net_shape+'R'), (layer_count)
+    
+    def feature_fn(f: Features, input=None, **kwargs) -> Features:
+    
+        input_shape = f.nngp_feat.shape[:-1]
+        nngp_feat_dim = f.nngp_feat.shape[-1]
+        ntk_feat_dim = f.ntk_feat.shape[-1]
+          
+        nngp_feat_2d = f.nngp_feat.reshape(-1, nngp_feat_dim)
+        ntk_feat_2d = f.ntk_feat.reshape(-1, ntk_feat_dim)
+          
+        if method == 'rf':  # Random Features approach.
+            W0: np.ndarray = input[0]
+            W1: np.ndarray = input[1]
+            ts2: TensorSRHT2 = input[2]
+            
+            kappa0_feat = (nngp_feat_2d @ W0 > 0) / np.sqrt(W0.shape[-1])
+            nngp_feat = (np.maximum(nngp_feat_2d @ W1, 0) /
+                         np.sqrt(W1.shape[-1])).reshape(input_shape + (-1,))
+            ntk_feat = ts2.sketch(ntk_feat_2d,
+                                  kappa0_feat).reshape(input_shape + (-1,))
+          
+        elif method == 'ps':
+          # ps0: PolyTensorSRHT = input[0]
+          # ps1: PolyTensorSRHT = input[1]
+          # ts2: TensorSRHT2 = input[2]
+          raise NotImplementedError
+          
+        elif method == 'exact':  # Exact feature extraction via Cholesky decomposition.
+            layer_count = input
+            
+            nngp_feat = cholesky(kappa1(nngp_feat_2d)).reshape(input_shape + (-1,))
+            
+            ntk = ntk_feat_2d @ ntk_feat_2d.T
+            kappa0_mat = kappa0(nngp_feat_2d)
+            ntk_feat = cholesky(ntk * kappa0_mat).reshape(input_shape + (-1,))
+            
+            if top_layer:
+                ntk_feat = (1 / 2**(layer_count/2))*ntk_feat
+                nngp_feat = (1 / 2**(layer_count/2))*nngp_feat
+          
+        else:
+          raise NotImplementedError
+        
+        if top_layer:
+            ntk_feat = (ntk_feat.T * f.norms).T
+            nngp_feat = (nngp_feat.T * f.norms).T
+          
+          
+        return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
+    
+    return init_fn, feature_fn
 
 
 def _conv_feat(X, filter_size):
