@@ -14,9 +14,8 @@
 
 """Common Type Definitions."""
 
-
 from typing import Any, Dict, Generator, List, Optional, Sequence, TYPE_CHECKING, Tuple, TypeVar, Union
-from typing_extensions import Protocol
+
 import jax.numpy as np
 from jax import random
 from .kernel import Kernel
@@ -49,7 +48,6 @@ have internal nodes that are either Lists or Tuples and leaves which are either
 array or kernel objects.
 """
 T = TypeVar('T')
-
 
 if TYPE_CHECKING:
   NTTree = Union[List['NTTree[T]'], Tuple['NTTree[T]', ...], T]
