@@ -11,7 +11,7 @@ from neural_tangents import stax
 from features import DenseFeatures, ReluFeatures, serial
 
 seed = 1
-n, d = 6, 4
+n, d = 6, 5
 
 key1, key2 = random.split(random.PRNGKey(seed))
 x = random.normal(key1, (n, d))
@@ -40,19 +40,25 @@ print("================= Result of NTK Random Features =================")
 kappa0_feat_dim = 2048
 kappa1_feat_dim = 2048
 sketch_dim = 2048
+poly_degree = 4
+poly_sketch_dim = 2048
 
 relufeat_arg = {
-    'method': 'rf',
+    'method': 'psrf',
     'feature_dim0': kappa0_feat_dim,
     'feature_dim1': kappa1_feat_dim,
     'sketch_dim': sketch_dim,
+    'poly_degree': poly_degree,
+    'poly_sketch_dim': poly_sketch_dim
 }
 
 relufeat_arg_top = {
-    'method': 'rf',
+    'method': 'psrf',
     'feature_dim0': kappa0_feat_dim,
     'feature_dim1': kappa1_feat_dim,
     'sketch_dim': sketch_dim,
+    'poly_degree': poly_degree,
+    'poly_sketch_dim': poly_sketch_dim,
     'top_layer': True
 }
 
@@ -89,8 +95,8 @@ print()
 
 print("================= (Debug) Exact NTK Feature Maps =================")
 
-relufeat_arg = {'method': 'exact'}
-relufeat_arg_top = {'method': 'exact', 'top_layer': True}
+relufeat_arg = {'poly_degree': poly_degree, 'method': 'exact'}
+relufeat_arg_top = {'poly_degree': poly_degree, 'method': 'exact', 'top_layer': True}
 
 
 init_fn, features_fn = serial(DenseFeatures(width),

@@ -10,7 +10,7 @@ from neural_tangents._src.utils import dataclasses
 from neural_tangents._src.stax.linear import _pool_kernel, Padding
 from neural_tangents._src.stax.linear import _Pooling as Pooling
 
-from sketching import TensorSRHT2
+from sketching import TensorSRHT2, PolyTensorSketch, CmplxTensorSRHT
 from poly_fitting import kappa0_coeffs, kappa1_coeffs
 """ Implementation for NTK Sketching and Random Features """
 
@@ -43,6 +43,13 @@ def kappa1(x):
   return (_sqrt(prod - xxt**2) +
           (np.pi - _arccos(xxt / _sqrt(prod))) * xxt) / np.pi
 
+def poly_expansion(x, coeffs):
+    y = np.ones_like(x)
+    results = np.zeros_like(x)
+    for c in coeffs:
+        results += c*y
+        y = y*x
+    return results
 
 @dataclasses.dataclass
 class Features:
@@ -185,16 +192,14 @@ def ReluFeatures(
     feature_dim0: int = 1,
     feature_dim1: int = 1,
     sketch_dim: int = 1,
-    poly_degree0: int = 4,
-    poly_degree1: int = 4,
-    poly_sketch_dim0: int = 1,
-    poly_sketch_dim1: int = 1,
+    poly_degree: int = 4,
+    poly_sketch_dim: int = 1,
     method: str = 'rf',
     top_layer: bool = False
 ):
 
     method = method.lower()
-    assert method in ['rf', 'ps', 'exact']
+    assert method in ['rf', 'ps', 'exact', 'psrf']
     
     def init_fn(rng, input_shape):
         nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
@@ -215,19 +220,47 @@ def ReluFeatures(
                               input_dim2=feature_dim0,
                               sketch_dim=sketch_dim).init_sketches()  # pytype:disable=wrong-keyword-args
             return (new_nngp_feat_shape, new_ntk_feat_shape, net_shape+'R'), (W0, W1, ts2)
-          
+
+        elif method == 'psrf':
+            new_nngp_feat_shape = nngp_feat_shape[:-1] + (poly_sketch_dim,)
+            rng1, rng2, rng3 = random.split(rng, 3)
+            
+            kappa1_coeff = kappa1_coeffs(poly_degree,layer_count-1)
+            
+            # PolySketch expansion for nngp features.
+            polysketch = PolyTensorSketch(rng1, nngp_feat_shape[-1], 
+                                          poly_sketch_dim, poly_degree).init_sketch()
+            # TensorSRHT of degree 2 for approximating tensor product.
+            tensorsrht = TensorSRHT2(input_dim1=ntk_feat_shape[-1], 
+                                         input_dim2=feature_dim0, 
+                                         sketch_dim=sketch_dim , rng=rng2).init_sketches()
+
+            # Random vectors for random features of arc-cosine kernel of order 0.
+            # W0 = random.choice(rng3, 2, shape=(nngp_feat_shape[-1], feature_dim0//2)) * 2 - 1
+            if layer_count ==1:
+                W0 = random.normal(rng3, (nngp_feat_shape[-1], feature_dim0//2))
+            else:
+                W0 = random.normal(rng3, (nngp_feat_shape[-1], feature_dim0//2),dtype='float32')
+
+            return (new_nngp_feat_shape, new_ntk_feat_shape, net_shape+'R'), (W0, polysketch, tensorsrht, (kappa1_coeff, layer_count))
+
         elif method == 'ps':
-          # rng1, rng2, rng3 = random.split(rng, 3)
-          # # PolySketch algorithm for arc-cosine kernel of order 0.
-          # ps0 = PolyTensorSRHT(rng1, nngp_feat_shape[-1], poly_sketch_dim0,
-          #                      poly_degree0)
-          # # PolySketch algorithm for arc-cosine kernel of order 1.
-          # ps1 = PolyTensorSRHT(rng2, nngp_feat_shape[-1], poly_sketch_dim1,
-          #                      poly_degree1)
-          # # TensorSRHT of degree 2 for approximating tensor product.
-          # ts2 = TensorSRHT2(rng3, ntk_feat_shape[-1], feature_dim0, sketch_dim)
-          # return (new_nngp_feat_shape, new_ntk_feat_shape), (ps0, ps1, ts2)
-          raise NotImplementedError
+            new_nngp_feat_shape = nngp_feat_shape[:-1] + (poly_sketch_dim,)
+            rng1, rng2, rng3 = random.split(rng, 3)
+            
+            kappa1_coeff = kappa1_coeffs(poly_degree,layer_count-1) 
+            kappa0_coeff = kappa0_coeffs(poly_degree,layer_count-1)
+
+            # PolySketch expansion for nngp features.
+            polysketch = PolyTensorSketch(rng1, nngp_feat_shape[-1]//(1+(layer_count>1)), 
+                                          poly_sketch_dim, poly_degree).init_sketch()
+            # TensorSRHT of degree 2 for approximating tensor product.
+            tensorsrht = CmplxTensorSRHT(input_dim1=ntk_feat_shape[-1]//(1+(layer_count>1)), 
+                                         input_dim2=poly_degree*(polysketch.sketch_dim//4-1)+1, 
+                                         sketch_dim=sketch_dim , rng=rng2).init_sketches()
+
+            return (new_nngp_feat_shape, new_ntk_feat_shape, net_shape+'R'), (polysketch, tensorsrht,(kappa0_coeff,kappa1_coeff, layer_count))
+            raise NotImplementedError
           
         elif method == 'exact':
             # The exact feature map computation is for debug.
@@ -235,7 +268,10 @@ def ReluFeatures(
                 nngp_feat_shape[:-1]),)
             new_ntk_feat_shape = ntk_feat_shape[:-1] + (_prod(ntk_feat_shape[:-1]),)
             
-            return (new_nngp_feat_shape, new_ntk_feat_shape, net_shape+'R'), (layer_count)
+            kappa1_coeff = kappa1_coeffs(poly_degree,layer_count-1) 
+            kappa0_coeff = kappa0_coeffs(poly_degree,layer_count-1)
+            
+            return (new_nngp_feat_shape, new_ntk_feat_shape, net_shape+'R'), (kappa0_coeff, kappa1_coeff, layer_count)
     
     def feature_fn(f: Features, input=None, **kwargs) -> Features:
     
@@ -256,20 +292,66 @@ def ReluFeatures(
                          np.sqrt(W1.shape[-1])).reshape(input_shape + (-1,))
             ntk_feat = ts2.sketch(ntk_feat_2d,
                                   kappa0_feat).reshape(input_shape + (-1,))
+        
+        elif method == 'psrf':  # Combination of Poly Sketch and Random Features.
+            W0: np.ndarray = input[0]
+            polysketch: PolyTensorSketch = input[1]
+            ts2: TensorSRHT2 = input[2]
+            kappa1_coeff: np.ndarray = input[3][0]
+            layer_count = input[3][1]
+            
+            polysketch_feats = polysketch.sketch(nngp_feat_2d)
+            kappa1_feat = polysketch.expand_feats(polysketch_feats, kappa1_coeff)
+            del polysketch_feats
+            nngp_feat = polysketch.standardsrht(kappa1_feat, polysketch.rand_inds, 
+                                                polysketch.rand_signs).reshape(input_shape + (-1,))
+            nngp_feat = np.concatenate((nngp_feat.real, nngp_feat.imag), axis=1)
+
+            nngp_proj = np.dot(nngp_feat_2d , W0)
+            
+            
+            kappa0_feat = np.concatenate(((nngp_proj > 0), (nngp_proj <= 0)), axis=1) / np.sqrt(W0.shape[-1])
+            del W0
+            ntk_feat = ts2.sketch(ntk_feat_2d, kappa0_feat).reshape(input_shape + (-1,))
+            if top_layer:
+                ntk_feat = (1 / 2**(layer_count/2))*ntk_feat
+                nngp_feat = (1 / 2**(layer_count/2))*nngp_feat
+
           
         elif method == 'ps':
-          # ps0: PolyTensorSRHT = input[0]
-          # ps1: PolyTensorSRHT = input[1]
-          # ts2: TensorSRHT2 = input[2]
-          raise NotImplementedError
-          
-        elif method == 'exact':  # Exact feature extraction via Cholesky decomposition.
-            layer_count = input
+            polysketch: PolyTensorSketch = input[0]
+            tensorsrht: CmplxTensorSRHT = input[1]
+            kappa0_coeff: np.ndarray = input[2][0]
+            kappa1_coeff: np.ndarray = input[2][1]
+            layer_count = input[2][2]
             
-            nngp_feat = cholesky(kappa1(nngp_feat_2d)).reshape(input_shape + (-1,))
+            polysketch_feats = polysketch.sketch(nngp_feat_2d)
+            kappa1_feat = polysketch.expand_feats(polysketch_feats, kappa1_coeff)
+            nngp_feat = polysketch.standardsrht(kappa1_feat, polysketch.rand_inds, 
+                                                polysketch.rand_signs).reshape(input_shape + (-1,))
+            
+            kappa0_feat = polysketch.expand_feats(polysketch_feats, kappa0_coeff)
+            del polysketch_feats
+            ntk_feat = tensorsrht.sketch(ntk_feat_2d, kappa0_feat).reshape(input_shape + (-1,))
+            
+            if top_layer:
+                ntk_feat = (1 / 2**(layer_count/2))*np.concatenate((ntk_feat.real, ntk_feat.imag), axis=1)
+                nngp_feat = (1 / 2**(layer_count/2))*np.concatenate((nngp_feat.real, nngp_feat.imag), axis=1)
+
+          
+        elif method == 'exact':
+            
+            kappa0_coeff: np.ndarray = input[0]
+            kappa1_coeff: np.ndarray = input[1]
+            layer_count = input[2]
+            
+            gram_nngp = np.dot(nngp_feat_2d, nngp_feat_2d.T)
+            nngp_feat = cholesky(poly_expansion(gram_nngp, kappa1_coeff)).reshape(input_shape + (-1,))
+            
             
             ntk = ntk_feat_2d @ ntk_feat_2d.T
-            kappa0_mat = kappa0(nngp_feat_2d)
+            kappa0_mat = poly_expansion(gram_nngp, kappa0_coeff)
+            # kappa0_mat = kappa0(nngp_feat_2d)
             ntk_feat = cholesky(ntk * kappa0_mat).reshape(input_shape + (-1,))
             
             if top_layer:

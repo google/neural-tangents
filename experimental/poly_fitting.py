@@ -59,7 +59,7 @@ def kappa0_coeffs(degree,h):
     for i in range(h):
         alpha_ = (1.0*alpha_ + (onp.sqrt(1-alpha_**2) + alpha_*(onp.pi - onp.arccos(alpha_)))/onp.pi)/2.0
     
-    n=15*h+5*degree
+    n=20*h+8*degree
     x = onp.sort(onp.concatenate((onp.linspace(alpha_, 1.0, num=201), onp.cos((2*onp.arange(n)+1)*onp.pi / (4*n))), axis=0))
     y = (onp.pi - onp.arccos(x))/onp.pi    
     grid_len = len(x)
@@ -70,9 +70,8 @@ def kappa0_coeffs(degree,h):
     for i in range(degree):
         Z[:,i+1] = Z[:,i] * x
     
-    weight_ = onp.linspace(0.0, 1.0, num=grid_len) + 1/2
-    w = y * weight_
-    U = Z.T * weight_
+    w = y 
+    U = Z.T 
 
     beta_ = quadprog_solve_qp(onp.dot(U, U.T), -onp.dot(U,w) , onp.concatenate((Z[0:grid_len-1,:]-Z[1:grid_len,:], -onp.eye(degree+1)),axis=0), onp.zeros(degree+grid_len))#, Z[200,:][np.newaxis,:],y[200])
     beta_[beta_ < 1e-5] = 0

@@ -237,7 +237,7 @@ class PolyTensorSketch:
     def expand_feats(self, polysketch_feats, coeffs):
         n, sktch_dim = polysketch_feats[0].shape
         Z = np.zeros((len(self.rand_signs),n), dtype=np.complex64)
-        Z = Z.at[1,:].set(np.sqrt(coeffs[0]) * np.ones(n))
+        Z = Z.at[0,:].set(np.sqrt(coeffs[0]) * np.ones(n))
         degree = len(polysketch_feats)
         for i in range(degree):
             Z = Z.at[sktch_dim*i+1:sktch_dim*(i+1)+1,:].set(np.sqrt( coeffs[i+1] ) * 
