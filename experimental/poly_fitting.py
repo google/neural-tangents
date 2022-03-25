@@ -69,7 +69,7 @@ def poly_fitting_qp(xvals: np.ndarray,
     return OSQP().run(params_obj=(Q, c), params_ineq=(G, h)).params.primal
 
 
-def kappa0_coeffsF(degree: int, num_layers: int):
+def kappa0_coeffs(degree: int, num_layers: int):
 
   # A lower bound of kappa0^{(num_layers)} reduces to alpha_ from -1
   init_alpha_ = -1.
