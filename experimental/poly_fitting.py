@@ -1,81 +1,121 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Mar 22 16:56:26 2022
-
-@author: amir
-"""
-
-import numpy as onp
-import quadprog
-from jax import numpy as jnp
+from jax import numpy as np
+from jax import lax
 from jaxopt import OSQP
 
 
-from matplotlib import pyplot as plt
+def _arccos(x):
+  return np.arccos(np.clip(x, -1, 1))
 
 
-
-def quadprog_solve_qp(P, q, G=None, h=None, A=None, b=None):
-    qp_Q = .5 * (P + P.T +1e-5*jnp.eye(P.shape[0]))   # make sure P is symmetric
-    
-    qp = OSQP()
-    if A is not None:
-        sol = qp.run(params_obj=(qp_Q, q), params_eq=(A, b), params_ineq=(G, h)).params
-    else:
-        sol = qp.run(params_obj=(qp_Q, q), params_eq=None, params_ineq=(G, h)).params
-    return onp.array(sol.primal)
+def _sqrt(x):
+  return np.sqrt(np.maximum(x, 1e-20))
 
 
-
-def kappa1_coeffs(degree,h):
-    alpha_ = -1.0
-    for i in range(h):
-        alpha_ = (2.0*alpha_ + (onp.sqrt(1-alpha_**2) + alpha_*(onp.pi - onp.arccos(alpha_)))/onp.pi)/3.0
-    
-    n=15*h+5*degree
-    x = onp.sort(onp.concatenate((onp.linspace(alpha_, 1.0, num=201), onp.cos((2*onp.arange(n)+1)*onp.pi / (4*n))), axis=0))
-    y = (onp.sqrt(1-x**2) + x*(onp.pi - onp.arccos(x)))/onp.pi
-    grid_len = len(x)
-    
-    Z = onp.zeros((grid_len,degree+1))
-    Z[:,0] = onp.ones(grid_len)
-    for i in range(degree):
-        Z[:,i+1] = Z[:,i] * x
-    
-    w = y
-    U = Z.T
-
-    beta_ = quadprog_solve_qp(onp.dot(U, U.T), -onp.dot(U,w) , 
-                              -onp.eye(degree+1), onp.zeros(degree+1), 
-                              Z[grid_len-1,:][onp.newaxis,:],onp.array([y[grid_len-1]]))
-    beta_[beta_ < 1e-5] = 0
-    
-    return beta_
+def kappa0(x, is_x_matrix=True):
+  if is_x_matrix:
+    xxt = x @ x.T
+    xnormsq = np.linalg.norm(x, axis=-1)**2
+    prod = np.outer(xnormsq, xnormsq)
+    return (1 - _arccos(xxt / _sqrt(prod)) / np.pi)
+  else:  # vector input
+    return (1 - _arccos(x) / np.pi)
 
 
+def kappa1(x, is_x_matrix=True):
+  if is_x_matrix:
+    xxt = x @ x.T
+    xnormsq = np.linalg.norm(x, axis=-1)**2
+    prod = np.outer(xnormsq, xnormsq)
+    return (_sqrt(prod - xxt**2) +
+            (np.pi - _arccos(xxt / _sqrt(prod))) * xxt) / np.pi
+  else:  # vector input
+    return (_sqrt(1 - x**2) + (np.pi - _arccos(x)) * x) / np.pi
 
-def kappa0_coeffs(degree,h):
-    alpha_ = -1.0
-    for i in range(h):
-        alpha_ = (1.0*alpha_ + (onp.sqrt(1-alpha_**2) + alpha_*(onp.pi - onp.arccos(alpha_)))/onp.pi)/2.0
-    
-    n=20*h+8*degree
-    x = onp.sort(onp.concatenate((onp.linspace(alpha_, 1.0, num=201), onp.cos((2*onp.arange(n)+1)*onp.pi / (4*n))), axis=0))
-    y = (onp.pi - onp.arccos(x))/onp.pi    
-    grid_len = len(x)
 
-    
-    Z = onp.zeros((grid_len,degree+1))
-    Z[:,0] = onp.ones(grid_len)
-    for i in range(degree):
-        Z[:,i+1] = Z[:,i] * x
-    
-    w = y 
-    U = Z.T 
+def poly_fitting_qp(xvals: np.ndarray,
+                    fvals: np.ndarray,
+                    weights: np.ndarray,
+                    degree: int,
+                    eq_last_point: bool = False):
+  """ Computes polynomial coefficients that fitting input observations. 
+    For a dot-product kernel (e.g., kappa0 or kappa1), coefficients of its 
+    Taylor series expansion are always nonnegative.  Moreover, the kernel 
+    function is a monotone increasing function. This can be solved by 
+    Quadratic Programming (QP) under inequality constraints.
+    """
+  nx = len(xvals)
+  x_powers = np.ones((nx, degree + 1), dtype=xvals.dtype)
+  for i in range(degree):
+    x_powers = x_powers.at[:, i + 1].set(x_powers[:, i] * xvals)
 
-    beta_ = quadprog_solve_qp(onp.dot(U, U.T), -onp.dot(U,w) , 
-                              -onp.eye(degree+1), onp.zeros(degree+1))
-    beta_[beta_ < 1e-5] = 0
-    
-    return beta_
+  y_weighted = fvals * weights
+  x_powers_weighted = x_powers.T * weights
+
+  dx_powers = x_powers[:-1, :] - x_powers[1:, :]
+
+  # OSQP algorithm for solving min_x x'*Q*x + c'*x such that A*x=b, G*x<= h
+  P = x_powers_weighted @ x_powers_weighted.T
+  Q = .5 * (P.T + P + 1e-5 * np.eye(P.shape[0], dtype=xvals.dtype))  # make sure Q is symmetric
+  c = -x_powers_weighted @ y_weighted
+  G = np.concatenate((dx_powers, -np.eye(degree + 1)), axis=0)
+  h = np.zeros(nx + degree, dtype=xvals.dtype)
+
+  if eq_last_point:
+    A = x_powers[-1, :][None, :]
+    b = fvals[-1:]
+    return OSQP().run(params_obj=(Q, c), params_eq=(A, b),
+                      params_ineq=(G, h)).params.primal
+  else:
+    return OSQP().run(params_obj=(Q, c), params_ineq=(G, h)).params.primal
+
+
+def kappa0_coeffsF(degree: int, num_layers: int):
+
+  # A lower bound of kappa0^{(num_layers)} reduces to alpha_ from -1
+  init_alpha_ = -1.
+  alpha_ = lax.fori_loop(
+      0, 4, lambda i, x_: (x_ + kappa1(x_, is_x_matrix=False)) / 2.,
+      init_alpha_)
+
+  # Points for polynomial fitting contain (1) equi-spaced ones from [alpha_,1]
+  # and (2) non-equi-spaced ones from [0,1]. For (2), cosine function is used
+  # where more points are around 1.
+  num_points = 20 * num_layers + 8 * degree
+  x_eq = np.linspace(alpha_, 1., num=201)
+  x_noneq = np.cos((2 * np.arange(num_points) + 1) * np.pi / (4 * num_points))
+  xvals = np.sort(np.concatenate((x_eq, x_noneq)))
+  fvals = kappa0(xvals, is_x_matrix=False)
+
+  # For kappa0, we set all weights to be one.
+  weights = np.ones(len(fvals), dtype=xvals.dtype)
+
+  # Coefficients can be obtained by solving QP with OSQP jaxopt.
+  coeffs = poly_fitting_qp(xvals, fvals, weights, degree)
+  return np.where(coeffs < 1e-5, 0.0, coeffs)
+
+
+def kappa1_coeffs(degree: int, num_layers: int):
+
+  # A lower bound of kappa1^{(num_layers)} reduces to alpha_ from -1
+  init_alpha_ = -1.
+  alpha_ = lax.fori_loop(
+      0, 4, lambda i, x_: (2. * x_ + kappa1(x_, is_x_matrix=False)) / 3.,
+      init_alpha_)
+
+  # Points for polynomial fitting contain (1) equi-spaced ones from [alpha_,1]
+  # and (2) non-equi-spaced ones from [0,1]. For (2), cosine function is used
+  # where more points are around 1.
+  num_points = 15 * num_layers + 5 * degree
+  x_eq = np.linspace(alpha_, 1., num=201)
+  x_noneq = np.cos(
+      (2. * np.arange(num_points) + 1.) * np.pi / (4. * num_points))
+  xvals = np.sort(np.concatenate((x_eq, x_noneq)))
+  fvals = kappa1(xvals, is_x_matrix=False)
+
+  # For kappa1, we set all weights to be one.
+  weights = np.ones(len(fvals), dtype=xvals.dtype)
+
+  # For kappa1, we consider an equality condition for the last point
+  # (close to 1) because the slope around 1 is much sharper.
+  coeffs = poly_fitting_qp(xvals, fvals, weights, degree, eq_last_point=True)
+  return np.where(coeffs < 1e-5, 0.0, coeffs)

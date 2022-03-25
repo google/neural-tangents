@@ -22,34 +22,14 @@ def _prod(tuple_):
   return prod
 
 
-# Arc-cosine kernel functions is for debugging.
-def _arccos(x):
-  return np.arccos(np.clip(x, -1, 1))
-
-
-def _sqrt(x):
-  return np.sqrt(np.maximum(x, 1e-20))
-
-
-def kappa0(x):
-  xxt = x @ x.T
-  prod = np.outer(np.linalg.norm(x, axis=-1)**2, np.linalg.norm(x, axis=-1)**2)
-  return (1 - _arccos(xxt / _sqrt(prod)) / np.pi)
-
-
-def kappa1(x):
-  xxt = x @ x.T
-  prod = np.outer(np.linalg.norm(x, axis=-1)**2, np.linalg.norm(x, axis=-1)**2)
-  return (_sqrt(prod - xxt**2) +
-          (np.pi - _arccos(xxt / _sqrt(prod))) * xxt) / np.pi
-
 def poly_expansion(x, coeffs):
-    y = np.ones_like(x)
-    results = np.zeros_like(x)
-    for c in coeffs:
-        results += c*y
-        y = y*x
-    return results
+  y = np.ones_like(x)
+  results = np.zeros_like(x)
+  for c in coeffs:
+    results += c*y
+    y = y*x
+  return results
+
 
 @dataclasses.dataclass
 class Features:
