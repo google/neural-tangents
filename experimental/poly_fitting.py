@@ -1,5 +1,5 @@
 from jax import numpy as np
-from jax import lax
+from jax.lax import fori_loop
 from jaxopt import OSQP
 
 
@@ -55,7 +55,8 @@ def poly_fitting_qp(xvals: np.ndarray,
 
   # OSQP algorithm for solving min_x x'*Q*x + c'*x such that A*x=b, G*x<= h
   P = x_powers_weighted @ x_powers_weighted.T
-  Q = .5 * (P.T + P + 1e-5 * np.eye(P.shape[0], dtype=xvals.dtype))  # make sure Q is symmetric
+  Q = .5 * (P.T + P + 1e-5 * np.eye(P.shape[0], dtype=xvals.dtype)
+           )  # make sure Q is symmetric
   c = -x_powers_weighted @ y_weighted
   G = np.concatenate((dx_powers, -np.eye(degree + 1)), axis=0)
   h = np.zeros(nx + degree, dtype=xvals.dtype)
@@ -72,10 +73,8 @@ def poly_fitting_qp(xvals: np.ndarray,
 def kappa0_coeffs(degree: int, num_layers: int):
 
   # A lower bound of kappa0^{(num_layers)} reduces to alpha_ from -1
-  init_alpha_ = -1.
-  alpha_ = lax.fori_loop(
-      0, 4, lambda i, x_: (x_ + kappa1(x_, is_x_matrix=False)) / 2.,
-      init_alpha_)
+  alpha_ = fori_loop(0, num_layers, lambda i, x_:
+                     (x_ + kappa1(x_, is_x_matrix=False)) / 2., -1.)
 
   # Points for polynomial fitting contain (1) equi-spaced ones from [alpha_,1]
   # and (2) non-equi-spaced ones from [0,1]. For (2), cosine function is used
@@ -97,10 +96,9 @@ def kappa0_coeffs(degree: int, num_layers: int):
 def kappa1_coeffs(degree: int, num_layers: int):
 
   # A lower bound of kappa1^{(num_layers)} reduces to alpha_ from -1
-  init_alpha_ = -1.
-  alpha_ = lax.fori_loop(
-      0, 4, lambda i, x_: (2. * x_ + kappa1(x_, is_x_matrix=False)) / 3.,
-      init_alpha_)
+  alpha_ = fori_loop(
+      0, num_layers, lambda i, x_:
+      (2. * x_ + kappa1(x_, is_x_matrix=False)) / 3., -1.)
 
   # Points for polynomial fitting contain (1) equi-spaced ones from [alpha_,1]
   # and (2) non-equi-spaced ones from [0,1]. For (2), cosine function is used
