@@ -57,7 +57,7 @@ for name_, value_ in relufeat_arg.items():
     print(f"{name_:<12} : {value_}")
 print()
 
-init_fn, features_fn = serial(
+init_fn, feature_fn = serial(
     DenseFeatures(width, W_std=W_std), ReluFeatures(**relufeat_arg),
     DenseFeatures(width, W_std=W_std), ReluFeatures(**relufeat_arg),
     DenseFeatures(width, W_std=W_std), ReluFeatures(**relufeat_arg),
@@ -67,7 +67,7 @@ init_fn, features_fn = serial(
 feat_shape, feat_fn_inputs = init_fn(key2, x.shape)
 
 # Transform input vectors to NNGP/NTK feature map
-feats = jit(features_fn)(x, feat_fn_inputs)
+feats = jit(feature_fn)(x, feat_fn_inputs)
 
 print(f"f_nngp shape: {feat_shape[0]}")
 print(f"f_ntk shape: {feat_shape[1]}")
@@ -107,7 +107,7 @@ for name_, value_ in relufeat_arg.items():
     print(f"{name_:<12} : {value_}")
 print()
 
-init_fn, features_fn = serial(
+init_fn, feature_fn = serial(
     DenseFeatures(width, W_std=W_std), ReluFeatures(**relufeat_arg),
     DenseFeatures(width, W_std=W_std), ReluFeatures(**relufeat_arg),
     DenseFeatures(width, W_std=W_std), ReluFeatures(**relufeat_arg, top_layer=True),
@@ -117,7 +117,7 @@ init_fn, features_fn = serial(
 feat_shape, feat_fn_inputs = init_fn(key2, x.shape)
 
 # Transform input vectors to NNGP/NTK feature map
-feats = features_fn(x, feat_fn_inputs)
+feats = jit(feature_fn)(x, feat_fn_inputs)
 
 print(f"f_nngp shape: {feat_shape[0]}")
 print(f"f_ntk shape: {feat_shape[1]}")
@@ -161,7 +161,7 @@ for name_, value_ in relufeat_arg.items():
     print(f"{name_:<12} : {value_}")
 print()
 
-init_fn, features_fn = serial(
+init_fn, feature_fn = serial(
     DenseFeatures(width, W_std=W_std), ReluFeatures(**relufeat_arg),
     DenseFeatures(width, W_std=W_std), ReluFeatures(**relufeat_arg),
     DenseFeatures(width, W_std=W_std), ReluFeatures(**relufeat_arg, top_layer=True),
@@ -171,7 +171,7 @@ init_fn, features_fn = serial(
 feat_shape, feat_fn_inputs = init_fn(key2, x.shape)
 
 # Transform input vectors to NNGP/NTK feature map
-feats = features_fn(x, feat_fn_inputs)
+feats = jit(feature_fn)(x, feat_fn_inputs)
 
 print(f"f_nngp shape: {feat_shape[0]}")
 print(f"f_ntk shape: {feat_shape[1]}")
