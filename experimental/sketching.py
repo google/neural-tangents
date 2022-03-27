@@ -6,7 +6,7 @@ from typing import Optional, Callable
 
 # TensorSRHT of degree 2. This version allows different input vectors.
 @dataclasses.dataclass
-class TensorSRHT2:
+class TensorSRHT:
 
   input_dim1: int
   input_dim2: int
@@ -20,9 +20,9 @@ class TensorSRHT2:
   rand_inds1: Optional[np.ndarray] = None
   rand_inds2: Optional[np.ndarray] = None
 
-  replace = ...  # type: Callable[..., 'TensorSRHT2']
+  replace = ...  # type: Callable[..., 'TensorSRHT']
 
-  def init_sketches(self) -> 'TensorSRHT2':
+  def init_sketches(self) -> 'TensorSRHT':
     rng1, rng2, rng3, rng4 = random.split(self.rng, 4)
     rand_signs1 = random.choice(rng1, 2, shape=(self.input_dim1,)) * 2 - 1
     rand_signs2 = random.choice(rng2, 2, shape=(self.input_dim2,)) * 2 - 1
@@ -39,99 +39,22 @@ class TensorSRHT2:
                         rand_inds1=rand_inds1,
                         rand_inds2=rand_inds2)
 
-  def sketch(self, x1, x2):
+  def sketch(self, x1, x2, real_output=False):
     x1fft = np.fft.fftn(x1 * self.rand_signs1, axes=(-1,))[:, self.rand_inds1]
     x2fft = np.fft.fftn(x2 * self.rand_signs2, axes=(-1,))[:, self.rand_inds2]
     out = np.sqrt(1 / self.rand_inds1.shape[-1]) * (x1fft * x2fft)
-    return np.concatenate((out.real, out.imag), 1)
+    return np.concatenate((out.real, out.imag), 1) if real_output else out
 
 
-# Standard SRHT with real valued output
-@dataclasses.dataclass
-class SRHT:
-
-  input_dim: int
-  sketch_dim: int
-
-  rng: np.ndarray
-  shape: Optional[np.ndarray] = None
-
-  rand_signs: Optional[np.ndarray] = None
-  rand_inds: Optional[np.ndarray] = None
-
-  replace = ...  # type: Callable[..., 'SRHT']
-
-  def init_sketches(self) -> 'SRHT':
-    rng1, rng2 = random.split(self.rng, 2)
-    rand_signs = random.choice(rng1, 2, shape=(self.input_dim,)) * 2 - 1
-    rand_inds = random.choice(rng2,
-                              self.input_dim,
-                              shape=(self.sketch_dim // 2,))
-    shape = (self.input_dim, self.sketch_dim)
-    return self.replace(shape=shape, rand_signs=rand_signs, rand_inds=rand_inds)
-
-  def sketch(self, x):
-    xfft = np.fft.fftn(x * self.rand_signs, axes=(-1,))[:, self.rand_inds]
-    out = np.sqrt(1 / self.rand_inds.shape[-1]) * xfft
-    return np.concatenate((out.real, out.imag), 1)
-
-
-# TensorSRHT of degree 2 with complex valued output. This version allows different input vectors.
-@dataclasses.dataclass
-class CmplxTensorSRHT:
-
-  input_dim1: int
-  input_dim2: int
-  sketch_dim: int
-
-  rng: np.ndarray
-  shape: Optional[np.ndarray] = None
-
-  rand_signs1: Optional[np.ndarray] = None
-  rand_signs2: Optional[np.ndarray] = None
-  rand_inds1: Optional[np.ndarray] = None
-  rand_inds2: Optional[np.ndarray] = None
-
-  replace = ...  # type: Callable[..., 'CmplxTensorSRHT']
-
-  def init_sketches(self) -> 'CmplxTensorSRHT':
-    rng1, rng2, rng3, rng4 = random.split(self.rng, 4)
-    rand_signs1 = random.choice(rng1, 2, shape=(self.input_dim1,)) * 2 - 1
-    rand_signs2 = random.choice(rng2, 2, shape=(self.input_dim2,)) * 2 - 1
-    rand_inds1 = random.choice(rng3,
-                               self.input_dim1,
-                               shape=(self.sketch_dim // 2,))
-    rand_inds2 = random.choice(rng4,
-                               self.input_dim2,
-                               shape=(self.sketch_dim // 2,))
-    shape = (self.input_dim1, self.input_dim2, self.sketch_dim)
-    return self.replace(shape=shape,
-                        rand_signs1=rand_signs1,
-                        rand_signs2=rand_signs2,
-                        rand_inds1=rand_inds1,
-                        rand_inds2=rand_inds2)
-
-  def sketch(self, x1, x2):
-    x1fft = np.fft.fftn(x1 * self.rand_signs1, axes=(-1,))[:, self.rand_inds1]
-    x2fft = np.fft.fftn(x2 * self.rand_signs2, axes=(-1,))[:, self.rand_inds2]
-    out = np.sqrt(1 / self.rand_inds1.shape[-1]) * (x1fft * x2fft)
-    return out
-
-
-# Standard SRHT as a function
-def standardsrht(x, rand_inds, rand_signs):
-  xfft = np.fft.fftn(x * rand_signs, axes=(-1,))[:, rand_inds]
-  return np.sqrt(1 / rand_inds.shape[0]) * xfft
-
-
+# pytype: disable=attribute-error
 @dataclasses.dataclass
 class PolyTensorSketch:
-
-  rng: np.ndarray
 
   input_dim: int
   sketch_dim: int
   degree: int
+
+  rng: np.ndarray
 
   tree_rand_signs: Optional[list] = None
   tree_rand_inds: Optional[list] = None
@@ -140,7 +63,7 @@ class PolyTensorSketch:
 
   replace = ...  # type: Callable[..., 'PolyTensorSketch']
 
-  def init_sketch(self) -> 'PolyTensorSketch':
+  def init_sketches(self) -> 'PolyTensorSketch':
 
     tree_rand_signs = [0 for i in range((self.degree - 1).bit_length())]
     tree_rand_inds = [0 for i in range((self.degree - 1).bit_length())]
@@ -185,7 +108,9 @@ class PolyTensorSketch:
     return np.sqrt(1 / rand_inds.shape[1]) * (x1fft * x2fft)
 
   # Standard SRHT
-  def standardsrht(self, x, rand_inds, rand_signs):
+  def standardsrht(self, x, rand_inds=None, rand_signs=None):
+    rand_inds = self.rand_inds if rand_inds is None else rand_inds
+    rand_signs = self.rand_signs if rand_signs is None else rand_signs
     xfft = np.fft.fftn(x * rand_signs, axes=(-1,))[:, rand_inds]
     return np.sqrt(1 / rand_inds.shape[0]) * xfft
 
