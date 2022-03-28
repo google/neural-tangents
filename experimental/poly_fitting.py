@@ -117,3 +117,31 @@ def kappa1_coeffs(degree: int, num_layers: int):
   # (close to 1) because the slope around 1 is much sharper.
   coeffs = poly_fitting_qp(xvals, fvals, weights, degree, eq_last_point=True)
   return np.where(coeffs < 1e-5, 0.0, coeffs)
+
+
+def relu_ntk_coeffs(degree: int, num_layers: int):
+
+  num_points = 20 * num_layers + 8 * degree
+  x_eq = np.linspace(-1, 1., num=201)
+  x_noneq = np.cos((2 * np.arange(num_points) + 1) * np.pi / (4 * num_points))
+  x = np.sort(np.concatenate((x_eq, x_noneq)))
+
+  kappa1s = {}
+  kappa1s[0] = x
+  for i in range(num_layers):
+    kappa1s[i + 1] = kappa1(kappa1s[i], is_x_matrix=False)
+
+  weights = np.linspace(0.0, 1.0, num=len(x)) + 2 / num_layers
+  nngp_coeffs = poly_fitting_qp(x, kappa1s[num_layers], weights, degree)
+  nngp_coeffs = np.where(nngp_coeffs < 1e-5, 0.0, nngp_coeffs)
+
+  ntk = np.zeros(len(x), dtype=x.dtype)
+  for i in range(num_layers + 1):
+    z = kappa1s[i]
+    for j in range(i, num_layers):
+      z *= kappa0(kappa1s[j], is_x_matrix=False)
+    ntk += z
+  ntk_coeffs = poly_fitting_qp(x, ntk, weights, degree)
+  ntk_coeffs = np.where(ntk_coeffs < 1e-5, 0.0, ntk_coeffs)
+
+  return nngp_coeffs, ntk_coeffs

@@ -10,7 +10,7 @@ from neural_tangents._src.stax.linear import _pool_kernel, Padding
 from neural_tangents._src.stax.linear import _Pooling as Pooling
 
 from experimental.sketching import TensorSRHT, PolyTensorSketch
-from experimental.poly_fitting import kappa0_coeffs, kappa1_coeffs, kappa0, kappa1
+from experimental.poly_fitting import kappa0_coeffs, kappa1_coeffs, kappa0, kappa1, relu_ntk_coeffs
 """ Implementation for NTK Sketching and Random Features """
 
 
@@ -112,16 +112,6 @@ def layer(layer_fn):
     return init_fn, feature_fn
 
   return new_layer_fns
-
-
-def _check_modules_contain_dense_relu(module_names: tuple) -> bool:
-
-  def _check_string_tuple_has_one_entry(str_tuple, entry):
-    return len(set(str_tuple)) == 1 and str_tuple[0] == entry
-
-  return len(module_names) % 2 == 1 and _check_string_tuple_has_one_entry(
-      module_names[::2], 'DenseFeatures') and _check_string_tuple_has_one_entry(
-          module_names[1::2], 'ReluFeatures')
 
 
 # Modified the serial process of feature map blocks.
@@ -392,6 +382,55 @@ def ReluFeatures(feature_dim0: int = 1,
       norms /= np.sqrt(2.)
 
     return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat, norms=norms)
+
+  return init_fn, feature_fn
+
+
+@layer
+def ReluNTKFeatures(
+    num_layers: int,
+    poly_degree: int,
+    poly_sketch_dim: int,
+    W_std: float = 1.,
+):
+
+  def init_fn(rng, input_shape):
+    input_dim = input_shape[0][-1]
+
+    # PolySketch expansion for nngp/ntk features.
+    polysketch = PolyTensorSketch(rng=rng,
+                                  input_dim=input_dim,
+                                  sketch_dim=poly_sketch_dim,
+                                  degree=poly_degree).init_sketches()  # pytype:disable=wrong-keyword-args
+
+    nngp_coeffs, ntk_coeffs = relu_ntk_coeffs(poly_degree, num_layers)
+
+    return (), (polysketch, nngp_coeffs, ntk_coeffs)
+
+  def feature_fn(f, input=None, **kwargs):
+    input_shape = f.nngp_feat.shape[:-1]
+
+    polysketch: PolyTensorSketch = input[0]
+    nngp_coeffs: np.ndarray = input[1]
+    ntk_coeffs: np.ndarray = input[2]
+
+    polysketch_feats = polysketch.sketch(
+        f.nngp_feat)  # f.ntk_feat should be equal to f.nngp_feat.
+    nngp_feat = polysketch.expand_feats(polysketch_feats, nngp_coeffs)
+    ntk_feat = polysketch.expand_feats(polysketch_feats, ntk_coeffs)
+
+    # Apply SRHT to features so that dimensions are poly_sketch_dim//2.
+    nngp_feat = polysketch.standardsrht(nngp_feat).reshape(input_shape + (-1,))
+    ntk_feat = polysketch.standardsrht(ntk_feat).reshape(input_shape + (-1,))
+
+    # Convert complex features to real ones.
+    ntk_feat = np.concatenate((ntk_feat.real, ntk_feat.imag), axis=1)
+    nngp_feat = np.concatenate((nngp_feat.real, nngp_feat.imag), axis=1)
+
+    norms = f.norms / 2.**(num_layers / 2) * (W_std**(num_layers + 1))
+
+    return _renormalize_feature(
+        f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat, norms=norms))
 
   return init_fn, feature_fn
 
