@@ -12,7 +12,7 @@ class TensorSRHT:
   input_dim2: int
   sketch_dim: int
 
-  rng: np.ndarray
+  rng: random.KeyArray
   shape: Optional[np.ndarray] = None
 
   rand_signs1: Optional[np.ndarray] = None
@@ -54,7 +54,7 @@ class PolyTensorSketch:
   sketch_dim: int
   degree: int
 
-  rng: np.ndarray
+  rng: random.KeyArray
 
   tree_rand_signs: Optional[list] = None
   tree_rand_inds: Optional[list] = None

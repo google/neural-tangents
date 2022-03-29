@@ -1,4 +1,4 @@
-from typing import Optional, Callable
+from typing import Optional, Callable, Sequence, Tuple
 from jax import random
 from jax import numpy as np
 from jax.numpy.linalg import cholesky
@@ -6,7 +6,7 @@ import jax.example_libraries.stax as ostax
 
 from neural_tangents import stax
 from neural_tangents._src.utils import dataclasses
-from neural_tangents._src.stax.linear import _pool_kernel, Padding
+from neural_tangents._src.stax.linear import _pool_kernel, Padding, _get_dimension_numbers
 from neural_tangents._src.stax.linear import _Pooling as Pooling
 
 from experimental.sketching import TensorSRHT, PolyTensorSketch
@@ -14,22 +14,11 @@ from experimental.poly_fitting import kappa0_coeffs, kappa1_coeffs, kappa0, kapp
 """ Implementation for NTK Sketching and Random Features """
 
 
-def _prod(tuple_):
-  prod = 1
-  for x in tuple_:
-    prod = prod * x
-  return prod
-
-
-def _poly_expansion(x, coeffs):
-  return np.polyval(coeffs[::-1], x)
-
-
 @dataclasses.dataclass
 class Features:
-  nngp_feat: Optional[np.ndarray] = None
-  ntk_feat: Optional[np.ndarray] = None
-  norms: Optional[np.ndarray] = None
+  nngp_feat: np.ndarray
+  ntk_feat: np.ndarray
+  norms: np.ndarray
 
   batch_axis: int = 0
   channel_axis: int = -1
@@ -37,25 +26,38 @@ class Features:
   replace = ...  # type: Callable[..., 'Features']
 
 
-def _inputs_to_features(x: np.ndarray,
-                        batch_axis: int = 0,
-                        channel_axis: int = -1,
-                        **kwargs) -> Features:
-  """Transforms (batches of) inputs to a `Features`."""
+def layer(layer_fn):
 
-  # Followed the same initialization of Neural Tangents library.
-  nngp_feat = x / x.shape[channel_axis]**0.5
-  norms = np.linalg.norm(nngp_feat, axis=channel_axis)
-  norms = np.expand_dims(np.where(norms > 0, norms, 1.0), channel_axis)
-  nngp_feat = nngp_feat / norms
+  def new_layer_fns(*args, **kwargs):
+    init_fn, feature_fn = layer_fn(*args, **kwargs)
+    init_fn = _preprocess_init_fn(init_fn)
+    feature_fn = _preprocess_feature_fn(feature_fn)
+    return init_fn, feature_fn
 
-  ntk_feat = np.array([0.0], dtype=nngp_feat.dtype)
+  return new_layer_fns
 
-  return Features(nngp_feat=nngp_feat,
-                  ntk_feat=ntk_feat,
-                  norms=norms,
-                  batch_axis=batch_axis,
-                  channel_axis=channel_axis)  # pytype:disable=wrong-keyword-args
+
+def _preprocess_init_fn(init_fn):
+
+  def init_fn_any(rng, input_shape_any, **kwargs):
+    if _is_sinlge_shape(input_shape_any):
+      input_shape = (input_shape_any, (-1, 0))
+      return init_fn(rng, input_shape, **kwargs)
+    else:
+      return init_fn(rng, input_shape_any, **kwargs)
+
+  return init_fn_any
+
+
+def _is_sinlge_shape(input_shape):
+  if len(input_shape) == 2:
+    if all(isinstance(n, int) for n in input_shape):
+      return True
+    elif all(_is_sinlge_shape(s) for s in input_shape):
+      return False
+  elif len(input_shape) == 3:
+    return _is_sinlge_shape(input_shape[:2])
+  raise ValueError(input_shape)
 
 
 # For flexible `feature_fn` with both input `np.ndarray` and with `Feature`.
@@ -77,41 +79,24 @@ def _preprocess_feature_fn(feature_fn):
   return feature_fn_any
 
 
-def _is_sinlge_shape(input_shape):
-  return all(isinstance(n, int) for n in input_shape)
+def _inputs_to_features(x: np.ndarray,
+                        batch_axis: int = 0,
+                        channel_axis: int = -1,
+                        **kwargs) -> Features:
+  """Transforms (batches of) inputs to a `Features`."""
 
+  # Followed the same initialization of Neural Tangents library.
+  nngp_feat = x / x.shape[channel_axis]**0.5
+  norms = np.linalg.norm(nngp_feat, axis=channel_axis)
+  norms = np.expand_dims(np.where(norms > 0, norms, 1.0), channel_axis)
+  nngp_feat = nngp_feat / norms
+  ntk_feat = np.zeros((), dtype=nngp_feat.dtype)
 
-def _is_defaut_feature(feat):
-  return feat.ndim == 1
-
-
-def _preprocess_init_fn(init_fn):
-
-  def init_fn_any(rng, input_shape_any, **kwargs):
-    if _is_sinlge_shape(input_shape_any):
-      input_shape = (input_shape_any, (-1, 0))
-      return init_fn(rng, input_shape, **kwargs)
-    else:
-      return init_fn(rng, input_shape_any, **kwargs)
-
-  return init_fn_any
-
-
-def _renormalize_feature(f: Features, **kwargs):
-  nngp_feat = f.nngp_feat * f.norms
-  ntk_feat = f.ntk_feat * f.norms
-  return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
-
-
-def layer(layer_fn):
-
-  def new_layer_fns(*args, **kwargs):
-    init_fn, feature_fn = layer_fn(*args, **kwargs)
-    feature_fn = _preprocess_feature_fn(feature_fn)
-    init_fn = _preprocess_init_fn(init_fn)
-    return init_fn, feature_fn
-
-  return new_layer_fns
+  return Features(nngp_feat=nngp_feat,
+                  ntk_feat=ntk_feat,
+                  norms=norms,
+                  batch_axis=batch_axis,
+                  channel_axis=channel_axis)  # pytype:disable=wrong-keyword-args
 
 
 # Modified the serial process of feature map blocks.
@@ -131,16 +116,27 @@ def serial(*layers):
   return init_fn, feature_fn
 
 
+def _renormalize_feature(f: Features, **kwargs):
+  nngp_feat = f.nngp_feat * f.norms
+  ntk_feat = f.ntk_feat * f.norms
+  return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
+
+
 @layer
 def DenseFeatures(out_dim: int,
                   W_std: float = 1.,
-                  b_std: float = 0.,
+                  b_std: Optional[float] = None,
+                  parameterization: str = 'ntk',
                   batch_axis: int = 0,
                   channel_axis: int = -1):
 
-  if b_std != 0.0:
-    raise NotImplementedError('Non-zero b_std is not implemented yet .'
+  if b_std is not None:
+    raise NotImplementedError('Bias variable b_std is not implemented yet .'
                               ' Please set b_std to be `0`.')
+
+  if parameterization != 'ntk':
+    raise NotImplementedError(f'Parameterization ({parameterization}) is '
+                              ' not implemented yet.')
 
   def init_fn(rng, input_shape):
     nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
@@ -153,10 +149,13 @@ def DenseFeatures(out_dim: int,
       return (nngp_feat_shape, new_ntk_feat_shape, 'D'), ()
 
   def feature_fn(f: Features, input, **kwargs):
-    nngp_feat, ntk_feat, norms = f.nngp_feat, f.ntk_feat, f.norms
+    nngp_feat : np.ndarray = f.nngp_feat
+    ntk_feat : np.ndarray = f.ntk_feat
+    norms : np.ndarray = f.norms
+
     norms *= W_std
 
-    if _is_defaut_feature(ntk_feat):  # check if ntk_feat is empty
+    if ntk_feat.ndim == 0:  # check if ntk_feat is empty
       ntk_feat = nngp_feat
     else:
       ntk_feat = np.concatenate((ntk_feat, nngp_feat), axis=channel_axis)
@@ -280,23 +279,23 @@ def ReluFeatures(feature_dim0: int = 1,
 
   def feature_fn(f: Features, input=None, **kwargs) -> Features:
 
-    input_shape = f.nngp_feat.shape[:-1]
-    nngp_feat_dim = f.nngp_feat.shape[-1]
-    ntk_feat_dim = f.ntk_feat.shape[-1]
+    input_shape: tuple = f.nngp_feat.shape[:-1]
+    nngp_feat_dim: tuple = f.nngp_feat.shape[-1]
+    ntk_feat_dim: tuple = f.ntk_feat.shape[-1]
 
-    nngp_feat_2d = f.nngp_feat.reshape(-1, nngp_feat_dim)
-    ntk_feat_2d = f.ntk_feat.reshape(-1, ntk_feat_dim)
-    norms = f.norms
+    nngp_feat_2d: np.ndarray = f.nngp_feat.reshape(-1, nngp_feat_dim)
+    ntk_feat_2d: np.ndarray = f.ntk_feat.reshape(-1, ntk_feat_dim)
+    norms: np.ndarray = f.norms
 
     if method == 'rf':  # Random Features approach.
       W0: np.ndarray = input[0]
       W1: np.ndarray = input[1]
       tensorsrht: TensorSRHT = input[2]
 
-      kappa0_feat = (nngp_feat_2d @ W0 > 0) / np.sqrt(W0.shape[-1])
+      kappa0_feat = (nngp_feat_2d @ W0 > 0) / W0.shape[-1]**0.5
       del W0
       nngp_feat = (np.maximum(nngp_feat_2d @ W1, 0) /
-                   np.sqrt(W1.shape[-1])).reshape(input_shape + (-1,))
+                   W1.shape[-1]**0.5).reshape(input_shape + (-1,))
       del W1
       ntk_feat = tensorsrht.sketch(ntk_feat_2d, kappa0_feat,
                                    real_output=True).reshape(input_shape +
@@ -343,7 +342,7 @@ def ReluFeatures(feature_dim0: int = 1,
       nngp_proj = np.concatenate(
           (nngp_feat_2d.real, nngp_feat_2d.imag), axis=1) @ W0
       kappa0_feat = np.concatenate(
-          ((nngp_proj > 0), (nngp_proj <= 0)), axis=1) / np.sqrt(W0.shape[-1])
+          ((nngp_proj > 0), (nngp_proj <= 0)), axis=1) / W0.shape[-1]**0.5
       del W0
 
       # Apply TensorSRHT to ntk_feat_2d and kappa0_feat to approximate their tensor product.
@@ -361,11 +360,11 @@ def ReluFeatures(feature_dim0: int = 1,
       layer_count = input[2]
 
       gram_nngp = np.dot(nngp_feat_2d, nngp_feat_2d.T)
-      nngp_feat = cholesky(_poly_expansion(
-          gram_nngp, kappa1_coeff)).reshape(input_shape + (-1,))
+      nngp_feat = cholesky(np.polyval(kappa1_coeff[::-1],
+                                      gram_nngp)).reshape(input_shape + (-1,))
 
       ntk = ntk_feat_2d @ ntk_feat_2d.T
-      kappa0_mat = _poly_expansion(gram_nngp, kappa0_coeff)
+      kappa0_mat = np.polyval(kappa0_coeff[::-1], gram_nngp)
       ntk_feat = cholesky(ntk * kappa0_mat).reshape(input_shape + (-1,))
 
     elif method == 'exact':  # Exact feature map computations via Cholesky decomposition.
@@ -379,18 +378,25 @@ def ReluFeatures(feature_dim0: int = 1,
       raise NotImplementedError(f'Invalid method name: {method}')
 
     if method != 'rf':
-      norms /= np.sqrt(2.)
+      norms /= 2.0**0.5
 
     return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat, norms=norms)
 
   return init_fn, feature_fn
 
 
+def _prod(tuple_):
+  prod = 1
+  for x in tuple_:
+    prod = prod * x
+  return prod
+
+
 @layer
 def ReluNTKFeatures(
     num_layers: int,
-    poly_degree: int,
-    poly_sketch_dim: int,
+    poly_degree: int = 16,
+    poly_sketch_dim: int = 1024,
     W_std: float = 1.,
 ):
 
@@ -435,7 +441,74 @@ def ReluNTKFeatures(
   return init_fn, feature_fn
 
 
+@layer
+def ConvFeatures(out_chan: int,
+                 filter_shape: Sequence[int],
+                 strides: Optional[Sequence[int]],
+                 padding: str,
+                 W_std: float = 1.0,
+                 b_std: Optional[float] = None,
+                 dimension_numbers: Optional[Tuple[str, str, str]] = None,
+                 parameterization: str = 'ntk'):
+
+  if b_std is not None:
+    raise NotImplementedError('Bias variable b_std is not implemented yet .'
+                              ' Please set b_std to be `0`.')
+
+  parameterization = parameterization.lower()
+
+  if dimension_numbers is None:
+    dimension_numbers = _get_dimension_numbers(len(filter_shape), False)
+
+  lhs_spec, rhs_spec, out_spec = dimension_numbers
+
+  channel_axis = lhs_spec.index('C')
+
+  if parameterization != 'ntk':
+    raise NotImplementedError(f'Parameterization ({parameterization}) is '
+                              ' not implemented yet.')
+
+  if filter_shape[0] != filter_shape[1]:
+    raise NotImplementedError('filter_shape should be square.')
+  filter_size = filter_shape[0]
+
+  def init_fn(rng, input_shape):
+    nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
+    new_nngp_feat_shape = nngp_feat_shape[:-1] + (nngp_feat_shape[-1] *
+                                                  filter_size**2,)
+    new_ntk_feat_shape = nngp_feat_shape[:-1] + (
+        (nngp_feat_shape[-1] + ntk_feat_shape[-1]) * filter_size**2,)
+
+    if len(input_shape) > 2:
+      return (new_nngp_feat_shape, new_ntk_feat_shape, input_shape[2] + 'D'), ()
+    else:
+      return (new_nngp_feat_shape, new_ntk_feat_shape, 'D'), ()
+
+  def feature_fn(f, input, **kwargs):
+    nngp_feat, ntk_feat = f.nngp_feat, f.ntk_feat
+
+    nngp_feat = _conv2d_feat(nngp_feat, filter_size) / filter_size * W_std
+
+    if ntk_feat.ndim == 0:  # check if ntk_feat is empty
+      ntk_feat = nngp_feat
+    else:
+      ntk_feat = _conv2d_feat(ntk_feat, filter_size) / filter_size * W_std
+      ntk_feat = np.concatenate((ntk_feat, nngp_feat), axis=channel_axis)
+
+    return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
+
+  return init_fn, feature_fn
+
+
+def _conv2d_feat(X, filter_size):
+  return _conv_feat(np.moveaxis(_conv_feat(X, filter_size), 1, 2), filter_size)
+
+
 def _conv_feat(X, filter_size):
+  """
+  Direct sums of image features. If input shape is (N, H, W, C), the output has
+  the shape (N, H, W, C * filter_size**2).
+  """
   N, H, W, C = X.shape
   out = np.zeros((N, H, W, C * filter_size))
   out = out.at[:, :, :, :C].set(X)
@@ -448,48 +521,9 @@ def _conv_feat(X, filter_size):
   return out
 
 
-def _conv2d_feat(X, filter_size):
-  return _conv_feat(np.moveaxis(_conv_feat(X, filter_size), 1, 2), filter_size)
-
-
 @layer
-def ConvFeatures(out_dim: int,
-                 filter_size: int,
-                 W_std: float = 1.0,
-                 b_std: float = 0.,
-                 channel_axis: int = -1):
-
-  if b_std != 0.0:
-    raise NotImplementedError('Non-zero b_std is not implemented yet .'
-                              ' Please set b_std to be `0`.')
-
-  def init_fn(rng, input_shape):
-    nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
-    new_nngp_feat_shape = nngp_feat_shape[:-1] + (nngp_feat_shape[-1] *
-                                                  filter_size**2,)
-    new_ntk_feat_shape = nngp_feat_shape[:-1] + (
-        (nngp_feat_shape[-1] + ntk_feat_shape[-1]) * filter_size**2,)
-    return (new_nngp_feat_shape, new_ntk_feat_shape), ()
-
-  def feature_fn(f, input, **kwargs):
-    nngp_feat, ntk_feat = f.nngp_feat, f.ntk_feat
-
-    nngp_feat = _conv2d_feat(nngp_feat, filter_size) / filter_size * W_std
-
-    if _is_defaut_feature(ntk_feat):  # check if ntk_feat is empty
-      ntk_feat = nngp_feat
-    else:
-      ntk_feat = _conv2d_feat(ntk_feat, filter_size) / filter_size * W_std
-      ntk_feat = np.concatenate((ntk_feat, nngp_feat), axis=channel_axis)
-
-    return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
-
-  return init_fn, feature_fn
-
-
-@layer
-def AvgPoolFeatures(window_size: int,
-                    stride_size: int = 2,
+def AvgPoolFeatures(window_shape: Sequence[int],
+                    strides: Optional[Sequence[int]] = None,
                     padding: str = stax.Padding.VALID.name,
                     normalize_edges: bool = False,
                     batch_axis: int = 0,
@@ -499,21 +533,25 @@ def AvgPoolFeatures(window_size: int,
     nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
 
     new_nngp_feat_shape = nngp_feat_shape[:1] + (
-        nngp_feat_shape[1] // window_size,
-        nngp_feat_shape[2] // window_size) + nngp_feat_shape[-1:]
+        nngp_feat_shape[1] // window_shape[0],
+        nngp_feat_shape[2] // window_shape[1]) + nngp_feat_shape[-1:]
     new_ntk_feat_shape = ntk_feat_shape[:1] + (
-        ntk_feat_shape[1] // window_size,
-        ntk_feat_shape[2] // window_size) + ntk_feat_shape[-1:]
+        ntk_feat_shape[1] // window_shape[0],
+        ntk_feat_shape[2] // window_shape[1]) + ntk_feat_shape[-1:]
     return (new_nngp_feat_shape, new_ntk_feat_shape), ()
 
   def feature_fn(f, input=None, **kwargs):
-    window_shape_kernel = (1,) + (window_size,) * 2 + (1,)
-    strides_kernel = (1,) + (window_size,) * 2 + (1,)
+    window_shape_kernel = (1,) + tuple(window_shape) + (1,)
+    strides_kernel = (1,) + tuple(strides) + (1,)
     pooling = lambda x: _pool_kernel(x, Pooling.AVG,
                                      window_shape_kernel, strides_kernel,
                                      Padding(padding), normalize_edges, 0)
     nngp_feat = pooling(f.nngp_feat)
-    ntk_feat = pooling(f.ntk_feat)
+
+    if f.ntk_feat.ndim == 0:  # check if ntk_feat is empty
+      ntk_feat = nngp_feat
+    else:
+      ntk_feat = pooling(f.ntk_feat)
 
     return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
 
@@ -523,6 +561,15 @@ def AvgPoolFeatures(window_size: int,
 @layer
 def FlattenFeatures(batch_axis: int = 0, batch_axis_out: int = 0):
 
+  if batch_axis_out in (0, -2):
+    batch_axis_out = 0
+    channel_axis_out = 1
+  elif batch_axis_out in (1, -1):
+    batch_axis_out = 1
+    channel_axis_out = 0
+  else:
+    raise ValueError(f'`batch_axis_out` must be 0 or 1, got {batch_axis_out}.')
+
   def init_fn(rng, input_shape):
     nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
     new_nngp_feat_shape = nngp_feat_shape[:1] + (_prod(nngp_feat_shape[1:]),)
@@ -530,14 +577,15 @@ def FlattenFeatures(batch_axis: int = 0, batch_axis_out: int = 0):
     return (new_nngp_feat_shape, new_ntk_feat_shape), ()
 
   def feature_fn(f, input=None, **kwargs):
-    batch_size = f.nngp_feat.shape[0]
-    nngp_feat = f.nngp_feat.reshape(batch_size, -1) / np.sqrt(
-        _prod(f.nngp_feat.shape[1:-1]))
-    if _is_defaut_feature(f.ntk_feat):  # check if ntk_feat is empty
+    batch_size = f.nngp_feat.shape[batch_axis]
+    nngp_feat = f.nngp_feat.reshape(batch_size, -1) / _prod(
+        f.nngp_feat.shape[1:-1])**0.5
+
+    if f.ntk_feat.ndim == 0:  # check if ntk_feat is empty
       ntk_feat = f.ntk_feat
     else:
-      ntk_feat = f.ntk_feat.reshape(batch_size, -1) / np.sqrt(
-          _prod(f.ntk_feat.shape[1:-1]))
+      ntk_feat = f.ntk_feat.reshape(batch_size, -1) / _prod(
+          f.ntk_feat.shape[1:-1])**0.5
 
     return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
 

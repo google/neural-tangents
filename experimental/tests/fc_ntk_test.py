@@ -3,7 +3,6 @@ from jax import random
 from jax.config import config
 from jax import jit
 import sys
-
 sys.path.append("./")
 
 config.update("jax_enable_x64", True)
@@ -87,7 +86,7 @@ init_fn, feature_fn = serial(
 feat_shape, feat_fn_inputs = init_fn(key2, x.shape)
 
 # Transform input vectors to NNGP/NTK feature map
-feats = jit(feature_fn)(x, feat_fn_inputs)
+feats = feature_fn(x, feat_fn_inputs)
 eval_features(feats)
 
 print("==================== Result of NTK wih PolySketch ====================")

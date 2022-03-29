@@ -3,14 +3,6 @@ from jax.lax import fori_loop
 from jaxopt import OSQP
 
 
-def _arccos(x):
-  return np.arccos(np.clip(x, -1, 1))
-
-
-def _sqrt(x):
-  return np.sqrt(np.maximum(x, 1e-20))
-
-
 def kappa0(x, is_x_matrix=True):
   if is_x_matrix:
     xxt = x @ x.T
@@ -30,6 +22,14 @@ def kappa1(x, is_x_matrix=True):
             (np.pi - _arccos(xxt / _sqrt(prod))) * xxt) / np.pi
   else:  # vector input
     return (_sqrt(1 - x**2) + (np.pi - _arccos(x)) * x) / np.pi
+
+
+def _arccos(x):
+  return np.arccos(np.clip(x, -1, 1))
+
+
+def _sqrt(x):
+  return np.maximum(x, 1e-20)**0.5
 
 
 def poly_fitting_qp(xvals: np.ndarray,
