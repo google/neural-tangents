@@ -14,10 +14,10 @@ from jax import random
 from experimental.features import DenseFeatures, ReluFeatures, serial
 
 relufeat_arg = {
-    'feature_dim0': 128,
+    'method': 'RANDFEAT',
+    'feature_dim0': 64,
     'feature_dim1': 128,
     'sketch_dim': 256,
-    'method': 'rf',
 }
 
 init_fn, feature_fn = serial(
@@ -33,6 +33,8 @@ _, feat_fn_inputs = init_fn(key2, x.shape)
 feats = feature_fn(x, feat_fn_inputs)
 # feats.nngp_feat is a feature map of NNGP kernel
 # feats.ntk_feat is a feature map of NTK
+assert feats.nngp_feat.shape == (5, relufeat_arg['feature_dim1'])
+assert feats.ntk_feat.shape == (5, relufeat_arg['feature_dim1'] + relufeat_arg['sketch_dim'])
 ```
 For more details of fully connected NTK features, please check `test_fc_ntk.py`.
 
@@ -41,8 +43,9 @@ For more details of fully connected NTK features, please check `test_fc_ntk.py`.
 from experimental.features import ConvFeatures, AvgPoolFeatures, FlattenFeatures
 
 init_fn, feature_fn = serial(
-    ConvFeatures(512, filter_size=3), ReluFeatures(**relufeat_arg),
-    AvgPoolFeatures(2, 2), FlattenFeatures()
+    ConvFeatures(512, filter_shape=(3, 3)), ReluFeatures(**relufeat_arg),
+    AvgPoolFeatures((2, 2), strides=(2, 2)), FlattenFeatures(),
+    DenseFeatures(512)
 )
 
 n, H, W, C = 5, 8, 8, 3
@@ -53,6 +56,8 @@ _, feat_fn_inputs = init_fn(key2, x.shape)
 feats = feature_fn(x, feat_fn_inputs)
 # feats.nngp_feat is a feature map of NNGP kernel
 # feats.ntk_feat is a feature map of NTK
+assert feats.nngp_feat.shape == (5, (H/2)*(W/2)*relufeat_arg['feature_dim1'])
+assert feats.ntk_feat.shape == (5, (H/2)*(W/2)*(relufeat_arg['feature_dim1'] + relufeat_arg['sketch_dim']))
 ```
 For more complex CNTK features, please check `test_myrtle_networks.py`.
 
@@ -67,19 +72,20 @@ All modules return a pair of functions `(init_fn, feature_fn)`. Instead of kerne
 ## [`features.DenseFeatures`](https://github.com/insuhan/ntk-sketching-neural-tangents/blob/ea23f8575a61f39c88aa57723408c175dbba0045/features.py#L88)
 `features.DenseFeatures` provides features for fully-connected dense layer and corresponds to `stax.Dense` module in [Neural Tangents](https://github.com/google/neural-tangents). We assume that the input is a tabular dataset (i.e., a n-by-d matrix). Its `feature_fn` updates the NTK features by concatenating NNGP features and NTK features. This is because `stax.Dense` updates a new NTK kernel matrix `(N x D)` by adding the previous NNGP and NTK kernel matrices. The features of dense layer are exact and no approximations are applied. 
 ```python
-import numpy as np
+from jax import numpy as np
 from neural_tangents import stax
+from experimental.features import DenseFeatures, serial
 
 width = 1
 x = random.normal(key1, shape=(3, 2))
 _, _, kernel_fn = stax.Dense(width)
 nt_kernel = kernel_fn(x)
 
-_, feat_fn = DenseFeatures(width)
+_, feat_fn = serial(DenseFeatures(width))
 feat = feat_fn(x, ())
 
-assert np.linalg.norm(nt_kernel.ntk - feat.ntk_feat @ feat.ntk_feat.T) <= 1e-12
 assert np.linalg.norm(nt_kernel.nngp - feat.nngp_feat @ feat.nngp_feat.T) <= 1e-12
+assert feat.ntk_feat == np.zeros(())
 ```
 
 ## [`features.ReluFeatures`](https://github.com/insuhan/ntk-sketching-neural-tangents/blob/ea23f8575a61f39c88aa57723408c175dbba0045/features.py#L119)
@@ -89,11 +95,13 @@ For image dataset, the inputs are 4-D tensors with shape `N x H x W x D` where N
 
 To use the Random Features approach, set the parameter `method` to `rf` (default `rf`), e.g.,
 ```python
+from experimental.features import DenseFeatures, ReluFeatures, serial
+
 x = random.normal(key1, shape=(3, 32))
 
 init_fn, feat_fn = serial(
     DenseFeatures(1),
-    ReluFeatures(method='rf', feature_dim0=10, feature_dim1=20, sketch_dim=30)
+    ReluFeatures(method='RANDFEAT', feature_dim0=10, feature_dim1=20, sketch_dim=30)
 )
 
 _, params = init_fn(key1, x.shape)
