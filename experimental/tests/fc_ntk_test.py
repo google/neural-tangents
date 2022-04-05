@@ -22,7 +22,7 @@ x = random.normal(key1, (n, d))
 width = 512  # this does not matter the output
 W_std = 1.234  # std of Gaussian random weights
 
-print("================== Result of Neural Tangent Library ==================")
+print("================== Result of Neural Tangent Library ===================")
 
 init_fn, _, kernel_fn = stax.serial(stax.Dense(width, W_std=W_std), stax.Relu(),
                                     stax.Dense(width, W_std=W_std), stax.Relu(),
