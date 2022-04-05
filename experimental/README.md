@@ -36,9 +36,11 @@ feats = feature_fn(x, feat_fn_inputs)
 assert feats.nngp_feat.shape == (5, relufeat_arg['feature_dim1'])
 assert feats.ntk_feat.shape == (5, relufeat_arg['feature_dim1'] + relufeat_arg['sketch_dim'])
 ```
+
 For more details of fully connected NTK features, please check `test_fc_ntk.py`.
 
 ### Convolutional NTK approximation via Random Features:
+
 ```python
 from experimental.features import ConvFeatures, AvgPoolFeatures, FlattenFeatures
 
@@ -71,6 +73,7 @@ All modules return a pair of functions `(init_fn, feature_fn)`. Instead of kerne
 
 ## [`features.DenseFeatures`](https://github.com/insuhan/ntk-sketching-neural-tangents/blob/ea23f8575a61f39c88aa57723408c175dbba0045/features.py#L88)
 `features.DenseFeatures` provides features for fully-connected dense layer and corresponds to `stax.Dense` module in [Neural Tangents](https://github.com/google/neural-tangents). We assume that the input is a tabular dataset (i.e., a n-by-d matrix). Its `feature_fn` updates the NTK features by concatenating NNGP features and NTK features. This is because `stax.Dense` updates a new NTK kernel matrix `(N x D)` by adding the previous NNGP and NTK kernel matrices. The features of dense layer are exact and no approximations are applied. 
+
 ```python
 from jax import numpy as np
 from neural_tangents import stax
@@ -94,6 +97,7 @@ assert feat.ntk_feat == np.zeros(())
 For image dataset, the inputs are 4-D tensors with shape `N x H x W x D` where N is batch size, H is image height, W is image width and D is the feature dimension. We reshape the image features into 2-D tensor with shape `NHW x D` and apply proper feature approximations. Then, the resulting features reshape to 4-D tensor with shape `N x H x W x D'` where `D'` is the output dimension of the feature approximation.
 
 To use the Random Features approach, set the parameter `method` to `rf` (default `rf`), e.g.,
+
 ```python
 from experimental.features import DenseFeatures, ReluFeatures, serial
 
@@ -113,6 +117,7 @@ assert out_feat.ntk_feat.shape == (3, 30)
 ```
 
 To use the exact feature map (based on Cholesky decomposition), set the parameter `method` to `exact`, e.g.,
+
 ```python
 init_fn, feat_fn = serial(DenseFeatures(1), ReluFeatures(method='exact'))
 _, params = init_fn(key1, x.shape)
@@ -121,6 +126,7 @@ out_feat = feat_fn(x, params)
 assert out_feat.nngp_feat.shape == (3, 3)
 assert out_feat.ntk_feat.shape == (3, 3)
 ```
+
 (This is for debugging. The dimension of the exact feature map is equal to the number of inputs, i.e., `N` for tabular dataset, `NHW` for image dataset).
 
 

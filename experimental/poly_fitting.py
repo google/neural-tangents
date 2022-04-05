@@ -88,8 +88,9 @@ def kappa0_coeffs(degree: int, num_layers: int):
   # For kappa0, we set all weights to be one.
   weights = np.ones(len(fvals), dtype=xvals.dtype)
 
-  # Coefficients can be obtained by solving QP with OSQP jaxopt.
-  coeffs = poly_fitting_qp(xvals, fvals, weights, degree)
+  # Coefficients can be obtained by solving QP with OSQP jaxopt.  kappa0 has a 
+  # sharp slope at x=1, hence we add an equailty condition of p_n(1)=f(x).
+  coeffs = poly_fitting_qp(xvals, fvals, weights, degree, eq_last_point=True)
   return np.where(coeffs < 1e-5, 0.0, coeffs)
 
 

@@ -138,9 +138,9 @@ test_myrtle_network_approx({
 })
 
 print("==================== Result of CNTK wih PolySketch ====================")
-poly_degree = 16
-poly_sketch_dim = 4096
-sketch_dim = 4096
+poly_degree = 8
+poly_sketch_dim = 1024
+sketch_dim = 1024
 
 test_myrtle_network_approx({
   'method': 'POLYSKETCH',
@@ -150,10 +150,10 @@ test_myrtle_network_approx({
 })
 
 print("=============== Result of PolySketch + Random Features ===============")
-kappa0_feat_dim = 2048
-sketch_dim = 4096
-poly_degree = 4
-poly_sketch_dim = 4096
+kappa0_feat_dim = 512
+sketch_dim = 1024
+poly_degree = 8
+poly_sketch_dim = 1024
 
 test_myrtle_network_approx({
   'method': 'PSRF',

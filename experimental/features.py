@@ -1,6 +1,7 @@
 import enum
 from typing import Optional, Callable, Sequence, Tuple
 from jax import random
+from jax._src.util import prod
 from jax import numpy as np
 from jax.numpy.linalg import cholesky
 import jax.example_libraries.stax as ostax
@@ -21,6 +22,8 @@ class Features:
   nngp_feat: np.ndarray
   ntk_feat: np.ndarray
   norms: np.ndarray
+
+  is_reversed: bool = dataclasses.field(pytree_node=False)
 
   batch_axis: int = 0
   channel_axis: int = -1
@@ -101,9 +104,12 @@ def _inputs_to_features(x: np.ndarray,
   nngp_feat = nngp_feat / norms
   ntk_feat = np.zeros((), dtype=nngp_feat.dtype)
 
+  is_reversed = False
+
   return Features(nngp_feat=nngp_feat,
                   ntk_feat=ntk_feat,
                   norms=norms,
+                  is_reversed=is_reversed,
                   batch_axis=batch_axis,
                   channel_axis=channel_axis)  # pytype:disable=wrong-keyword-args
 
@@ -181,7 +187,8 @@ def ReluFeatures(method: str = 'RANDFEAT',
                  feature_dim1: int = 1,
                  sketch_dim: int = 1,
                  poly_degree: int = 8,
-                 poly_sketch_dim: int = 1):
+                 poly_sketch_dim: int = 1,
+                 generate_rand_mtx: bool = True):
 
   method = ReluFeaturesMethod(method.upper())
 
@@ -195,10 +202,16 @@ def ReluFeatures(method: str = 'RANDFEAT',
 
     if method == ReluFeaturesMethod.RANDFEAT:
       rng1, rng2, rng3 = random.split(rng, 3)
-      # Random vectors for random features of arc-cosine kernel of order 0.
-      W0 = random.normal(rng1, (nngp_feat_shape[-1], feature_dim0))
-      # Random vectors for random features of arc-cosine kernel of order 1.
-      W1 = random.normal(rng2, (nngp_feat_shape[-1], feature_dim1))
+      if generate_rand_mtx:
+        # Random vectors for random features of arc-cosine kernel of order 0.
+        W0 = random.normal(rng1, (nngp_feat_shape[-1], feature_dim0))
+        # Random vectors for random features of arc-cosine kernel of order 1.
+        W1 = random.normal(rng2, (nngp_feat_shape[-1], feature_dim1))
+      else:
+        # if `generate_rand_mtx` is False, return random seeds and shapes instead of np.ndarray.
+        W0 = (rng1, (nngp_feat_shape[-1], feature_dim0))
+        W1 = (rng2, (nngp_feat_shape[-1], feature_dim1))
+
       # TensorSRHT of degree 2 for approximating tensor product.
       tensorsrht = TensorSRHT(rng=rng3,
                               input_dim1=ntk_feat_shape[-1],
@@ -210,7 +223,7 @@ def ReluFeatures(method: str = 'RANDFEAT',
 
     elif method == ReluFeaturesMethod.POLYSKETCH:
       new_nngp_feat_shape = nngp_feat_shape[:-1] + (poly_sketch_dim,)
-      rng1, rng2, rng3 = random.split(rng, 3)
+      rng1, rng2 = random.split(rng, 2)
 
       kappa1_coeff = kappa1_coeffs(poly_degree, relu_layers_count)
       kappa0_coeff = kappa0_coeffs(poly_degree, relu_layers_count)
@@ -224,10 +237,11 @@ def ReluFeatures(method: str = 'RANDFEAT',
 
       # TensorSRHT of degree 2 for approximating tensor product.
       tensorsrht = TensorSRHT(
+          rng=rng2,
           input_dim1=ntk_feat_shape[-1] // (1 + (relu_layers_count > 0)),
           input_dim2=poly_degree * (polysketch.sketch_dim // 4 - 1) + 1,
-          sketch_dim=sketch_dim,
-          rng=rng2).init_sketches()  # pytype:disable=wrong-keyword-args
+          sketch_dim=sketch_dim).init_sketches()  # pytype:disable=wrong-keyword-args
+
       return (new_nngp_feat_shape, new_ntk_feat_shape,
               new_net_shape), (polysketch, tensorsrht, kappa0_coeff,
                                kappa1_coeff)
@@ -263,9 +277,8 @@ def ReluFeatures(method: str = 'RANDFEAT',
 
     elif method == ReluFeaturesMethod.POLY:
       # This only uses the polynomial approximation without sketching.
-      new_nngp_feat_shape = nngp_feat_shape[:-1] + (_prod(
-          nngp_feat_shape[:-1]),)
-      new_ntk_feat_shape = ntk_feat_shape[:-1] + (_prod(ntk_feat_shape[:-1]),)
+      new_nngp_feat_shape = nngp_feat_shape[:-1] + (prod(nngp_feat_shape[:-1]),)
+      new_ntk_feat_shape = ntk_feat_shape[:-1] + (prod(ntk_feat_shape[:-1]),)
 
       kappa1_coeff = kappa1_coeffs(poly_degree, relu_layers_count)
       kappa0_coeff = kappa0_coeffs(poly_degree, relu_layers_count)
@@ -275,9 +288,8 @@ def ReluFeatures(method: str = 'RANDFEAT',
 
     elif method == ReluFeaturesMethod.EXACT:
       # The exact feature map computation is for debug.
-      new_nngp_feat_shape = nngp_feat_shape[:-1] + (_prod(
-          nngp_feat_shape[:-1]),)
-      new_ntk_feat_shape = ntk_feat_shape[:-1] + (_prod(ntk_feat_shape[:-1]),)
+      new_nngp_feat_shape = nngp_feat_shape[:-1] + (prod(nngp_feat_shape[:-1]),)
+      new_ntk_feat_shape = ntk_feat_shape[:-1] + (prod(ntk_feat_shape[:-1]),)
 
       return (new_nngp_feat_shape, new_ntk_feat_shape, new_net_shape), ()
 
@@ -295,8 +307,12 @@ def ReluFeatures(method: str = 'RANDFEAT',
     norms: np.ndarray = f.norms
 
     if method == ReluFeaturesMethod.RANDFEAT:  # Random Features approach.
-      W0: np.ndarray = input[0]
-      W1: np.ndarray = input[1]
+      if generate_rand_mtx:
+        W0: np.ndarray = input[0]
+        W1: np.ndarray = input[1]
+      else:
+        W0 = random.normal(input[0][0], shape=input[0][1])
+        W1 = random.normal(input[1][0], shape=input[1][1])
       tensorsrht: TensorSRHT = input[2]
 
       kappa0_feat = (nngp_feat_2d @ W0 > 0) / W0.shape[-1]**0.5
@@ -380,13 +396,6 @@ def ReluFeatures(method: str = 'RANDFEAT',
   return init_fn, feature_fn
 
 
-def _prod(tuple_):
-  prod = 1
-  for x in tuple_:
-    prod = prod * x
-  return prod
-
-
 @layer
 def ReluNTKFeatures(
     num_layers: int,
@@ -459,20 +468,18 @@ def ConvFeatures(out_chan: int,
 
   channel_axis = lhs_spec.index('C')
 
+  patch_size = prod(filter_shape)
+
   if parameterization != 'ntk':
     raise NotImplementedError(f'Parameterization ({parameterization}) is '
                               ' not implemented yet.')
 
-  if filter_shape[0] != filter_shape[1]:
-    raise NotImplementedError('filter_shape should be square.')
-  filter_size = filter_shape[0]
-
   def init_fn(rng, input_shape):
     nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
     new_nngp_feat_shape = nngp_feat_shape[:-1] + (nngp_feat_shape[-1] *
-                                                  filter_size**2,)
+                                                  patch_size,)
     new_ntk_feat_shape = nngp_feat_shape[:-1] + (
-        (nngp_feat_shape[-1] + ntk_feat_shape[-1]) * filter_size**2,)
+        (nngp_feat_shape[-1] + ntk_feat_shape[-1]) * patch_size,)
 
     if len(input_shape) > 2:
       return (new_nngp_feat_shape, new_ntk_feat_shape, input_shape[2] + 'C'), ()
@@ -485,15 +492,27 @@ def ConvFeatures(out_chan: int,
     they are not linear operations, we first unnormalize features (i.e., 
     multiplying them by `norms`) and then re-normalize the output features.
     """
+    is_reversed = f.is_reversed
+
     f_renormalized: Features = _unnormalize_features(f)
     nngp_feat: np.ndarray = f_renormalized.nngp_feat
     ntk_feat: np.ndarray = f_renormalized.ntk_feat
-    nngp_feat = _conv2d_feat(nngp_feat, filter_size) / filter_size * W_std
+
+    if is_reversed:
+      filter_shape_ = filter_shape[::-1]
+    else:
+      filter_shape_ = filter_shape
+
+    is_reversed = not f.is_reversed
+
+    nngp_feat = _concat_shifted_features_2d(
+        nngp_feat, filter_shape_) * W_std / patch_size**0.5
 
     if f.ntk_feat.ndim == 0:  # check if ntk_feat is empty
       ntk_feat = nngp_feat
     else:
-      ntk_feat = _conv2d_feat(ntk_feat, filter_size) / filter_size * W_std
+      ntk_feat = _concat_shifted_features_2d(
+          ntk_feat, filter_shape_) * W_std / patch_size**0.5
       ntk_feat = np.concatenate((ntk_feat, nngp_feat), axis=channel_axis)
 
     # Re-normalize the features.
@@ -502,19 +521,24 @@ def ConvFeatures(out_chan: int,
     nngp_feat = nngp_feat / norms
     ntk_feat = ntk_feat / norms
 
-    return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat, norms=norms)
+    return f.replace(nngp_feat=nngp_feat,
+                     ntk_feat=ntk_feat,
+                     norms=norms,
+                     is_reversed=is_reversed)
 
   return init_fn, feature_fn
 
 
-def _conv2d_feat(X, filter_size):
-  return _conv_feat(np.moveaxis(_conv_feat(X, filter_size), 1, 2), filter_size)
+def _concat_shifted_features_2d(X: np.ndarray, filter_shape: Sequence[int]):
+  return _concat_shifted_features(
+      np.moveaxis(_concat_shifted_features(X, filter_shape[1]), 1, 2),
+      filter_shape[0])
 
 
-def _conv_feat(X, filter_size):
+def _concat_shifted_features(X, filter_size):
   """
-  Direct sums of image features. If input shape is (N, H, W, C), the output has
-  the shape (N, H, W, C * filter_size**2).
+  Concatenations of shifted image features. If input shape is (N, H, W, C), 
+  the output has the shape (N, H, W, C * filter_size).
   """
   N, H, W, C = X.shape
   out = np.zeros((N, H, W, C * filter_size))
@@ -579,7 +603,10 @@ def AvgPoolFeatures(window_shape: Sequence[int],
     nngp_feat = nngp_feat / norms
     ntk_feat = ntk_feat / norms
 
-    return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat, norms=norms)
+    return f.replace(nngp_feat=nngp_feat,
+                     ntk_feat=ntk_feat,
+                     norms=norms,
+                     is_reversed=False)
 
   return init_fn, feature_fn
 
@@ -598,8 +625,8 @@ def FlattenFeatures(batch_axis: int = 0, batch_axis_out: int = 0):
 
   def init_fn(rng, input_shape):
     nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
-    new_nngp_feat_shape = nngp_feat_shape[:1] + (_prod(nngp_feat_shape[1:]),)
-    new_ntk_feat_shape = ntk_feat_shape[:1] + (_prod(ntk_feat_shape[1:]),)
+    new_nngp_feat_shape = nngp_feat_shape[:1] + (prod(nngp_feat_shape[1:]),)
+    new_ntk_feat_shape = ntk_feat_shape[:1] + (prod(ntk_feat_shape[1:]),)
     if len(input_shape) > 2:
       return (new_nngp_feat_shape, new_ntk_feat_shape, input_shape[2] + 'F'), ()
     else:
@@ -611,11 +638,11 @@ def FlattenFeatures(batch_axis: int = 0, batch_axis_out: int = 0):
     ntk_feat: np.ndarray = f_renomalized.ntk_feat
 
     batch_size = f.nngp_feat.shape[batch_axis]
-    nngp_feat = nngp_feat.reshape(batch_size, -1) / _prod(
+    nngp_feat = nngp_feat.reshape(batch_size, -1) / prod(
         nngp_feat.shape[1:-1])**0.5
 
     if f.ntk_feat.ndim != 0:  # check if ntk_feat is not empty
-      ntk_feat = ntk_feat.reshape(batch_size, -1) / _prod(
+      ntk_feat = ntk_feat.reshape(batch_size, -1) / prod(
           ntk_feat.shape[1:-1])**0.5
 
     # Re-normalize the features.
@@ -624,6 +651,9 @@ def FlattenFeatures(batch_axis: int = 0, batch_axis_out: int = 0):
     nngp_feat = nngp_feat / norms
     ntk_feat = ntk_feat / norms
 
-    return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat, norms=norms)
+    return f.replace(nngp_feat=nngp_feat,
+                     ntk_feat=ntk_feat,
+                     norms=norms,
+                     is_reversed=False)
 
   return init_fn, feature_fn
