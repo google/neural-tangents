@@ -124,7 +124,6 @@ def test_myrtle_network_approx(relufeat_arg, init_fn=None, feature_fn=None):
   print()
 
 
-
 print("=================== Result of CNTK Random Features ===================")
 kappa0_feat_dim = 1024
 kappa1_feat_dim = 1024
@@ -162,6 +161,11 @@ test_myrtle_network_approx({
   'poly_degree': poly_degree,
   'poly_sketch_dim': poly_sketch_dim
 })
+
+print("======= (Debug) NTK Feature Maps with Polynomial Approximation =======")
+print("\t(*No Sketching algorithm is applied.)")
+
+test_myrtle_network_approx({'method': 'POLY', 'poly_degree': poly_degree})
 
 print("====== (Debug) Exact NTK Feature Maps via Cholesky Decomposition ======")
 

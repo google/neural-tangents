@@ -541,7 +541,7 @@ def _concat_shifted_features(X, filter_size):
   the output has the shape (N, H, W, C * filter_size).
   """
   N, H, W, C = X.shape
-  out = np.zeros((N, H, W, C * filter_size))
+  out = np.zeros((N, H, W, C * filter_size), dtype=X.dtype)
   out = out.at[:, :, :, :C].set(X)
   j = 1
   for i in range(1, min((filter_size + 1) // 2, W)):
