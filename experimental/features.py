@@ -3,7 +3,6 @@ from typing import Optional, Callable, Sequence, Tuple
 from jax import random
 from jax._src.util import prod
 from jax import numpy as np
-from jax.numpy.linalg import cholesky
 import jax.example_libraries.stax as ostax
 from jax import eval_shape, ShapedArray
 
@@ -371,19 +370,19 @@ def ReluFeatures(method: str = 'RANDFEAT',
       kappa1_coeff: np.ndarray = input[1]
 
       gram_nngp = np.dot(nngp_feat_2d, nngp_feat_2d.T)
-      nngp_feat = cholesky(np.polyval(kappa1_coeff[::-1],
+      nngp_feat = _cholesky(np.polyval(kappa1_coeff[::-1],
                                       gram_nngp)).reshape(input_shape + (-1,))
 
       ntk = ntk_feat_2d @ ntk_feat_2d.T
       kappa0_mat = np.polyval(kappa0_coeff[::-1], gram_nngp)
-      ntk_feat = cholesky(ntk * kappa0_mat).reshape(input_shape + (-1,))
+      ntk_feat = _cholesky(ntk * kappa0_mat).reshape(input_shape + (-1,))
 
     elif method == ReluFeaturesMethod.EXACT:  # Exact feature map computations via Cholesky decomposition.
-      nngp_feat = cholesky(kappa1(nngp_feat_2d)).reshape(input_shape + (-1,))
+      nngp_feat = _cholesky(kappa1(nngp_feat_2d)).reshape(input_shape + (-1,))
 
       ntk = ntk_feat_2d @ ntk_feat_2d.T
       kappa0_mat = kappa0(nngp_feat_2d)
-      ntk_feat = cholesky(ntk * kappa0_mat).reshape(input_shape + (-1,))
+      ntk_feat = _cholesky(ntk * kappa0_mat).reshape(input_shape + (-1,))
 
     else:
       raise NotImplementedError(f'Invalid method name: {method}')
@@ -394,6 +393,10 @@ def ReluFeatures(method: str = 'RANDFEAT',
     return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat, norms=norms)
 
   return init_fn, feature_fn
+
+
+def _cholesky(mat):
+  return np.linalg.cholesky(mat + 1e-8 * np.eye(mat.shape[0]))
 
 
 @layer
