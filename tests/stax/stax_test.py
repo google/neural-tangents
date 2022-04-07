@@ -24,7 +24,6 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from jax import default_backend
 from jax import jit
-from jax import test_util as jtu
 from jax.config import config
 from jax.example_libraries import stax as ostax
 import jax.numpy as np
@@ -328,7 +327,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
       raise absltest.SkipTest('FC models do not have these parameters.')
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               '_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}'.format(
                   model, phi_name, width, 'same_inputs'
@@ -392,7 +391,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
 
   # pylint: disable=g-complex-comprehension
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               f'_model={model}'
               f'_width={width}'
@@ -484,7 +483,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
                                          atol=0.2)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               '_{}_{}_{}_{}_{}_{}'.format(
                   model,
@@ -543,7 +542,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
                                          0.07)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               '_{}_{}_{}_{}_{}_{}_{}_{}'.format(
                   width, 'same_inputs' if same_inputs else 'different_inputs',
@@ -633,7 +632,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     self.assertAllClose((nngp, cov1, cov2), (ker.nngp, ker.cov1, ker.cov2))
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               '_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}'.format(
                   model, phi_name, width, 'same_inputs'
@@ -688,7 +687,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     self._check_agreement_with_empirical(net, same_inputs, use_dropout, is_ntk)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               f'_act={act}_kernel={kern}_do_stabilize={do_stabilize}',
           'act': act,
@@ -713,11 +712,10 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     samples = N_SAMPLES
 
     if default_backend() == 'gpu':
-      jtu._default_tolerance[onp.dtype(onp.float64)] = 5e-4
+      tol = 5e-4
       samples = 100 * N_SAMPLES
     else:
-      jtu._default_tolerance[onp.dtype(onp.float32)] = 5e-2
-      jtu._default_tolerance[onp.dtype(onp.float64)] = 5e-3
+      tol = {onp.dtype(onp.float32): 5e-2, onp.dtype(onp.float64): 5e-3}
 
     # a batch of dense inputs
     x_dense = random.normal(key, (input_count, input_size))
@@ -745,7 +743,8 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
 
     assert not np.any(np.isnan(exact))
     self.assertAllClose(exact[sparse_count:, sparse_count:],
-                        mc[sparse_count:, sparse_count:])
+                        mc[sparse_count:, sparse_count:],
+                        rtol=tol, atol=tol)
 
   def test_composition_dense(self):
     rng = random.PRNGKey(0)
@@ -766,7 +765,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     self.assertAllClose(ker_out, composed_ker_out)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name': '_avg_pool={}_same_inputs={}'.format(avg_pool,
                                                                 same_inputs),
           'avg_pool': avg_pool,
@@ -856,7 +855,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
 class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               f'_same_inputs={same_inputs}_kernel_type={kernel_type}',
           'same_inputs': same_inputs,
@@ -897,7 +896,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
                                      rtol)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               f'_same_inputs={same_inputs}_kernel_type={kernel_type}',
           'same_inputs': same_inputs,
@@ -933,7 +932,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
                                      rtol)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               f'_same_inputs={same_inputs}_kernel_type={kernel_type}',
           'same_inputs': same_inputs,
@@ -985,7 +984,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
     K_readout_fn(K_readin_fn(x1, x2))
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               f'_same_inputs={same_inputs}_kernel_type={kernel_type}',
           'same_inputs': same_inputs,

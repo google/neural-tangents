@@ -22,7 +22,6 @@ import time
 from absl.testing import absltest
 from absl.testing import parameterized
 from jax import lax
-from jax import test_util as jtu
 from jax import jit, vjp
 from jax.config import config
 from jax import default_backend
@@ -142,7 +141,7 @@ class FlattenTest(test_utils.NeuralTangentsTestCase):
 class ConvNDTest(test_utils.NeuralTangentsTestCase):
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               ' [{}_n={}_{}_{}_{}_{}_{}_{}]'.format(
                   'same_inputs' if same_inputs else 'different_inputs', n, get,
@@ -274,7 +273,7 @@ class ConvNDTest(test_utils.NeuralTangentsTestCase):
 class AttentionTest(test_utils.NeuralTangentsTestCase):
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               f'[same_inputs={same_inputs}_'
               f'get={get}_'
@@ -427,7 +426,7 @@ class AttentionTest(test_utils.NeuralTangentsTestCase):
 class AggregateTest(test_utils.NeuralTangentsTestCase):
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               f'{get}-{name}-same_inp={same_input}-{act_name}'
               f'-mask_constant={mask_constant}'
@@ -692,7 +691,7 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
 class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               f'_same_inputs={same_inputs}_{padding}_size={size}_'
               f'strides={strides}_filter={filter_shape}_'
@@ -809,7 +808,7 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
     return apply_fn((params[0], 0.), lhs)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               f'size={size}_strides={strides}_filter={filter_shape}',
           'size': size,
@@ -840,7 +839,7 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
 class DotGeneralTest(test_utils.NeuralTangentsTestCase):
 
   @parameterized.named_parameters(
-      jtu.cases_from_list(
+      test_utils.cases_from_list(
           {
               'testcase_name':
                   ' [{}_n={}_dn=(({}, {}), ({}, {}))_channel_axis={}_'
@@ -1034,7 +1033,7 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
               self, get_empirical(get), getattr(exact, get), 0.01, atol)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list(
+      test_utils.cases_from_list(
           {
               'testcase_name': ' [{}_get={}_n={}_{}_{}_{}]'.format(
                   'same_inputs' if same_inputs else 'different_inputs',
@@ -1164,7 +1163,7 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
 class ImageResizeTest(test_utils.NeuralTangentsTestCase):
 
   @parameterized.named_parameters(
-      jtu.cases_from_list(
+      test_utils.cases_from_list(
           {
               'testcase_name':
                   ' [{}_n={}_channel_axis={}_'
@@ -1345,7 +1344,7 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
               self, get_empirical(get), getattr(exact, get), tol)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list(
+      test_utils.cases_from_list(
           {
               'testcase_name': ' [{}_get={}_n={}_{}_{}_{}_shape={}]'.format(
                   'same_inputs' if same_inputs else 'different_inputs',
@@ -1444,7 +1443,7 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
 class ConvLocalTest(test_utils.NeuralTangentsTestCase):
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name': f'_diag_spatial={diagonal_spatial}_',
           'diagonal_spatial': diagonal_spatial,
       }
@@ -1487,7 +1486,7 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
       self._test_against_mc(apply_fn, init_fn, k.nngp, x, None)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               f'_same_inputs={same_inputs}_{padding}_size={size}_'
               f'strides={strides}_filter={filter_shape}_'
@@ -1572,7 +1571,7 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
     self.assertAllClose(k_conv, k, atol=tol, rtol=tol)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               f'_get={get}'
               f'_same_inputs={same_inputs}_'

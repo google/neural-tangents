@@ -20,7 +20,6 @@ import random as prandom
 from absl.testing import absltest
 from absl.testing import parameterized
 from jax import default_backend
-from jax import test_util as jtu
 from jax.config import config
 import jax.numpy as np
 import jax.random as random
@@ -49,7 +48,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
     }[i % 3]
 
   @parameterized.named_parameters(
-      jtu.cases_from_list(
+      test_utils.cases_from_list(
           {
               'testcase_name':
                   ' [{}_axis={}_n_branches={}_{}_{}_{}]'.format(
@@ -163,7 +162,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list(
+      test_utils.cases_from_list(
           {
               'testcase_name':
                   ' [{}_axis={}_n_branches={}_{}_{}_{}_{}]'.format(

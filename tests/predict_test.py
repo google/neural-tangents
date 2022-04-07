@@ -21,7 +21,6 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from jax import grad
 from jax import jit
-from jax import test_util as jtu
 from jax import vmap
 from jax.config import config
 from jax.example_libraries import optimizers
@@ -107,13 +106,6 @@ KERNELS = {
 
 class PredictTest(test_utils.NeuralTangentsTestCase):
 
-  def _assertAllClose(self, x, y, rtol):
-    x = ravel_pytree(x)[0]
-    y = ravel_pytree(y)[0]
-    diff = 2 * np.sum(np.abs(x - y)) / (np.sum(np.abs(x))
-                                        + np.sum(np.abs(y)) + 1e-4)
-    self.assertLess(diff, rtol)
-
   def _test_zero_time(self, predictor, fx_train_0, fx_test_0, g_td, momentum):
     fx_train_t0, fx_test_t0 = predictor(0.0, fx_train_0, fx_test_0, g_td)
     self.assertAllClose(fx_train_0, fx_train_t0)
@@ -186,7 +178,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
     return key, x_test, x_train, y_train
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               '_train={}_test={}_network={}_logits={}_{}_'
               'momentum={}_lr={}_loss={}_t={}'.format(train, test, network,
@@ -284,7 +276,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
                                                                x.shape[-1])
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               '_train={}_test={}_network={}_logits={}'.format(
                   train, test, network, out_logits),
@@ -348,14 +340,20 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
       return fx_train_mean, fx_test_mean, cov_train, cov_test
 
     fx_train_mc, fx_test_mc, cov_train_mc, cov_test_mc = predict_mc(4096, key)
-    rtol = 0.05
-    self._assertAllClose(fx_train_mc, fx_train_inf, rtol)
-    self._assertAllClose(cov_train_mc, cov_train_inf, rtol)
-    self._assertAllClose(cov_test_mc, cov_test_inf, rtol)
-    self._assertAllClose(fx_test_mc, fx_test_inf, rtol)
+    tol = 0.05
+
+    assert_close = lambda a, b: self.assertAllClose(ravel_pytree(a)[0],
+                                                    ravel_pytree(b)[0],
+                                                    atol=tol,
+                                                    rtol=tol)
+
+    assert_close(fx_train_mc, fx_train_inf)
+    assert_close(cov_train_mc, cov_train_inf)
+    assert_close(cov_test_mc, cov_test_inf)
+    assert_close(fx_test_mc, fx_test_inf)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               '_train={}_test={}_network={}_logits={}'.format(
                   train, test, network, out_logits),
@@ -402,7 +400,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
         self.assertAllClose(out[1], out2[0])
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               '_train={}_test={}_network={}_logits={}_get={}'.format(
                   train, test, network, out_logits, get),
@@ -445,7 +443,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
           self.assertAllClose(inf_x, fin_x)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               '_train={}_test={}_network={}_logits={}'.format(
                   train, test, network, out_logits),
@@ -502,7 +500,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
     return always_ntk
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               '_train={}_test={}_network={}_logits={}'.format(
                   train, test, network, out_logits),
@@ -597,7 +595,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
           self.assertAllClose(nngp_cov, nngp_ntk_cov)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               '_train={}_test={}_network={}_logits={}'.format(
                   train, test, network, out_logits),
@@ -635,7 +633,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
             self.assertGreater(np.min(np.linalg.eigh(cov)[0]), -1e-4)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               '_train={}_test={}_network={}_logits={}'.format(
                   train, test, network, out_logits),
@@ -688,7 +686,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
       return get_params(opt_state)
 
     params = vmap(train_network)(ensemble_key)
-    rtol = 0.08
+    tol = 0.08
 
     for x in [None, 'x_test']:
       with self.subTest(x=x):
@@ -703,8 +701,9 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
                 mean_subtracted.shape[0] * mean_subtracted.shape[-1])
 
         ntk = predict_fn_mse_ens(training_steps, x, 'ntk', compute_cov=True)
-        self._assertAllClose(mean_emp, ntk.mean, rtol)
-        self._assertAllClose(cov_emp, ntk.covariance, rtol)
+        self.assertAllClose(ravel_pytree(mean_emp)[0],
+                            ravel_pytree(ntk.mean)[0], rtol=tol, atol=tol)
+        self.assertAllClose(cov_emp, ntk.covariance, rtol=tol, atol=tol)
 
   def testGradientDescentMseEnsembleTrain(self):
     key = random.PRNGKey(1)
@@ -720,7 +719,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
       with self.subTest(t=t):
         y_none = predictor(t, None, None, compute_cov=True)
         y_x = predictor(t, x, None, compute_cov=True)
-        self._assertAllClose(y_none, y_x, 0.04)
+        self.assertAllClose(y_none, y_x, rtol=0.04, atol=0.04)
 
   def testGpInference(self):
     reg = 1e-5
@@ -768,7 +767,8 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
 
               out_ens = gd_ensemble(None, x_test, get, compute_cov)
               out_ens_inf = gd_ensemble(np.inf, x_test, get, compute_cov)
-              self._assertAllClose(out_ens_inf, out_ens, 0.08)
+              tol = 0.35 if jax.default_backend() == 'tpu' else 0.08
+              self.assertAllClose(out_ens_inf, out_ens, rtol=tol, atol=tol)
 
               if (get is not None and
                   'nngp' not in get and
@@ -962,7 +962,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
               self.assertAllClose(y_train_shape, p_train.shape)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               f'_train={train}_network={network}_logits={out_logits}_{name}' +
               f'_lr_factor={lr_factor}_momentum={momentum}',
@@ -1039,7 +1039,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
 class PredictKwargsTest(test_utils.NeuralTangentsTestCase):
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name': f'batch={do_batch}_mode={mode}',
           'do_batch': do_batch,
           'mode': mode

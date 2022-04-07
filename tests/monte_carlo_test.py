@@ -16,7 +16,6 @@
 from absl.testing import absltest
 from absl.testing import parameterized
 import jax
-from jax import test_util as jtu
 from jax.config import config
 import jax.numpy as np
 import jax.random as random
@@ -64,10 +63,10 @@ def _get_inputs_and_model(width=1, n_classes=2, use_conv=True):
   return x1, x2, init_fn, apply_fn, kernel_fn, key
 
 
-class MonteCarloTest(jtu.JaxTestCase):
+class MonteCarloTest(test_utils.NeuralTangentsTestCase):
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name': '[batch_size={}, '
                            'device_count={} '
                            'store_on_device={} '
@@ -99,7 +98,7 @@ class MonteCarloTest(jtu.JaxTestCase):
     self.assertAllClose(one_sample, one_sample_batch)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name': '[batch_size={}, '
                            'device_count={} '
                            'store_on_device={} '
@@ -128,7 +127,7 @@ class MonteCarloTest(jtu.JaxTestCase):
     self.assertAllClose(one_sample, one_batch_sample)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name': '[batch_size={}, '
                            'device_count={} '
                            'store_on_device={} '
@@ -156,7 +155,7 @@ class MonteCarloTest(jtu.JaxTestCase):
     test_utils.assert_close_matrices(self, ker_analytic, ker_empirical, 2e-2)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name': '[batch_size={}, '
                            'device_count={} '
                            'store_on_device={} '
@@ -185,7 +184,7 @@ class MonteCarloTest(jtu.JaxTestCase):
     test_utils.assert_close_matrices(self, ker_analytic, ker_empirical, 2e-2)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name': '[batch_size={}, '
                            'device_count={} '
                            'store_on_device={} '
@@ -260,7 +259,7 @@ class MonteCarloTest(jtu.JaxTestCase):
     self.assertAllClose(ker_analytic_12, ker_analytic_34)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               f'_same_inputs={same_inputs}_batch_size={batch_size}',
           'same_inputs': same_inputs,

@@ -22,7 +22,6 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from jax import default_backend
 from jax import jit
-from jax import test_util as jtu
 from jax.config import config
 import jax.numpy as np
 import jax.random as random
@@ -41,7 +40,7 @@ prandom.seed(1)
 
 
 @parameterized.named_parameters(
-    jtu.cases_from_list(
+    test_utils.cases_from_list(
         {
             'testcase_name':
                 ' [{}_out={}_in={}]'.format(
@@ -241,7 +240,7 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
 class MaskingTest(test_utils.NeuralTangentsTestCase):
 
   @parameterized.named_parameters(
-      jtu.cases_from_list(
+      test_utils.cases_from_list(
           {
               'testcase_name':
                   ' [{}_get={}_axis={}_mask={}_concat={}_p={}]'.format(
@@ -328,7 +327,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               ' [{}_get={}_axis={}_mask={}_concat={}_{}_p={}_n={}_{}]'
               ''.format(
