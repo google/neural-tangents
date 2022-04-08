@@ -14,25 +14,34 @@
 
 """Utilities for testing."""
 
-from typing import Any, Sequence, Dict
 import dataclasses
 import logging
+import os
+from typing import Dict, Sequence
 
 from absl import flags
 from absl.testing import parameterized
-
 import jax
 from jax import config
+from jax import dtypes as _dtypes
 from jax import jit
 from jax import vmap
 import jax.numpy as np
 import numpy as onp
-from jax import dtypes as _dtypes
 
-flags.DEFINE_integer('num_generated_cases', 10000,
-                     'The maximum number of test cases in combinatorial tests.')
-flags.DEFINE_string('jax_test_dut', None,
-                    '')
+
+flags.DEFINE_string(
+    'jax_test_dut',
+    '',
+    help=
+    'Describes the device under test in case special consideration is required.'
+)
+
+flags.DEFINE_integer(
+    'num_generated_cases',
+    int(os.getenv('JAX_NUM_GENERATED_CASES', '10')),
+    help='Number of generated cases to test'
+)
 
 FLAGS = flags.FLAGS
 
