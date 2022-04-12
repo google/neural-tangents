@@ -725,9 +725,11 @@ def Dense(
     out_dim: int,
     W_std: float = 1.,
     b_std: Optional[float] = None,
-    parameterization: str = 'ntk',
     batch_axis: int = 0,
-    channel_axis: int = -1) -> InternalLayerMasked:
+    channel_axis: int = -1,
+    parameterization: str = 'ntk',
+    s: Tuple[int, int] = (1, 1),
+) -> InternalLayerMasked:
   r"""Layer constructor function for a dense (fully-connected) layer.
 
   Based on `jax.example_libraries.stax.Dense`.
@@ -743,22 +745,6 @@ def Dense(
     b_std:
       Specifies the standard deviation of the biases. `None` means no bias.
 
-    parameterization:
-      Either `"ntk"` or `"standard"`.
-
-      Under `"ntk"` parameterization (https://arxiv.org/abs/1806.07572, page 3),
-      weights and biases are initialized as
-      :math:`W_{ij} \sim \mathcal{N}(0,1)`, :math:`b_i \sim \mathcal{N}(0,1)`,
-      and the finite width layer equation is
-      :math:`z_i = \sigma_W / \sqrt{N} \sum_j W_{ij} x_j + \sigma_b b_i`.
-
-      Under `"standard"` parameterization (https://arxiv.org/abs/2001.07301),
-      weights and biases are initialized as :math:`W_{ij} \sim \mathcal{N}(0,
-      W_{std}^2/N)`,
-      :math:`b_i \sim \mathcal{N}(0,\sigma_b^2)`, and the finite width layer
-      equation is
-      :math:`z_i = \sum_j W_{ij} x_j + b_i`.
-
     batch_axis:
       Specifies which axis is contains different elements of the batch.
       Defaults to `0`, the leading axis.
@@ -766,6 +752,44 @@ def Dense(
     channel_axis: Specifies which axis contains the features / channels.
       Defaults to `-1`, the trailing axis. For `kernel_fn`, channel size is
       considered to be infinite.
+
+    parameterization:
+      Either `"ntk"` or `"standard"`.
+
+      Under `"ntk"` parameterization (https://arxiv.org/abs/1806.07572, page 3),
+      weights and biases are initialized as
+      :math:`W_{ij} \sim \mathcal{N}(0,1)`, :math:`b_i \sim \mathcal{N}(0,1)`,
+      and the finite width layer equation is
+      :math:`z_i = \sigma_W / \sqrt{N} \sum_j W_{ij} x_j + \sigma_b b_i`, where
+      `N` is `out_dim`.
+
+      Under `"standard"` parameterization (https://arxiv.org/abs/2001.07301),
+      weights and biases are initialized as :math:`W_{ij} \sim \mathcal{N}(0,
+      W_{std}^2/N)`,
+      :math:`b_i \sim \mathcal{N}(0,\sigma_b^2)`, and the finite width layer
+      equation is
+      :math:`z_i = \frac{1}{s} \sum_j W_{ij} x_j + b_i`, where `N` is `out_dim`.
+
+      `N` corresponds to the respective variable in
+      https://arxiv.org/abs/2001.07301.
+
+    s:
+      only applicable when `parameterization="standard"`. A tuple of integers
+      specifying the width scalings of the input and the output of the layer,
+      i.e. the weight matrix `W` of the layer has shape
+      `(s[0] * in_dim, s[1] * out_dim)`, and the bias has size `s[1] * out_dim`.
+      Note that we need `s[0]` (scaling of the previous layer) to infer
+      `in_dim` from `input_shape`. Also note that for the bottom layer, `s[0]`
+      must be `1`, and for all other layers `s[0]` must be equal to `s[1]` of
+      the previous layer. For the top layer, `s[1]` is expected to be `1`
+      (recall that the output size is `s[1] * out_dim`, and in common infinite
+      network research input and output sizes are considered fixed).
+
+      `s` corresponds to the respective variable in
+      https://arxiv.org/abs/2001.07301.
+
+      For `parameterization="ntk"`, or for standard, finite-width networks
+      corresponding to He initialization, `s=(1, 1)`.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -775,7 +799,7 @@ def Dense(
 
   parameterization = parameterization.lower()
 
-  def ntk_init_fn(rng, input_shape):
+  def _init_fn(rng, input_shape, out_dim):
     _channel_axis = channel_axis % len(input_shape)
     output_shape = (input_shape[:_channel_axis] + (out_dim,)
                     + input_shape[_channel_axis + 1:])
@@ -791,10 +815,14 @@ def Dense(
 
     return output_shape, (W, b)
 
+  def ntk_init_fn(rng, input_shape):
+    return _init_fn(rng, input_shape, out_dim)
+
   def standard_init_fn(rng, input_shape):
-    output_shape, (W, b) = ntk_init_fn(rng, input_shape)
-    return output_shape, (W * W_std / np.sqrt(input_shape[channel_axis]),
-                          b * b_std if b is not None else None)
+    output_shape, (W, b) = _init_fn(rng, input_shape, out_dim * s[1])
+    W *= W_std / (input_shape[channel_axis] / s[0])**0.5
+    b = None if b is None else b * b_std
+    return output_shape, (W, b)
 
   if parameterization == 'ntk':
     init_fn = ntk_init_fn
@@ -809,12 +837,12 @@ def Dense(
                        0, channel_axis)
 
     if parameterization == 'ntk':
-      norm = W_std / np.sqrt(inputs.shape[channel_axis])
+      norm = W_std / inputs.shape[channel_axis]**0.5
       outputs = norm * prod
       if b is not None:
         outputs += b_std * b
     elif parameterization == 'standard':
-      outputs = prod
+      outputs = prod / s[0]**0.5
       if b is not None:
         outputs += b
     else:
@@ -837,7 +865,7 @@ def Dense(
       if ntk is not None:
         ntk = nngp + W_std**2 * ntk
     elif parameterization == 'standard':
-      input_width = k.shape1[channel_axis]
+      input_width = k.shape1[channel_axis] / s[0]
       if ntk is not None:
         ntk = input_width * nngp + W_std**2 * ntk
         if b_std is not None:
@@ -859,14 +887,17 @@ def Dense(
 
 @layer
 @supports_masking(remask_kernel=True)
-def Conv(out_chan: int,
-         filter_shape: Sequence[int],
-         strides: Optional[Sequence[int]] = None,
-         padding: str = Padding.VALID.name,
-         W_std: float = 1.0,
-         b_std: Optional[float] = None,
-         dimension_numbers: Optional[Tuple[str, str, str]] = None,
-         parameterization: str = 'ntk') -> InternalLayerMasked:
+def Conv(
+    out_chan: int,
+    filter_shape: Sequence[int],
+    strides: Optional[Sequence[int]] = None,
+    padding: str = Padding.VALID.name,
+    W_std: float = 1.0,
+    b_std: Optional[float] = None,
+    dimension_numbers: Optional[Tuple[str, str, str]] = None,
+    parameterization: str = 'ntk',
+    s: Tuple[int, int] = (1, 1),
+) -> InternalLayerMasked:
   """Layer construction function for a general convolution layer.
 
   Based on `jax.example_libraries.stax.GeneralConv`.
@@ -875,44 +906,58 @@ def Conv(out_chan: int,
     out_chan:
       The number of output channels / features of the convolution. This is
       ignored in by the `kernel_fn` in NTK parameterization.
+
     filter_shape:
       The shape of the filter. The shape of the tuple should agree with the
       number of spatial dimensions in `dimension_numbers`.
+
     strides:
       The stride of the convolution. The shape of the tuple should agree with
       the number of spatial dimensions in `dimension_numbers`.
+
     padding:
       Specifies padding for the convolution. Can be one of `"VALID"`, `"SAME"`,
       or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
+
     W_std:
       The standard deviation of the weights.
+
     b_std:
       The standard deviation of the biases.
+
     dimension_numbers:
       Specifies which axes should be convolved over. Should match the
       specification in `jax.lax.conv_general_dilated`.
+
     parameterization:
       Either `"ntk"` or `"standard"`. These parameterizations are the direct
       analogues for convolution of the corresponding parameterizations for
       `Dense` layers.
 
+    s:
+      A tuple of integers, a direct convolutional analogue of the respective
+      parameters for the `Dense` layer.
+
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
   return _Conv(out_chan, filter_shape, strides, padding, W_std, b_std,
-               dimension_numbers, parameterization, False, True)
+               dimension_numbers, parameterization, s, False, True)
 
 
 @layer
 @supports_masking(remask_kernel=True)
-def ConvTranspose(out_chan: int,
-                  filter_shape: Sequence[int],
-                  strides: Optional[Sequence[int]] = None,
-                  padding: str = Padding.VALID.name,
-                  W_std: float = 1.0,
-                  b_std: Optional[float] = None,
-                  dimension_numbers: Optional[Tuple[str, str, str]] = None,
-                  parameterization: str = 'ntk') -> InternalLayerMasked:
+def ConvTranspose(
+    out_chan: int,
+    filter_shape: Sequence[int],
+    strides: Optional[Sequence[int]] = None,
+    padding: str = Padding.VALID.name,
+    W_std: float = 1.0,
+    b_std: Optional[float] = None,
+    dimension_numbers: Optional[Tuple[str, str, str]] = None,
+    parameterization: str = 'ntk',
+    s: Tuple[int, int] = (1, 1),
+) -> InternalLayerMasked:
   """Layer construction function for a general transpose convolution layer.
 
   Based on `jax.example_libraries.stax.GeneralConvTranspose`.
@@ -921,44 +966,58 @@ def ConvTranspose(out_chan: int,
     out_chan:
       The number of output channels / features of the convolution. This is
       ignored in by the `kernel_fn` in `"ntk"` parameterization.
+
     filter_shape:
       The shape of the filter. The shape of the tuple should agree with the
       number of spatial dimensions in `dimension_numbers`.
+
     strides:
       The stride of the convolution. The shape of the tuple should agree with
       the number of spatial dimensions in `dimension_numbers`.
+
     padding:
       Specifies padding for the convolution. Can be one of `"VALID"`, `"SAME"`,
       or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
+
     W_std:
       standard deviation of the weights.
+
     b_std:
       standard deviation of the biases.
+
     dimension_numbers:
       Specifies which axes should be convolved over. Should match the
       specification in `jax.lax.conv_general_dilated`.
+
     parameterization:
       Either `"ntk"` or `"standard"`. These parameterizations are the direct
       analogues for convolution of the corresponding parameterizations for
       `Dense` layers.
 
+    s:
+      A tuple of integers, a direct convolutional analogue of the respective
+      parameters for the `Dense` layer.
+
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
   return _Conv(out_chan, filter_shape, strides, padding, W_std, b_std,
-               dimension_numbers, parameterization, True, True)
+               dimension_numbers, parameterization, s, True, True)
 
 
 @layer
 @supports_masking(remask_kernel=True)
-def ConvLocal(out_chan: int,
-              filter_shape: Sequence[int],
-              strides: Optional[Sequence[int]] = None,
-              padding: str = Padding.VALID.name,
-              W_std: float = 1.0,
-              b_std: Optional[float] = None,
-              dimension_numbers: Optional[Tuple[str, str, str]] = None,
-              parameterization: str = 'ntk') -> InternalLayerMasked:
+def ConvLocal(
+    out_chan: int,
+    filter_shape: Sequence[int],
+    strides: Optional[Sequence[int]] = None,
+    padding: str = Padding.VALID.name,
+    W_std: float = 1.0,
+    b_std: Optional[float] = None,
+    dimension_numbers: Optional[Tuple[str, str, str]] = None,
+    parameterization: str = 'ntk',
+    s: Tuple[int, int] = (1, 1),
+) -> InternalLayerMasked:
   """Layer construction function for a general unshared convolution layer.
 
   Also known and "Locally connected networks" or LCNs, these are equivalent to
@@ -969,32 +1028,43 @@ def ConvLocal(out_chan: int,
     out_chan:
       The number of output channels / features of the convolution. This is
       ignored in by the `kernel_fn` in `"ntk"` parameterization.
+
     filter_shape:
       The shape of the filter. The shape of the tuple should agree with the
       number of spatial dimensions in `dimension_numbers`.
+
     strides:
       The stride of the convolution. The shape of the tuple should agree with
       the number of spatial dimensions in `dimension_numbers`.
+
     padding:
       Specifies padding for the convolution. Can be one of `"VALID"`, `"SAME"`,
       or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
+
     W_std:
       standard deviation of the weights.
+
     b_std:
       standard deviation of the biases. `None` means no bias.
+
     dimension_numbers:
       Specifies which axes should be convolved over. Should match the
       specification in `jax.lax.conv_general_dilated`.
+
     parameterization:
       Either `"ntk"` or `"standard"`. These parameterizations are the direct
       analogues for convolution of the corresponding parameterizations for
       `Dense` layers.
 
+    s:
+      A tuple of integers, a direct convolutional analogue of the respective
+      parameters for the `Dense` layer.
+
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
   return _Conv(out_chan, filter_shape, strides, padding, W_std, b_std,
-               dimension_numbers, parameterization, False, False)
+               dimension_numbers, parameterization, s, False, False)
 
 
 def _Conv(
@@ -1006,6 +1076,7 @@ def _Conv(
     b_std: Optional[float],
     dimension_numbers: Optional[Tuple[str, str, str]],
     parameterization: str,
+    s: Tuple[int, int],
     transpose: bool,
     shared_weights: bool
 ) -> InternalLayerMasked:
@@ -1017,28 +1088,41 @@ def _Conv(
     out_chan:
       The number of output channels / features of the convolution. This is
       ignored in by the `kernel_fn` in NTK parameterization.
+
     filter_shape: The shape of the filter.
       The shape of the tuple should agree with the number of spatial dimensions
       in `dimension_numbers`.
+
     strides:
       The stride of the convolution. The shape of the tuple should agree with
       the number of spatial dimensions in `dimension_numbers`.
+
     padding:
       Specifies padding for the convolution. Can be one of `"VALID"`, `"SAME"`,
       or `"CIRCULAR"`. `"CIRCULAR"` uses periodic convolutions.
+
     W_std:
       The standard deviation of the weights.
+
     b_std:
       The standard deviation of the biases. `None` means no bias.
+
     dimension_numbers:
       Specifies which axes should be convolved over. Should match the
       specification in `jax.lax.dot_general_dilated`.
+
     parameterization:
       Either `"ntk"` or `"standard"`. These parameterizations are the direct
       analogues for convolution of the corresponding parameterizations for
       `Dense` layers.
+
+    s:
+      A tuple of integers, a direct convolutional analogue of the respective
+      parameters for the `Dense` layer.
+
     transpose:
       `True` to use transpose convolution.
+
     shared_weights:
       `True` to share weights (regular CNNs); otherwise different weights at
       different spatial locations (locally connected networks, LCNs).
@@ -1064,8 +1148,14 @@ def _Conv(
   else:
     init_padding = apply_padding = padding
 
+  if parameterization == 'ntk':
+    out_chan_arg = out_chan
+  elif parameterization == 'standard':
+    out_chan_arg = out_chan * s[1]
+  else:
+    raise ValueError(parameterization)
   init_args = dict(dimension_numbers=dimension_numbers,
-                   out_chan=out_chan,
+                   out_chan=out_chan_arg,
                    filter_shape=filter_shape,
                    strides=strides,
                    padding=init_padding.name,
@@ -1131,7 +1221,7 @@ def _Conv(
 
   def standard_init_fn(rng, input_shape):
     output_shape, (W, b) = ntk_init_fn(rng, input_shape)
-    norm = W_std / np.sqrt(get_fan_in(input_shape))
+    norm = W_std / (get_fan_in(input_shape) / s[0])**0.5
     return output_shape, (W * norm, None if b_std is None else b * b_std)
 
   if parameterization == 'ntk':
@@ -1145,10 +1235,10 @@ def _Conv(
     W, b = params
 
     if parameterization == 'ntk':
-      norm = W_std / np.sqrt(get_fan_in(inputs.shape))
+      norm = W_std / get_fan_in(inputs.shape)**0.5
       b_rescale = b_std
     elif parameterization == 'standard':
-      norm = 1.
+      norm = 1. / s[0]**0.5
       b_rescale = 1.
     else:
       raise NotImplementedError(parameterization)
@@ -1264,7 +1354,7 @@ def _Conv(
     elif parameterization == 'standard':
       nngp_unscaled = conv_unscaled(nngp, 2)
       if ntk is not None:
-        ntk = (get_fan_in(k.shape1) * nngp_unscaled +
+        ntk = (get_fan_in(k.shape1) / s[0] * nngp_unscaled +
                W_std ** 2 * conv_unscaled(ntk, 2))
         if b_std is not None:
           ntk = affine(ntk, 1, 1., 2)
