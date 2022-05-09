@@ -92,7 +92,7 @@ import operator
 from typing import Union, Optional, Tuple, Dict
 from jax import eval_shape, jacobian, jvp, vjp, vmap, linear_transpose
 import jax.numpy as np
-from jax.tree_util import tree_flatten, tree_unflatten, tree_multimap, tree_reduce, tree_map
+from jax.tree_util import tree_flatten, tree_unflatten, tree_reduce, tree_map
 from .utils import utils
 from .utils.typing import ApplyFn, EmpiricalKernelFn, EmpiricalGetKernelFn, NTTree, PyTree, Axes, VMapAxes, VMapAxisTriple
 
@@ -699,7 +699,7 @@ def _direct_ntk_fn(f: ApplyFn,
       contract_axes = _trace_axes + param_axes
       return utils.dot_general(x, y, contract_axes, _diagonal_axes) / size
 
-    return tree_reduce(operator.add, tree_multimap(contract, j1, j2))
+    return tree_reduce(operator.add, tree_map(contract, j1, j2))
 
   def ntk_fn(x1: NTTree[np.ndarray],
              x2: Optional[NTTree[np.ndarray]],
@@ -816,7 +816,7 @@ def _dict_of_tree_to_tree_of_dict(out_dict, get):
   # to be a tuple of dicts instead. This occurs when the output of a network is
   # is a parallel layer.
 
-  return tree_multimap(lambda *x: dict((g, v) for g, v in zip(get, x)),
+  return tree_map(lambda *x: dict((g, v) for g, v in zip(get, x)),
                        *[out_dict[g] for g in get])
 
 
@@ -843,17 +843,17 @@ def _get_f_params(f, x, x_axis, fx_axis, kw_axes, **apply_fn_kwargs):
 def _expand_dims(x, axis):
   if axis is None or x is None:
     return x
-  return tree_multimap(np.expand_dims, x, axis)
+  return tree_map(np.expand_dims, x, axis)
 
 
 def _add(x, y):
   if x is None or y is None:
     return None
-  return tree_multimap(operator.add, x, y)
+  return tree_map(operator.add, x, y)
 
 
 def _sub(x, y):
-  return tree_multimap(operator.sub, x, y)
+  return tree_map(operator.sub, x, y)
 
 
 def _div(x, y):
@@ -863,7 +863,7 @@ def _div(x, y):
 def _squeeze(x, axis):
   if axis is None:
     return x
-  return tree_multimap(np.squeeze, x, axis)
+  return tree_map(np.squeeze, x, axis)
 
 
 @utils.nt_tree_fn()
@@ -872,7 +872,7 @@ def _ndim(x):
 
 
 def _mod(x, y):
-  return tree_multimap(operator.mod, x, y)
+  return tree_map(operator.mod, x, y)
 
 
 def _diagonal(ntk, fx):

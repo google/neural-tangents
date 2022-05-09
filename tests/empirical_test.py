@@ -18,7 +18,7 @@ from functools import partial
 import operator
 from absl.testing import absltest
 from absl.testing import parameterized
-from jax import jit, tree_map, tree_multimap
+from jax import jit, tree_map
 from jax.config import config
 import jax.numpy as np
 import jax.random as random
@@ -139,7 +139,7 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
       b *= 2.
       w1 += 5.
       w2 /= 0.9
-    return tree_multimap(operator.add,
+    return tree_map(operator.add,
                          f0,
                          [np.dot(np.dot(x0.T, w1) + w2, dx),
                           (np.dot(w1, dx),
@@ -196,7 +196,7 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
         w1 += 5.
         w2 /= 0.9
       dx = x - x0
-      return tree_multimap(operator.add,
+      return tree_map(operator.add,
                            f_lin,
                            [0.5 * np.dot(np.dot(dx.T, w1), dx),
                             (0.,

@@ -54,7 +54,7 @@ from jax import random
 import jax.numpy as np
 from jax.tree_util import tree_all
 from jax.tree_util import tree_map
-from jax.tree_util import tree_multimap, tree_flatten, tree_unflatten
+from jax.tree_util import tree_flatten, tree_unflatten
 from .utils.kernel import Kernel
 from .utils import utils
 from .utils.typing import KernelFn, NTTree
@@ -151,7 +151,7 @@ def _scan(f: Callable[[_Carry, _Input], Tuple[_Carry, _Output]],
     carry, y = f(carry, x)
     ys += [y]
 
-  return carry, tree_multimap(lambda *y: np.stack(y), *ys)
+  return carry, tree_map(lambda *y: np.stack(y), *ys)
 
 
 def _flatten_batch_dimensions(k: np.ndarray,
