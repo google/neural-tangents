@@ -118,11 +118,11 @@ class PolyTensorSketch:
     n = x.shape[0]
     log_degree = len(self.tree_rand_signs)
     V = [0 for i in range(log_degree)]
+    dtype = np.complex64 if x.real.dtype == np.float32 else np.complex128
 
     for i in range(log_degree):
       deg = self.tree_rand_signs[i].shape[0]
-      V[i] = np.zeros((deg, n, self.tree_rand_inds[i].shape[2]),
-                      dtype=np.complex64)
+      V[i] = np.zeros((deg, n, self.tree_rand_inds[i].shape[2]), dtype=dtype)
       for j in range(deg):
         if i == 0:
           V[i] = V[i].at[j, :, :].set(
@@ -166,7 +166,9 @@ class PolyTensorSketch:
 
   def expand_feats(self, polysketch_feats, coeffs):
     n, sktch_dim = polysketch_feats[0].shape
-    Z = np.zeros((len(self.rand_signs), n), dtype=np.complex64)
+    dtype = np.complex64 if polysketch_feats[
+        0].real.dtype == np.float32 else np.complex128
+    Z = np.zeros((len(self.rand_signs), n), dtype=dtype)
     Z = Z.at[0, :].set(np.sqrt(coeffs[0]) * np.ones(n))
     degree = len(polysketch_feats)
     for i in range(degree):
