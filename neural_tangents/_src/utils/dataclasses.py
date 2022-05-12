@@ -90,11 +90,17 @@ def dataclass(clz):
 
   @functools.wraps(dataclasses.asdict)
   def asdict(self: data_clz) -> Dict[str, Any]:
-    return dataclasses.asdict(self)
+    return {
+        f.name: getattr(self, f.name)
+        for f in dataclasses.fields(self)
+    }
 
   @functools.wraps(dataclasses.astuple)
   def astuple(self: data_clz) -> Tuple[Any, ...]:
-    return dataclasses.astuple(self)
+    return tuple(
+        getattr(self, f.name)
+        for f in dataclasses.fields(self)
+    )
 
   data_clz.replace = replace
   data_clz.asdict = asdict
