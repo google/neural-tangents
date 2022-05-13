@@ -237,14 +237,12 @@ def _flatten_kernel(k: Kernel,
                     is_parallel: bool) -> Kernel:
   """Flattens a kernel array or a `Kernel` along the batch dimension."""
 
-  # pytype: disable=attribute-error
-  if hasattr(k, '_asdict'):
+  if hasattr(k, '_asdict') and hasattr(k, '_replace'):
     return k._replace(**_flatten_kernel_dict(k._asdict(), x2_is_none,
                                              is_parallel))
 
   elif isinstance(k, Kernel):
     return Kernel(**_flatten_kernel_dict(k.asdict(), x2_is_none, is_parallel))
-  # pytype:enable=attribute-error
 
   elif isinstance(k, (onp.ndarray, np.ndarray)):
     return _flatten_batch_dimensions(k, is_parallel)
@@ -284,9 +282,11 @@ def _reshape_kernel_for_pmap(k: Kernel,
       mask2=mask2)
 
 
+_ArrayOrKernel = TypeVar('_ArrayOrKernel', np.ndarray, Kernel)
+
+
 @utils.nt_tree_fn()
-def _set_cov2_to_none(
-    k: Union[Kernel, np.ndarray]) -> Union[Kernel, np.ndarray]:
+def _set_cov2_to_none(k: _ArrayOrKernel) -> _ArrayOrKernel:
   if isinstance(k, Kernel):
     k = k.replace(cov2=None)
   return k
@@ -399,14 +399,18 @@ def _serial(kernel_fn: _KernelFn,
     return flatten(kernel, x2_is_none)
 
   def serial_fn_kernel(k: NTTree[Kernel], *args, **kwargs) -> NTTree[Kernel]:
-    # pytype: disable=attribute-error
-    def get_n1_n2(k):
+
+    def get_n1_n2(k: NTTree[Kernel]) -> Tuple[int, ...]:
       if utils.is_list_or_tuple(k):
         # TODO(schsam): We might want to check for consistency here, but I can't
         # imagine a case where we could get inconsistent kernels.
         return get_n1_n2(k[0])
-      return k.nngp.shape[:2]
-    # pytype: enable=attribute-error
+
+      if isinstance(k, Kernel):
+        return k.nngp.shape[:2]
+
+      raise TypeError(type(Kernel), Kernel)
+
     n1, n2 = get_n1_n2(k)
 
     (n1_batches, n1_batch_size,
@@ -463,7 +467,7 @@ def _serial(kernel_fn: _KernelFn,
                 x2: Optional[NTTree[Optional[np.ndarray]]] = None,
                 *args,
                 **kwargs) -> NTTree[Kernel]:
-    if utils.is_nt_tree_of(x1_or_kernel, (onp.ndarray, np.ndarray)):
+    if utils.is_nt_tree_of(x1_or_kernel, onp.ndarray, np.ndarray):
       return serial_fn_x1(x1_or_kernel, x2, *args, **kwargs)
     elif utils.is_nt_tree_of(x1_or_kernel, Kernel):
       if x2 is not None:
@@ -603,7 +607,7 @@ def _parallel(kernel_fn: _KernelFn,
 
   @utils.wraps(kernel_fn)
   def parallel_fn(x1_or_kernel, x2=None, *args, **kwargs):
-    if utils.is_nt_tree_of(x1_or_kernel, (onp.ndarray, np.ndarray)):
+    if utils.is_nt_tree_of(x1_or_kernel, onp.ndarray, np.ndarray):
       return parallel_fn_x1(x1_or_kernel, x2, *args, **kwargs)
     elif utils.is_nt_tree_of(x1_or_kernel, Kernel):
       assert not x2

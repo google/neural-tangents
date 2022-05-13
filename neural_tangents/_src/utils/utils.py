@@ -19,7 +19,7 @@ import functools
 import inspect
 import operator
 import types
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Sized, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Sized, Tuple, Union, TypeVar, Type
 
 import jax
 
@@ -35,18 +35,18 @@ from jax.tree_util import tree_flatten, tree_unflatten
 import numpy as onp
 
 
-def is_list_or_tuple(x):
+def is_list_or_tuple(x) -> bool:
   # We do not want to return True if x is a subclass of list or tuple since
   # otherwise this will return true for namedtuples.
   return type(x) == list or type(x) == tuple
 
 
-def is_nt_tree_of(x, dtype):
+def is_nt_tree_of(x, *dtype: Type) -> bool:
   if isinstance(x, dtype):
     return True
   if not is_list_or_tuple(x):
     return False
-  return all(is_nt_tree_of(_x, dtype) for _x in x)
+  return all(is_nt_tree_of(_x, *dtype) for _x in x)
 
 
 def nt_tree_fn(nargs: Optional[int] = None,
@@ -119,7 +119,7 @@ def nt_tree_fn(nargs: Optional[int] = None,
   return tree_fn
 
 
-def all_none(x: Any, attr: Optional[str] = None) -> bool:
+def all_none(x, attr: Optional[str] = None) -> bool:
   get_fn = (lambda x: x) if attr is None else lambda x: getattr(x, attr)
   return tree_all(tree_map(lambda x: get_fn(x) is None, x))
 
@@ -429,9 +429,14 @@ def outer_prod(x, y, start_axis, end_axis, prod_op):
   return prod_op(x, y)
 
 
+_ArrayOrShape = TypeVar('_ArrayOrShape',
+                        onp.ndarray, np.ndarray, List[int], Tuple[int, ...])
+
+
 def reverse_zipped(
-    x: Union[np.ndarray, Sequence[int]],
-    start_axis: int = 0) -> Union[np.ndarray, Sequence[int]]:
+    x: _ArrayOrShape,
+    start_axis: int = 0
+) -> _ArrayOrShape:
   if x is not None:
     ndim = _get_ndim(x)
     source_axes = tuple(j
@@ -442,7 +447,7 @@ def reverse_zipped(
       target_axes = range(start_axis, ndim)
       x = np.moveaxis(x, source_axes, target_axes)
     else:
-      x = x[:start_axis] + type(x)(x[i] for i in source_axes)  # pytype: disable=wrong-arg-count  # py39-upgrade
+      x = x[:start_axis] + type(x)(x[i] for i in source_axes)
   return x
 
 
@@ -461,14 +466,14 @@ class MaskedArray:
 
 
 @nt_tree_fn(nargs=1)
-def get_masked_array(x: np.ndarray,
+def get_masked_array(x: Union[None, np.ndarray, MaskedArray],
                      mask_constant: Optional[float] = None) -> MaskedArray:
   """Return `x` with entries equal to `mask_constant` zeroed-out, and the mask.
 
   The mask returned is a boolean `np.ndarray` with masked indices having `True`.
 
   Args:
-    x: `np.ndarray` to mask. If `x` is a `MaskedInput`, treat it as
+    x: `np.ndarray` to mask. If `x` is a `MaskedArray`, treat it as
       `(masked_x, mask)` and pass it through.
     mask_constant: an optional `float`, the value in inputs to be considered as
       masked (e.g. padding in a batch of sentences). `None` means no masking.
@@ -499,13 +504,16 @@ def get_masked_array(x: np.ndarray,
   return MaskedArray(x, mask_mat)  # pytype: disable=wrong-arg-count
 
 
-def mask(x: Optional[np.ndarray], mask_mat: Optional[np.ndarray]):
+def mask(
+    x: Optional[np.ndarray],
+    mask_mat: Optional[np.ndarray]
+) -> Optional[np.ndarray]:
   if x is None or mask_mat is None:
     return x
   return np.where(mask_mat, np.zeros((), x.dtype), x)
 
 
-def size_at(x: Union[np.ndarray, Sequence[int]],
+def size_at(x: _ArrayOrShape,
             axes: Optional[Iterable[int]] = None) -> int:
   if hasattr(x, 'shape'):
     x = x.shape
@@ -517,7 +525,7 @@ def size_at(x: Union[np.ndarray, Sequence[int]],
 
 
 def shape_and_axes(
-    x: Union[np.ndarray, Sequence[int]],
+    x: _ArrayOrShape,
     ignore_axes: Iterable[int] = ()) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
   if hasattr(x, 'shape'):
     x = x.shape

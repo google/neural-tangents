@@ -84,17 +84,32 @@ def dataclass(clz):
                                      iterate_clz,
                                      clz_from_iterable)
 
-  @functools.wraps(dataclasses.replace)
+  @functools.wraps(
+    dataclasses.replace,
+    assigned=('__module__', '__name__', '__qualname__', '__annotations__'))
   def replace(self: data_clz, **kwargs) -> data_clz:
+    """Instance method alternative to `dataclasses.replace`."""
     return dataclasses.replace(self, **kwargs)
 
-  @functools.wraps(dataclasses.asdict)
+  @functools.wraps(
+    dataclasses.asdict,
+    assigned=('__module__', '__name__', '__qualname__', '__annotations__'))
   def asdict(self: data_clz) -> Dict[str, Any]:
-    return dataclasses.asdict(self)
+    """Instance method alternative to `dataclasses.asdict`."""
+    return {
+        f.name: getattr(self, f.name)
+        for f in dataclasses.fields(self)
+    }
 
-  @functools.wraps(dataclasses.astuple)
+  @functools.wraps(
+    dataclasses.astuple,
+    assigned=('__module__', '__name__', '__qualname__', '__annotations__'))
   def astuple(self: data_clz) -> Tuple[Any, ...]:
-    return dataclasses.astuple(self)
+    """Instance method alternative to `dataclasses.astuple`."""
+    return tuple(
+        getattr(self, f.name)
+        for f in dataclasses.fields(self)
+    )
 
   data_clz.replace = replace
   data_clz.asdict = asdict

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The `Kernel` class containing NTK and NNGP `np.ndarray`s as fields."""
+"""The `Kernel` class with infinite-width NTK and NNGP `np.ndarray` fields."""
 
 
 import operator as op
@@ -85,11 +85,11 @@ class Kernel:
       store only the diagonals of the location-location covariances
       (`diagonal_spatial == True`,
       `nngp.shape == (batch_size_1, batch_size_2, height, width, depth, ...)`),
-      or the full covariance (`diagonal_spatial == False`,
-     `nngp.shape == (batch_size_1, batch_size_2, height, height, width, width,
-     depth, depth, ...)`). Defaults to `False`, but is set to `True` if the
-     output top-layer covariance depends only on the diagonals (e.g. when a CNN
-     network has no pooling layers and `Flatten` on top).
+      or the full covariance (`diagonal_spatial == False`, `nngp.shape ==
+      (batch_size_1, batch_size_2, height, height, width, width, depth, depth, ...)`).
+      Defaults to `False`, but is set to `True` if the
+      output top-layer covariance depends only on the diagonals (e.g. when a CNN
+      network has no pooling layers and `Flatten` on top).
 
     shape1:
       a tuple specifying the shape of the random variable in the first batch of

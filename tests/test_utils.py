@@ -244,7 +244,7 @@ def update_test_tolerance(f32_tol=5e-3, f64_tol=1e-5):
 def stub_out_pmap(batch, count):
   # If we are using GPU or CPU stub out pmap with vmap to simulate multi-core.
   if count > 0:
-    class xla_bridge_stub(object):
+    class xla_bridge_stub:
 
       def device_count(self):
         return count

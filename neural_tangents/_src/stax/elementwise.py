@@ -888,7 +888,7 @@ def _elementwise(
   def apply_fn(params, inputs, **kwargs):
     if fn is None:
       raise NotImplementedError(fn)
-    return fn(inputs)  # pytype:disable=not-callable
+    return fn(inputs)
 
   @requires(diagonal_spatial=Diagonal())
   def new_kernel_fn(k: Kernel, **kwargs) -> Kernel:
@@ -899,7 +899,7 @@ def _elementwise(
       raise ValueError('The input to the activation function must be Gaussian, '
                        'i.e. a random affine transform is required before the '
                        'activation function.')
-    k = kernel_fn(k)  # pytype:disable=not-callable
+    k = kernel_fn(k)
     return k.replace(is_gaussian=False)
 
   init_fn.__name__ = apply_fn.__name__ = new_kernel_fn.__name__ = name

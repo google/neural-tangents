@@ -25,7 +25,7 @@ from jax import numpy as np
 from jax import eval_shape, ShapedArray
 from jax.tree_util import tree_map
 from ..utils import utils
-from ..utils import dataclasses
+import dataclasses
 from ..utils.kernel import Kernel
 from ..utils.typing import AnalyticKernelFn, Axes, Get, InitFn, ApplyFn, InternalLayer, Layer, LayerKernelFn, NTTree
 import numpy as onp
@@ -96,7 +96,7 @@ def requires(**static_reqs):
                                  f'`{key} == {v}`.')
 
             elif key in ('batch_axis', 'channel_axis'):
-              ndim = len(k.shape1)  # pytype: disable=attribute-error  # preserve-union-macros
+              ndim = len(k.shape1)
               v_kernel = getattr(k, key)
               v_pos = v % ndim
               if v_kernel != v_pos:
@@ -266,7 +266,7 @@ class Bool(enum.IntEnum):
   __rand__ = __and__
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class Diagonal:
   """Helps decide whether to allow the kernel to contain diagonal entries only.
 
@@ -324,7 +324,7 @@ class Diagonal:
     else:
       input = min(self.input, other.input)
 
-    return Diagonal(input=input, output=other.output)  # pytype:disable=wrong-keyword-args
+    return Diagonal(input=input, output=other.output)
 
   def __and__(self, other: 'Diagonal') -> 'Diagonal':
     """Commutative, associative, and idempotent `AND` operation.
@@ -337,7 +337,7 @@ class Diagonal:
        The largest value allowed both `self` and `other`.
     """
     return Diagonal(input=self.input & other.input,
-                    output=self.output & other.output)  # pytype:disable=wrong-keyword-args
+                    output=self.output & other.output)
 
   def __bool__(self) -> bool:
     """Convert to `diagonal_spatial` / `diagonal_batch` `Kernel` attribute."""
@@ -650,7 +650,7 @@ def _propagate_shape(init_fn: InitFn,
   """Statically, abstractly, evaluate the init_fn to get shape information."""
   def init_and_apply(rng, x):
     _, params = init_fn(rng, tree_map(lambda x: x.shape, x))
-    return apply_fn(params, x, rng=rng, **kwargs)  # pytype: disable=wrong-keyword-args  # kwargs-checking
+    return apply_fn(params, x, rng=rng, **kwargs)
   akey = ShapedArray((2,), np.uint32)
   try:
     shaped = eval_shape(init_and_apply, akey, shaped)
@@ -660,7 +660,7 @@ def _propagate_shape(init_fn: InitFn,
     pass
 
   if isinstance(shaped, utils.MaskedArray):
-    shaped = shaped.masked_value  # pytype: disable=attribute-error
+    shaped = shaped.masked_value
 
   return shaped
 

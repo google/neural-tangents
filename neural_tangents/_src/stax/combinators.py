@@ -15,14 +15,14 @@
 """Layer combinators."""
 
 import operator as op
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Tuple
 import warnings
-
+from jax import random
 import frozendict
 import jax.example_libraries.stax as ostax
 from .requirements import Diagonal, get_req, layer, requires
 from ..utils.kernel import Kernel
-from ..utils.typing import InternalLayer, Layer, LayerKernelFn, NTTree, NTTrees
+from ..utils.typing import InternalLayer, Layer, LayerKernelFn, NTTree, NTTrees, Shapes, PyTree
 
 
 @layer
@@ -74,7 +74,7 @@ def parallel(*layers: Layer) -> InternalLayer:
   init_fns, apply_fns, kernel_fns = zip(*layers)
   init_fn_stax, apply_fn_stax = ostax.parallel(*zip(init_fns, apply_fns))
 
-  def init_fn(rng, input_shape):
+  def init_fn(rng: random.KeyArray, input_shape: Shapes):
     return type(input_shape)(init_fn_stax(rng, input_shape))
 
   def apply_fn(params, inputs, **kwargs):
