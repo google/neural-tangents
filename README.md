@@ -1,6 +1,6 @@
 # **Stand with Ukraine!** 🇺🇦
 
-Freedom of thought is fundamental to all of science. Right now, our freedom is being suppressed with carpet bombing of civilians in Ukraine. **Don't be against the war - fight against the war!** Support Ukraine at **https://stopputin.net**.
+Freedom of thought is fundamental to all of science. Right now, our freedom is being suppressed with carpet bombing of civilians in Ukraine. **Don't be against the war - fight against the war!** Support Ukraine at **[stopputin.net](https://stopputin.net/)** (rallies and events) and **[fundforukraine.ml](https://fundforukraine.ml/)** (donation matching).
 
 # Neural Tangents
 [**ICLR 2020 Video**](https://iclr.cc/virtual_2020/poster_SklD9yrFPS.html)
@@ -438,7 +438,10 @@ as an example. With `NVIDIA V100` 64-bit precision, `nt` took 316/330/508 GPU-ho
 
 Neural Tangents has been used in the following papers (newest first):
 
+1. [Generative Adversarial Method Based on Neural Tangent Kernels](https://arxiv.org/abs/2204.04090)
+1. [Generalization Through The Lens Of Leave-One-Out Error](https://arxiv.org/abs/2203.03443)
 1. [Fast rates for noisy interpolation require rethinking the effects of inductive bias](https://arxiv.org/abs/2203.03597)
+1. [A duality connecting neural network and cosmological dynamics](https://arxiv.org/abs/2202.11104)
 2. [Representation Learning and Deep Generative Modeling in Dynamical Systems](https://tel.archives-ouvertes.fr/tel-03591720/document)
 3. [Do autoencoders need a bottleneck for anomaly detection?](https://www.researchgate.net/profile/Bang-Xiang-Yong/publication/358445830_Do_autoencoders_need_a_bottleneck_for_anomaly_detection/links/6202e7d96adc0779cd52574a/Do-autoencoders-need-a-bottleneck-for-anomaly-detection.pdf)
 4. [Finding Dynamics Preserving Adversarial Winning Tickets](https://arxiv.org/abs/2202.06488)
