@@ -1,6 +1,6 @@
 # **Stand with Ukraine!** 🇺🇦
 
-Freedom of thought is fundamental to all of science. Right now, our freedom is being suppressed with carpet bombing of civilians in Ukraine. **Don't be against the war - fight against the war!** Support Ukraine at **[stopputin.net](https://stopputin.net/)** (rallies and events) and **[fundforukraine.ml](https://fundforukraine.ml/)** (donation matching).
+Freedom of thought is fundamental to all of science. Right now, our freedom is being suppressed with carpet bombing of civilians in Ukraine. **Don't be against the war - fight against the war!** Support Ukraine at **[stopputin.net](https://stopputin.net/)**.
 
 # Neural Tangents
 [**ICLR 2020 Video**](https://iclr.cc/virtual_2020/poster_SklD9yrFPS.html)
