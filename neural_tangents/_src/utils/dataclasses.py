@@ -19,8 +19,8 @@ This code was copied and adapted from https://github.com/google/flax/struct.py.
 Accessed on 03/23/2020.
 """
 
-import functools
 import dataclasses
+import functools
 from typing import Any, Dict, Tuple
 
 import jax
@@ -84,19 +84,28 @@ def dataclass(clz):
                                      iterate_clz,
                                      clz_from_iterable)
 
-  @functools.wraps(dataclasses.replace)
+  @functools.wraps(
+      dataclasses.replace,
+      assigned=('__module__', '__name__', '__qualname__', '__annotations__'))
   def replace(self: data_clz, **kwargs) -> data_clz:
+    """Instance method alternative to `dataclasses.replace`."""
     return dataclasses.replace(self, **kwargs)
 
-  @functools.wraps(dataclasses.asdict)
+  @functools.wraps(
+      dataclasses.asdict,
+      assigned=('__module__', '__name__', '__qualname__', '__annotations__'))
   def asdict(self: data_clz) -> Dict[str, Any]:
+    """Instance method alternative to `dataclasses.asdict`."""
     return {
         f.name: getattr(self, f.name)
         for f in dataclasses.fields(self)
     }
 
-  @functools.wraps(dataclasses.astuple)
+  @functools.wraps(
+      dataclasses.astuple,
+      assigned=('__module__', '__name__', '__qualname__', '__annotations__'))
   def astuple(self: data_clz) -> Tuple[Any, ...]:
+    """Instance method alternative to `dataclasses.astuple`."""
     return tuple(
         getattr(self, f.name)
         for f in dataclasses.fields(self)

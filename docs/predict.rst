@@ -1,6 +1,8 @@
+:github_url: https://github.com/google/neural-tangents/tree/main/docs/predict.rst
+
 .. default-role:: code
 
-Predict -- inference with NNGP and NTK or linearized networks
+`nt.predict` -- inference w/ NNGP & NTK
 =============================================================
 
 .. automodule:: neural_tangents._src.predict

@@ -418,7 +418,7 @@ def gradient_descent(
         )
 
       if momentum is None:
-        return ODEState(fx_train_t, fx_test_t)  # pytype: disable=wrong-arg-count
+        return ODEState(fx_train_t, fx_test_t)
 
       fx_train_t += momentum * qx_train_t
       if qx_test_t is not None:

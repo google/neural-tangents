@@ -195,7 +195,7 @@ def DotGeneral(
   diagonal_spatial = Diagonal(
       input=Bool.YES
       if (input_cs in ((), (batch_axis,)) or (rhs is None and lhs is None))
-      else Bool.NO)  # pytype:disable=wrong-keyword-args
+      else Bool.NO)
 
   @requires(diagonal_batch=diagonal_batch,
             diagonal_spatial=diagonal_spatial,
@@ -568,8 +568,8 @@ def Aggregate(
 
   @requires(batch_axis=batch_axis,
             channel_axis=channel_axis,
-            diagonal_spatial=Diagonal(input=Bool.NO, output=Bool.NO))  # pytype:disable=wrong-keyword-args
-  def kernel_fn(k: NTTree[Kernel],
+            diagonal_spatial=Diagonal(input=Bool.NO, output=Bool.NO))
+  def kernel_fn(k: Kernel,
                 *,
                 pattern: Tuple[Optional[np.ndarray],
                                Optional[np.ndarray]] = (None, None),
@@ -601,10 +601,10 @@ def Aggregate(
           'Please file a bug at '
           'https://github.com/google/neural-tangents/issues/new.')
 
-    ndim = len(k.shape1)  # pytype: disable=attribute-error  # preserve-union-macros
+    ndim = len(k.shape1)
     agg_axes, batch_axis, channel_axis = get_agg_axes(ndim)
     agg_ndim = len(agg_axes)
-    agg_shape = tuple(k.shape1[a] for a in agg_axes)  # pytype: disable=attribute-error  # preserve-union-macros
+    agg_shape = tuple(k.shape1[a] for a in agg_axes)
     agg_size = functools.reduce(op.mul, agg_shape, 1)
 
     def bucket_axes(ndim, start_axis):
@@ -629,7 +629,7 @@ def Aggregate(
       pattern1 = None if pattern1 is None else to_dense(pattern1)
       pattern2 = None if pattern2 is None else to_dense(pattern2)
 
-      k = k.dot_general(  # pytype: disable=attribute-error  # preserve-union-macros
+      k = k.dot_general(
           other1=pattern1,
           other2=pattern2,
           is_lhs=False,
@@ -852,7 +852,7 @@ def Dense(
 
   @requires(batch_axis=batch_axis,
             channel_axis=channel_axis,
-            diagonal_spatial=Diagonal())  # pytype:disable=wrong-keyword-args
+            diagonal_spatial=Diagonal())
   def kernel_fn(k: Kernel, **kwargs):
     """Compute the transformed kernels after a `Dense` layer."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -1275,7 +1275,7 @@ def _Conv(
   @requires(batch_axis=lhs_spec.index('N'),
             channel_axis=lhs_spec.index('C'),
             diagonal_spatial=Diagonal(
-                output=Bool.NO if shared_weights else Bool.MAYBE))  # pytype:disable=wrong-keyword-args
+                output=Bool.NO if shared_weights else Bool.MAYBE))
   def kernel_fn(k: Kernel, **kwargs):
     """Compute the transformed kernels after a conv layer."""
     cov1, nngp, cov2, ntk, is_reversed = (k.cov1, k.nngp, k.cov2, k.ntk,
@@ -1551,7 +1551,7 @@ def _Pool(
 
   @requires(batch_axis=batch_axis,
             channel_axis=channel_axis,
-            diagonal_spatial=Diagonal(input=Bool.MAYBE))  # pytype:disable=wrong-keyword-args
+            diagonal_spatial=Diagonal(input=Bool.MAYBE))
   def kernel_fn(k: Kernel, **kwargs) -> Kernel:
     """Kernel transformation."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -1686,7 +1686,7 @@ def _GlobalPool(
 
   @requires(batch_axis=batch_axis,
             channel_axis=channel_axis,
-            diagonal_spatial=Diagonal(input=Bool.MAYBE, output=Bool.YES))  # pytype:disable=wrong-keyword-args
+            diagonal_spatial=Diagonal(input=Bool.MAYBE, output=Bool.YES))
   def kernel_fn(k: Kernel, **kwargs):
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
@@ -1779,7 +1779,7 @@ def Flatten(
 
   @requires(batch_axis=batch_axis,
             channel_axis=None,
-            diagonal_spatial=Diagonal(output=Bool.YES))  # pytype:disable=wrong-keyword-args
+            diagonal_spatial=Diagonal(output=Bool.YES))
   def kernel_fn(k: Kernel, **kwargs):
     """Compute kernels."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -2167,7 +2167,7 @@ def GlobalSelfAttention(
 
   @requires(batch_axis=batch_axis,
             channel_axis=channel_axis,
-            diagonal_spatial=Diagonal(input=Bool.NO))  # pytype:disable=wrong-keyword-args
+            diagonal_spatial=Diagonal(input=Bool.NO))
   def kernel_fn(k: Kernel, **kwargs):
     # Generate (optional) positional embedding covariances.
     R1, R12, R2 = _get_all_pos_emb(k, pos_emb_type, pos_emb_p_norm,
@@ -2631,12 +2631,12 @@ def ImageResize(
       input=Bool.NO
       if any(shape[i] != -1 for i in range(len(shape))
              if i not in (batch_axis, channel_axis))
-      else Bool.YES)  # pytype:disable=wrong-keyword-args
+      else Bool.YES)
 
   @requires(batch_axis=batch_axis,
             channel_axis=channel_axis,
             diagonal_batch=diagonal_batch,
-            diagonal_spatial=diagonal_spatial)  # pytype:disable=wrong-keyword-args
+            diagonal_spatial=diagonal_spatial)
   def kernel_fn(k: Kernel, **kwargs) -> Kernel:
     if isinstance(method, str):
       _method = jax.image.ResizeMethod.from_string(method)

@@ -1,7 +1,9 @@
+:github_url: https://github.com/google/neural-tangents/tree/main/docs/stax.rst
+
 .. default-role:: code
 
-Stax -- infinite networks (NNGP, NTK)
-======================================
+`nt.stax` -- infinite NNGP and NTK
+===========================================
 
 .. automodule:: neural_tangents.stax
 

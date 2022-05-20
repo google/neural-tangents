@@ -1,6 +1,8 @@
+:github_url: https://github.com/google/neural-tangents/tree/main/docs/empirical.rst
+
 .. default-role:: code
 
-Empirical -- finite NNGP and NTK
+`nt.empirical` -- finite NNGP and NTK
 ======================================
 
 .. automodule:: neural_tangents._src.empirical
