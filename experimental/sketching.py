@@ -24,8 +24,8 @@ class TensorSRHT:
 
   def init_sketches(self) -> 'TensorSRHT':
     rng1, rng2, rng3, rng4 = random.split(self.rng, 4)
-    rand_signs1 = random.choice(rng1, 2, shape=(self.input_dim1,)) * 2 - 1
-    rand_signs2 = random.choice(rng2, 2, shape=(self.input_dim2,)) * 2 - 1
+    rand_signs1 = random.bernoulli(rng1, shape=(self.input_dim1,)) * 2 - 1
+    rand_signs2 = random.bernoulli(rng2, shape=(self.input_dim2,)) * 2 - 1
     rand_inds1 = random.choice(rng3,
                                self.input_dim1,
                                shape=(self.sketch_dim // 2,))
@@ -42,7 +42,7 @@ class TensorSRHT:
   def sketch(self, x1, x2, real_output=False):
     x1fft = np.fft.fftn(x1 * self.rand_signs1, axes=(-1,))[:, self.rand_inds1]
     x2fft = np.fft.fftn(x2 * self.rand_signs2, axes=(-1,))[:, self.rand_inds2]
-    out = np.sqrt(1 / self.rand_inds1.shape[-1]) * (x1fft * x2fft)
+    out = self.rand_inds1.shape[-1]**(-0.5) * (x1fft * x2fft)
     return np.concatenate((out.real, out.imag), 1) if real_output else out
 
 
@@ -76,22 +76,22 @@ class PolyTensorSketch:
       rng1, rng2 = random.split(rng1)
 
       if i == 0:
-        tree_rand_signs[i] = random.choice(
-            rng1, 2, shape=(deg_, 2, self.input_dim)) * 2 - 1
+        tree_rand_signs[i] = random.bernoulli(
+            rng1, shape=(deg_, 2, self.input_dim)) * 2 - 1
         tree_rand_inds[i] = random.choice(rng2,
                                           self.input_dim,
                                           shape=(deg_, 2, ske_dim_))
       else:
-        tree_rand_signs[i] = random.choice(rng1, 2,
-                                           shape=(deg_, 2, ske_dim_)) * 2 - 1
+        tree_rand_signs[i] = random.bernoulli(rng1,
+                                              shape=(deg_, 2, ske_dim_)) * 2 - 1
         tree_rand_inds[i] = random.choice(rng2,
                                           ske_dim_,
                                           shape=(deg_, 2, ske_dim_))
       deg_ = deg_ // 2
 
     rng1, rng2 = random.split(rng3, 2)
-    rand_signs = random.choice(rng1, 2,
-                               shape=(1 + self.degree * ske_dim_,)) * 2 - 1
+    rand_signs = random.bernoulli(rng1,
+                                  shape=(1 + self.degree * ske_dim_,)) * 2 - 1
     rand_inds = random.choice(rng2,
                               1 + self.degree * ske_dim_,
                               shape=(self.sketch_dim // 2,))
@@ -105,14 +105,14 @@ class PolyTensorSketch:
   def tensorsrht(self, x1, x2, rand_inds, rand_signs):
     x1fft = np.fft.fftn(x1 * rand_signs[0, :], axes=(-1,))[:, rand_inds[0, :]]
     x2fft = np.fft.fftn(x2 * rand_signs[1, :], axes=(-1,))[:, rand_inds[1, :]]
-    return np.sqrt(1 / rand_inds.shape[1]) * (x1fft * x2fft)
+    return rand_inds.shape[1]**(-0.5) * (x1fft * x2fft)
 
   # Standard SRHT
   def standardsrht(self, x, rand_inds=None, rand_signs=None):
     rand_inds = self.rand_inds if rand_inds is None else rand_inds
     rand_signs = self.rand_signs if rand_signs is None else rand_signs
     xfft = np.fft.fftn(x * rand_signs, axes=(-1,))[:, rand_inds]
-    return np.sqrt(1 / rand_inds.shape[0]) * xfft
+    return rand_inds.shape[0]**(-0.5) * xfft
 
   def sketch(self, x):
     n = x.shape[0]
@@ -169,11 +169,11 @@ class PolyTensorSketch:
     dtype = np.complex64 if polysketch_feats[
         0].real.dtype == np.float32 else np.complex128
     Z = np.zeros((len(self.rand_signs), n), dtype=dtype)
-    Z = Z.at[0, :].set(np.sqrt(coeffs[0]) * np.ones(n))
+    Z = Z.at[0, :].set(coeffs[0]**0.5 * np.ones(n))
     degree = len(polysketch_feats)
     for i in range(degree):
       Z = Z.at[sktch_dim * i + 1:sktch_dim * (i + 1) + 1, :].set(
-          np.sqrt(coeffs[i + 1]) * polysketch_feats[degree - i - 1].T)
+          coeffs[i + 1]**0.5 * polysketch_feats[degree - i - 1].T)
 
     return Z.T
 # pytype: enable=attribute-error

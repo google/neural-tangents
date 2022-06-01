@@ -21,13 +21,15 @@ x = random.normal(key1, (n, d))
 
 width = 512  # this does not matter the output
 W_std = 1.234  # std of Gaussian random weights
+b_std = 0.567  # std of the biases
+dense_kwargs = {"out_dim": width, "W_std": W_std, "b_std": b_std}
 
 print("================== Result of Neural Tangent Library ===================")
 
-init_fn, _, kernel_fn = stax.serial(stax.Dense(width, W_std=W_std), stax.Relu(),
-                                    stax.Dense(width, W_std=W_std), stax.Relu(),
-                                    stax.Dense(width, W_std=W_std), stax.Relu(),
-                                    stax.Dense(1, W_std=W_std))
+init_fn, _, kernel_fn = stax.serial(stax.Dense(**dense_kwargs), stax.Relu(),
+                                    stax.Dense(**dense_kwargs), stax.Relu(),
+                                    stax.Dense(**dense_kwargs), stax.Relu(),
+                                    stax.Dense(1, W_std=W_std, b_std=b_std))
 
 kernel_fn = kernel_fn if no_jitting else jit(kernel_fn)
 nt_kernel = kernel_fn(x, None)
@@ -50,10 +52,10 @@ def test_fc_relu_ntk_approx(relufeat_arg, init_fn=None, feature_fn=None):
 
   if init_fn is None or feature_fn is None:
     init_fn, feature_fn = serial(
-      DenseFeatures(width, W_std=W_std), ReluFeatures(**relufeat_arg),
-      DenseFeatures(width, W_std=W_std), ReluFeatures(**relufeat_arg),
-      DenseFeatures(width, W_std=W_std), ReluFeatures(**relufeat_arg),
-      DenseFeatures(1, W_std=W_std))
+      DenseFeatures(**dense_kwargs), ReluFeatures(**relufeat_arg),
+      DenseFeatures(**dense_kwargs), ReluFeatures(**relufeat_arg),
+      DenseFeatures(**dense_kwargs), ReluFeatures(**relufeat_arg),
+      DenseFeatures(1, W_std=W_std, b_std=b_std))
 
   # Initialize random vectors and sketching algorithms
   _, feat_fn_inputs = init_fn(key2, x.shape)
@@ -89,64 +91,64 @@ def test_fc_relu_ntk_approx(relufeat_arg, init_fn=None, feature_fn=None):
 
 
 
-print("==================== Result of NTK Random Features ====================")
+# print("==================== Result of NTK Random Features ====================")
 
-kappa0_feat_dim = 4096
-kappa1_feat_dim = 4096
-sketch_dim = 4096
+# kappa0_feat_dim = 4096
+# kappa1_feat_dim = 4096
+# sketch_dim = 4096
 
-test_fc_relu_ntk_approx({
-  'method': 'RANDFEAT',
-  'feature_dim0': kappa0_feat_dim,
-  'feature_dim1': kappa1_feat_dim,
-  'sketch_dim': sketch_dim,
-})
+# test_fc_relu_ntk_approx({
+#   'method': 'RANDFEAT',
+#   'feature_dim0': kappa0_feat_dim,
+#   'feature_dim1': kappa1_feat_dim,
+#   'sketch_dim': sketch_dim,
+# })
 
-print("==================== Result of NTK wih PolySketch ====================")
+# print("==================== Result of NTK wih PolySketch ====================")
 
-poly_degree = 4
-poly_sketch_dim = 4096
-sketch_dim = 4096
+# poly_degree = 4
+# poly_sketch_dim = 4096
+# sketch_dim = 4096
 
-test_fc_relu_ntk_approx({
-  'method': 'POLYSKETCH',
-  'sketch_dim': sketch_dim,
-  'poly_degree': poly_degree,
-  'poly_sketch_dim': poly_sketch_dim
-})
+# test_fc_relu_ntk_approx({
+#   'method': 'POLYSKETCH',
+#   'sketch_dim': sketch_dim,
+#   'poly_degree': poly_degree,
+#   'poly_sketch_dim': poly_sketch_dim
+# })
 
-print("=============== Result of PolySketch + Random Features ===============")
+# print("=============== Result of PolySketch + Random Features ===============")
 
-kappa0_feat_dim = 2048
-sketch_dim = 4096
-poly_degree = 4
-poly_sketch_dim = 4096
+# kappa0_feat_dim = 2048
+# sketch_dim = 4096
+# poly_degree = 4
+# poly_sketch_dim = 4096
 
-test_fc_relu_ntk_approx({
-  'method': 'PSRF',
-  'feature_dim0': kappa0_feat_dim,
-  'sketch_dim': sketch_dim,
-  'poly_degree': poly_degree,
-  'poly_sketch_dim': poly_sketch_dim
-})
+# test_fc_relu_ntk_approx({
+#   'method': 'PSRF',
+#   'feature_dim0': kappa0_feat_dim,
+#   'sketch_dim': sketch_dim,
+#   'poly_degree': poly_degree,
+#   'poly_sketch_dim': poly_sketch_dim
+# })
 
-print("=========== Result of ReLU-NTK Sketch (one-pass sketching) ===========")
+# print("=========== Result of ReLU-NTK Sketch (one-pass sketching) ===========")
 
-relufeat_arg = {
-  'num_layers': 3,
-  'poly_degree': 32,
-  'poly_sketch_dim': 4096,
-  'W_std': W_std,
-}
+# relufeat_arg = {
+#   'num_layers': 3,
+#   'poly_degree': 32,
+#   'poly_sketch_dim': 4096,
+#   'W_std': W_std,
+# }
 
-init_fn, feature_fn = ReluNTKFeatures(**relufeat_arg)
-test_fc_relu_ntk_approx(relufeat_arg, init_fn, feature_fn)
+# init_fn, feature_fn = ReluNTKFeatures(**relufeat_arg)
+# test_fc_relu_ntk_approx(relufeat_arg, init_fn, feature_fn)
 
-print("======= (Debug) NTK Feature Maps with Polynomial Approximation =======")
-print("\t(*No Sketching algorithm is applied.)")
+# print("======= (Debug) NTK Feature Maps with Polynomial Approximation =======")
+# print("\t(*No Sketching algorithm is applied.)")
 
-test_fc_relu_ntk_approx({'method': 'POLY', 'poly_degree': 16})
+# test_fc_relu_ntk_approx({'method': 'POLY', 'poly_degree': 16})
 
-print("====== (Debug) Exact NTK Feature Maps via Cholesky Decomposition ======")
+# print("====== (Debug) Exact NTK Feature Maps via Cholesky Decomposition ======")
 
 test_fc_relu_ntk_approx({'method': 'EXACT'})

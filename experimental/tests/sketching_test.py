@@ -16,8 +16,8 @@ sketch_dim = 256
 
 rng = random.PRNGKey(1)
 x = random.normal(rng, shape=(n, d))
-norm_x = jnp.linalg.norm(x, axis=-1)
-x_normalized = x / norm_x[:, None]
+norm_x = jnp.linalg.norm(x, axis=-1, keepdims=True)
+x_normalized = x / norm_x
 
 rng2 = random.PRNGKey(2)
 pts = PolyTensorSketch(rng=rng2,

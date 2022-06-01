@@ -1,8 +1,9 @@
 import time
 import sys
-sys.path.append("./")
+sys.path.insert(0, "./")
 import functools
 from numpy.linalg import norm
+import jax
 from jax.config import config
 from jax import jit
 # Enable float64 for JAX
@@ -16,6 +17,9 @@ from experimental.features import ReluFeatures, ConvFeatures, AvgPoolFeatures, s
 
 layer_factor = {5: [2, 1, 1], 7: [2, 2, 2], 10: [3, 3, 3]}
 
+H, W, C =  4,  4, 3; num_final_avgpools = 0
+# H, W, C = 32, 32, 3; num_final_avgpools = 3
+
 def MyrtleNetwork(depth, W_std=np.sqrt(2.0), b_std=0., width=1):
   activation_fn = stax.Relu()
   conv = functools.partial(stax.Conv, W_std=W_std, b_std=b_std, padding='SAME')
@@ -26,7 +30,7 @@ def MyrtleNetwork(depth, W_std=np.sqrt(2.0), b_std=0., width=1):
   layers += [conv(width, (3, 3)), activation_fn] * layer_factor[depth][1]
   layers += [stax.AvgPool((2, 2), strides=(2, 2))]
   layers += [conv(width, (3, 3)), activation_fn] * layer_factor[depth][2]
-  layers += [stax.AvgPool((2, 2), strides=(2, 2))] * 3
+  layers += [stax.AvgPool((2, 2), strides=(2, 2))] * num_final_avgpools
 
   layers += [stax.Flatten(), stax.Dense(1, W_std, b_std)]
 
@@ -50,25 +54,26 @@ def MyrtleNetworkFeatures(depth, W_std=np.sqrt(2.0), width=1, **relu_args):
       ConvFeatures(width, filter_shape=(3, 3), W_std=W_std),
       ReluFeatures(**relu_args)
   ] * layer_factor[depth][2]
-  layers += [AvgPoolFeatures((2, 2), strides=(2, 2))] * 3
+  layers += [AvgPoolFeatures((2, 2), strides=(2, 2))] * num_final_avgpools
   layers += [FlattenFeatures(), DenseFeatures(1, W_std)]
 
   return serial(*layers)
 
 
-def test_small_dataset(num_data=4, dataset='synthetic', depth=5, no_jitting=False):
+def test_small_dataset(num_data=4, dataset='synthetic', depth=5, do_jit=True):
 
   print(f"dataset : {dataset}")
 
   key = random.PRNGKey(0)
 
   if dataset == 'synthetic':
-    H, W, C = 32, 32, 3
     x = random.normal(key, shape=(num_data, H, W, C))
 
   elif dataset in ['cifar10', 'cifar100']:
     from examples import datasets
     x = datasets.get_dataset('cifar10', do_flatten_and_normalize=False)[0]
+    if (H, W) != (32, 32):
+      x = jax.image.resize(x, (x.shape[0], H, W, 3), method='linear')
     mean_ = np.mean(x)
     std_ = np.std(x)
     x = (x - mean_) / std_
@@ -82,7 +87,7 @@ def test_small_dataset(num_data=4, dataset='synthetic', depth=5, no_jitting=Fals
   print("================= Result of Neural Tangent Library =================")
 
   _, _, kernel_fn = MyrtleNetwork(depth)
-  kernel_fn = kernel_fn if no_jitting else jit(kernel_fn)
+  kernel_fn = jit(kernel_fn) if do_jit else kernel_fn
 
   tic = time.time()
   nt_kernel = kernel_fn(x)
@@ -108,10 +113,14 @@ def test_small_dataset(num_data=4, dataset='synthetic', depth=5, no_jitting=Fals
     init_fn, feature_fn = MyrtleNetworkFeatures(depth, **relufeat_arg)
 
     # Initialize random vectors and sketching algorithms
-    _, feat_fn_inputs = init_fn(key2, x.shape)
+    # _, feat_fn_inputs = init_fn(key2, x.shape)
 
     # Transform input vectors to NNGP/NTK feature map
-    feature_fn = feature_fn if no_jitting else jit(feature_fn)
+    # feature_fn = jit(feature_fn) if do_jit else feature_fn
+    @jit
+    def feature_fn_joint(x, key):
+      _, feat_fn_inputs = init_fn(key, x.shape)
+      return feature_fn(x, feat_fn_inputs)
     
     tic = time.time()
     feats = feature_fn(x, feat_fn_inputs)
@@ -193,6 +202,6 @@ def test_small_dataset(num_data=4, dataset='synthetic', depth=5, no_jitting=Fals
   test_myrtle_network_approx({'method': 'EXACT'})
 
 if __name__ == "__main__":
-  test_small_dataset(num_data=6, dataset='synthetic', depth=5, no_jitting=False)
-  test_small_dataset(num_data=6, dataset='cifar10', depth=5, no_jitting=False)
-  test_small_dataset(num_data=6, dataset='cifar100', depth=5, no_jitting=False)
+  test_small_dataset(num_data=4, dataset='synthetic', depth=5)
+  # test_small_dataset(num_data=4, dataset='cifar10', depth=5)
+  # test_small_dataset(num_data=4, dataset='cifar100', depth=5)

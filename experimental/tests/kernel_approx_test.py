@@ -81,7 +81,7 @@ def fc_relu_ntk_sketching(relufeat_arg,
 
 
 seed = 1
-n, d = 1000, 28 * 28
+n, d = 10, 32
 no_jitting = False
 
 key1, key2, key3 = random.split(random.PRNGKey(seed), 3)
@@ -124,9 +124,9 @@ for width in width_all:
 print()
 print("ReluNTKFeatures results:")
 relufeat_arg = {
-    'num_layers': depth,
-    'poly_degree': 16,
-    'W_std': W_std,
+  'num_layers': depth,
+  'poly_degree': 16,
+  'W_std': W_std,
 }
 
 for feat_dim in grad_feat_dims_all:

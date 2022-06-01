@@ -66,7 +66,7 @@ def _is_sinlge_shape(input_shape):
   if all(isinstance(n, int) for n in input_shape):
     return True
   elif (len(input_shape) == 2 or len(input_shape) == 3) and all(
-      _is_sinlge_shape(s) for s in input_shape[:2]):
+    _is_sinlge_shape(s) for s in input_shape[:2]):
     return False
   raise ValueError(input_shape)
 
@@ -82,7 +82,7 @@ def _preprocess_feature_fn(feature_fn):
     feature = _inputs_to_features(x, **kwargs)
     return feature_fn(feature, input, **kwargs)
 
-  def feature_fn_any(x_or_feature, input=None, **kwargs):
+  def feature_fn_any(x_or_feature, input, **kwargs):
     if isinstance(x_or_feature, Features):
       return feature_fn_feature(x_or_feature, input, **kwargs)
     return feature_fn_x(x_or_feature, input, **kwargs)
@@ -98,8 +98,8 @@ def _inputs_to_features(x: np.ndarray,
 
   # Followed the same initialization of Neural Tangents library.
   nngp_feat = x / x.shape[channel_axis]**0.5
-  norms = np.linalg.norm(nngp_feat, axis=channel_axis)
-  norms = np.expand_dims(np.where(norms > 0, norms, 1.0), channel_axis)
+  norms = np.linalg.norm(nngp_feat, axis=channel_axis, keepdims=True)
+  norms = np.where(norms > 0, norms, 1.0)
   nngp_feat = nngp_feat / norms
   ntk_feat = np.zeros((), dtype=nngp_feat.dtype)
 
@@ -145,10 +145,6 @@ def DenseFeatures(out_dim: int,
                   batch_axis: int = 0,
                   channel_axis: int = -1):
 
-  if b_std is not None:
-    raise NotImplementedError('Bias variable b_std is not implemented yet .'
-                              ' Please set b_std to be None.')
-
   if parameterization != 'ntk':
     raise NotImplementedError(f'Parameterization ({parameterization}) is '
                               ' not implemented yet.')
@@ -168,7 +164,23 @@ def DenseFeatures(out_dim: int,
     ntk_feat: np.ndarray = f.ntk_feat
     norms: np.ndarray = f.norms
 
-    norms *= W_std
+    if b_std is not None:
+      f_renomalized: Features = _unnormalize_features(f)
+      nngp_feat: np.ndarray = f_renomalized.nngp_feat
+      ntk_feat: np.ndarray = f_renomalized.ntk_feat
+
+      biases = b_std * np.ones((nngp_feat.shape[0], 1), dtype=nngp_feat.dtype)
+      nngp_feat = np.concatenate((W_std * nngp_feat, biases), axis=-1)
+      ntk_feat = W_std * ntk_feat
+
+      norms = np.linalg.norm(nngp_feat, axis=channel_axis, keepdims=True)
+      norms = np.where(norms > 0, norms, 1.0)
+
+      nngp_feat = nngp_feat / norms
+      ntk_feat = ntk_feat / norms
+
+    else:
+      norms *= W_std
 
     if ntk_feat.ndim == 0:  # check if ntk_feat is empty
       ntk_feat = nngp_feat
@@ -371,7 +383,7 @@ def ReluFeatures(method: str = 'RANDFEAT',
 
       gram_nngp = np.dot(nngp_feat_2d, nngp_feat_2d.T)
       nngp_feat = _cholesky(np.polyval(kappa1_coeff[::-1],
-                                      gram_nngp)).reshape(input_shape + (-1,))
+                                       gram_nngp)).reshape(input_shape + (-1,))
 
       ntk = ntk_feat_2d @ ntk_feat_2d.T
       kappa0_mat = np.polyval(kappa0_coeff[::-1], gram_nngp)
@@ -519,8 +531,8 @@ def ConvFeatures(out_chan: int,
       ntk_feat = np.concatenate((ntk_feat, nngp_feat), axis=channel_axis)
 
     # Re-normalize the features.
-    norms = norms = np.linalg.norm(nngp_feat, axis=channel_axis)
-    norms = np.expand_dims(np.where(norms > 0, norms, 1.0), channel_axis)
+    norms = np.linalg.norm(nngp_feat, axis=channel_axis, keepdims=True)
+    norms = np.where(norms > 0, norms, 1.0)
     nngp_feat = nngp_feat / norms
     ntk_feat = ntk_feat / norms
 
@@ -601,8 +613,8 @@ def AvgPoolFeatures(window_shape: Sequence[int],
       ntk_feat = pooling(ntk_feat)
 
     # Re-normalize the features.
-    norms = norms = np.linalg.norm(nngp_feat, axis=channel_axis)
-    norms = np.expand_dims(np.where(norms > 0, norms, 1.0), channel_axis)
+    norms = np.linalg.norm(nngp_feat, axis=channel_axis, keepdims=True)
+    norms = np.where(norms > 0, norms, 1.0)
     nngp_feat = nngp_feat / norms
     ntk_feat = ntk_feat / norms
 
@@ -613,7 +625,7 @@ def AvgPoolFeatures(window_shape: Sequence[int],
 
   return init_fn, feature_fn
 
-
+# TODO(insu): fix reshaping features for general batch/channel axes.
 @layer
 def FlattenFeatures(batch_axis: int = 0, batch_axis_out: int = 0):
 
@@ -649,8 +661,8 @@ def FlattenFeatures(batch_axis: int = 0, batch_axis_out: int = 0):
           ntk_feat.shape[1:-1])**0.5
 
     # Re-normalize the features.
-    norms = norms = np.linalg.norm(nngp_feat, axis=-1)
-    norms = np.expand_dims(np.where(norms > 0, norms, 1.0), -1)
+    norms = np.linalg.norm(nngp_feat, axis=-1, keepdims=True)
+    norms = np.where(norms > 0, norms, 1.0)
     nngp_feat = nngp_feat / norms
     ntk_feat = ntk_feat / norms
 
