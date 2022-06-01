@@ -113,14 +113,10 @@ def test_small_dataset(num_data=4, dataset='synthetic', depth=5, do_jit=True):
     init_fn, feature_fn = MyrtleNetworkFeatures(depth, **relufeat_arg)
 
     # Initialize random vectors and sketching algorithms
-    # _, feat_fn_inputs = init_fn(key2, x.shape)
+    _, feat_fn_inputs = init_fn(key2, x.shape)
 
     # Transform input vectors to NNGP/NTK feature map
-    # feature_fn = jit(feature_fn) if do_jit else feature_fn
-    @jit
-    def feature_fn_joint(x, key):
-      _, feat_fn_inputs = init_fn(key, x.shape)
-      return feature_fn(x, feat_fn_inputs)
+    feature_fn = jit(feature_fn) if do_jit else feature_fn
     
     tic = time.time()
     feats = feature_fn(x, feat_fn_inputs)
