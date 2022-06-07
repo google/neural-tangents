@@ -8,6 +8,7 @@ from jax import eval_shape, ShapedArray
 
 from neural_tangents import stax
 from neural_tangents._src.utils import dataclasses
+from neural_tangents._src.utils.typing import Axes
 from neural_tangents._src.stax.linear import _pool_kernel, Padding, _get_dimension_numbers
 from neural_tangents._src.stax.linear import _Pooling as Pooling
 
@@ -54,7 +55,9 @@ def _preprocess_init_fn(init_fn):
 
   def init_fn_any(rng, input_shape_any, **kwargs):
     if _is_sinlge_shape(input_shape_any):
-      input_shape = (input_shape_any, (-1, 0))  # Add a dummy shape for ntk_feat
+      # Add a dummy shape for ntk_feat
+      dummy_shape = (-1,) + (0,) * (len(input_shape_any) - 1)
+      input_shape = (input_shape_any, dummy_shape)
       return init_fn(rng, input_shape, **kwargs)
     else:
       return init_fn(rng, input_shape_any, **kwargs)
@@ -66,7 +69,7 @@ def _is_sinlge_shape(input_shape):
   if all(isinstance(n, int) for n in input_shape):
     return True
   elif (len(input_shape) == 2 or len(input_shape) == 3) and all(
-    _is_sinlge_shape(s) for s in input_shape[:2]):
+      _is_sinlge_shape(s) for s in input_shape[:2]):
     return False
   raise ValueError(input_shape)
 
@@ -151,15 +154,21 @@ def DenseFeatures(out_dim: int,
 
   def init_fn(rng, input_shape):
     nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
-    new_ntk_feat_shape = nngp_feat_shape[:-1] + (nngp_feat_shape[-1] +
-                                                 ntk_feat_shape[-1],)
+
+    nngp_feat_dim = nngp_feat_shape[channel_axis]
+    if b_std is not None:
+      nngp_feat_dim += 1
+
+    new_nngp_feat_shape = nngp_feat_shape[:-1] + (nngp_feat_dim,)
+    new_ntk_feat_shape = nngp_feat_shape[:-1] + (nngp_feat_dim +
+                                                 ntk_feat_shape[channel_axis],)
 
     if len(input_shape) > 2:
-      return (nngp_feat_shape, new_ntk_feat_shape, input_shape[2] + 'D'), ()
+      return (new_nngp_feat_shape, new_ntk_feat_shape, input_shape[2] + 'D'), ()
     else:
-      return (nngp_feat_shape, new_ntk_feat_shape, 'D'), ()
+      return (new_nngp_feat_shape, new_ntk_feat_shape, 'D'), ()
 
-  def feature_fn(f: Features, input, **kwargs):
+  def feature_fn(f: Features, input=None, **kwargs):
     nngp_feat: np.ndarray = f.nngp_feat
     ntk_feat: np.ndarray = f.ntk_feat
     norms: np.ndarray = f.norms
@@ -170,14 +179,14 @@ def DenseFeatures(out_dim: int,
       ntk_feat: np.ndarray = f_renomalized.ntk_feat
 
       biases = b_std * np.ones((nngp_feat.shape[0], 1), dtype=nngp_feat.dtype)
-      nngp_feat = np.concatenate((W_std * nngp_feat, biases), axis=-1)
+      nngp_feat = np.concatenate((W_std * nngp_feat, biases), axis=channel_axis)
       ntk_feat = W_std * ntk_feat
 
       norms = np.linalg.norm(nngp_feat, axis=channel_axis, keepdims=True)
       norms = np.where(norms > 0, norms, 1.0)
 
       nngp_feat = nngp_feat / norms
-      ntk_feat = ntk_feat / norms
+      ntk_feat = ntk_feat / norms if ntk_feat.ndim != 0 else ntk_feat
 
     else:
       norms *= W_std
@@ -240,18 +249,25 @@ def ReluFeatures(method: str = 'RANDFEAT',
       kappa0_coeff = kappa0_coeffs(poly_degree, relu_layers_count)
 
       # PolySketch expansion for nngp features.
+      if relu_layers_count == 0:
+        pts_input_dim = nngp_feat_shape[-1]
+      else:
+        pts_input_dim = int(nngp_feat_shape[-1] / 2 + 0.5)
       polysketch = PolyTensorSketch(rng=rng1,
-                                    input_dim=nngp_feat_shape[-1] //
-                                    (1 + (relu_layers_count > 0)),
+                                    input_dim=pts_input_dim,
                                     sketch_dim=poly_sketch_dim,
                                     degree=poly_degree).init_sketches()  # pytype:disable=wrong-keyword-args
 
       # TensorSRHT of degree 2 for approximating tensor product.
-      tensorsrht = TensorSRHT(
-          rng=rng2,
-          input_dim1=ntk_feat_shape[-1] // (1 + (relu_layers_count > 0)),
-          input_dim2=poly_degree * (polysketch.sketch_dim // 4 - 1) + 1,
-          sketch_dim=sketch_dim).init_sketches()  # pytype:disable=wrong-keyword-args
+      if relu_layers_count == 0:
+        ts_input_dim = ntk_feat_shape[-1]
+      else:
+        ts_input_dim = int(ntk_feat_shape[-1] / 2 + 0.5)
+      tensorsrht = TensorSRHT(rng=rng2,
+                              input_dim1=ts_input_dim,
+                              input_dim2=poly_degree *
+                              (polysketch.sketch_dim // 4 - 1) + 1,
+                              sketch_dim=sketch_dim).init_sketches()  # pytype:disable=wrong-keyword-args
 
       return (new_nngp_feat_shape, new_ntk_feat_shape,
               new_net_shape), (polysketch, tensorsrht, kappa0_coeff,
@@ -264,24 +280,31 @@ def ReluFeatures(method: str = 'RANDFEAT',
       kappa1_coeff = kappa1_coeffs(poly_degree, relu_layers_count)
 
       # PolySketch expansion for nngp features.
+      if relu_layers_count == 0:
+        pts_input_dim = nngp_feat_shape[-1]
+      else:
+        pts_input_dim = int(nngp_feat_shape[-1] / 2 + 0.5)
       polysketch = PolyTensorSketch(rng=rng1,
-                                    input_dim=nngp_feat_shape[-1] //
-                                    (1 + (relu_layers_count > 0)),
+                                    input_dim=pts_input_dim,
                                     sketch_dim=poly_sketch_dim,
                                     degree=poly_degree).init_sketches()  # pytype:disable=wrong-keyword-args
 
       # TensorSRHT of degree 2 for approximating tensor product.
+      if relu_layers_count == 0:
+        ts_input_dim = ntk_feat_shape[-1]
+      else:
+        ts_input_dim = int(ntk_feat_shape[-1] / 2 + 0.5)
       tensorsrht = TensorSRHT(rng=rng2,
-                              input_dim1=ntk_feat_shape[-1] //
-                              (1 + (relu_layers_count > 0)),
+                              input_dim1=ts_input_dim,
                               input_dim2=feature_dim0,
                               sketch_dim=sketch_dim).init_sketches()  # pytype:disable=wrong-keyword-args
 
       # Random vectors for random features of arc-cosine kernel of order 0.
       if relu_layers_count == 0:
-        W0 = random.normal(rng3, (2 * nngp_feat_shape[-1], feature_dim0 // 2))
-      else:
         W0 = random.normal(rng3, (nngp_feat_shape[-1], feature_dim0 // 2))
+      else:
+        W0 = random.normal(
+            rng3, (int(nngp_feat_shape[-1] / 2 + 0.5), feature_dim0 // 2))
 
       return (new_nngp_feat_shape, new_ntk_feat_shape,
               new_net_shape), (W0, polysketch, tensorsrht, kappa1_coeff)
@@ -367,8 +390,7 @@ def ReluFeatures(method: str = 'RANDFEAT',
       nngp_feat = polysketch.standardsrht(kappa1_feat).reshape(input_shape +
                                                                (-1,))
 
-      nngp_proj = np.concatenate(
-          (nngp_feat_2d.real, nngp_feat_2d.imag), axis=1) @ W0
+      nngp_proj = nngp_feat_2d @ W0
       kappa0_feat = np.concatenate(
           ((nngp_proj > 0), (nngp_proj <= 0)), axis=1) / W0.shape[-1]**0.5
       del W0
@@ -470,10 +492,6 @@ def ConvFeatures(out_chan: int,
                  dimension_numbers: Optional[Tuple[str, str, str]] = None,
                  parameterization: str = 'ntk'):
 
-  if b_std is not None:
-    raise NotImplementedError('Bias variable b_std is not implemented yet .'
-                              ' Please set b_std to be None.')
-
   parameterization = parameterization.lower()
 
   if dimension_numbers is None:
@@ -491,10 +509,14 @@ def ConvFeatures(out_chan: int,
 
   def init_fn(rng, input_shape):
     nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
-    new_nngp_feat_shape = nngp_feat_shape[:-1] + (nngp_feat_shape[-1] *
-                                                  patch_size,)
+
+    nngp_feat_dim = nngp_feat_shape[channel_axis] * patch_size
+    if b_std is not None:
+      nngp_feat_dim += 1
+
+    new_nngp_feat_shape = nngp_feat_shape[:-1] + (nngp_feat_dim,)
     new_ntk_feat_shape = nngp_feat_shape[:-1] + (
-        (nngp_feat_shape[-1] + ntk_feat_shape[-1]) * patch_size,)
+        nngp_feat_dim + ntk_feat_shape[channel_axis] * patch_size,)
 
     if len(input_shape) > 2:
       return (new_nngp_feat_shape, new_ntk_feat_shape, input_shape[2] + 'C'), ()
@@ -522,6 +544,11 @@ def ConvFeatures(out_chan: int,
 
     nngp_feat = _concat_shifted_features_2d(
         nngp_feat, filter_shape_) * W_std / patch_size**0.5
+
+    if b_std is not None:
+      biases = b_std * np.ones(nngp_feat.shape[:-1] + (1,),
+                               dtype=nngp_feat.dtype)
+      nngp_feat = np.concatenate((nngp_feat, biases), axis=channel_axis)
 
     if f.ntk_feat.ndim == 0:  # check if ntk_feat is empty
       ntk_feat = nngp_feat
@@ -625,6 +652,7 @@ def AvgPoolFeatures(window_shape: Sequence[int],
 
   return init_fn, feature_fn
 
+
 # TODO(insu): fix reshaping features for general batch/channel axes.
 @layer
 def FlattenFeatures(batch_axis: int = 0, batch_axis_out: int = 0):
@@ -670,5 +698,20 @@ def FlattenFeatures(batch_axis: int = 0, batch_axis_out: int = 0):
                      ntk_feat=ntk_feat,
                      norms=norms,
                      is_reversed=False)
+
+  return init_fn, feature_fn
+
+
+@layer
+def LayerNormFeatures(axis: Axes = -1,
+                      eps: float = 1e-12,
+                      batch_axis: int = 0,
+                      channel_axis: int = -1):
+
+  def init_fn(rng, input_shape):
+    return input_shape, ()
+
+  def feature_fn(f, input=None, **kwargs):
+    return f.replace(norms=np.ones_like(f.norms))
 
   return init_fn, feature_fn

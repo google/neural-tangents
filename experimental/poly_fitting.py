@@ -49,7 +49,7 @@ def poly_fitting_qp(xvals: np.ndarray,
     x_powers = x_powers.at[:, i + 1].set(x_powers[:, i] * xvals)
 
   y_weighted = fvals * weights
-  x_powers_weighted = x_powers.T * weights
+  x_powers_weighted = x_powers.T * weights[None,:]
 
   dx_powers = x_powers[:-1, :] - x_powers[1:, :]
 
