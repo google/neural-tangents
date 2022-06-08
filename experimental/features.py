@@ -9,7 +9,7 @@ from jax import eval_shape, ShapedArray
 from neural_tangents import stax
 from neural_tangents._src.utils import dataclasses
 from neural_tangents._src.utils.typing import Axes
-from neural_tangents._src.stax.linear import _pool_kernel, Padding, _get_dimension_numbers
+from neural_tangents._src.stax.linear import _pool_kernel, Padding, _get_dimension_numbers, AggregateImplementation
 from neural_tangents._src.stax.linear import _Pooling as Pooling
 
 from experimental.sketching import TensorSRHT, PolyTensorSketch
@@ -653,6 +653,51 @@ def AvgPoolFeatures(window_shape: Sequence[int],
   return init_fn, feature_fn
 
 
+@layer
+def GlobalAvgPoolFeatures(batch_axis: int = 0, channel_axis: int = -1):
+
+  def init_fn(rng, input_shape):
+    nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
+    ndim = len(nngp_feat_shape)
+    non_spatial_axes = (batch_axis % ndim, channel_axis % ndim)
+    _get_output_shape = lambda _shape: tuple(_shape[i]
+                                             for i in range(ndim)
+                                             if i in non_spatial_axes)
+    new_nngp_feat_shape = _get_output_shape(nngp_feat_shape)
+    new_ntk_feat_shape = _get_output_shape(ntk_feat_shape)
+
+    if len(input_shape) > 2:
+      return (new_nngp_feat_shape, new_ntk_feat_shape, input_shape[2]), ()
+    else:
+      return (new_nngp_feat_shape, new_ntk_feat_shape, ''), ()
+
+  def feature_fn(f, input=None, **kwargs):
+    # Unnormalize the input features.
+    f_renomalized: Features = _unnormalize_features(f)
+    nngp_feat: np.ndarray = f_renomalized.nngp_feat
+    ntk_feat: np.ndarray = f_renomalized.ntk_feat
+
+    ndim = len(nngp_feat.shape)
+    non_spatial_axes = (batch_axis % ndim, channel_axis % ndim)
+    spatial_axes = tuple(set(range(ndim)) - set(non_spatial_axes))
+
+    nngp_feat = np.mean(nngp_feat, axis=spatial_axes)
+    ntk_feat = np.mean(ntk_feat, axis=spatial_axes)
+
+    # Re-normalize the features.
+    norms = np.linalg.norm(nngp_feat, axis=channel_axis, keepdims=True)
+    norms = np.where(norms > 0, norms, 1.0)
+    nngp_feat = nngp_feat / norms
+    ntk_feat = ntk_feat / norms
+
+    return f.replace(nngp_feat=nngp_feat,
+                     ntk_feat=ntk_feat,
+                     norms=norms,
+                     is_reversed=False)
+
+  return init_fn, feature_fn
+
+
 # TODO(insu): fix reshaping features for general batch/channel axes.
 @layer
 def FlattenFeatures(batch_axis: int = 0, batch_axis_out: int = 0):
@@ -713,5 +758,41 @@ def LayerNormFeatures(axis: Axes = -1,
 
   def feature_fn(f, input=None, **kwargs):
     return f.replace(norms=np.ones_like(f.norms))
+
+  return init_fn, feature_fn
+
+
+@layer
+def AggregateFeatures(
+    aggregate_axis: Optional[Axes] = None,
+    batch_axis: int = 0,
+    channel_axis: int = -1,
+    to_dense: Optional[Callable[[np.ndarray], np.ndarray]] = lambda p: p,
+    implementation: str = AggregateImplementation.DENSE.value):
+
+  init_fn = lambda rng, input_shape: (input_shape, ())
+
+  def feature_fn(f, input=None, pattern= None, **kwargs):
+    if pattern is None:
+      raise NotImplementedError('`pattern=None` is not implemented.')
+
+    f_renomalized: Features = _unnormalize_features(f)
+    nngp_feat: np.ndarray = f_renomalized.nngp_feat
+    ntk_feat: np.ndarray = f_renomalized.ntk_feat
+
+    pattern_T = np.swapaxes(pattern, 1, 2)
+    nngp_feat = np.einsum("bnm,bmc->bnc", pattern_T, nngp_feat)
+    if f.ntk_feat.ndim == 0:
+      ntk_feat = nngp_feat
+    else:
+      ntk_feat = np.einsum("bnm,bmc->bnc", pattern_T, ntk_feat)
+
+    # Re-normalize the features.
+    norms = np.linalg.norm(nngp_feat, axis=channel_axis, keepdims=True)
+    norms = np.where(norms > 0, norms, 1.0)
+    nngp_feat = nngp_feat / norms
+    ntk_feat = ntk_feat / norms
+
+    return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat, norms=norms)
 
   return init_fn, feature_fn

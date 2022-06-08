@@ -1,29 +1,31 @@
 from absl.testing import absltest
 from absl.testing import parameterized
 import functools
-
 from jax import jit
 from jax.config import config
 import jax.numpy as np
 import jax.random as random
-from jax import test_util as jtu
 from neural_tangents._src.utils import utils as ntutils
 from neural_tangents import stax
 from tests import test_utils
 
-from experimental.features import DenseFeatures, ReluFeatures, ConvFeatures, AvgPoolFeatures, FlattenFeatures, serial
+from experimental.features import DenseFeatures, ReluFeatures, ConvFeatures, AvgPoolFeatures, FlattenFeatures, serial, GlobalAvgPoolFeatures, AggregateFeatures
 
-config.update("jax_enable_x64", True)
+
 config.parse_flags_with_absl()
 config.update('jax_numpy_rank_promotion', 'raise')
+
+test_utils.update_test_tolerance()
+
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
 NUM_DIMS = [64, 128, 256, 512]
 WEIGHT_VARIANCES = [0.001, 0.01, 0.1, 1.]
 BIAS_VARIANCES = [None, 0.001, 0.01, 0.1]
-test_utils.update_test_tolerance()
 
 
-class FeaturesTest(jtu.JaxTestCase):
+class FeaturesTest(test_utils.NeuralTangentsTestCase):
 
   @classmethod
   def _get_init_data(cls, rng, shape, normalized_output=False):
@@ -38,7 +40,7 @@ class FeaturesTest(jtu.JaxTestCase):
     return ntutils.zip_axes(np.einsum("ijkc,xyzc->ijkxyz", f_, f_))
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               ' [Wstd{}_bstd{}_{}layers_{}] '.format(W_std, b_std, n_layers,
                                                      'jit' if do_jit else ''),
@@ -53,7 +55,7 @@ class FeaturesTest(jtu.JaxTestCase):
       } for W_std in WEIGHT_VARIANCES for b_std in BIAS_VARIANCES
                           for n_layers in [1, 2, 3, 4]
                           for do_jit in [True, False]))
-  def testDenseFeatures(self, W_std, b_std, n_layers, do_jit):
+  def test_dense_features(self, W_std, b_std, n_layers, do_jit):
     n, d = 4, 256
     rng = random.PRNGKey(1)
     x = self._get_init_data(rng, (n, d))
@@ -74,7 +76,7 @@ class FeaturesTest(jtu.JaxTestCase):
     self.assertAllClose(k.ntk, f.ntk_feat @ f.ntk_feat.T)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               ' [Wstd{}_bstd{}_numlayers{}_{}_{}] '.format(
                   W_std, b_std, n_layers, relu_method, 'jit' if do_jit else ''),
@@ -152,7 +154,7 @@ class FeaturesTest(jtu.JaxTestCase):
       test_utils.assert_close_matrices(self, k_ntk, k_ntk_approx, 0.1, 1.)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               ' [Wstd{}_bstd{}_numlayers{}_{}] '.format(
                   W_std, b_std, n_layers, 'jit' if do_jit else ''),
@@ -197,7 +199,7 @@ class FeaturesTest(jtu.JaxTestCase):
     self.assertAllClose(k.ntk, k_ntk_approx)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               ' [nlayers{}_{}] '.format(n_layers, 'jit' if do_jit else ''),
           'n_layers':
@@ -247,7 +249,7 @@ class FeaturesTest(jtu.JaxTestCase):
     self.assertAllClose(k.nngp, f.nngp_feat @ f.nngp_feat.T)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               ' [Wstd{}_bstd{}_depth{}_{}_{}] '.format(
                   W_std, b_std, depth, relu_method, 'jit' if do_jit else ''),
@@ -355,6 +357,63 @@ class FeaturesTest(jtu.JaxTestCase):
     else:
       test_utils.assert_close_matrices(self, k_nngp, k_nngp_approx, 0.15, 1.)
       test_utils.assert_close_matrices(self, k_ntk, k_ntk_approx, 0.15, 1.)
+
+  def test_global_average_pooling_features(self):
+    rng = random.PRNGKey(1)
+    input_shape = (4, 5, 6, 7)
+    x = random.normal(rng, input_shape)
+
+    _, _, kernel_fn = stax.serial(
+      stax.Conv(1, (3, 3), padding='SAME'),
+      stax.Relu(),
+      stax.GlobalAvgPool()
+    )
+
+    _, feature_fn = serial(
+      ConvFeatures(1, (3, 3)),
+      ReluFeatures(method='EXACT'),
+      GlobalAvgPoolFeatures()
+    )
+
+    k = jit(kernel_fn)(x)
+    f = jit(feature_fn)(x, [()] * 3)
+
+    self.assertAllClose(k.nngp, f.nngp_feat @ f.nngp_feat.T)
+    self.assertAllClose(k.ntk, f.ntk_feat @ f.ntk_feat.T)
+
+  def test_aggregate_features(self):
+    rng = random.PRNGKey(1)
+    rng1, rng2 = random.split(rng, 2)
+
+    batch_size = 4
+    num_channels = 3
+    shape = (5, )
+    width = 1
+
+    x = random.normal(rng1, (batch_size,) + shape + (num_channels,))
+    pattern = random.uniform(rng2, (batch_size,) + shape * 2)
+
+    _, _, kernel_fn = stax.serial(
+      stax.Dense(width, W_std=2**0.5),
+      stax.Relu(),
+      stax.Aggregate(),
+      stax.GlobalAvgPool(),
+      stax.Dense(width)
+    )
+
+    k = jit(kernel_fn)(x, None, pattern=(pattern, pattern))
+
+    _, feature_fn = serial(
+      DenseFeatures(width, W_std=2**0.5),
+      ReluFeatures(method='EXACT'),
+      AggregateFeatures(),
+      GlobalAvgPoolFeatures(),
+      DenseFeatures(width)
+    )
+
+    f = feature_fn(x, [()] * 5, **{'pattern': pattern})
+    self.assertAllClose(k.nngp, f.nngp_feat @ f.nngp_feat.T)
+    self.assertAllClose(k.ntk, f.ntk_feat @ f.ntk_feat.T)
 
 
 if __name__ == "__main__":
