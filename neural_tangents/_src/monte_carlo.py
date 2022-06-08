@@ -35,7 +35,6 @@ from .empirical import empirical_kernel_fn
 from jax import random
 import jax.numpy as np
 from jax.tree_util import tree_map
-from jax.tree_util import tree_multimap
 from .utils import utils
 from .utils.typing import ApplyFn, Axes, EmpiricalGetKernelFn, Get, InitFn, MonteCarloKernelFn, NTTree, PyTree, VMapAxes
 
@@ -58,7 +57,7 @@ def _sample_once_kernel_fn(kernel_fn: EmpiricalGetKernelFn,
     init_key, dropout_key = random.split(key, 2)
     shape = tree_map(lambda x: x.shape, x1)
     _, params = init_fn(init_key, shape)
-    return kernel_fn(x1, x2, get, params, rng=dropout_key, **apply_fn_kwargs)  # pytype: disable=wrong-keyword-args  # kwargs-checking
+    return kernel_fn(x1, x2, get, params, rng=dropout_key, **apply_fn_kwargs)
   return kernel_fn_sample_once
 
 
@@ -83,7 +82,7 @@ def _sample_many_kernel_fn(
       if ker_sampled is None:
         ker_sampled = one_sample
       else:
-        ker_sampled = tree_multimap(operator.add, ker_sampled, one_sample)
+        ker_sampled = tree_map(operator.add, ker_sampled, one_sample)
       yield n, ker_sampled
 
   if get_generator:

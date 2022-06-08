@@ -1,7 +1,6 @@
 sphinx>=3
-sphinx_rtd_theme
+sphinx-rtd-theme
 jax
 jaxlib
-ipykernel
 nbsphinx
 sphinx-autodoc-typehints

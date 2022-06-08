@@ -19,7 +19,6 @@ import itertools
 import random as prandom
 from absl.testing import absltest
 from absl.testing import parameterized
-from jax import test_util as jtu
 from jax import jit, jvp, jacfwd, jacrev, value_and_grad, grad
 from jax.config import config
 from jax import default_backend
@@ -129,7 +128,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
                                        direct_rbf_kernel, rtol)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               '_model={}_phi={}_{}_get={}_abc={}_approximate={}'.format(
                   model,
@@ -192,7 +191,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
     self._test_activation(activation, same_inputs, model, get)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               '_{}_Rbf_{}_{}_{}'.format(
                   model,
@@ -215,7 +214,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
                           rbf_gamma=gamma)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name': f'{phi.__name__}_{same_inputs}_a={a}_b={b}_n={n}',
           'same_inputs': same_inputs,
           'a': a,
@@ -303,7 +302,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
     self.assertAllClose(k_manual, k)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               '_{}_degree={}_get={}_readout={}'.format(
                   'Same_inputs' if same_inputs else 'Different_inputs',
@@ -353,7 +352,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
 class ElementwiseTest(test_utils.NeuralTangentsTestCase):
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               '_{}_{}_n={}_diag_batch={}_spatial={}'.format(
                   phi[0].__name__, same_inputs, n, diagonal_batch,
@@ -432,7 +431,7 @@ class ElementwiseTest(test_utils.NeuralTangentsTestCase):
 class ElementwiseNumericalTest(test_utils.NeuralTangentsTestCase):
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               '_{}_{}_{}_{}'.format(
                   model,
@@ -614,7 +613,7 @@ class ABReluTest(test_utils.NeuralTangentsTestCase):
 class AutodiffTest(test_utils.NeuralTangentsTestCase):
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name': f'{get}-{same_inputs}-{phi.__name__}',
           'get': get,
           'same_inputs': same_inputs,
@@ -716,7 +715,7 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
       assert_close(np.moveaxis(k_rev_1, (0, 2, 4), (1, 3, 5)), k_rev_10)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               f'get={get}-'
               f'param={parameterization}-'
@@ -935,7 +934,7 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
                                        atol=10.)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               f'get={get}-'
               f'architecture={architecture}-'

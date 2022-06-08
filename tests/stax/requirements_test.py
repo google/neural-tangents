@@ -22,7 +22,6 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from jax import default_backend
 from jax import jit
-from jax import test_util as jtu
 from jax.config import config
 import jax.numpy as np
 import jax.random as random
@@ -41,7 +40,7 @@ prandom.seed(1)
 
 
 @parameterized.named_parameters(
-    jtu.cases_from_list(
+    test_utils.cases_from_list(
         {
             'testcase_name':
                 ' [{}_out={}_in={}]'.format(
@@ -124,9 +123,9 @@ class DiagonalClassTest(test_utils.NeuralTangentsTestCase):
   def test_diagonal_compose_is_associative(self):
     for inp_a, inp_b, inp_c in itertools.product(stax.Bool, repeat=3):
       for out_a, out_b, out_c in itertools.product(stax.Bool, repeat=3):
-        a = stax.Diagonal(inp_a, out_a)  # pytype:disable=wrong-arg-count
-        b = stax.Diagonal(inp_b, out_b)  # pytype:disable=wrong-arg-count
-        c = stax.Diagonal(inp_c, out_c)  # pytype:disable=wrong-arg-count
+        a = stax.Diagonal(inp_a, out_a)
+        b = stax.Diagonal(inp_b, out_b)
+        c = stax.Diagonal(inp_c, out_c)
         with self.subTest(a=a, b=b, c=c):
           ab_c = (a >> b) >> c
           a_bc = a >> (b >> c)
@@ -241,7 +240,7 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
 class MaskingTest(test_utils.NeuralTangentsTestCase):
 
   @parameterized.named_parameters(
-      jtu.cases_from_list(
+      test_utils.cases_from_list(
           {
               'testcase_name':
                   ' [{}_get={}_axis={}_mask={}_concat={}_p={}]'.format(
@@ -328,7 +327,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
   @parameterized.named_parameters(
-      jtu.cases_from_list({
+      test_utils.cases_from_list({
           'testcase_name':
               ' [{}_get={}_axis={}_mask={}_concat={}_{}_p={}_n={}_{}]'
               ''.format(

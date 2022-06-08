@@ -1,4 +1,8 @@
-Batching -- using multiple devices
+:github_url: https://github.com/google/neural-tangents/tree/main/docs/batching.rst
+
+.. default-role:: code
+
+`nt.batch` -- using multiple devices
 ============================================================
 
 .. default-role:: code

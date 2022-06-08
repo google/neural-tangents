@@ -99,7 +99,7 @@ html_theme = 'sphinx_rtd_theme'
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-# html_static_path = ['_static']
+html_static_path = ['_static']
 
 # Custom sidebar templates, must be a dictionary that maps document names
 # to template names.
@@ -142,7 +142,7 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (main_doc, 'NeuralTangents.tex', u'Neural Tangents Documentation',
+    (main_doc, 'NeuralTangents.tex', u'Neural Tangents',
      u'The Neural Tangents Authors', 'manual'),
 ]
 
@@ -152,7 +152,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    (main_doc, 'neuraltangents', u'Neural Tangents Documentation',
+    (main_doc, 'neuraltangents', u'Neural Tangents',
      [author], 1)
 ]
 
@@ -165,7 +165,7 @@ man_pages = [
 texinfo_documents = [
     (main_doc,
      'NeuralTangents',
-     u'Neural Tangents Documentation',
+     u'Neural Tangents',
      author,
      'NeuralTangents',
      'Neural Tangents: Fast and Easy Infinite Neural Networks in Python',
@@ -182,6 +182,7 @@ def remove_module_docstring(app, what, name, obj, options, lines):
 
 def setup(app):
   app.connect("autodoc-process-docstring", remove_module_docstring)
+  app.add_css_file('style.css')
 
 
 # -- Options for Epub output -------------------------------------------------

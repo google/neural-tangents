@@ -18,18 +18,18 @@ from absl.testing import absltest
 import jax
 from jax import device_get
 from jax import jit
-from jax import test_util as jtu
 from jax.config import config
 import jax.numpy as np
 import jax.random as random
 from neural_tangents._src.utils import utils
+from tests import test_utils
 
 
 config.parse_flags_with_absl()
 config.update('jax_numpy_rank_promotion', 'raise')
 
 
-class UtilsTest(jtu.JaxTestCase):
+class UtilsTest(test_utils.NeuralTangentsTestCase):
 
   def test_is_on_cpu(self):
     dtypes = [np.float16, np.float32]

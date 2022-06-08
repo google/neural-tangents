@@ -16,16 +16,15 @@
 
 from absl.testing import absltest
 
-from jax import test_util as jtu
 from jax.config import config
 from examples import weight_space
-
+from tests import test_utils
 
 config.parse_flags_with_absl()
 config.update('jax_numpy_rank_promotion', 'raise')
 
 
-class WeightSpaceTest(jtu.JaxTestCase):
+class WeightSpaceTest(test_utils.NeuralTangentsTestCase):
 
   def test_weight_space(self):
     weight_space.main(None)
