@@ -14,7 +14,6 @@
 
 """Tests for `neural_tangents/stax.py`."""
 
-
 import functools
 import itertools
 import random as prandom
@@ -24,10 +23,10 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from jax import default_backend
 from jax import jit
+from jax import random
 from jax.config import config
 from jax.example_libraries import stax as ostax
 import jax.numpy as np
-import jax.random as random
 import neural_tangents as nt
 from neural_tangents import stax
 from tests import test_utils
@@ -411,16 +410,15 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
           'proj_into_2d':
               proj_into_2d
       }
-                          for model in MODELS
-                          for width in WIDTHS
-                          for phi, phi_name in ACTIVATIONS.items()
-                          for same_inputs in [False]
-                          for padding in PADDINGS for strides in STRIDES
-                          for filter_shape in FILTER_SHAPES
-                          for use_pooling in [False, True]
-                          for is_ntk in [False, True]
-                          for is_res in [False, True]
-                          for proj_into_2d in PROJECTIONS))
+                                 for model in MODELS for width in WIDTHS
+                                 for phi, phi_name in ACTIVATIONS.items()
+                                 for same_inputs in [False]
+                                 for padding in PADDINGS for strides in STRIDES
+                                 for filter_shape in FILTER_SHAPES
+                                 for use_pooling in [False, True]
+                                 for is_ntk in [False, True]
+                                 for is_res in [False, True]
+                                 for proj_into_2d in PROJECTIONS))
   def test_exact(self, model, width, strides, padding, phi, same_inputs,
                  filter_shape, use_pooling, is_ntk, is_res, proj_into_2d):
     is_conv = 'conv' in model
@@ -464,12 +462,12 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
           'layer_norm':
               layer_norm
       }
-                          for model in MODELS
-                          for width in WIDTHS
-                          for same_inputs in [False]
-                          for is_ntk in [False, True]
-                          for proj_into_2d in PROJECTIONS[:2]
-                          for layer_norm in LAYER_NORM))
+                                 for model in MODELS
+                                 for width in WIDTHS
+                                 for same_inputs in [False]
+                                 for is_ntk in [False, True]
+                                 for proj_into_2d in PROJECTIONS[:2]
+                                 for layer_norm in LAYER_NORM))
   def test_layernorm(self,
                      model,
                      width,
@@ -525,14 +523,17 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
               strides,
           'normalize_edges':
               normalize_edges
-      } for width in WIDTHS for same_inputs in [False]
-                          for is_ntk in [False, True]
-                          for pool_type in POOL_TYPES for padding in PADDINGS
-                          for filter_shape in FILTER_SHAPES
-                          for strides in STRIDES
-                          for normalize_edges in [True, False]))
-  def test_pool(self, width, same_inputs, is_ntk, pool_type,
-                padding, filter_shape, strides, normalize_edges):
+      }
+                                 for width in WIDTHS
+                                 for same_inputs in [False]
+                                 for is_ntk in [False, True]
+                                 for pool_type in POOL_TYPES
+                                 for padding in PADDINGS
+                                 for filter_shape in FILTER_SHAPES
+                                 for strides in STRIDES
+                                 for normalize_edges in [True, False]))
+  def test_pool(self, width, same_inputs, is_ntk, pool_type, padding,
+                filter_shape, strides, normalize_edges):
     use_dropout = False
     # Check for duplicate / incorrectly-shaped NN configs / wrong backend.
     test_utils.skip_test(self)
@@ -619,14 +620,16 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
               use_pooling,
           'proj_into_2d':
               proj_into_2d
-      } for model in MODELS for width in WIDTHS
-                          for same_inputs in [True, False]
-                          for phi, phi_name in ACTIVATIONS.items()
-                          for padding in ['SAME'] for strides in STRIDES
-                          for filter_shape in [(2, 1)]
-                          for is_ntk in [True, False]
-                          for use_pooling in [True, False]
-                          for proj_into_2d in ['FLAT', 'POOL']))
+      }
+                                 for model in MODELS
+                                 for width in WIDTHS
+                                 for same_inputs in [True, False]
+                                 for phi, phi_name in ACTIVATIONS.items()
+                                 for padding in ['SAME'] for strides in STRIDES
+                                 for filter_shape in [(2, 1)]
+                                 for is_ntk in [True, False]
+                                 for use_pooling in [True, False]
+                                 for proj_into_2d in ['FLAT', 'POOL']))
   def test_dropout(self, model, width, same_inputs, is_ntk, padding, strides,
                    filter_shape, phi, use_pooling, proj_into_2d):
     pool_type = 'AVG'
@@ -653,9 +656,9 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
           'kernel': kern,
           'do_stabilize': do_stabilize
       }
-                          for act in ['erf', 'relu']
-                          for do_stabilize in [True, False]
-                          for kern in ['nngp', 'ntk']))
+                                 for act in ['erf', 'relu']
+                                 for do_stabilize in [True, False]
+                                 for kern in ['nngp', 'ntk']))
   def test_sparse_inputs(self, act, kernel, do_stabilize):
     if do_stabilize and act != 'relu':
       raise absltest.SkipTest('Stabilization possible only in Relu.')
@@ -764,39 +767,30 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
 
 class ParameterizationTest(test_utils.NeuralTangentsTestCase):
 
-
   @parameterized.named_parameters(
       test_utils.cases_from_list({
-                              'testcase_name':
-                                f'_get={get}'
-                                f'_s={s}'
-                                f'_depth={depth}'
-                                f'_same_inputs={same_inputs}'
-                                f'_b_std={b_std}_'
-                                f'_W_std={W_std}'
-                                f'_param={parameterization}',
-                              'get':
-                                get,
-                              's':
-                                s,
-                              'depth':
-                                depth,
-                              'same_inputs':
-                                same_inputs,
-                              'b_std':
-                                b_std,
-                              'W_std':
-                                W_std,
-                              'parameterization':
-                                parameterization,
-                          }
-                          for get in ['nngp', 'ntk']
-                          for s in [2**9, 2**8, 2**7]
-                          for depth in [0, 1, 2]
-                          for same_inputs in [True, False]
-                          for W_std in [0., 1., 2.]
-                          for b_std in [None, 0., 0.5**0.5, 2]
-                          for parameterization in ['ntk', 'standard']))
+          'testcase_name': f'_get={get}'
+                           f'_s={s}'
+                           f'_depth={depth}'
+                           f'_same_inputs={same_inputs}'
+                           f'_b_std={b_std}_'
+                           f'_W_std={W_std}'
+                           f'_param={parameterization}',
+          'get': get,
+          's': s,
+          'depth': depth,
+          'same_inputs': same_inputs,
+          'b_std': b_std,
+          'W_std': W_std,
+          'parameterization': parameterization,
+      }
+                                 for get in ['nngp', 'ntk']
+                                 for s in [2**9, 2**8, 2**7]
+                                 for depth in [0, 1, 2]
+                                 for same_inputs in [True, False]
+                                 for W_std in [0., 1., 2.]
+                                 for b_std in [None, 0., 0.5**0.5, 2]
+                                 for parameterization in ['ntk', 'standard']))
   def test_linear(
       self,
       get,
@@ -830,67 +824,44 @@ class ParameterizationTest(test_utils.NeuralTangentsTestCase):
 
     net = stax.serial(*layers)
     net = net, (BATCH_SIZE, 3), -1, 1
-    _check_agreement_with_empirical(self, net, same_inputs, False, get == 'ntk',
-                                    rtol=0.02, atol=10)
-
+    _check_agreement_with_empirical(
+        self, net, same_inputs, False, get == 'ntk', rtol=0.02, atol=10)
 
   @parameterized.named_parameters(
       test_utils.cases_from_list({
-                              'testcase_name':
-                                f'_model={model}'
-                                f'_width={width}'
-                                f'_same_inputs={same_inputs}'
-                                f'_filter_shape={filter_shape}'
-                                f'_proj={proj_into_2d}_'
-                                f'_is_ntk={is_ntk}_'
-                                f'_b_std={b_std}_'
-                                f'_W_std={W_std}'
-                                f'_param={parameterization}'
-                                f'_s={s}',
-                              'model':
-                                model,
-                              'width':
-                                width,
-                              'same_inputs':
-                                same_inputs,
-                              'filter_shape':
-                                filter_shape,
-                              'proj_into_2d':
-                                proj_into_2d,
-                              'is_ntk':
-                                is_ntk,
-                              'b_std':
-                                b_std,
-                              'W_std':
-                                W_std,
-                              'parameterization':
-                                parameterization,
-                              's':
-                                s
-                          }
-                          for model in MODELS
-                          for width in [2**11]
-                          for same_inputs in [False]
-                          for is_ntk in [False, True]
-                          for filter_shape in FILTER_SHAPES
-                          for proj_into_2d in PROJECTIONS[:2]
-                          for W_std in [0., 1., 2.]
-                          for b_std in [None, 0., 0.5**0.5]
-                          for parameterization in ['ntk', 'standard']
-                          for s in [2**10]))
-  def test_nonlinear(
-      self,
-      model,
-      width,
-      same_inputs,
-      is_ntk,
-      filter_shape,
-      proj_into_2d,
-      b_std,
-      W_std,
-      parameterization,
-      s
-  ):
+          'testcase_name': f'_model={model}'
+                           f'_width={width}'
+                           f'_same_inputs={same_inputs}'
+                           f'_filter_shape={filter_shape}'
+                           f'_proj={proj_into_2d}_'
+                           f'_is_ntk={is_ntk}_'
+                           f'_b_std={b_std}_'
+                           f'_W_std={W_std}'
+                           f'_param={parameterization}'
+                           f'_s={s}',
+          'model': model,
+          'width': width,
+          'same_inputs': same_inputs,
+          'filter_shape': filter_shape,
+          'proj_into_2d': proj_into_2d,
+          'is_ntk': is_ntk,
+          'b_std': b_std,
+          'W_std': W_std,
+          'parameterization': parameterization,
+          's': s
+      }
+                                 for model in MODELS
+                                 for width in [2**11]
+                                 for same_inputs in [False]
+                                 for is_ntk in [False, True]
+                                 for filter_shape in FILTER_SHAPES
+                                 for proj_into_2d in PROJECTIONS[:2]
+                                 for W_std in [0., 1., 2.]
+                                 for b_std in [None, 0., 0.5**0.5]
+                                 for parameterization in ['ntk', 'standard']
+                                 for s in [2**10]))
+  def test_nonlinear(self, model, width, same_inputs, is_ntk, filter_shape,
+                     proj_into_2d, b_std, W_std, parameterization, s):
     is_conv = 'conv' in model
 
     if parameterization == 'standard':
@@ -948,8 +919,8 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
           'same_inputs': same_inputs,
           'kernel_type': kernel_type
       }
-                          for same_inputs in [True, False]
-                          for kernel_type in ['ntk']))
+                                 for same_inputs in [True, False]
+                                 for kernel_type in ['ntk']))
   def test_parallel_in(self, same_inputs, kernel_type):
     platform = default_backend()
     rtol = RTOL if platform != 'tpu' else 0.05

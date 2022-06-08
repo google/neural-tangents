@@ -18,9 +18,9 @@ from absl.testing import absltest
 import jax
 from jax import device_get
 from jax import jit
+from jax import random
 from jax.config import config
 import jax.numpy as np
-import jax.random as random
 from neural_tangents._src.utils import utils
 from tests import test_utils
 

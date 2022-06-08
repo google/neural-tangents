@@ -21,7 +21,7 @@ from functools import partial
 from jax import jit
 from jax.config import config
 import jax.numpy as np
-import jax.random as random
+from jax import random
 from jax.tree_util import tree_map
 import neural_tangents as nt
 from neural_tangents import stax
@@ -147,9 +147,12 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
               kernel_fn,
           'batch_size':
               batch_size
-      } for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
-                          for name, kernel_fn in KERNELS.items()
-                          for batch_size in [2, 8]))
+      }
+                                 for train, test, network in zip(TRAIN_SHAPES,
+                                                                 TEST_SHAPES,
+                                                                 NETWORK)
+                                 for name, kernel_fn in KERNELS.items()
+                                 for batch_size in [2, 8]))
   def testSerial(self, train_shape, test_shape, network, name, kernel_fn,
                  batch_size):
     key = random.PRNGKey(0)
@@ -213,9 +216,12 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
               kernel_fn,
           'batch_size':
               batch_size
-      } for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
-                          for name, kernel_fn in KERNELS.items()
-                          for batch_size in [2, 8]))
+      }
+                                 for train, test, network in zip(TRAIN_SHAPES,
+                                                                 TEST_SHAPES,
+                                                                 NETWORK)
+                                 for name, kernel_fn in KERNELS.items()
+                                 for batch_size in [2, 8]))
   def testComposition(self, train_shape, test_shape, network, name, kernel_fn,
                       batch_size):
     test_utils.stub_out_pmap(batching, 2)
@@ -254,9 +260,12 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
               kernel_fn,
           'batch_size':
               batch_size
-      } for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
-                          for name, kernel_fn in KERNELS.items()
-                          for batch_size in [2, 8]))
+      }
+                                 for train, test, network in zip(TRAIN_SHAPES,
+                                                                 TEST_SHAPES,
+                                                                 NETWORK)
+                                 for name, kernel_fn in KERNELS.items()
+                                 for batch_size in [2, 8]))
   def testAutomatic(self, train_shape, test_shape, network, name, kernel_fn,
                     batch_size):
     test_utils.stub_out_pmap(batching, 2)

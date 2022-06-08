@@ -14,19 +14,18 @@
 
 """Tests for `neural_tangents/predict.py`."""
 
-
 import math
 
 from absl.testing import absltest
 from absl.testing import parameterized
 from jax import grad
 from jax import jit
+from jax import random
 from jax import vmap
 from jax.config import config
 from jax.example_libraries import optimizers
 from jax.flatten_util import ravel_pytree
 import jax.numpy as np
-import jax.random as random
 import jax.tree_util
 import neural_tangents as nt
 from neural_tangents import predict, stax
@@ -203,15 +202,17 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
               learning_rate,
           't':
               t
-      } for train, test, network in
-                          zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
-                          for out_logits in OUTPUT_LOGITS
-                          for name, fn in KERNELS.items()
-                          for momentum in [None, 0.9]
-                          for learning_rate in [0.0002]
-                          for t in [5]
-                          for loss in ['mse_analytic', 'mse'])
-  )
+      }
+                                 for train, test, network in zip(TRAIN_SHAPES,
+                                                                 TEST_SHAPES,
+                                                                 NETWORK)
+                                 for out_logits in OUTPUT_LOGITS
+                                 for name, fn in KERNELS.items()
+                                 for momentum in [None, 0.9]
+                                 for learning_rate in [0.0002]
+                                 for t in [5]
+                                 for loss in ['mse_analytic', 'mse']
+                                 ))
   def testNTKGDPrediction(self, train_shape, test_shape, network, out_logits,
                           fn_and_kernel, momentum, learning_rate, t, loss):
     key, x_test, x_train, y_train = self._get_inputs(out_logits, test_shape,
@@ -289,9 +290,12 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
           'out_logits':
               out_logits,
       }
-                          for train, test, network in zip(
-                              TRAIN_SHAPES[:1], TEST_SHAPES[:1], NETWORK[:1])
-                          for out_logits in [1]))
+                                 for train, test, network in zip(
+                                     TRAIN_SHAPES[:1],
+                                     TEST_SHAPES[:1],
+                                     NETWORK[:1]
+                                     )
+                                 for out_logits in [1]))
   def testNTKMeanCovPrediction(self, train_shape, test_shape, network,
                                out_logits):
     key, x_test, x_train, y_train = self._get_inputs(out_logits, test_shape,
@@ -366,9 +370,12 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
           'out_logits':
               out_logits,
       }
-                          for train, test, network in zip(
-                              TRAIN_SHAPES[:-1], TEST_SHAPES[:-1], NETWORK[:-1])
-                          for out_logits in OUTPUT_LOGITS))
+                                 for train, test, network in zip(
+                                     TRAIN_SHAPES[:-1],
+                                     TEST_SHAPES[:-1],
+                                     NETWORK[:-1]
+                                     )
+                                 for out_logits in OUTPUT_LOGITS))
   def testGradientDescentMseEnsembleGet(self, train_shape, test_shape, network,
                                         out_logits):
     _, x_test, x_train, y_train = self._get_inputs(out_logits, test_shape,
@@ -415,9 +422,13 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
           'get':
               get,
       }
-                          for train, test, network in zip(
-                              TRAIN_SHAPES[:-1], TEST_SHAPES[:-1], NETWORK[:-1])
-                          for out_logits in OUTPUT_LOGITS for get in GETS))
+                                 for train, test, network in zip(
+                                     TRAIN_SHAPES[:-1],
+                                     TEST_SHAPES[:-1],
+                                     NETWORK[:-1]
+                                     )
+                                 for out_logits in OUTPUT_LOGITS
+                                 for get in GETS))
   def testInfiniteTimeAgreement(self, train_shape, test_shape, network,
                                 out_logits, get):
     _, x_test, x_train, y_train = self._get_inputs(out_logits, test_shape,
@@ -456,9 +467,12 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
           'out_logits':
               out_logits,
       }
-                          for train, test, network in zip(
-                              TRAIN_SHAPES[:-1], TEST_SHAPES[:-1], NETWORK[:-1])
-                          for out_logits in OUTPUT_LOGITS))
+                                 for train, test, network in zip(
+                                     TRAIN_SHAPES[:-1],
+                                     TEST_SHAPES[:-1],
+                                     NETWORK[:-1]
+                                     )
+                                 for out_logits in OUTPUT_LOGITS))
   def testZeroTimeAgreement(self, train_shape, test_shape, network, out_logits):
     """Test that the NTK and NNGP agree at t=0."""
     _, x_test, x_train, y_train = self._get_inputs(out_logits, test_shape,
@@ -513,9 +527,12 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
           'out_logits':
               out_logits,
       }
-                          for train, test, network in zip(
-                              TRAIN_SHAPES[:-1], TEST_SHAPES[:-1], NETWORK[:-1])
-                          for out_logits in OUTPUT_LOGITS))
+                                 for train, test, network in zip(
+                                     TRAIN_SHAPES[:-1],
+                                     TEST_SHAPES[:-1],
+                                     NETWORK[:-1]
+                                     )
+                                 for out_logits in OUTPUT_LOGITS))
   def testNTK_NTKNNGPAgreement(self, train_shape, test_shape, network,
                                out_logits):
     _, x_test, x_train, y_train = self._get_inputs(out_logits, test_shape,
@@ -608,9 +625,12 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
           'out_logits':
               out_logits,
       }
-                          for train, test, network in zip(
-                              TRAIN_SHAPES[:-1], TEST_SHAPES[:-1], NETWORK[:-1])
-                          for out_logits in OUTPUT_LOGITS))
+                                 for train, test, network in zip(
+                                     TRAIN_SHAPES[:-1],
+                                     TEST_SHAPES[:-1],
+                                     NETWORK[:-1]
+                                     )
+                                 for out_logits in OUTPUT_LOGITS))
   def testPredCovPosDef(self, train_shape, test_shape, network, out_logits):
     _, x_test, x_train, y_train = self._get_inputs(out_logits, test_shape,
                                                    train_shape)
@@ -646,9 +666,12 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
           'out_logits':
               out_logits,
       }
-                          for train, test, network in zip(
-                              TRAIN_SHAPES[:1], TEST_SHAPES[:1], NETWORK[:1])
-                          for out_logits in [1]))
+                                 for train, test, network in zip(
+                                     TRAIN_SHAPES[:1],
+                                     TEST_SHAPES[:1],
+                                     NETWORK[:1]
+                                     )
+                                 for out_logits in [1]))
   def testTrainedEnsemblePredCov(self, train_shape, test_shape, network,
                                  out_logits):
     training_steps = 1000
@@ -978,11 +1001,13 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
               lr_factor,
           'momentum':
               momentum,
-      } for train, network in zip(TRAIN_SHAPES, NETWORK)
-                          for out_logits in OUTPUT_LOGITS
-                          for name, fn in KERNELS.items()
-                          for lr_factor in [0.5, 1., 3.]
-                          for momentum in [0., 0.1, 0.5, 0.9]))
+      }
+                                 for train, network in zip(TRAIN_SHAPES,
+                                                           NETWORK)
+                                 for out_logits in OUTPUT_LOGITS
+                                 for name, fn in KERNELS.items()
+                                 for lr_factor in [0.5, 1., 3.]
+                                 for momentum in [0., 0.1, 0.5, 0.9]))
   def testMaxLearningRate(self, train_shape, network, out_logits,
                           fn_and_kernel, lr_factor, momentum):
 
@@ -1044,8 +1069,8 @@ class PredictKwargsTest(test_utils.NeuralTangentsTestCase):
           'do_batch': do_batch,
           'mode': mode
       }
-                          for do_batch in [True, False]
-                          for mode in ['analytic', 'mc', 'empirical']))
+                                 for do_batch in [True, False]
+                                 for mode in ['analytic', 'mc', 'empirical']))
   def test_kwargs(self, do_batch, mode):
     rng = random.PRNGKey(1)
 

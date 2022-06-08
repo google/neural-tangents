@@ -13,12 +13,13 @@
 # limitations under the License.
 
 """Tests for `neural_tangents/_src/monte_carlo.py`."""
+
 from absl.testing import absltest
 from absl.testing import parameterized
 import jax
+from jax import random
 from jax.config import config
 import jax.numpy as np
-import jax.random as random
 import neural_tangents as nt
 from neural_tangents import stax
 from neural_tangents._src import batching
@@ -79,9 +80,11 @@ class MonteCarloTest(test_utils.NeuralTangentsTestCase):
           'device_count': device_count,
           'store_on_device': store_on_device,
           'get': get,
-      } for batch_size in BATCH_SIZES for device_count in DEVICE_COUNTS
-                          for store_on_device in STORE_ON_DEVICE
-                          for get in ALL_GET))
+      }
+                                 for batch_size in BATCH_SIZES
+                                 for device_count in DEVICE_COUNTS
+                                 for store_on_device in STORE_ON_DEVICE
+                                 for get in ALL_GET))
   def test_sample_once_batch(self, batch_size, device_count, store_on_device,
                              get):
     test_utils.stub_out_pmap(batching, device_count)
@@ -109,9 +112,11 @@ class MonteCarloTest(test_utils.NeuralTangentsTestCase):
           'device_count': device_count,
           'store_on_device': store_on_device,
           'get': get,
-      } for batch_size in BATCH_SIZES for device_count in DEVICE_COUNTS
-                          for store_on_device in STORE_ON_DEVICE
-                          for get in ALL_GET))
+      }
+                                 for batch_size in BATCH_SIZES
+                                 for device_count in DEVICE_COUNTS
+                                 for store_on_device in STORE_ON_DEVICE
+                                 for get in ALL_GET))
   def test_batch_sample_once(self, batch_size, device_count, store_on_device,
                              get):
     test_utils.stub_out_pmap(batching, device_count)
@@ -136,8 +141,10 @@ class MonteCarloTest(test_utils.NeuralTangentsTestCase):
           'batch_size': batch_size,
           'device_count': device_count,
           'store_on_device': store_on_device,
-      } for batch_size in BATCH_SIZES for device_count in DEVICE_COUNTS
-                          for store_on_device in STORE_ON_DEVICE))
+      }
+                                 for batch_size in BATCH_SIZES
+                                 for device_count in DEVICE_COUNTS
+                                 for store_on_device in STORE_ON_DEVICE))
   def test_sample_vs_analytic_nngp(self, batch_size, device_count,
                                    store_on_device):
     test_utils.stub_out_pmap(batching, device_count)
@@ -164,8 +171,10 @@ class MonteCarloTest(test_utils.NeuralTangentsTestCase):
           'batch_size': batch_size,
           'device_count': device_count,
           'store_on_device': store_on_device,
-      } for batch_size in BATCH_SIZES for device_count in DEVICE_COUNTS
-                          for store_on_device in STORE_ON_DEVICE))
+      }
+                                 for batch_size in BATCH_SIZES
+                                 for device_count in DEVICE_COUNTS
+                                 for store_on_device in STORE_ON_DEVICE))
   def test_monte_carlo_vs_analytic_ntk(self, batch_size, device_count,
                                        store_on_device):
     test_utils.stub_out_pmap(batching, device_count)
@@ -195,9 +204,11 @@ class MonteCarloTest(test_utils.NeuralTangentsTestCase):
           'device_count': device_count,
           'store_on_device': store_on_device,
           'get': get
-      } for batch_size in BATCH_SIZES for device_count in DEVICE_COUNTS
-                          for store_on_device in STORE_ON_DEVICE
-                          for get in ALL_GET))
+      }
+                                 for batch_size in BATCH_SIZES
+                                 for device_count in DEVICE_COUNTS
+                                 for store_on_device in STORE_ON_DEVICE
+                                 for get in ALL_GET))
   def test_monte_carlo_generator(self, batch_size, device_count,
                                  store_on_device, get):
     test_utils.stub_out_pmap(batching, device_count)
@@ -264,7 +275,9 @@ class MonteCarloTest(test_utils.NeuralTangentsTestCase):
               f'_same_inputs={same_inputs}_batch_size={batch_size}',
           'same_inputs': same_inputs,
           'batch_size': batch_size
-      } for same_inputs in [True, False] for batch_size in [1, 2]))
+      }
+                                 for same_inputs in [True, False]
+                                 for batch_size in [1, 2]))
   def test_parallel_in_out_mc(self, same_inputs, batch_size):
     rng = random.PRNGKey(0)
     input_key1, input_key2, net_key = random.split(rng, 3)

@@ -16,12 +16,13 @@
 
 from functools import partial
 import operator
+
 from absl.testing import absltest
 from absl.testing import parameterized
 from jax import jit, tree_map
+from jax import random
 from jax.config import config
 import jax.numpy as np
-import jax.random as random
 import neural_tangents as nt
 from neural_tangents import stax
 from tests import test_utils
@@ -140,11 +141,11 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
       w1 += 5.
       w2 /= 0.9
     return tree_map(operator.add,
-                         f0,
-                         [np.dot(np.dot(x0.T, w1) + w2, dx),
-                          (np.dot(w1, dx),
-                           0.)
-                          ])
+                    f0,
+                    [
+                        np.dot(np.dot(x0.T, w1) + w2, dx),
+                        (np.dot(w1, dx), 0.)
+                    ])
 
   @classmethod
   def _get_init_data(cls, shape):
@@ -197,11 +198,11 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
         w2 /= 0.9
       dx = x - x0
       return tree_map(operator.add,
-                           f_lin,
-                           [0.5 * np.dot(np.dot(dx.T, w1), dx),
-                            (0.,
-                             0.)
-                            ])
+                      f_lin,
+                      [
+                          0.5 * np.dot(np.dot(dx.T, w1), dx),
+                          (0., 0.)
+                      ])
 
     key, params, x0 = self._get_init_data(shape)
 
@@ -229,8 +230,11 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
           'network': network,
           'name': name,
           'kernel_fn': kernel_fn
-      } for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
-                          for name, kernel_fn in KERNELS.items()))
+      }
+                                 for train, test, network in zip(TRAIN_SHAPES,
+                                                                 TEST_SHAPES,
+                                                                 NETWORK)
+                                 for name, kernel_fn in KERNELS.items()))
   def testNTKAgainstDirect(
       self, train_shape, test_shape, network, name, kernel_fn):
     key = random.PRNGKey(0)
@@ -270,31 +274,35 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
           'diagonal_axes': diagonal_axes,
           'trace_axes': trace_axes,
       }
-                          for diagonal_axes in [(),
-                                                (0,),
-                                                (0, 1),
-                                                (0, 1, 2),
-                                                (0, 1, 2, 3),
-                                                (-1,),
-                                                (-2,),
-                                                (0, -1),
-                                                (1, -2),
-                                                (2, 3),
-                                                (3, 0, 2)]
-                          for trace_axes in [(),
-                                             (0,),
-                                             (0, 1),
-                                             (-1,),
-                                             (1,),
-                                             (0, -1),
-                                             (-1, -2),
-                                             (0, 1, 2, 3),
-                                             (3, 1, 2, 0),
-                                             (1, 2, 3),
-                                             (-3, -2),
-                                             (-3, -1),
-                                             (-2, -4),
-                                             (2, 0, -1)]))
+                                 for diagonal_axes in [
+                                     (),
+                                     (0,),
+                                     (0, 1),
+                                     (0, 1, 2),
+                                     (0, 1, 2, 3),
+                                     (-1,),
+                                     (-2,),
+                                     (0, -1),
+                                     (1, -2),
+                                     (2, 3),
+                                     (3, 0, 2)
+                                 ]
+                                 for trace_axes in [
+                                     (),
+                                     (0,),
+                                     (0, 1),
+                                     (-1,),
+                                     (1,),
+                                     (0, -1),
+                                     (-1, -2),
+                                     (0, 1, 2, 3),
+                                     (3, 1, 2, 0),
+                                     (1, 2, 3),
+                                     (-3, -2),
+                                     (-3, -1),
+                                     (-2, -4),
+                                     (2, 0, -1)
+                                 ]))
   def testAxes(self, diagonal_axes, trace_axes):
     key = random.PRNGKey(0)
     key, self_split, other_split = random.split(key, 3)

@@ -14,15 +14,14 @@
 
 """Tests for neural_tangents/_src/stax/branching.py."""
 
-
 import random as prandom
 
 from absl.testing import absltest
 from absl.testing import parameterized
 from jax import default_backend
+from jax import random
 from jax.config import config
 import jax.numpy as np
-import jax.random as random
 import neural_tangents as nt
 from neural_tangents import stax
 from tests import test_utils

@@ -22,9 +22,9 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from jax import default_backend
 from jax import jit
+from jax import random
 from jax.config import config
 import jax.numpy as np
-import jax.random as random
 import neural_tangents as nt
 from neural_tangents import stax
 from tests import test_utils
@@ -351,19 +351,13 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
           'n': n,
           'transpose': transpose
       }
-                          for proj in ['flatten', 'avg']
-                          for same_inputs in [False]
-                          for get in ['ntk']
-                          for n in [0, 1]
-                          for concat in [None] + list(range(n + 1))
-                          for mask_constant in [10.]
-                          for p in [0.5]
-                          for transpose in [True, False]
-                          for mask_axis in [(),
-                                            (0,),
-                                            (0, 1, 2, 3)
-                                            ]
-                          ))
+                                 for proj in ['flatten', 'avg']
+                                 for same_inputs in [False]
+                                 for get in ['ntk'] for n in [0, 1]
+                                 for concat in [None] + list(range(n + 1))
+                                 for mask_constant in [10.] for p in [0.5]
+                                 for transpose in [True, False]
+                                 for mask_axis in [(), (0,), (0, 1, 2, 3)]))
   def test_mask_conv(self, same_inputs, get, mask_axis, mask_constant, concat,
                      proj, p, n, transpose):
     test_utils.skip_test(self)

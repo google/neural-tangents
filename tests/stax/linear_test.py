@@ -14,7 +14,6 @@
 
 """Tests for `neural_tangents/_src/stax/linear.py."""
 
-
 import itertools
 import random as prandom
 import string
@@ -26,7 +25,7 @@ from jax import jit, vjp
 from jax.config import config
 from jax import default_backend
 import jax.numpy as np
-import jax.random as random
+from jax import random
 import more_itertools
 import neural_tangents as nt
 from neural_tangents import stax
@@ -168,14 +167,14 @@ class ConvNDTest(test_utils.NeuralTangentsTestCase):
           'use_layernorm':
               use_layernorm
       }
-                          for same_inputs in [False]
-                          for n in [0, 1, 2]
-                          for get in ['ntk']
-                          for proj in ['flatten', 'pool']
-                          for use_attn in [True]
-                          for channels_first in [True, False]
-                          for use_dropout in [True]
-                          for use_layernorm in [True]))
+                                 for same_inputs in [False]
+                                 for n in [0, 1, 2]
+                                 for get in ['ntk']
+                                 for proj in ['flatten', 'pool']
+                                 for use_attn in [True]
+                                 for channels_first in [True, False]
+                                 for use_dropout in [True]
+                                 for use_layernorm in [True]))
   def test_conv_nd(self, same_inputs, n, get, proj, use_attn, channels_first,
                    use_dropout, use_layernorm):
     platform = default_backend()
@@ -299,44 +298,45 @@ class AttentionTest(test_utils.NeuralTangentsTestCase):
           'val_pos_emb': val_pos_emb,
           'W_pos_emb_std': W_pos_emb_std
       }
-                          for same_inputs in [
-                              False
-                          ]
-                          for get in [
-                              'ntk'
-                          ]
-                          for n in [
-                              2,
-                          ]
-                          for linear_scaling in [
-                              True,
-                              False
-                          ]
-                          for mask_constant in [
-                              10.
-                          ]
-                          for p in [0.5]
-                          for mask_axis in [(-1,)]
-                          for pos_emb_type in [
-                              'CONCAT',
-                              'SUM',
-                              'NONE'
-                          ]
-                          for n_chan_pos_emb in ([None]
-                                                 if pos_emb_type != 'CONCAT'
-                                                 else [None, 512])
-                          for pos_emb_decay_fn in [
-                              None,
-                              'linear'
-                          ]
-                          for val_pos_emb in ([
-                              True,
-                              False
-                          ] if pos_emb_type != 'NONE' else [True])
-                          for W_pos_emb_std in ([
-                              2,
-                          ] if pos_emb_type != 'NONE' else [0.])
-                          ))
+                                 for same_inputs in [
+                                     False
+                                 ]
+                                 for get in [
+                                     'ntk'
+                                 ]
+                                 for n in [
+                                     2,
+                                 ]
+                                 for linear_scaling in [
+                                     True,
+                                     False
+                                 ]
+                                 for mask_constant in [
+                                     10.
+                                 ]
+                                 for p in [0.5]
+                                 for mask_axis in [(-1,)]
+                                 for pos_emb_type in [
+                                     'CONCAT',
+                                     'SUM',
+                                     'NONE'
+                                 ]
+                                 for n_chan_pos_emb in (
+                                     [None] if pos_emb_type != 'CONCAT'
+                                     else [None, 512]
+                                     )
+                                 for pos_emb_decay_fn in [
+                                     None,
+                                     'linear'
+                                 ]
+                                 for val_pos_emb in ([
+                                     True,
+                                     False
+                                 ] if pos_emb_type != 'NONE' else [True])
+                                 for W_pos_emb_std in ([
+                                     2,
+                                 ] if pos_emb_type != 'NONE' else [0.])
+                                 ))
   def test_attention(
       self,
       same_inputs,
@@ -447,47 +447,48 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
           'implementation': implementation,
           'to_dense': to_dense
       }
-                          for get in [
-                              'ntk',
-                          ]
-                          for same_input in [
-                              False,
-                              True
-                          ]
-                          for act_name, activation in [
-                              ('Relu', stax.Relu()),
-                          ]
-                          for mask_constant in [
-                              10.
-                          ]
-                          for shape in [
-                              (4,),
-                              (3, 2),
-                          ]
-                          for batch_axis in range(len(shape) + 2)
-                          for channel_axis in
-                          [
-                              c for c in range(len(shape) + 2)
-                              if c != batch_axis
-                          ]
-                          for agg_axes in [None] +
-                          list(more_itertools.powerset(
-                              [p for p in range(len(shape) + 2)
-                               if p not in (batch_axis, channel_axis)]))
-                          for do_batch in ([
-                              True
-                          ] if batch_axis == 0 else [False])
-                          for implementation in ['DENSE', 'SPARSE']
-                          for to_dense in [
-                              'identity',
-                              'sparse_to_dense',
-                          ]
-                          for name, readout in [
-                              ('Pooling',
-                               stax.GlobalAvgPool(batch_axis=batch_axis,
-                                                  channel_axis=channel_axis)),
-                          ]
-                          ))
+                                 for get in [
+                                     'ntk',
+                                 ]
+                                 for same_input in [
+                                     False,
+                                     True
+                                 ]
+                                 for act_name, activation in [
+                                     ('Relu', stax.Relu()),
+                                 ]
+                                 for mask_constant in [
+                                     10.
+                                 ]
+                                 for shape in [
+                                     (4,),
+                                     (3, 2),
+                                 ]
+                                 for batch_axis in range(len(shape) + 2)
+                                 for channel_axis in
+                                 [
+                                     c for c in range(len(shape) + 2)
+                                     if c != batch_axis
+                                 ]
+                                 for agg_axes in [None] +
+                                 list(more_itertools.powerset(
+                                     [p for p in range(len(shape) + 2)
+                                      if p not in (batch_axis, channel_axis)]))
+                                 for do_batch in ([
+                                     True
+                                 ] if batch_axis == 0 else [False])
+                                 for implementation in ['DENSE', 'SPARSE']
+                                 for to_dense in [
+                                     'identity',
+                                     'sparse_to_dense',
+                                 ]
+                                 for name, readout in [
+                                     ('Pooling',
+                                      stax.GlobalAvgPool(
+                                          batch_axis=batch_axis,
+                                          channel_axis=channel_axis)),
+                                 ]
+                                 ))
   def test_aggregate(self, get, readout, same_input, activation, mask_constant,
                      shape, batch_axis, channel_axis, agg_axes, do_batch,
                      implementation, to_dense):
@@ -630,7 +631,7 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
       pattern2_dense = sparse_to_dense(pattern2)
 
       # Test parameters agreement
-      key, old = random.split(key, 2)
+      key, _ = random.split(key, 2)
       _, params_sparse = init_fn(key, x1.shape)
       _, params_dense = init_fn_dense(key, x1.shape)
       self.assertAllClose(params_dense, params_sparse)
@@ -704,13 +705,13 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
           'diagonal_batch': diagonal_batch,
           'diagonal_spatial': diagonal_spatial
       }
-                          for padding in ['CIRCULAR', 'SAME', 'VALID']
-                          for same_inputs in [False]
-                          for filter_shape in range(2, 5)
-                          for strides in range(2, 5)
-                          for size in range(2, 5)
-                          for diagonal_batch in [True]
-                          for diagonal_spatial in [True, False]))
+                                 for padding in ['CIRCULAR', 'SAME', 'VALID']
+                                 for same_inputs in [False]
+                                 for filter_shape in range(2, 5)
+                                 for strides in range(2, 5)
+                                 for size in range(2, 5)
+                                 for diagonal_batch in [True]
+                                 for diagonal_spatial in [True, False]))
   def test_conv_transpose(self, same_inputs, padding, filter_shape, strides,
                           size, diagonal_batch, diagonal_spatial):
     if size > 2:
@@ -815,9 +816,9 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
           'filter_shape': filter_shape,
           'strides': strides,
       }
-                          for filter_shape in range(1, 5)
-                          for strides in range(1, 5)
-                          for size in range(1, 5)))
+                                 for filter_shape in range(1, 5)
+                                 for strides in range(1, 5)
+                                 for size in range(1, 5)))
   def test_conv_transpose_circular(self, size, filter_shape, strides):
     if size > 2:
       test_utils.skip_test(self)
@@ -1237,7 +1238,7 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
 
     n_b1, n_b2 = 2, 4
     n_c = 1
-    key1, key2, key3 = random.split(random.PRNGKey(1), 3)
+    key1, key2, _ = random.split(random.PRNGKey(1), 3)
 
     shape = shape[:channel_axis] + (-1,) + shape[channel_axis + 1:]
 
@@ -1389,7 +1390,7 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
     width = 2**7
     n_samples = 2**7
     tol = 0.03
-    key1, key2, key3 = random.split(random.PRNGKey(1), 3)
+    key1, key2, _ = random.split(random.PRNGKey(1), 3)
 
     mask_constant = 10.
 
@@ -1447,7 +1448,7 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
           'testcase_name': f'_diag_spatial={diagonal_spatial}_',
           'diagonal_spatial': diagonal_spatial,
       }
-                          for diagonal_spatial in [True, False]))
+                                 for diagonal_spatial in [True, False]))
   def test_whitened_inputs(self, diagonal_spatial):
     test_utils.skip_test(self)
 
@@ -1502,15 +1503,15 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
           'get': get,
           'parameterization': parameterization
       }
-                          for padding in ['SAME', 'VALID', 'CIRCULAR']
-                          for same_inputs in [False]
-                          for filter_shape in range(2, 4)
-                          for strides in range(1, 3)
-                          for size in range(2, 4)
-                          for diagonal_batch in [True]
-                          for diagonal_spatial in [True, False]
-                          for get in ['cov1', 'nngp', 'ntk']
-                          for parameterization in ['standard', 'ntk']))
+                                 for padding in ['SAME', 'VALID', 'CIRCULAR']
+                                 for same_inputs in [False]
+                                 for filter_shape in range(2, 4)
+                                 for strides in range(1, 3)
+                                 for size in range(2, 4)
+                                 for diagonal_batch in [True]
+                                 for diagonal_spatial in [True, False]
+                                 for get in ['cov1', 'nngp', 'ntk']
+                                 for parameterization in ['standard', 'ntk']))
   def test_conv_local(self, same_inputs, padding, filter_shape, strides,
                       size, diagonal_batch, diagonal_spatial, get,
                       parameterization):
@@ -1584,13 +1585,17 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
           'pool': pool,
           'get': get
       }
-                          for pool in [stax.Identity(),
-                                       stax.AvgPool((2, 3), (2, 1), 'VALID')]
-                          for readout in [stax.Flatten(),
-                                          stax.GlobalAvgPool()]
-                          for same_inputs in [False]
-                          for get in ['ntk']
-                          for parameterization in ['ntk', 'standard']))
+                                 for pool in [
+                                     stax.Identity(),
+                                     stax.AvgPool((2, 3), (2, 1), 'VALID')
+                                 ]
+                                 for readout in [
+                                     stax.Flatten(),
+                                     stax.GlobalAvgPool()
+                                 ]
+                                 for same_inputs in [False]
+                                 for get in ['ntk']
+                                 for parameterization in ['ntk', 'standard']))
   def test_conv_local_deep(self, get, pool, same_inputs, readout,
                            parameterization):
     test_utils.skip_test(self)
