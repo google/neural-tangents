@@ -31,15 +31,15 @@ import numpy as onp
 
 
 flags.DEFINE_string(
-    'jax_test_dut',
+    'nt_test_dut',
     '',
     help=
     'Describes the device under test in case special consideration is required.'
 )
 
 flags.DEFINE_integer(
-    'num_generated_cases',
-    int(os.getenv('JAX_NUM_GENERATED_CASES', '10')),
+    'nt_num_generated_cases',
+    int(os.getenv('NT_NUM_GENERATED_CASES', '10')),
     help='Number of generated cases to test'
 )
 
@@ -65,7 +65,7 @@ def _dtype(x):
     return onp.asarray(x).dtype
 
 
-def is_sequence(x):
+def _is_sequence(x):
   try:
     iter(x)
   except TypeError:
@@ -75,7 +75,7 @@ def is_sequence(x):
 
 
 def device_under_test():
-  return getattr(FLAGS, 'jax_test_dut', None) or jax.default_backend()
+  return getattr(FLAGS, 'nt_test_dut', None) or jax.default_backend()
 
 
 _DEFAULT_TOLERANCE = {
@@ -126,9 +126,9 @@ _CACHED_INDICES: Dict[int, Sequence[int]] = {}
 def cases_from_list(xs):
   xs = list(xs)
   n = len(xs)
-  if n < FLAGS.num_generated_cases:
+  if n < FLAGS.nt_num_generated_cases:
     return xs
-  k = min(n, FLAGS.num_generated_cases)
+  k = min(n, FLAGS.nt_num_generated_cases)
   # Random sampling for every parameterized test is expensive. Do it once and
   # cache the result.
   indices = _CACHED_INDICES.get(n)
@@ -151,8 +151,8 @@ class NeuralTangentsTestCase(parameterized.TestCase):
         self._assertAllClose(x[k], y[k], check_dtypes=check_dtypes, atol=atol,
                              rtol=rtol, canonicalize_dtypes=canonicalize_dtypes,
                              err_msg=err_msg)
-    elif is_sequence(x) and not hasattr(x, '__array__'):
-      self.assertTrue(is_sequence(y) and not hasattr(y, '__array__'))
+    elif _is_sequence(x) and not hasattr(x, '__array__'):
+      self.assertTrue(_is_sequence(y) and not hasattr(y, '__array__'))
       self.assertEqual(len(x), len(y))
       for x_elt, y_elt in zip(x, y):
         self._assertAllClose(x_elt, y_elt, check_dtypes=check_dtypes, atol=atol,
