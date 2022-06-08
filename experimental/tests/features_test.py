@@ -151,8 +151,8 @@ class FeaturesTest(test_utils.NeuralTangentsTestCase):
       self.assertAllClose(k_nngp, k_nngp_approx)
       self.assertAllClose(k_ntk, k_ntk_approx)
     else:
-      test_utils.assert_close_matrices(self, k_nngp, k_nngp_approx, 0.1, 1.)
-      test_utils.assert_close_matrices(self, k_ntk, k_ntk_approx, 0.1, 1.)
+      test_utils.assert_close_matrices(self, k_nngp, k_nngp_approx, 0.2, 1.)
+      test_utils.assert_close_matrices(self, k_ntk, k_ntk_approx, 0.2, 1.)
 
   @parameterized.named_parameters(
       test_utils.cases_from_list({
