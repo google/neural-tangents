@@ -12,6 +12,7 @@ from tests import test_utils
 from experimental.features import DenseFeatures, ReluFeatures, ConvFeatures, AvgPoolFeatures, FlattenFeatures, serial, GlobalAvgPoolFeatures, AggregateFeatures
 
 
+config.update("jax_enable_x64", True)
 config.parse_flags_with_absl()
 config.update('jax_numpy_rank_promotion', 'raise')
 
@@ -20,9 +21,9 @@ test_utils.update_test_tolerance()
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
-NUM_DIMS = [64, 128, 256, 512]
-WEIGHT_VARIANCES = [0.001, 0.01, 0.1, 1.]
-BIAS_VARIANCES = [None, 0.001, 0.01, 0.1]
+NUM_DIMS = [128, 256, 512]
+WEIGHT_VARIANCES = [0.01, 0.1, 1.]
+BIAS_VARIANCES = [None, 0.01, 0.1]
 
 
 class FeaturesTest(test_utils.NeuralTangentsTestCase):
@@ -355,8 +356,8 @@ class FeaturesTest(test_utils.NeuralTangentsTestCase):
       self.assertAllClose(k_nngp, k_nngp_approx)
       self.assertAllClose(k_ntk, k_ntk_approx)
     else:
-      test_utils.assert_close_matrices(self, k_nngp, k_nngp_approx, 0.15, 1.)
-      test_utils.assert_close_matrices(self, k_ntk, k_ntk_approx, 0.15, 1.)
+      test_utils.assert_close_matrices(self, k_nngp, k_nngp_approx, 0.2, 1.)
+      test_utils.assert_close_matrices(self, k_ntk, k_ntk_approx, 0.2, 1.)
 
   def test_global_average_pooling_features(self):
     rng = random.PRNGKey(1)
