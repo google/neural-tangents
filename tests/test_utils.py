@@ -17,7 +17,8 @@
 import dataclasses
 import logging
 import os
-from typing import Dict, Sequence
+from typing import Dict, Sequence, Tuple, Optional, Callable
+from types import ModuleType
 
 from absl import flags
 from absl.testing import parameterized
@@ -48,7 +49,7 @@ FLAGS = flags.FLAGS
 # Utility functions forked from jax._src.public_test_util
 
 
-_python_scalar_dtypes : dict = {
+_python_scalar_dtypes: Dict[type, onp.dtype] = {
     bool: onp.dtype('bool'),
     int: onp.dtype('int64'),
     float: onp.dtype('float64'),
@@ -56,7 +57,7 @@ _python_scalar_dtypes : dict = {
 }
 
 
-def _dtype(x):
+def _dtype(x) -> onp.dtype:
   if hasattr(x, 'dtype'):
     return x.dtype
   elif type(x) in _python_scalar_dtypes:
@@ -65,7 +66,7 @@ def _dtype(x):
     return onp.asarray(x).dtype
 
 
-def _is_sequence(x):
+def _is_sequence(x) -> bool:
   try:
     iter(x)
   except TypeError:
@@ -74,20 +75,22 @@ def _is_sequence(x):
     return True
 
 
-def device_under_test():
+def device_under_test() -> str:
   return getattr(FLAGS, 'nt_test_dut', None) or jax.default_backend()
 
 
-_DEFAULT_TOLERANCE = {
+_DEFAULT_TOLERANCE: Dict[onp.dtype, float] = {
     onp.dtype(onp.bool_): 0,
     onp.dtype(onp.int32): 0,
     onp.dtype(onp.int64): 0,
+    onp.dtype(onp.float16): 5e-3,
     onp.dtype(onp.float32): 5e-3,
     onp.dtype(onp.float64): 1e-5,
+    onp.dtype(np.bfloat16): 5e-3
 }
 
 
-def _default_tolerance():
+def _default_tolerance() -> Dict[onp.dtype, float]:
   if device_under_test() != 'tpu':
     return _DEFAULT_TOLERANCE
   tol = _DEFAULT_TOLERANCE.copy()
@@ -96,7 +99,13 @@ def _default_tolerance():
   return tol
 
 
-def _assert_numpy_allclose(a, b, atol=None, rtol=None, err_msg=''):
+def _assert_numpy_allclose(
+    a: onp.ndarray,
+    b: onp.ndarray,
+    atol: Optional[float] = None,
+    rtol: Optional[float] = None,
+    err_msg: str = ''
+):
   if a.dtype == b.dtype == _dtypes.float0:
     onp.testing.assert_array_equal(a, b, err_msg=err_msg)
     return
@@ -111,7 +120,7 @@ def _assert_numpy_allclose(a, b, atol=None, rtol=None, err_msg=''):
     onp.testing.assert_allclose(a, b, **kw, err_msg=err_msg)
 
 
-def _tolerance(dtype, tol=None):
+def _tolerance(dtype: onp.dtype, tol: Optional[float] = None) -> float:
   tol = {} if tol is None else tol
   if not isinstance(tol, dict):
     return tol
@@ -141,8 +150,17 @@ def cases_from_list(xs):
 class NeuralTangentsTestCase(parameterized.TestCase):
   """Testing helper class forked from JaxTestCase."""
 
-  def _assertAllClose(self, x, y, *, check_dtypes=True, atol=None, rtol=None,
-                      canonicalize_dtypes=True, err_msg=''):
+  def _assertAllClose(
+      self,
+      x,
+      y,
+      *,
+      check_dtypes: bool = True,
+      atol: Optional[float] = None,
+      rtol: Optional[float] = None,
+      canonicalize_dtypes: bool = True,
+      err_msg: str = ''
+  ):
     """Assert that x and y, either arrays or nested tuples/lists, are close."""
     if isinstance(x, dict):
       self.assertIsInstance(y, dict)
@@ -171,8 +189,16 @@ class NeuralTangentsTestCase(parameterized.TestCase):
     else:
       raise TypeError((type(x), type(y)))
 
-  def assertArraysAllClose(self, x, y, *, check_dtypes=True, atol=None,
-                           rtol=None, err_msg=''):
+  def assertArraysAllClose(
+      self,
+      x,
+      y,
+      *,
+      check_dtypes: bool = True,
+      atol: Optional[float] = None,
+      rtol: Optional[float] = None,
+      err_msg: str = ''
+  ):
     """Assert that x and y are close (up to numerical tolerances)."""
     self.assertEqual(x.shape, y.shape)
     atol = max(_tolerance(_dtype(x), atol), _tolerance(_dtype(y), atol))
@@ -182,7 +208,7 @@ class NeuralTangentsTestCase(parameterized.TestCase):
     if check_dtypes:
       self.assertDtypesMatch(x, y)
 
-  def assertDtypesMatch(self, x, y, *, canonicalize_dtypes=True):
+  def assertDtypesMatch(self, x, y, *, canonicalize_dtypes: bool = True):
     if not config.x64_enabled and canonicalize_dtypes:
       self.assertEqual(_dtypes.canonicalize_dtype(_dtype(x)),
                        _dtypes.canonicalize_dtype(_dtype(y)))
@@ -194,16 +220,18 @@ class NeuralTangentsTestCase(parameterized.TestCase):
       x,
       y,
       *,
-      check_dtypes=True,
-      atol=None,
-      rtol=None,
-      canonicalize_dtypes=True,
+      check_dtypes: bool = True,
+      atol: Optional[float] = None,
+      rtol: Optional[float] = None,
+      canonicalize_dtypes: bool = True,
+      check_finite: bool = True,
       err_msg=''):
-    def is_finite(x):
-      self.assertTrue(np.all(np.isfinite(x)))
+    if check_finite:
+      def is_finite(x):
+        self.assertTrue(np.all(np.isfinite(x)))
 
-    jax.tree_map(is_finite, x)
-    jax.tree_map(is_finite, y)
+      jax.tree_map(is_finite, x)
+      jax.tree_map(is_finite, y)
 
     def assert_close(x, y):
       self._assertAllClose(
@@ -232,21 +260,21 @@ class NeuralTangentsTestCase(parameterized.TestCase):
 # Neural Tangents specific utilities.
 
 
-def _jit_vmap(f):
+def _jit_vmap(f: Callable) -> Callable:
   return jit(vmap(f))
 
 
-def update_test_tolerance(f32_tol=5e-3, f64_tol=1e-5):
+def update_test_tolerance(f32_tol: float = 5e-3, f64_tol: float = 1e-5):
   _DEFAULT_TOLERANCE[onp.dtype(onp.float32)] = f32_tol
   _DEFAULT_TOLERANCE[onp.dtype(onp.float64)] = f64_tol
 
 
-def stub_out_pmap(batch, count):
+def stub_out_pmap(batch: ModuleType, count: int):
   # If we are using GPU or CPU stub out pmap with vmap to simulate multi-core.
   if count > 0:
     class xla_bridge_stub:
 
-      def device_count(self):
+      def device_count(self) -> int:
         return count
 
     platform = jax.default_backend()
@@ -255,7 +283,13 @@ def stub_out_pmap(batch, count):
       batch.xla_bridge = xla_bridge_stub()
 
 
-def _log(relative_error, absolute_error, expected, actual, did_pass):
+def _log(
+    relative_error: float,
+    absolute_error: float,
+    expected,
+    actual,
+    did_pass: bool
+):
   msg = 'PASSED' if did_pass else 'FAILED'
   logging.info(f'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n'
                f'\n{msg} with {relative_error} relative error \n'
@@ -298,12 +332,21 @@ def assert_close_matrices(self, expected, actual, rtol, atol=0.1):
   jax.tree_map(assert_close, expected, actual)
 
 
-def skip_test(self, msg='Skipping large tests for speed.', platforms=('cpu',)):
+def skip_test(
+    self,
+    msg: str = 'Skipping large tests for speed.',
+    platforms: Tuple[str, ...] = ('cpu',)
+):
   if jax.default_backend() in platforms:
     raise parameterized.TestCase.skipTest(self, msg)
 
 
-def mask(x, mask_constant, mask_axis, key, p):
+def mask(
+    x: np.ndarray,
+    mask_constant: Optional[float],
+    mask_axis: Sequence[int],
+    key: jax.random.KeyArray,
+    p: float) -> np.ndarray:
   if mask_constant is not None:
     mask_shape = [1 if i in mask_axis else s
                   for i, s in enumerate(x.shape)]
