@@ -33,7 +33,7 @@ import numpy as onp
 from .requirements import Bool, Diagonal, get_diagonal_outer_prods, layer, mean_and_var, requires, supports_masking
 from ..utils import utils
 from ..utils.kernel import Kernel
-from ..utils.typing import Axes, InternalLayer, InternalLayerMasked, NTTree, PyTree
+from ..utils.typing import Axes, InternalLayer, InternalLayerMasked, PyTree
 
 
 # Enums
