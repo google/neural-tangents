@@ -814,7 +814,7 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
       test_utils.skip_test(self)
 
     n_out = 1 if get == 'ntk' else 1024
-    width = 2**10
+    width = 832
 
     W_std_in = width**(-0.5) if parameterization_out == 'standard' else 1.
     if phi == stax.Exp:
