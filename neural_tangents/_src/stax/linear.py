@@ -409,11 +409,6 @@ def Aggregate(
     warnings.warn('Negative indices in `pattern` are considered as padding '
                   '(i.e. ignored), unlike typical numpy negative indexing.')
 
-    # TODO(romann): revisit based on https://github.com/google/jax/issues/7538.
-    warnings.warn('Reverse-mode differentiation of this layer can produce '
-                  'wrong results if `pattern` contains negative indices. See '
-                  'https://github.com/google/jax/issues/7538.')
-
   init_fn = lambda rng, input_shape: (input_shape, ())
 
   def get_agg_axes(ndim: int) -> Tuple[Tuple[int, ...], int, int]:
@@ -1388,8 +1383,9 @@ def _Conv(
       rhs_shape = list(filter_shape)
       for c in ('O', 'I'):
         rhs_shape.insert(rhs_spec.index(c), 1)
-      rhs = np.ones(rhs_shape)
-      # TODO(romann): revisit after https://github.com/google/jax/issues/4012.
+
+      # TODO(romann): revisit based on http://b/235531081.
+      rhs = np.ones(rhs_shape, dtype=None if jax.default_backend() == 'gpu' else mask.dtype)
       mask = lax.conv_transpose(
           mask.astype(rhs.dtype),
           rhs,

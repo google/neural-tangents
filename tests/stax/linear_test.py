@@ -416,7 +416,7 @@ class AttentionTest(test_utils.NeuralTangentsTestCase):
         vmap_axes=0
     )
 
-    kernel_fn = jit(kernel_fn, static_argnums=(2,))
+    kernel_fn = jit(kernel_fn, static_argnames='get')
     exact = kernel_fn(X0_1, X0_2, get, mask_constant=mask_constant)
 
     empirical = kernel_fn_mc(X0_1, X0_2, get=get, mask_constant=mask_constant)
@@ -610,7 +610,7 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
 
     init_fn, apply_fn, kernel_fn = get_nn(to_dense, implementation)
     apply_fn = jit(apply_fn)
-    kernel_fn = jit(kernel_fn, static_argnums=2)
+    kernel_fn = jit(kernel_fn, static_argnames='get')
 
     if do_batch:
       kernel_fn = nt.batch(kernel_fn, batch_size=2)
@@ -625,7 +625,7 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
       init_fn_dense, apply_fn_dense, kernel_fn_dense = get_nn('identity',
                                                               'DENSE')
       apply_fn_dense = jit(apply_fn_dense)
-      kernel_fn_dense = jit(kernel_fn_dense, static_argnums=2)
+      kernel_fn_dense = jit(kernel_fn_dense, static_argnames='get')
 
       pattern1_dense = sparse_to_dense(pattern1)
       pattern2_dense = sparse_to_dense(pattern2)

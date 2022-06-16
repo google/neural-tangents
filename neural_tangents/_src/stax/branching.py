@@ -223,8 +223,7 @@ def FanInConcat(axis: int = -1) -> InternalLayerMasked:
             'for the case if all input layers guaranteed to be mean-zero '
             'Gaussian, i.e. having all `is_gaussian set to `True`.')
     else:
-      # TODO(romann): allow to apply nonlinearity after
-      # channelwise concatenation.
+      # TODO(romann): allow nonlinearity after channelwise concatenation.
       # TODO(romann): support concatenating different channelwise masks.
       is_gaussian = False
 

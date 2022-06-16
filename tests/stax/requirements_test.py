@@ -321,7 +321,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
         vmap_axes=None if concat in (0, -2) else 0,
     )
 
-    kernel_fn = jit(kernel_fn, static_argnums=(2,))
+    kernel_fn = jit(kernel_fn, static_argnames='get')
     exact = kernel_fn(x1, x2, get, mask_constant=mask_constant)
     empirical = kernel_fn_mc(x1, x2, get=get, mask_constant=mask_constant)
     test_utils.assert_close_matrices(self, empirical, exact, tol)
@@ -487,7 +487,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
         vmap_axes=None if concat in (0, -n) else 0,
     )
 
-    kernel_fn = jit(kernel_fn, static_argnums=(2,))
+    kernel_fn = jit(kernel_fn, static_argnames='get')
     exact = kernel_fn(x1, x2, get, mask_constant=mask_constant)
     empirical = kernel_fn_mc(x1, x2, get=get, mask_constant=mask_constant)
     test_utils.assert_close_matrices(self, empirical, exact, tol)

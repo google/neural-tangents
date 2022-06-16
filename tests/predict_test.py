@@ -88,13 +88,13 @@ def _empirical_kernel(key, input_shape, network, out_logits):
   _, params = init_fn(key, (-1,) + input_shape)
   _kernel_fn = nt.empirical_kernel_fn(f, trace_axes=(), vmap_axes=0)
   kernel_fn = lambda x1, x2, get: _kernel_fn(x1, x2, get, params)
-  return params, f, jit(kernel_fn, static_argnums=(2,))
+  return params, f, jit(kernel_fn, static_argnames='get')
 
 
 def _theoretical_kernel(key, input_shape, network, out_logits):
   init_fn, f, kernel_fn = _build_network(input_shape, network, out_logits)
   _, params = init_fn(key, (-1,) + input_shape)
-  return params, f, jit(kernel_fn, static_argnums=(2,))
+  return params, f, jit(kernel_fn, static_argnames='get')
 
 
 KERNELS = {
@@ -942,8 +942,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
 
             kernel_fn = nt.empirical_kernel_fn(apply_fn, trace_axes=trace_axes)
 
-            # TODO(romann): investigate the SIGTERM error on CPU.
-            # kernel_fn = jit(kernel_fn, static_argnums=(2,))
+            kernel_fn = jit(kernel_fn, static_argnames='get')
             ntk_train_train = kernel_fn(x_train, None, 'ntk', params)
             if x is not None:
               ntk_test_train = kernel_fn(x, x_train, 'ntk', params)
@@ -1083,14 +1082,13 @@ class PredictKwargsTest(test_utils.NeuralTangentsTestCase):
     pattern_train = random.normal(rng, (8, 7, 7))
     pattern_test = random.normal(rng, (4, 7, 7))
 
+    diag_reg = 1e-4
+
     if jax.default_backend() == 'tpu':
-      # TODO(romann): figure out why TPU accuracy is so low.
-      diag_reg = 1e-2
       atol = 3e-3
-      rtol = 0.4
-      width = 512
+      rtol = 4e-2
+      width = 256
     else:
-      diag_reg = 1e-4
       atol = 5e-4
       rtol = 1e-2
       width = 64

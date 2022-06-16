@@ -680,15 +680,11 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
       return jvp(dk, (x1, x2), (dx1, dx2))[1]
 
     _dk = dk(x1, x2)
+    _d2k = d2k(x1, x2)
 
-    if (same_inputs is not False and
-        get == 'ntk' and
-        ('Relu' in name or 'Abs' in name)):
-      # TODO(romann): revisit numerical issues of second derivative of `Relu`
-      _d2k = 0
-      tol = 0.01
+    if same_inputs is not False and get == 'ntk' and 'Relu' in name:
+      tol = 8e-3
     else:
-      _d2k = d2k(x1, x2)
       tol = 2e-3 if name == 'ElementwiseNumerical' else 1e-4
 
     def assert_close(x, y, tol=3e-5):
@@ -902,7 +898,7 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
     def kernel_fn_emp(x1, x2, get, params):
       return nt.empirical_kernel_fn(apply_fn)(x1, x2, get, params)[0, 0]
 
-    kernel_fn_emp_g = jit(value_and_grad(kernel_fn_emp), static_argnums=(2,))
+    kernel_fn_emp_g = jit(value_and_grad(kernel_fn_emp), static_argnames='get')
 
     def kernel_scalar_mc_grad_mean(x1, x2):
       key = random.PRNGKey(4)
