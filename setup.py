@@ -38,6 +38,7 @@ TESTS_REQUIRES = [
     'tensorflow',
     'tensorflow-datasets',
     'flax>=0.5.1'
+    'PyYAML>=6.0'  # TODO(romann): remove when https://github.com/google/flax/issues/2190 is fixed.
 ]
 
 
