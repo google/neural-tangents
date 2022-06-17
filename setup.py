@@ -37,7 +37,10 @@ TESTS_REQUIRES = [
     'more-itertools',
     'tensorflow',
     'tensorflow-datasets',
-    'flax>=0.5.1'
+    'flax>=0.5.1',
+    # TODO(romann): remove when
+    #   https://github.com/google/flax/issues/2190 is fixed.
+    'PyYAML>=6.0'
 ]
 
 
