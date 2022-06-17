@@ -27,6 +27,7 @@ import jax.numpy as np
 import neural_tangents as nt
 from neural_tangents import stax
 from tests import test_utils
+from neural_tangents._src.empirical import _DEFAULT_TESTING_NTK_IMPLEMENTATION
 
 
 config.parse_flags_with_absl()
@@ -112,7 +113,8 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
         *[affine, activation_fn]*depth, readout)
     analytic_kernel = kernel_fn(X0_1, X0_2, get)
     mc_kernel_fn = nt.monte_carlo_kernel_fn(
-        init_fn, apply_fn, split, num_samplings, implementation=2,
+        init_fn, apply_fn, split, num_samplings,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         vmap_axes=0
     )
     empirical_kernel = mc_kernel_fn(X0_1, X0_2, get)

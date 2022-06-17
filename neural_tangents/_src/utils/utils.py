@@ -19,19 +19,17 @@ import functools
 import inspect
 import operator
 import types
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Sized, Tuple, Union, TypeVar, Type
-
-import jax
-
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Sized, Tuple, Type, TypeVar, Union
 from .typing import Axes, PyTree
 import warnings
 
 from . import dataclasses
-from jax import dtypes, random
-from jax import lax
+import jax
+from jax import dtypes, lax, tree_flatten, tree_unflatten
+from jax import random
+from jax.core import ShapedArray
 import jax.numpy as np
 from jax.tree_util import tree_all, tree_map
-from jax.tree_util import tree_flatten, tree_unflatten
 import numpy as onp
 
 
@@ -280,7 +278,7 @@ def mod(axis: Axes, x: Union[int, Sized, np.ndarray]) -> List[int]:
   n = _get_ndim(x)
   if isinstance(axis, int):
     axis = [axis]
-  return [i % n for i in axis]
+  return [(i % n) if n > 0 else i for i in axis]
 
 
 def canonicalize_axis(axis: Axes,
@@ -430,7 +428,10 @@ def outer_prod(x, y, start_axis, end_axis, prod_op):
 
 
 _ArrayOrShape = TypeVar('_ArrayOrShape',
-                        onp.ndarray, np.ndarray, List[int], Tuple[int, ...])
+                        onp.ndarray,
+                        np.ndarray,
+                        List[int],
+                        Tuple[int, ...])
 
 
 def reverse_zipped(
@@ -453,21 +454,37 @@ def reverse_zipped(
 
 @dataclasses.dataclass
 class MaskedArray:
-  masked_value: np.ndarray
+  masked_value: Union[np.ndarray, float]
   mask: np.ndarray
+  dtype: np.dtype = dataclasses.field(init=False, pytree_node=False)
   shape: Tuple[int, ...] = dataclasses.field(init=False, pytree_node=False)
   ndim: int = dataclasses.field(init=False, pytree_node=False)
 
   def __post_init__(self):
-    super().__setattr__('shape', self.masked_value.shape)
-    super().__setattr__('ndim', self.masked_value.ndim)
+    if isinstance(self.masked_value, (float, int)):
+      shape = ()
+      ndim = 0
+      dtype = dtypes.canonicalize_dtype(type(self.masked_value))
+
+    else:
+      # pytype:disable=attribute-error
+      shape = self.masked_value.shape
+      ndim = self.masked_value.ndim
+      dtype = self.masked_value.dtype
+      # pytype:enable=attribute-error
+
+    super().__setattr__('shape', shape)
+    super().__setattr__('ndim', ndim)
+    super().__setattr__('dtype', dtype)
 
   astuple = ...  # type: Callable[[], Tuple[np.ndarray, np.ndarray, Tuple[int, ...], int]]
 
 
 @nt_tree_fn(nargs=1)
-def get_masked_array(x: Union[None, np.ndarray, MaskedArray],
-                     mask_constant: Optional[float] = None) -> MaskedArray:
+def get_masked_array(
+    x: Union[None, np.ndarray, ShapedArray, MaskedArray],
+    mask_constant: Optional[float] = None
+) -> MaskedArray:
   """Return `x` with entries equal to `mask_constant` zeroed-out, and the mask.
 
   The mask returned is a boolean `np.ndarray` with masked indices having `True`.
@@ -475,6 +492,7 @@ def get_masked_array(x: Union[None, np.ndarray, MaskedArray],
   Args:
     x: `np.ndarray` to mask. If `x` is a `MaskedArray`, treat it as
       `(masked_x, mask)` and pass it through.
+
     mask_constant: an optional `float`, the value in inputs to be considered as
       masked (e.g. padding in a batch of sentences). `None` means no masking.
       Can also be `np.nan`, `np.inf` etc.
@@ -487,9 +505,9 @@ def get_masked_array(x: Union[None, np.ndarray, MaskedArray],
     mask_mat = None
 
   elif isinstance(x, MaskedArray):
-    x, mask_mat, _, _ = x.astuple()
+    x, mask_mat = x.masked_value, x.mask
 
-  elif isinstance(x, (onp.ndarray, np.ndarray)):
+  elif isinstance(x, (onp.ndarray, np.ndarray, float, int)):
     if mask_constant is None:
       mask_mat = None
     else:
@@ -513,7 +531,7 @@ def mask(
   return np.where(mask_mat, np.zeros((), x.dtype), x)
 
 
-def size_at(x: _ArrayOrShape,
+def size_at(x: Union[_ArrayOrShape, jax.ShapedArray],
             axes: Optional[Iterable[int]] = None) -> int:
   if hasattr(x, 'shape'):
     x = x.shape
@@ -525,7 +543,7 @@ def size_at(x: _ArrayOrShape,
 
 
 def shape_and_axes(
-    x: _ArrayOrShape,
+    x: Union[_ArrayOrShape, jax.ShapedArray],
     ignore_axes: Iterable[int] = ()) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
   if hasattr(x, 'shape'):
     x = x.shape
@@ -671,7 +689,7 @@ def _read_keys(key, x1, x2):
     warnings.warn('The value of `key[1]` might be replaced by a new value if '
                   'key[0] == key[1] and x1 != x2 or key[0] != key[1] and '
                   'x1 == x2.')
-  elif isinstance(key, (onp.ndarray, np.ndarray)):
+  elif isinstance(key, np.ndarray):
     key1 = key
     key2 = np.where(x1_is_x2(x1, x2), key1, random.fold_in(key, 1))
   else:
@@ -705,6 +723,17 @@ def split_kwargs(kwargs, x1=None, x2=None):
   return kwargs1, kwargs2
 
 
+def get_flops(f: Callable, optimize: bool, *a, **kw) -> float:
+  m = jax.xla_computation(f)(*a, **kw)
+  client = jax.lib.xla_bridge.get_backend()
+  if optimize:
+    m = client.compile(m).hlo_modules()[0]
+  else:
+    m = m.as_hlo_module()
+  analysis = jax.lib.xla_client._xla.hlo_module_cost_analysis(client, m)
+  return analysis['flops']
+
+
 def std_basis(pytree: PyTree) -> PyTree:
   """Similar to `jax.api._std_basis` without host-side ops."""
   leaves, _ = tree_flatten(pytree)
@@ -725,3 +754,29 @@ def unravel_array_into_pytree(pytree: PyTree,
   parts = np.split(arr, onp.cumsum([np.size(l) for l in leaves[:-1]]), axis)
   reshaped_parts = [np.reshape(x, shape) for x, shape in zip(parts, shapes)]
   return tree_unflatten(treedef, reshaped_parts)
+
+
+def squeeze(
+    x: np.ndarray,
+    axis: Union[None, int, Tuple[int, ...]]
+) -> np.ndarray:
+  """`np.squeeze` analog working with 0-sized axes."""
+  if isinstance(axis, int):
+    axis = (axis,)
+
+  non_zero_axes = tuple()
+  shift = 0
+
+  for a in sorted(axis):
+    if x.shape[a - shift] == 0:
+      new_shape = x.shape[:a] + x.shape[a + 1:]
+      if size_at(new_shape) == 0:
+        x = x.reshape(new_shape)
+      else:
+        x = np.zeros(new_shape, x.dtype)
+
+      shift += 1
+    else:
+      non_zero_axes += (a - shift,)
+
+  return np.squeeze(x, non_zero_axes)

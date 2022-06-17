@@ -27,6 +27,7 @@ from jax.config import config
 import jax.numpy as np
 import neural_tangents as nt
 from neural_tangents import stax
+from neural_tangents._src.empirical import _DEFAULT_TESTING_NTK_IMPLEMENTATION
 from tests import test_utils
 
 
@@ -175,10 +176,14 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
         stax.Dense(1024)
     )
 
-    correct_conv_fn_mc = nt.monte_carlo_kernel_fn(init_fn, apply_fn,
-                                                  key, 400,
-                                                  implementation=2,
-                                                  vmap_axes=0)
+    correct_conv_fn_mc = nt.monte_carlo_kernel_fn(
+        init_fn=init_fn,
+        apply_fn=apply_fn,
+        key=key,
+        n_samples=400,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
+        vmap_axes=0
+    )
     K = correct_conv_fn(x1, x2, get='nngp')
     K_mc = correct_conv_fn_mc(x1, x2, get='nngp')
     self.assertAllClose(K, K_mc, atol=0.01, rtol=0.05)
@@ -203,10 +208,14 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
         stax.Dense(1024)
     )
 
-    correct_conv_fn_mc = nt.monte_carlo_kernel_fn(init_fn, apply_fn,
-                                                  key, 300,
-                                                  implementation=2,
-                                                  vmap_axes=0)
+    correct_conv_fn_mc = nt.monte_carlo_kernel_fn(
+        init_fn=init_fn,
+        apply_fn=apply_fn,
+        key=key,
+        n_samples=300,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
+        vmap_axes=0
+    )
     K = correct_conv_fn(x1, x2, get='nngp')
     K_mc = correct_conv_fn_mc(x1, x2, get='nngp')
     self.assertAllClose(K, K_mc, atol=0.01, rtol=0.05)
@@ -228,10 +237,14 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
         stax.Dense(1)
     )
 
-    correct_conv_fn_mc = nt.monte_carlo_kernel_fn(init_fn, apply_fn,
-                                                  key, 200,
-                                                  implementation=2,
-                                                  vmap_axes=0)
+    correct_conv_fn_mc = nt.monte_carlo_kernel_fn(
+        init_fn=init_fn,
+        apply_fn=apply_fn,
+        key=key,
+        n_samples=200,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
+        vmap_axes=0
+    )
     K = correct_conv_fn(x1, x2, get='ntk')
     K_mc = correct_conv_fn_mc(x1, x2, get='ntk')
     self.assertAllClose(K, K_mc, atol=0.01, rtol=0.05)
@@ -317,7 +330,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
     kernel_fn_mc = nt.monte_carlo_kernel_fn(
         init_fn, apply_fn, key, n_samples,
         device_count=0 if concat in (0, -2) else -1,
-        implementation=2,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         vmap_axes=None if concat in (0, -2) else 0,
     )
 
@@ -483,7 +496,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
     kernel_fn_mc = nt.monte_carlo_kernel_fn(
         init_fn, apply_fn, key, n_samples,
         device_count=0 if concat in (0, -n) else -1,
-        implementation=2,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         vmap_axes=None if concat in (0, -n) else 0,
     )
 

@@ -26,6 +26,7 @@ from jax.tree_util import tree_map
 import neural_tangents as nt
 from neural_tangents import stax
 from neural_tangents._src import batching
+from neural_tangents._src.empirical import _DEFAULT_TESTING_NTK_IMPLEMENTATION
 from tests import test_utils
 
 
@@ -78,7 +79,9 @@ def _empirical_kernel(key, input_shape, network, out_logits, use_dropout):
   init_fn, f, _ = _build_network(input_shape, network, out_logits, use_dropout)
   key, split = random.split(key)
   _, params = init_fn(key, (-1,) + input_shape)
-  kernel_fn = jit(nt.empirical_ntk_fn(f))
+  kernel_fn = jit(nt.empirical_ntk_fn(
+      f,
+      implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION))
   return partial(kernel_fn, params=params, keys=split)
 
 
@@ -538,7 +541,9 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     init_fn, apply_fn, _ = stax.serial(net(WIDTH), net(1))
     _, params = init_fn(net_key, ((-1, 1), ((-1, 1), (-1, 1))))
 
-    kernel_fn = jit(nt.empirical_ntk_fn(apply_fn))
+    kernel_fn = jit(nt.empirical_ntk_fn(
+        apply_fn,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION))
     batch_kernel_fn = jit(batching.batch(kernel_fn, 2))
 
     test_utils.assert_close_matrices(
@@ -584,7 +589,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
         trace_axes=trace_axes,
         diagonal_axes=diagonal_axes,
         vmap_axes=0,
-        implementation=2
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION
     )
 
     _, params = init_fn(net_key, test_x1.shape)

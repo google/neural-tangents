@@ -29,6 +29,7 @@ from jax.example_libraries import stax as ostax
 import jax.numpy as np
 import neural_tangents as nt
 from neural_tangents import stax
+from neural_tangents._src.empirical import _DEFAULT_TESTING_NTK_IMPLEMENTATION
 from tests import test_utils
 import numpy as onp
 
@@ -343,7 +344,7 @@ def _check_agreement_with_empirical(
     kernel_fn_empirical = nt.monte_carlo_kernel_fn(
         init_fn, apply_fn, key, n_samples, device_count=device_count,
         trace_axes=(channel_axis,), batch_size=batch_size,
-        implementation=2
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION
     )
     if same_inputs:
       assert x2 is None
@@ -699,7 +700,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
         samples,
         vmap_axes=0,
         device_count=-1,
-        implementation=2
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION
     )(x_sparse, None, kernel)
     mc = np.reshape(mc, exact.shape)
 
@@ -945,7 +946,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
 
     kernel_fn_empirical = nt.monte_carlo_kernel_fn(
         init_fn, apply_fn, mc_key, N_SAMPLES, trace_axes=(-1,),
-        implementation=2,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         vmap_axes=((0, 0), 0, {})
     )
     test_utils.assert_close_matrices(self,
@@ -981,7 +982,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
 
     kernel_fn_empirical = nt.monte_carlo_kernel_fn(
         init_fn, apply_fn, mc_key, N_SAMPLES, trace_axes=(-1,),
-        implementation=2,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         vmap_axes=(0, [0, 0], {}))
 
     test_utils.assert_close_matrices(self,
@@ -1025,7 +1026,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
 
     kernel_fn_empirical = nt.monte_carlo_kernel_fn(
         init_fn, apply_fn, mc_key, N_SAMPLES, trace_axes=(-1,),
-        implementation=2,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         vmap_axes=((0, 0), [0, 0, 0], {})
     )
 
@@ -1097,7 +1098,8 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
         stax.Conv(N_in + 3, (2,)))
 
     kernel_fn_empirical = nt.monte_carlo_kernel_fn(
-        init_fn, apply_fn, mc_key, N_SAMPLES, implementation=2,
+        init_fn, apply_fn, mc_key, N_SAMPLES,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         vmap_axes=(((((0, 0), 0), 0), (((0, 0), 0), 0), {})
                    if platform == 'tpu' else None)
     )

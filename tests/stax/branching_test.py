@@ -24,6 +24,7 @@ from jax.config import config
 import jax.numpy as np
 import neural_tangents as nt
 from neural_tangents import stax
+from neural_tangents._src.empirical import _DEFAULT_TESTING_NTK_IMPLEMENTATION
 from tests import test_utils
 
 
@@ -152,7 +153,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
     kernel_fn_mc = nt.monte_carlo_kernel_fn(
         init_fn, apply_fn, key, n_samples,
         device_count=0 if axis in (0, -2) else -1,
-        implementation=2,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         vmap_axes=None if axis in (0, -2) else 0,
     )
 
@@ -285,7 +286,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
         key,
         n_samples,
         device_count=0 if axis in (0, -4) else -1,
-        implementation=2,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         vmap_axes=None if axis in (0, -4) else 0,
     )
 

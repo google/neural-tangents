@@ -32,6 +32,7 @@ from neural_tangents import stax
 from tests import test_utils
 from neural_tangents._src.utils import utils
 import numpy as onp
+from neural_tangents._src.empirical import _DEFAULT_TESTING_NTK_IMPLEMENTATION
 
 
 config.parse_flags_with_absl()
@@ -86,13 +87,21 @@ class FlattenTest(test_utils.NeuralTangentsTestCase):
     n = 100
 
     kernel_fc_mc = nt.monte_carlo_kernel_fn(
-        init_fc, apply_fc, key, n, vmap_axes=0, implementation=2)
+        init_fc, apply_fc, key, n, vmap_axes=0,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION
+    )
     kernel_bot_mc = nt.monte_carlo_kernel_fn(
-        init_bot, apply_bot, key, n, vmap_axes=0, implementation=2)
+        init_bot, apply_bot, key, n, vmap_axes=0,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION
+    )
     kernel_mid_mc = nt.monte_carlo_kernel_fn(
-        init_mid, apply_mid, key, n, vmap_axes=0, implementation=2)
+        init_mid, apply_mid, key, n, vmap_axes=0,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION
+    )
     kernel_top_mc = nt.monte_carlo_kernel_fn(
-        init_top, apply_top, key, n, vmap_axes=0, implementation=2)
+        init_top, apply_top, key, n, vmap_axes=0,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION
+    )
 
     K = kernel_fc(X0_1_flat, X0_2_flat)
 
@@ -262,7 +271,10 @@ class ConvNDTest(test_utils.NeuralTangentsTestCase):
       raise ValueError(get)
 
     kernel_fn_mc = nt.monte_carlo_kernel_fn(
-        init_fn, apply_fn, key, n_samples, implementation=2, vmap_axes=0)
+        init_fn, apply_fn, key, n_samples,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
+        vmap_axes=0
+    )
 
     exact = kernel_fn(X0_1, X0_2, get=get)
     empirical = kernel_fn_mc(X0_1, X0_2, get=get)
@@ -412,7 +424,7 @@ class AttentionTest(test_utils.NeuralTangentsTestCase):
     kernel_fn_mc = nt.monte_carlo_kernel_fn(
         init_fn, apply_fn, key, n_samples,
         device_count=-1,
-        implementation=2,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         vmap_axes=0
     )
 
@@ -661,7 +673,7 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
         n_samples=2**6,
         batch_size=2 if (default_backend() == 'tpu' and batch_axis == 0) else 0,
         device_count=-1 if batch_axis == 0 else 0,
-        implementation=2,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         trace_axes=(int(batch_axis < channel_axis),)
     )
 
@@ -745,7 +757,10 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
 
     kernel_fn_mc = nt.monte_carlo_kernel_fn(
         init_fn, apply_fn, key, n_samples, diagonal_axes=diagonal_axes,
-        device_count=0, implementation=2, vmap_axes=0)
+        device_count=0,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
+        vmap_axes=0
+    )
     k_mc = kernel_fn_mc(x1, None if diagonal_batch else x2, 'nngp')
 
     test_utils.assert_close_matrices(self, k_mc, k, tol)
@@ -1013,7 +1028,7 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
             device_count=-1 if (get == 'nngp' and
                                 batch_axis == out_b_axis == 0 and
                                 0 not in c_dims + b_dims) else 0,
-            implementation=2,
+            implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         )
 
         empirical = kernel_fn_mc(x1=x2 if get == 'cov2' else x1,
@@ -1121,7 +1136,7 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
         init_fn, apply_fn, key1, n_samples,
         trace_axes=(int(out_c_axis > out_b_axis) if do_pool else 1,),
         device_count=0,
-        implementation=2
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
     )
 
     empirical = kernel_fn_mc(x1, x2, get, mask_constant=mask_constant)
@@ -1310,7 +1325,7 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
             device_count=-1 if (get == 'nngp' and
                                 batch_axis == 0 and
                                 shape[batch_axis] == -1) else 0,
-            implementation=2,
+            implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         )
 
         empirical = kernel_fn_mc(x1=x2 if get == 'cov2' else x1,
@@ -1425,7 +1440,7 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
     kernel_fn_mc = nt.monte_carlo_kernel_fn(
         init_fn, apply_fn, key1, n_samples,
         device_count=0,
-        implementation=2
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
     )
 
     empirical = kernel_fn_mc(x1, x2, get, mask_constant=mask_constant)
@@ -1549,7 +1564,7 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
     kernel_fn_mc = nt.monte_carlo_kernel_fn(
         init_fn, apply_fn, key_mc, n_samples=512, diagonal_axes=diagonal_axes,
         device_count=0,
-        implementation=2,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         vmap_axes=0
     )
     k_mc = kernel_fn_mc(x1, None if get == 'cov1' else x2,
@@ -1642,7 +1657,7 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
     # Test against MC.
     kernel_fn_mc = nt.monte_carlo_kernel_fn(
         init_fn, apply_fn, key_mc, n_samples=512, device_count=0,
-        implementation=2,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         vmap_axes=0
     )
     k_mc = kernel_fn_mc(x1, x2, get)
@@ -1730,7 +1745,7 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
   def _test_against_mc(self, apply_fn, init_fn, k, x1, x2, tol=0.01, n=256):
     kernel_fn_mc = nt.monte_carlo_kernel_fn(
         init_fn, apply_fn, random.PRNGKey(2), n_samples=n, device_count=0,
-        implementation=2,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         vmap_axes=0
     )
     k_mc = kernel_fn_mc(x1, x2, 'nngp')

@@ -27,7 +27,7 @@ with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
 
 
 INSTALL_REQUIRES = [
-    'jax>=0.3',
+    'jax>=0.3.13',
     'frozendict>=2.3',
     'typing_extensions>=4.0.1'
 ]
@@ -37,6 +37,7 @@ TESTS_REQUIRES = [
     'more-itertools',
     'tensorflow',
     'tensorflow-datasets',
+    'flax>=0.5.1'
 ]
 
 
