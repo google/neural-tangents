@@ -39,6 +39,9 @@ config.parse_flags_with_absl()
 config.update('jax_numpy_rank_promotion', 'raise')
 
 
+random.seed(1)
+
+
 _PRECISIONS = [
     None,
     # lax.Precision.HIGHEST,
