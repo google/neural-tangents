@@ -1000,8 +1000,7 @@ class StructuredDerivativesTest(test_utils.NeuralTangentsTestCase):
   ):
     if f_name == 'lax_reshape_all':
       # TODO(romann): investigate slow CPU execution.
-      if not _s_rules or len(shapes[0][0]) > 1:
-        test_utils.skip_test('Skipping large non-structured reshapes on CPU.')
+      test_utils.skip_test('Skipping large non-structured reshapes on CPU.')
 
     if 'lax.map' in f_name and len(shapes[0][0]) > 0 and shapes[0][0][0] == 0:
       # TODO(romann): fix.
