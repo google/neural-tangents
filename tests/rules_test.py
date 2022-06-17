@@ -1,4 +1,4 @@
-# Copyright 2019 Google LLC
+# Copyright 2022 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -37,6 +37,9 @@ import numpy as onp
 
 config.parse_flags_with_absl()
 config.update('jax_numpy_rank_promotion', 'raise')
+
+
+random.seed(1)
 
 
 _PRECISIONS = [
