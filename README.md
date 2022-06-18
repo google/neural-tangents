@@ -56,7 +56,10 @@ An easy way to get started with Neural Tangents is by playing around with the fo
 - [Weight Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/weight_space_linearization.ipynb)
 - [Function Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/function_space_linearization.ipynb)
 - [Neural Network Phase Diagram](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/phase_diagram.ipynb)
-- [Performance Benchmark](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/myrtle_kernel_with_neural_tangents.ipynb): simple benchmark for Myrtle kernels used in [[16]](#16-neural-kernels-without-tangents). Also see [Performance](#myrtle-network).
+- [Performance Benchmark](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/myrtle_kernel_with_neural_tangents.ipynb): simple benchmark for Myrtle kernels used in [[16]](#16-neural-kernels-without-tangents). Also see [Performance](#myrtle-network)
+- Empirical NTK:
+  - [Fully-connected network](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/empirical_ntk_fcn.ipynb)
+  - [FLAX ResNet18](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/empirical_ntk_resnet.ipynb)
 
 ## Installation
 
@@ -82,13 +85,8 @@ You can now run the examples and tests by calling:
 
 ```
 pip install .[testing]
-
-python examples/infinite_fcn.py
-python examples/weight_space.py
-python examples/function_space.py
-python examples/imdb.py
-
-set -e; for f in tests/*.py; do python $f; done
+for f in examples/*.py; do python $f; done  # Run examples
+set -e; for f in tests/*.py; do python $f; done  # Run tests
 ```
 
 
