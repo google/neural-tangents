@@ -32,3 +32,5 @@ from ._src.empirical import NtkImplementation
 from ._src.empirical import taylor_expand
 
 from ._src.monte_carlo import monte_carlo_kernel_fn
+
+from . import experimental

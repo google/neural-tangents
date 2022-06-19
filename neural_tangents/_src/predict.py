@@ -31,7 +31,6 @@ import collections
 from functools import lru_cache
 from typing import Callable, Dict, Generator, Iterable, NamedTuple, Optional, Tuple, Union
 
-from typing_extensions import Protocol
 import jax
 from jax import grad
 from jax.experimental import ode
@@ -40,6 +39,7 @@ import jax.scipy as sp
 from jax.tree_util import tree_all, tree_map
 import numpy as onp
 import scipy as osp
+from typing_extensions import Protocol
 from .utils import dataclasses, utils
 from .utils.typing import Axes, Get, KernelFn
 
@@ -317,8 +317,8 @@ def gradient_descent(
     >>> kernel_fn = nt.empirical_ntk_fn(f)
     >>> k_test_train = kernel_fn(x_test, x_train, params)
     >>>
-    >>> from jax.example_libraries import stax
-    >>> cross_entropy = lambda fx, y_hat: -np.mean(stax.logsoftmax(fx) * y_hat)
+    >>> from jax.nn import log_softmax
+    >>> cross_entropy = lambda fx, y_hat: -np.mean(log_softmax(fx) * y_hat)
     >>> predict_fn = nt.redict.gradient_descent(
     >>>     cross_entropy, k_train_train, y_train, learning_rate, momentum)
     >>>

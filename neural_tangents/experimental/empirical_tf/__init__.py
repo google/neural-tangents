@@ -11,24 +11,3 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-"""Tests for `examples/empirical_ntk.py`."""
-
-from absl.testing import absltest
-
-from jax.config import config
-from examples import empirical_ntk
-from tests import test_utils
-
-config.parse_flags_with_absl()
-config.update('jax_numpy_rank_promotion', 'raise')
-
-
-class EmpiricalNtkTest(test_utils.NeuralTangentsTestCase):
-
-  def test_empirical_ntk(self):
-    empirical_ntk.main(None)
-
-
-if __name__ == '__main__':
-  absltest.main()

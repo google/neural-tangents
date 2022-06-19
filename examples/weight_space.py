@@ -27,7 +27,7 @@ from jax import grad
 from jax import jit
 from jax import random
 from jax.example_libraries import optimizers
-from jax.example_libraries.stax import logsoftmax
+from jax.nn import log_softmax
 import jax.numpy as np
 import neural_tangents as nt
 from neural_tangents import stax
@@ -66,7 +66,7 @@ def main(unused_argv):
   state_lin = opt_init(params)
 
   # Create a cross-entropy loss function.
-  loss = lambda fx, y_hat: -np.mean(logsoftmax(fx) * y_hat)
+  loss = lambda fx, y_hat: -np.mean(log_softmax(fx) * y_hat)
 
   # Specialize the loss function to compute gradients for both linearized and
   # full networks.

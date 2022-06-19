@@ -1500,7 +1500,7 @@ def _to_tuple_tree(x: PyTree) -> Tuple:
     return tuple(_to_tuple_tree(x_i) for x_i in x)
 
   if isinstance(x, dict):
-    return tuple((k, v) for k, v in sorted(x.items()))
+    return tuple((k, _to_tuple_tree(v)) for k, v in sorted(x.items()))
 
   return x
 

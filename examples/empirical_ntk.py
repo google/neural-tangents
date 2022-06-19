@@ -22,8 +22,8 @@ from absl import app
 import jax
 from jax import numpy as np
 from jax import random
-from jax.example_libraries import stax
 import neural_tangents as nt
+from neural_tangents import stax
 
 
 def main(unused_argv):
@@ -32,13 +32,13 @@ def main(unused_argv):
   x2 = random.normal(key2, (3, 8, 8, 3))
 
   # A vanilla CNN.
-  init_fn, f = stax.serial(
+  init_fn, f, _ = stax.serial(
       stax.Conv(8, (3, 3)),
-      stax.Relu,
+      stax.Relu(),
       stax.Conv(8, (3, 3)),
-      stax.Relu,
+      stax.Relu(),
       stax.Conv(8, (3, 3)),
-      stax.Flatten,
+      stax.Flatten(),
       stax.Dense(10)
   )
 

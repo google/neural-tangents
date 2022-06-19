@@ -29,13 +29,13 @@ with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
 INSTALL_REQUIRES = [
     'jax>=0.3.13',
     'frozendict>=2.3',
-    'typing_extensions>=4.0.1'
+    'typing_extensions>=4.0.1',
+    'tf2jax @ git+https://github.com/deepmind/tf2jax',
 ]
 
 
 TESTS_REQUIRES = [
     'more-itertools',
-    'tensorflow',
     'tensorflow-datasets',
     'flax>=0.5.1',
     # TODO(romann): remove when
