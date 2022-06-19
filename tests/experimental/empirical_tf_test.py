@@ -54,7 +54,7 @@ class _Dense(tf.Module):
     super(_Dense, self).__init__(name=name)
     self.w = tf.Variable(
         tf.random.normal([input_dim, output_size]), name='w')
-    self.b = tf.Variable(tf.zeros([output_size]), name='b')
+    self.b = tf.Variable(tf.zeros([1, output_size]), name='b')
 
   def __call__(self, x):
     y = tf.matmul(x, self.w) + self.b
