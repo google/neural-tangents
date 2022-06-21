@@ -19,15 +19,6 @@ Finite-width NNGP and/or NTK kernel functions.
     empirical_nngp_fn
     empirical_ntk_fn
 
-NTK implementation
---------------------------------------
-An `IntEnum` specifying NTK implementation method.
-
-.. autosummary::
- :toctree: _autosummary
-
-    NtkImplementation
-
 
 Linearization and Taylor expansion
 --------------------------------------
