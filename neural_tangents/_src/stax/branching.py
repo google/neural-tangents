@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Branching functions.
+
 These layers split an input into multiple branches or fuse multiple inputs from
 several branches into one.
 """
@@ -31,7 +32,7 @@ from ..utils.typing import InternalLayer, InternalLayerMasked, Kernels
 
 @layer
 def FanOut(num: int) -> InternalLayer:
-  """Layer construction function for a fan-out layer.
+  """Fan-out.
 
   This layer takes an input and produces `num` copies that can be fed into
   different branches of a neural network (for example with residual
@@ -51,7 +52,7 @@ def FanOut(num: int) -> InternalLayer:
 @layer
 @supports_masking(remask_kernel=False)
 def FanInSum() -> InternalLayerMasked:
-  """Layer construction function for a fan-in sum layer.
+  """Fan-in sum.
 
   This layer takes a number of inputs (e.g. produced by `FanOut`) and sums the
   inputs to produce a single output.
@@ -113,7 +114,7 @@ def FanInSum() -> InternalLayerMasked:
 @layer
 @supports_masking(remask_kernel=False)
 def FanInProd() -> InternalLayerMasked:
-  """Layer construction function for a fan-in product layer.
+  """Fan-in product.
 
   This layer takes a number of inputs (e.g. produced by `FanOut`) and
   elementwise-multiplies the inputs to produce a single output.
@@ -179,9 +180,9 @@ def FanInProd() -> InternalLayerMasked:
 @layer
 @supports_masking(remask_kernel=False)
 def FanInConcat(axis: int = -1) -> InternalLayerMasked:
-  """Layer construction function for a fan-in concatenation layer.
+  """Fan-in concatenation.
 
-  Based on `jax.example_libraries.stax.FanInConcat`.
+  Based on :obj:`jax.example_libraries.stax.FanInConcat`.
 
   Args:
     axis: Specifies the axis along which input tensors should be concatenated.

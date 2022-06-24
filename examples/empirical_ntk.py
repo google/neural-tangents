@@ -16,6 +16,9 @@
 
 All implementations apply to any differentiable functions, (not necessarily ones
 constructed with Neural Tangents).
+
+For details about the empirical (finite width) NTK computation, please see
+"`Fast Finite Width Neural Tangent Kernel <https://arxiv.org/abs/2206.08720>`_".
 """
 
 from absl import app

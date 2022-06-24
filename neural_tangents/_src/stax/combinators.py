@@ -15,21 +15,22 @@
 """Layer combinators."""
 
 import operator as op
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List
 import warnings
-from jax import random
+
 import frozendict
+from jax import random
 import jax.example_libraries.stax as ostax
 from .requirements import Diagonal, get_req, layer, requires
 from ..utils.kernel import Kernel
-from ..utils.typing import InternalLayer, Layer, LayerKernelFn, NTTree, NTTrees, Shapes, PyTree
+from ..utils.typing import InternalLayer, Layer, LayerKernelFn, NTTree, NTTrees, Shapes
 
 
 @layer
 def serial(*layers: Layer) -> InternalLayer:
   """Combinator for composing layers in serial.
 
-  Based on `jax.example_libraries.stax.serial`.
+  Based on :obj:`jax.example_libraries.stax.serial`.
 
   Args:
     *layers:
@@ -57,9 +58,10 @@ def serial(*layers: Layer) -> InternalLayer:
 def parallel(*layers: Layer) -> InternalLayer:
   """Combinator for composing layers in parallel.
 
-  The layer resulting from this combinator is often used with the `FanOut` and
-  `FanInSum`/`FanInConcat` layers. Based on
-  `jax.example_libraries.stax.parallel`.
+  The layer resulting from this combinator is often used with the
+  :obj:`~neural_tangents.stax.FanOut`, :obj:`~neural_tangents.stax.FanInSum`,
+  and :obj:`~neural_tangents.stax.FanInConcat` layers. Based on
+  :obj:`jax.example_libraries.stax.parallel`.
 
   Args:
     *layers:

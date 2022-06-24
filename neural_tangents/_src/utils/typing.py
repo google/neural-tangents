@@ -48,18 +48,18 @@ else:
   network computations (for example, when neural networks have nested parallel
   layers).
 
-  Mimicking JAX, we use a lightweight tree structure called an `NTTree`.
-  `NTTree` has internal nodes that are either lists or tuples and leaves which
-  are either `np.ndarray` or `Kernel` objects.
+  Mimicking JAX, we use a lightweight tree structure called an :class:`NTTree`.
+  :class:`NTTree` has internal nodes that are either lists or tuples and leaves
+  which are either :class:`jax.numpy.ndarray` or :class:`~neural_tangents.Kernel` objects.
   """
 
   NTTrees = Union[List[T], Tuple[T, ...]]
-  """A list or tuple of `NTTree` s.
+  """A list or tuple of :class:`NTTree` s.
   """
 
 
 Shapes = NTTree[Tuple[int, ...]]
-"""A shape - a tuple of integers, or an `NTTree` of such tuples.
+"""A shape - a tuple of integers, or an :class:`NTTree` of such tuples.
 """
 
 
@@ -139,10 +139,11 @@ class LayerKernelFn(Protocol):
 class AnalyticKernelFn(Protocol):
   """A type alias for analytic kernel functions.
 
-  A kernel function that computes an analytic kernel. Takes either a `Kernel`
-  or `np.ndarray` inputs and a `get` argument that specifies what quantities
-  should be computed by the kernel. Returns either a `Kernel` object or
-  `np.ndarray`-s for kernels specified by `get`.
+  A kernel function that computes an analytic kernel. Takes either a
+  :class:`~neural_tangents.Kernel` or :class:`jax.numpy.ndarray` inputs and a
+  `get` argument that specifies what quantities should be computed by the
+  kernel. Returns either a :class:`~neural_tangents.Kernel` object or
+  :class:`jax.numpy.ndarray`-s for kernels specified by `get`.
   """
 
   def __call__(

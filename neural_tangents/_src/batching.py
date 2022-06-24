@@ -20,25 +20,25 @@ performs the same computation by batching over `x1` and `x2` and concatenating
 the result, allowing to both use multiple accelerators and stay within memory
 limits.
 
-Note that you typically should not apply the `jax.jit` decorator to the
+Note that you typically should not apply the :obj:`jax.jit` decorator to the
 resulting `batched_kernel_fn`, as its purpose is explicitly serial execution in
-order to save memory. Further, you do not need to apply `jax.jit` to the input
-`kernel_fn` function, as it is JITted internally.
+order to save memory. Further, you do not need to apply :obj:`jax.jit` to the
+input `kernel_fn` function, as it is JITted internally.
 
 Example:
-  >>>  from jax import numpy as np
-  >>>  import neural_tangents as nt
-  >>>  from neural_tangents import stax
-  >>>
-  >>>  # Define some kernel function.
-  >>>  _, _, kernel_fn = stax.serial(stax.Dense(1), stax.Relu(), stax.Dense(1))
-  >>>
-  >>>  # Compute the kernel in batches, in parallel.
-  >>>  kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=5)
-  >>>
-  >>>  # Generate dummy input data.
-  >>>  x1, x2 = np.ones((40, 10)), np.ones((80, 10))
-  >>>  kernel_fn_batched(x1, x2) == kernel_fn(x1, x2)  # True!
+  >>> from jax import numpy as np
+  >>> import neural_tangents as nt
+  >>> from neural_tangents import stax
+  >>> #
+  >>> # Define some kernel function.
+  >>> _, _, kernel_fn = stax.serial(stax.Dense(1), stax.Relu(), stax.Dense(1))
+  >>> #
+  >>> # Compute the kernel in batches, in parallel.
+  >>> kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=5)
+  >>> #
+  >>> # Generate dummy input data.
+  >>> x1, x2 = np.ones((40, 10)), np.ones((80, 10))
+  >>> kernel_fn_batched(x1, x2) == kernel_fn(x1, x2)  # True!
 """
 
 
@@ -137,7 +137,7 @@ def _scan(f: Callable[[_Carry, _Input], Tuple[_Carry, _Output]],
           xs: Iterable[_Input]) -> Tuple[_Carry, _Output]:
   """Implements an unrolled version of scan.
 
-  Based on `jax.lax.scan` and has a similar API.
+  Based on :obj:`jax.lax.scan` and has a similar API.
 
   TODO(schsam): We introduce this function because lax.scan currently has a
   higher peak memory usage than the unrolled version. We will aim to swap this
@@ -353,8 +353,8 @@ def _serial(kernel_fn: _KernelFn,
       return n1, n2
     n1, n2 = get_n1_n2(x1, x2)
 
-    (n1_batches, n1_batch_size, n2_batches, n2_batch_size) = \
-        _get_n_batches_and_batch_sizes(n1, n2, batch_size, device_count)
+    (n1_batches, n1_batch_size, n2_batches, n2_batch_size) = (
+        _get_n_batches_and_batch_sizes(n1, n2, batch_size, device_count))
 
     @utils.nt_tree_fn(nargs=1)
     def batch_input(x, batch_count, batch_size):
@@ -735,9 +735,9 @@ def _get_jit_or_pmap_broadcast():
           kwargs_other[k] = v
 
       # Check cache before jitting.
-      _key = key + \
-          tuple(args_other.items()) + \
-          tuple(kwargs_other.items())
+      _key = key + (
+          tuple(args_other.items()) +
+          tuple(kwargs_other.items()))
       if _key in cache:
         _f = cache[_key]
       else:

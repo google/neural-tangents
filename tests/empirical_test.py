@@ -17,7 +17,7 @@
 from functools import partial
 import logging
 import operator
-from typing import Any, Callable, Sequence, Tuple, Optional, Dict
+from typing import Any, Callable, Sequence, Tuple, Optional, Dict, List
 from absl.testing import absltest
 from absl.testing import parameterized
 from flax import linen as nn
@@ -374,19 +374,23 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
     _, params = init_fn(net_key, (x1_1.shape, x1_2.shape))
 
     ntk_fns = {
-        i: jit(partial(nt.empirical_ntk_fn(
-            apply_fn,
-            implementation=i),
-            params=params))
+        i: jit(
+            partial(
+                nt.empirical_ntk_fn(
+                    apply_fn,
+                    implementation=i),
+                params=params))
         for i in nt.NtkImplementation
     }
 
     ntk_fns_vmapped = {
-        i: jit(partial(nt.empirical_ntk_fn(
-            apply_fn,
-            implementation=i,
-            vmap_axes=(0, 0)),
-            params=params))
+        i: jit(
+            partial(
+                nt.empirical_ntk_fn(
+                    apply_fn,
+                    implementation=i,
+                    vmap_axes=(0, 0)),
+                params=params))
         for i in nt.NtkImplementation
     }
 
@@ -603,7 +607,7 @@ _functions = {
     'p[0] @ p[1] @ p[2]': lambda p, x: p[0] @ p[1] @ p[2],
     'p[0].T @ p[0]': lambda p, x: p[0].T @ p[0],
     'p[1].T @ p[0]': lambda p, x: p[1].T @ p[0],
-    'p[2] @ p[0] @ p[1]' : lambda p, x: p[2] @ p[0] @ p[1],
+    'p[2] @ p[0] @ p[1]': lambda p, x: p[2] @ p[0] @ p[1],
     '(p[0] @ p[1], p[0])': lambda p, x: (p[0] @ p[1], p[0]),
     '(p[0] @ p[1], p[1])': lambda p, x: (p[0] @ p[1], p[1]),
     '(p[0] @ p[1], p[1].T)': lambda p, x: (p[0] @ p[1], p[1].T),
@@ -801,6 +805,7 @@ def _compare_ntks(
     _j_rules,
     _s_rules,
     _fwd,
+    vmap_axes=None,
     allow_forward_pass_fail=False,
     rtol=None,
     atol=None,
@@ -827,6 +832,7 @@ def _compare_ntks(
           f=f,
           trace_axes=(),
           implementation=i,
+          vmap_axes=vmap_axes,
           _j_rules=_j_rules,
           _s_rules=_s_rules,
           _fwd=_fwd
@@ -1002,7 +1008,7 @@ class StructuredDerivativesTest(test_utils.NeuralTangentsTestCase):
       # TODO(romann): investigate slow CPU execution.
       test_utils.skip_test('Skipping large non-structured reshapes on CPU.')
 
-    if 'lax.map' in f_name and len(shapes[0][0]) > 0 and shapes[0][0][0] == 0:
+    if 'lax.map' in f_name and shapes[0][0] and shapes[0][0][0] == 0:
       # TODO(romann): fix.
       raise absltest.SkipTest('Zero-length scans not supported without JIT.')
 
@@ -1064,12 +1070,17 @@ class _MLP(nn.Module):
 
 class _CNN(nn.Module):
 
+  features: int
+  feature_group_counts: List[int]
+
   @nn.compact
   def __call__(self, x):
-    x = nn.Conv(features=32, kernel_size=(3, 3))(x)
+    x = nn.Conv(features=self.features, kernel_size=(3, 3),
+                feature_group_count=self.feature_group_counts[0])(x)
     x = nn.relu(x)
     x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
-    x = nn.Conv(features=64, kernel_size=(3, 3))(x)
+    x = nn.Conv(features=self.features, kernel_size=(3, 3),
+                feature_group_count=self.feature_group_counts[1])(x)
     x = nn.relu(x)
     x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
     x = x.reshape((x.shape[0], -1))  # flatten
@@ -1109,7 +1120,7 @@ class _Encoder(nn.Module):
 
   @nn.compact
   def __call__(self, x):
-    x = nn.Dense(500, name='fc1')(x)
+    x = nn.Dense(32, name='fc1')(x)
     x = nn.relu(x)
     mean_x = nn.Dense(self.latents, name='fc2_mean')(x)
     logvar_x = nn.Dense(self.latents, name='fc2_logvar')(x)
@@ -1120,9 +1131,9 @@ class _Decoder(nn.Module):
 
   @nn.compact
   def __call__(self, z):
-    z = nn.Dense(500, name='fc1')(z)
+    z = nn.Dense(16, name='fc1')(z)
     z = nn.relu(z)
-    z = nn.Dense(784, name='fc2')(z)
+    z = nn.Dense(32, name='fc2')(z)
     return z
 
 
@@ -1306,12 +1317,12 @@ class _MlpMixer(nn.Module):
 def _get_mixer_b16_config() -> Dict[str, Any]:
   """Returns a narrow Mixer-B/16 configuration."""
   return dict(
-    model_name='Mixer-B_16',
-    patches={'size': (16, 16)},
-    hidden_dim=16,
-    num_blocks=2,
-    tokens_mlp_dim=4,
-    channels_mlp_dim=8,
+      model_name='Mixer-B_16',
+      patches={'size': (16, 16)},
+      hidden_dim=16,
+      num_blocks=2,
+      tokens_mlp_dim=4,
+      channels_mlp_dim=8,
   )
 
 
@@ -1364,7 +1375,7 @@ def _get_mixer_b16_config() -> Dict[str, Any]:
                                for dtype in [
                                    jax.dtypes.canonicalize_dtype(np.float64),
                                ]))
-class FlaxTest(test_utils.NeuralTangentsTestCase):
+class FlaxOtherTest(test_utils.NeuralTangentsTestCase):
 
   def test_mlp(self, same_inputs, do_jit, do_remat, dtype, j_rules,
                s_rules, fwd):
@@ -1372,24 +1383,12 @@ class FlaxTest(test_utils.NeuralTangentsTestCase):
 
     k1, k2, ki = random.split(random.PRNGKey(1), 3)
 
-    x1 = random.normal(k1, (32, 10), dtype)
+    x1 = random.normal(k1, (4, 10), dtype)
     x2 = None if same_inputs else random.normal(k2, (3, 10), dtype)
 
     p = model.init(ki, x1)
     _compare_ntks(self, do_jit, do_remat, model.apply, p, x1, x2, j_rules,
-                  s_rules, fwd)
-
-  def test_cnn(self, same_inputs, do_jit, do_remat, dtype, j_rules,
-               s_rules, fwd):
-    test_utils.skip_test(self)
-
-    model = _CNN()
-    x1 = random.normal(random.PRNGKey(1), (5, 8, 8, 3), dtype)
-    x2 = None if same_inputs else random.normal(random.PRNGKey(2), (2, 8, 8, 3),
-                                                dtype)
-    p = model.init(random.PRNGKey(0), x1)
-    _compare_ntks(self, do_jit, do_remat, model.apply, p, x1, x2, j_rules,
-                  s_rules, fwd)
+                  s_rules, fwd, vmap_axes=0)
 
   def test_autoencoder(self, same_inputs, do_jit, do_remat, dtype, j_rules,
                        s_rules, fwd):
@@ -1407,14 +1406,14 @@ class FlaxTest(test_utils.NeuralTangentsTestCase):
 
     # Test encoding-decoding.
     _compare_ntks(self, do_jit, do_remat, model.apply, p, x1, x2, j_rules,
-                  s_rules, fwd)
+                  s_rules, fwd, vmap_axes=0)
 
     # Test encoding.
     def encode(p, x):
       return model.apply(p, x, method=model.encode)
 
     _compare_ntks(self, do_jit, do_remat, encode, p, x1, x2, j_rules,
-                  s_rules, fwd)
+                  s_rules, fwd, vmap_axes=0)
 
     # Test decoding.
     x1d = model.apply(p, x1, method=model.encode)
@@ -1424,7 +1423,7 @@ class FlaxTest(test_utils.NeuralTangentsTestCase):
       return model.apply(p, x, method=model.decode)
 
     _compare_ntks(self, do_jit, do_remat, decode, p, x1d, x2d, j_rules,
-                  s_rules, fwd)
+                  s_rules, fwd, vmap_axes=0)
 
     # Test manual encoding-decoding
     def encode_decode(p, x):
@@ -1434,13 +1433,13 @@ class FlaxTest(test_utils.NeuralTangentsTestCase):
 
     # Test encoding-decoding.
     _compare_ntks(self, do_jit, do_remat, encode_decode, p, x1, x2, j_rules,
-                  s_rules, fwd)
+                  s_rules, fwd, vmap_axes=0)
 
   def test_vae(self, same_inputs, do_jit, do_remat, dtype, j_rules,
                s_rules, fwd):
     test_utils.skip_test(self)
 
-    model = _VAE(latents=1)
+    model = _VAE(latents=2)
     k1, k2, ki, kzi, kza = random.split(random.PRNGKey(1), 5)
     x1 = random.normal(k1, (1, 1), dtype)
     x2 = None if same_inputs else random.normal(k2, (1, 1), dtype)
@@ -1484,6 +1483,168 @@ class FlaxTest(test_utils.NeuralTangentsTestCase):
 
     _compare_ntks(self, do_jit, do_remat, apply_fn, p, x1, x2, j_rules,
                   s_rules, fwd)
+
+
+@parameterized.product(
+    j_rules=[
+        True,
+        False
+    ],
+    s_rules=[
+        True,
+        False
+    ],
+    fwd=[
+        True,
+        False,
+        None,
+    ],
+    same_inputs=[
+        # True,
+        False
+    ],
+    do_jit=[
+        True,
+        # False
+    ],
+    do_remat=[
+        # True,
+        False
+    ],
+    dtype=[
+        jax.dtypes.canonicalize_dtype(np.float64),
+    ],
+    feature_group_counts=[
+        [1, 1],
+        [1, 5],
+        [5, 1],
+        [5, 5]
+    ],
+)
+class FlaxCnnTest(test_utils.NeuralTangentsTestCase):
+
+  def test_flax_cnn(self, same_inputs, do_jit, do_remat, dtype, j_rules,
+                    s_rules, fwd, feature_group_counts):
+    test_utils.skip_test(self)
+    n_chan = 5
+    x1 = random.normal(random.PRNGKey(1), (2, 8, 8, n_chan), dtype)
+    x2 = None if same_inputs else random.normal(random.PRNGKey(2),
+                                                (3, 8, 8, n_chan),
+                                                dtype)
+    model = _CNN(n_chan, feature_group_counts)
+    p = model.init(random.PRNGKey(0), x1)
+    _compare_ntks(self, do_jit, do_remat, model.apply, p, x1, x2, j_rules,
+                  s_rules, fwd, vmap_axes=0)
+
+
+@parameterized.product(
+    j_rules=[
+        True,
+        False
+    ],
+    s_rules=[
+        True,
+        False
+    ],
+    fwd=[
+        True,
+        False,
+        None,
+    ],
+    same_inputs=[
+        # True,
+        False
+    ],
+    do_jit=[
+        True,
+        # False
+    ],
+    do_remat=[
+        # True,
+        False
+    ],
+    dtype=[
+        jax.dtypes.canonicalize_dtype(np.float64),
+    ],
+    n_chan_in=[
+        1,
+        2,
+        3,
+        4
+    ],
+    batch_size=[
+        1,
+        2,
+        3,
+        4
+    ],
+    group_count=[
+        1,
+        2,
+        4,
+        8,
+        16,
+    ],
+    group_mode=[
+        'batch',
+        'feature'
+    ],
+    vmap_axes=[
+        0,
+        None
+    ]
+)
+class ConvTest(test_utils.NeuralTangentsTestCase):
+
+  def test_conv(
+      self,
+      same_inputs,
+      do_jit,
+      do_remat,
+      dtype,
+      j_rules,
+      s_rules,
+      fwd,
+      n_chan_in,
+      batch_size,
+      group_count,
+      group_mode,
+      vmap_axes
+  ):
+    # TODO(b/235167364): unskip when the bug is fixed.
+    test_utils.skip_test(self, platforms=('cpu', 'tpu',))
+
+    n_chan_out = 16
+
+    if group_mode == 'batch':
+      batch_group_count = group_count
+      feature_group_count = 1
+      if vmap_axes == 0 and group_count > 1:
+        raise absltest.SkipTest('Batch grouped convolution not vmap-able.')
+
+    elif group_mode == 'feature':
+      batch_group_count = 1
+      feature_group_count = group_count
+
+    else:
+      raise ValueError(group_mode)
+
+    n_chan_in *= feature_group_count
+    batch_size *= batch_group_count
+
+    x1 = random.normal(random.PRNGKey(1), (batch_size, n_chan_in, 5, 4), dtype)
+    x2 = None if same_inputs else random.normal(random.PRNGKey(2),
+                                                (batch_size, n_chan_in, 5, 4),
+                                                dtype)
+    p = random.normal(random.PRNGKey(2),
+                      (n_chan_out, n_chan_in // feature_group_count, 3, 2))
+    def f(p, x):
+      return lax.conv_general_dilated(x, p, (1, 1), 'SAME',
+                                      feature_group_count=feature_group_count,
+                                      batch_group_count=batch_group_count)
+
+    _compare_ntks(self, do_jit, do_remat, f, p, x1, x2, j_rules, s_rules, fwd,
+                  vmap_axes=vmap_axes)
 
 
 if __name__ == '__main__':

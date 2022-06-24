@@ -381,11 +381,12 @@ def _conv_general_dilated_s(
 
   if (rhs.shape[rhs_spec[0]] == feature_group_count and
       rhs.shape[rhs_spec[1]] == 1):
+    assert lhs.shape[lhs_spec[1]] == feature_group_count
     return Structure(
         in_trace=(),
         in_trace_idxs=(),
         out_trace=(),
-        in_diagonal=((None, rhs_spec[0]),),
+        in_diagonal=((lhs_spec[1], rhs_spec[0]),),
         out_diagonal=(out_spec[1],)
     )
 
@@ -504,16 +505,19 @@ def _conv_general_dilated_e(
   # `conv_general_dilated` has `lhs_shape` and `rhs_shape` arguments that are
   # for some reason not inferred from the `lhs` and `rhs` themselves.
   # TODO(romann): ask JAX why these are there.
-  if idx == 0:
-    params['lhs_shape'] = trimmed_invals[0].shape
-    params['rhs_shape'] = trimmed_invals[1].shape
+  dn = params['dimension_numbers']
 
-  elif idx == 1:
-    params['lhs_shape'] = trimmed_invals[0].shape
-    params['rhs_shape'] = trimmed_invals[1].shape
+  if (params['feature_group_count'] == params['lhs_shape'][dn[0][1]] and
+      params['feature_group_count'] == params['rhs_shape'][dn[1][0]]):
+    params['feature_group_count'] = 1
 
-  else:
-    raise ValueError(f'Convolution only has two inputs, got input index {idx}.')
+  if (params['batch_group_count'] == params['rhs_shape'][dn[1][0]] and
+      params['batch_group_count'] == params['lhs_shape'][dn[0][0]]):
+    params['batch_group_count'] = 1
+
+  lhs, rhs = trimmed_invals
+  params['lhs_shape'] = lhs.shape
+  params['rhs_shape'] = rhs.shape
 
   return params
 

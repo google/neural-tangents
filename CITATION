@@ -1,7 +1,39 @@
+# Infinite width NTK/NNGP:
 @inproceedings{neuraltangents2020,
     title={Neural Tangents: Fast and Easy Infinite Neural Networks in Python},
     author={Roman Novak and Lechao Xiao and Jiri Hron and Jaehoon Lee and Alexander A. Alemi and Jascha Sohl-Dickstein and Samuel S. Schoenholz},
     booktitle={International Conference on Learning Representations},
     year={2020},
+    pdf={https://arxiv.org/abs/1912.02803},
+    url={https://github.com/google/neural-tangents}
+}
+
+# Finite width, empirical NTK/NNGP:
+@inproceedings{novak2022fast,
+    title={Fast Finite Width Neural Tangent Kernel},
+    author={Roman Novak and Jascha Sohl-Dickstein and Samuel S. Schoenholz},
+    booktitle={International Conference on Machine Learning},
+    year={2022},
+    pdf={https://arxiv.org/abs/2206.08720},
+    url={https://github.com/google/neural-tangents}
+}
+
+# Attention and variable-length inputs:
+@inproceedings{hron2020infinite,
+    title={Infinite attention: NNGP and NTK for deep attention networks},
+    author={Jiri Hron and Yasaman Bahri and Jascha Sohl-Dickstein and Roman Novak},
+    booktitle={International Conference on Machine Learning},
+    year={2020},
+    pdf={https://arxiv.org/abs/2006.10540},
+    url={https://github.com/google/neural-tangents}
+}
+
+# Infinite-width "standard" parameterization:
+@misc{sohl2020on,
+    title={On the infinite width limit of neural networks with a standard parameterization},
+    author={Jascha Sohl-Dickstein and Roman Novak and Samuel S. Schoenholz and Jaehoon Lee},
+    publisher = {arXiv},
+    year={2020},
+    pdf={https://arxiv.org/abs/2001.07301},
     url={https://github.com/google/neural-tangents}
 }

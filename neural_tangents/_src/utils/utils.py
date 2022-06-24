@@ -20,7 +20,6 @@ import inspect
 import operator
 import types
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Sized, Tuple, Type, TypeVar, Union
-from .typing import Axes, PyTree
 import warnings
 
 from . import dataclasses
@@ -31,6 +30,12 @@ from jax.core import ShapedArray
 import jax.numpy as np
 from jax.tree_util import tree_all, tree_map
 import numpy as onp
+
+
+PyTree = Any
+
+
+Axes = Union[int, Sequence[int]]
 
 
 def is_list_or_tuple(x) -> bool:
@@ -47,9 +52,10 @@ def is_nt_tree_of(x, dtype: Union[Type, Tuple[Type, ...]]) -> bool:
   return all(is_nt_tree_of(_x, dtype) for _x in x)
 
 
-def nt_tree_fn(nargs: Optional[int] = None,
-               tree_structure_argnum: Optional[int] = None,
-               reduce: Callable = lambda x: x):
+def nt_tree_fn(
+    nargs: Optional[int] = None,
+    tree_structure_argnum: Optional[int] = None,
+    reduce: Callable = lambda x: x):
   """Convert a function that acts on single inputs to one that acts on trees.
 
   `nt_tree_fn` treats the first `nargs` arguments as NTTrees and the remaining
@@ -62,14 +68,19 @@ def nt_tree_fn(nargs: Optional[int] = None,
   is used to infer the structure.
 
   Args:
-    nargs: The number of arguments to be treated as NTTrees. If `nargs` is None
+    nargs:
+      The number of arguments to be treated as NTTrees. If `nargs` is `None`
       then all of the arguments are used. `nargs` can also be negative which
       follows numpy's semantics for array indexing.
-    tree_structure_argnum: The argument used to infer the tree structure to be
-      traversed. If `tree_structure_argnum` is None then a check is performed to
-      ensure that all trees have the same structure.
-    reduce: A callable that is applied recursively by each internal tree node
-      to its children.
+
+    tree_structure_argnum:
+      The argument used to infer the tree structure to be traversed. If
+      `tree_structure_argnum` is None then a check is performed to ensure that
+      all trees have the same structure.
+
+    reduce:
+      A callable that is applied recursively by each internal tree node to its
+      children.
 
   Returns:
     A decorator `tree_fn` that transforms a function, `fn`, from acting on
@@ -625,9 +636,10 @@ def axis_after_dot(axis: int,
   )
 
 
-def make_2d(x: Optional[np.ndarray],
-            start_axis: int = 0,
-            end_axis: Optional[int] = None) -> Optional[np.ndarray]:
+def make_2d(
+    x: Optional[np.ndarray],
+    start_axis: int = 0,
+    end_axis: Optional[int] = None) -> Optional[np.ndarray]:
   """Makes `x` 2D from `start_axis` to `end_axis`, preserving other axes.
 
   `x` is assumed to follow the (`X, X, Y, Y, Z, Z`) axes layout.
@@ -635,9 +647,9 @@ def make_2d(x: Optional[np.ndarray],
   Example:
     >>> x = np.ones((1, 2, 3, 3, 4, 4))
     >>> make_2d(x).shape == (12, 24)
-    >>>
+    >>> #
     >>> make_2d(x, 2).shape == (1, 2, 12, 12)
-    >>>
+    >>> #
     >>> make_2d(x, 2, 4).shape == (1, 2, 3, 3, 4, 4)
   """
   if x is None:

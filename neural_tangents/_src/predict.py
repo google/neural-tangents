@@ -18,12 +18,13 @@ Most functions in this module accept training data as inputs and return a new
 function `predict_fn` that computes predictions on the train set / given test
 set / timesteps.
 
-WARNING: `trace_axes` parameter supplied to prediction functions must match the
-respective parameter supplied to the function used to compute the kernel.
-Namely, this is the same `trace_axes` used to compute the empirical kernel
-(`utils/empirical.py`; `diagonal_axes` must be `()`), or `channel_axis` in the
-output of the top layer used to compute the closed-form kernel (`stax.py`; note
-that closed-form kernels currently only support a single `channel_axis`).
+.. warning::
+  `trace_axes` parameter supplied to prediction functions must match the
+  respective parameter supplied to the function used to compute the kernel.
+  Namely, this is the same `trace_axes` used to compute the empirical kernel
+  (`utils/empirical.py`; `diagonal_axes` must be `()`), or `channel_axis` in the
+  output of the top layer used to compute the closed-form kernel (`stax.py`;
+  note that closed-form kernels currently only support a single `channel_axis`).
 """
 
 
@@ -44,8 +45,8 @@ from .utils import dataclasses, utils
 from .utils.typing import Axes, Get, KernelFn
 
 
-"""Alias for optional arrays or scalars."""
 ArrayOrScalar = Union[None, int, float, np.ndarray]
+"""Alias for optional arrays or scalars."""
 
 
 class PredictFn(Protocol):
@@ -88,22 +89,25 @@ def gradient_descent_mse(
   `k_train_train` is performed and cached for future invocations (or both, if
   the function is called on both finite and infinite (`t=None`) times).
 
-  [*] https://arxiv.org/abs/1806.07572
-  [**] https://arxiv.org/abs/1902.06720
+  [*] "`Neural Tangent Kernel: Convergence and Generalization in Neural Networks
+  <https://arxiv.org/abs/1806.07572>`_"
+
+  [**] "`Wide Neural Networks of Any Depth Evolve as Linear
+  Models Under Gradient Descent <https://arxiv.org/abs/1902.06720>`_"
 
   Example:
     >>> import neural_tangents as nt
-    >>>
+    >>> #
     >>> t = 1e-7
     >>> kernel_fn = nt.empirical_ntk_fn(f)
     >>> k_train_train = kernel_fn(x_train, None, params)
     >>> k_test_train = kernel_fn(x_test, x_train, params)
-    >>>
+    >>> #
     >>> predict_fn = nt.predict.gradient_descent_mse(k_train_train, y_train)
-    >>>
+    >>> #
     >>> fx_train_0 = f(params, x_train)
     >>> fx_test_0 = f(params, x_test)
-    >>>
+    >>> #
     >>> fx_train_t, fx_test_t = predict_fn(t, fx_train_0, fx_test_0,
     >>>                                    k_test_train)
 
@@ -111,17 +115,22 @@ def gradient_descent_mse(
     k_train_train:
       kernel on the training data. Must have the shape of
       `zip(y_train.shape, y_train.shape)` with `trace_axes` absent.
+
     y_train:
       targets for the training data.
+
     learning_rate:
       learning rate, step size.
+
     diag_reg:
       a scalar representing the strength of the diagonal regularization for
       `k_train_train`, i.e. computing `k_train_train + diag_reg * I` during
       Cholesky factorization or eigendecomposition.
+
     diag_reg_absolute_scale:
       `True` for `diag_reg` to represent regularization in absolute units,
       `False` to be `diag_reg * np.mean(np.trace(k_train_train))`.
+
     trace_axes:
       `f(x_train)` axes such that `k_train_train` lacks these pairs of
       dimensions and is to be interpreted as :math:`\Theta \otimes I`, i.e.
@@ -228,12 +237,15 @@ def gradient_descent_mse(
         using identity or linear solve for train and test predictions
         respectively instead of eigendecomposition, saving time and precision.
         Equivalent of training steps (but can be fractional).
+
       fx_train_0:
         output of the network at `t == 0` on the training set. `fx_train_0=None`
         means to not compute predictions on the training set.
+
       fx_test_0:
         output of the network at `t == 0` on the test set. `fx_test_0=None`
         means to not compute predictions on the test set.
+
       k_test_train:
         kernel relating test data with training data. Must have the shape of
         `zip(y_test.shape, y_train.shape)` with `trace_axes` absent. Pass
@@ -262,7 +274,21 @@ def gradient_descent_mse(
 
 @dataclasses.dataclass
 class ODEState:
-  """ODE state dataclass holding outputs and auxiliary variables."""
+  """ODE state dataclass holding outputs and auxiliary variables.
+
+  Attributes:
+    fx_train:
+      training set outputs.
+
+    fx_test:
+      test set outputs.
+
+    qx_train:
+      training set auxiliary state variable (e.g. momentum).
+
+    qx_test:
+      test set auxiliary state variable (e.g. momentum).
+  """
   fx_train: Optional[np.ndarray] = None
   fx_test: Optional[np.ndarray] = None
   qx_train: Optional[np.ndarray] = None
@@ -293,38 +319,40 @@ def gradient_descent(
   r"""Predicts the outcome of function space training using gradient descent.
 
   Uses an ODE solver. If `momentum != None`, solves a continuous-time version of
-  gradient descent with momentum (note: this case uses standard momentum as
-  opposed to Nesterov momentum).
+  gradient descent with momentum.
+
+  .. note::
+    We use standard momentum as opposed to Nesterov momentum.
 
   Solves the function space ODE for [momentum] gradient descent with a given
-  `loss` (detailed in [*]) given a Neural Tangent Kernel[s] over the dataset[s]
-  at arbitrary time[s] (step[s]) `t`. Note that for gradient descent
-  `absolute_time = learning_rate * t` and the scales of the learning rate and
-  query step[s] `t` are interchangeable. However, the momentum gradient descent
-  ODE is solved in the units of `learning_rate**0.5`, and therefore
-  `absolute_time = learning_rate**0.5 * t`, hence the `learning_rate` and
-  training time[s] (step[s]) `t` scales are not interchangeable.
-
-  [*] https://arxiv.org/abs/1902.06720
+  `loss` (detailed in "`Wide Neural Networks of Any Depth Evolve as Linear
+  Models Under Gradient Descent <https://arxiv.org/abs/1902.06720>`_".) given a
+  Neural Tangent Kernel[s] over the dataset[s] at arbitrary time[s] (step[s])
+  `t`. Note that for gradient descent `absolute_time = learning_rate * t` and
+  the scales of the learning rate and query step[s] `t` are interchangeable.
+  However, the momentum gradient descent ODE is solved in the units of
+  `learning_rate**0.5`, and therefore `absolute_time = learning_rate**0.5 * t`,
+  hence the `learning_rate` and training time[s] (step[s]) `t` scales are not
+  interchangeable.
 
   Example:
     >>> import neural_tangents as nt
-    >>>
+    >>> #
     >>> t = 1e-7
     >>> learning_rate = 1e-2
     >>> momentum = 0.9
-    >>>
+    >>> #
     >>> kernel_fn = nt.empirical_ntk_fn(f)
     >>> k_test_train = kernel_fn(x_test, x_train, params)
-    >>>
+    >>> #
     >>> from jax.nn import log_softmax
     >>> cross_entropy = lambda fx, y_hat: -np.mean(log_softmax(fx) * y_hat)
     >>> predict_fn = nt.redict.gradient_descent(
     >>>     cross_entropy, k_train_train, y_train, learning_rate, momentum)
-    >>>
+    >>> #
     >>> fx_train_0 = f(params, x_train)
     >>> fx_test_0 = f(params, x_test)
-    >>>
+    >>> #
     >>> fx_train_t, fx_test_t = predict_fn(t, fx_train_0, fx_test_0,
     >>>                                    k_test_train)
 
@@ -333,15 +361,20 @@ def gradient_descent(
       a loss function whose signature is `loss(f(x_train), y_train)`. Note:
       the loss function should treat the batch and output dimensions
       symmetrically.
+
     k_train_train:
       kernel on the training data. Must have the shape of
       `zip(y_train.shape, y_train.shape)` with `trace_axes` absent.
+
     y_train:
       targets for the training data.
+
     learning_rate:
       learning rate, step size.
+
     momentum:
       momentum scalar.
+
     trace_axes:
       `f(x_train)` axes such that `k_train_train` lacks these pairs of
       dimensions and is to be interpreted as :math:`\Theta \otimes I`, i.e.
@@ -440,6 +473,7 @@ def gradient_descent(
         a scalar or array of scalars of any shape in strictly increasing order.
         `t=None` is equivalent to `t=np.inf` and may not converge. Equivalent of
         training steps (but can be fractional).
+
       fx_train_or_state_0:
         either (a) output of the network at `t == 0` on the training set or (b)
         complete ODE state (`predict.ODEState`). Pass an ODE state if you want
@@ -451,9 +485,11 @@ def gradient_descent(
         `predict.ODEState(fx_train_0, fx_test_0)`. If an ODE state is passed, an
         ODE state is returned. `fx_train_0=None` means to not compute
         predictions on the training set.
+
       fx_test_0:
         output of the network at `t == 0` on the test set. `fx_test_0=None`
         means to not compute predictions on the test set.
+
       k_test_train:
         kernel relating test data with training data. Must have the shape of
         `zip(y_test.shape, y_train.shape)` with `trace_axes` absent. Pass
@@ -508,7 +544,15 @@ def gradient_descent(
 
 
 class Gaussian(NamedTuple):
-  """A `(mean, covariance)` convenience namedtuple."""
+  """A `(mean, covariance)` convenience namedtuple.
+
+  Attributes:
+    mean:
+      Mean of shape equal to the shape of the function outputs.
+
+    covariance:
+      Covariance of shape equal to the shape of the respective NTK/NNGP kernel.
+  """
   mean: np.ndarray
   covariance: np.ndarray
 
@@ -524,8 +568,10 @@ def gp_inference(
   NNGP - the exact posterior of an infinitely wide Bayesian NN. NTK - exact
   distribution of an infinite ensemble of infinitely wide NNs trained with
   gradient flow for infinite time. NTKGP - posterior of a GP (Gaussian process)
-  with the NTK covariance (see https://arxiv.org/abs/2007.05864 for how this
-  can correspond to infinite ensembles of infinitely wide NNs as well).
+  with the NTK covariance (see
+  "`Bayesian Deep Ensembles via the Neural Tangent Kernel
+  <https://arxiv.org/abs/2007.05864>`_" for how this can correspond to infinite
+  ensembles of infinitely wide NNs as well).
 
   Note that first invocation of the returned `predict_fn` will be slow and
   allocate a lot of memory for its whole lifetime, as a Cholesky factorization
@@ -534,21 +580,26 @@ def gp_inference(
 
   Args:
     k_train_train:
-      train-train kernel. Can be (a) `np.ndarray`, (b) `Kernel` namedtuple, (c)
-      `Kernel` object. Must contain the necessary `nngp` and/or `ntk` kernels
-      for arguments provided to the returned `predict_fn` function. For
-      example, if you request to compute posterior test [only] NTK covariance in
-      future `predict_fn` invocations, `k_train_train` must contain both `ntk`
-      and `nngp` kernels.
+      train-train kernel. Can be (a) :class:`jax.numpy.ndarray`,
+      (b) `Kernel` namedtuple, (c) :class:`~neural_tangents.Kernel` object.
+      Must contain the necessary `nngp` and/or `ntk` kernels for arguments
+      provided to the returned `predict_fn` function. For example, if you
+      request to compute posterior test [only] NTK covariance in future
+      `predict_fn` invocations, `k_train_train` must contain both `ntk` and
+      `nngp` kernels.
+
     y_train:
       train targets.
+
     diag_reg:
       a scalar representing the strength of the diagonal regularization for
       `k_train_train`, i.e. computing `k_train_train + diag_reg * I` during
       Cholesky factorization.
+
     diag_reg_absolute_scale:
       `True` for `diag_reg` to represent regularization in absolute units,
       `False` to be `diag_reg * np.mean(np.trace(k_train_train))`.
+
     trace_axes:
       `f(x_train)` axes such that `k_train_train`,
       `k_test_train`[, and `k_test_test`] lack these pairs of dimensions and
@@ -587,33 +638,38 @@ def gp_inference(
     Args:
       get:
         string, the mode of the Gaussian process, either "nngp", "ntk", "ntkgp",
-        (see https://arxiv.org/abs/2007.05864) or a tuple, or `None`. If `None`
+        (see "`Bayesian Deep Ensembles via the Neural Tangent Kernel
+        <https://arxiv.org/abs/2007.05864>`_") or a tuple, or `None`. If `None`
         then both `nngp` and `ntk` predictions are returned.
+
       k_test_train:
-        test-train kernel. Can be (a) `np.ndarray`, (b) `Kernel` namedtuple, (c)
-        `Kernel` object. Must contain the necessary `nngp` and/or `ntk` kernels
-        for arguments provided to the returned `predict_fn` function. For
-        example, if you request to compute posterior test [only] NTK covariance,
-        `k_test_train` must contain both `ntk` and `nngp` kernels. If `None`,
-        returns predictions on the training set. Note that train-set outputs are
-        always `N(y_train, 0)` and mostly returned for API consistency.
+        test-train kernel. Can be (a) :class:`jax.numpy.ndarray`,
+        (b) `Kernel` namedtuple, (c) :class:`~neural_tangents.Kernel` object.
+        Must contain the necessary `nngp` and/or `ntk` kernels for arguments
+        provided to the returned `predict_fn` function. For example, if you
+        request to compute posterior test [only] NTK covariance, `k_test_train`
+        must contain both `ntk` and `nngp` kernels. If `None`, returns
+        predictions on the training set. Note that train-set outputs are always
+        `N(y_train, 0)` and mostly returned for API consistency.
+
       k_test_test:
-        test-test kernel. Can be (a) `np.ndarray`, (b) `Kernel` namedtuple, (c)
-        `Kernel` object. Must contain the necessary `nngp` and/or `ntk` kernels
-        for arguments provided to the returned `predict_fn` function. Provide
-        if you want to compute test-test posterior covariance.
-        `k_test_test=None` means to not compute it. If `k_test_train is None`,
-        pass any non-`None` value (e.g. `True`) if you want to get
-        non-regularized (`diag_reg=0`) train-train posterior covariance. Note
-        that non-regularized train-set outputs will always be the zero-variance
-        Gaussian `N(y_train, 0)` and mostly returned for API consistency. For
-        regularized train-set posterior outputs according to a positive
-        `diag_reg`, pass `k_test_train=k_train_train`, and, optionally,
+        test-test kernel. Can be (a) :class:`jax.numpy.ndarray`,
+        (b) `Kernel` namedtuple, (c) :class:`~neural_tangents.Kernel` object.
+        Must contain the necessary `nngp` and/or `ntk` kernels for arguments
+        provided to the returned `predict_fn` function. Provide if you want to
+        compute test-test posterior covariance. `k_test_test=None` means to not
+        compute it. If `k_test_train is None`, pass any non-`None` value (e.g.
+        `True`) if you want to get non-regularized (`diag_reg=0`) train-train
+        posterior covariance. Note that non-regularized train-set outputs will
+        always be the zero-variance Gaussian `N(y_train, 0)` and mostly
+        returned for API consistency. For regularized train-set posterior
+        outputs according to a positive `diag_reg`, pass
+        `k_test_train=k_train_train`, and, optionally,
         `k_test_test=nngp_train_train`.
 
     Returns:
-      Either a `Gaussian('mean', 'variance')` namedtuple or `mean` of the GP
-      posterior on the  `test` set.
+      Either a :class:`Gaussian` `(mean, variance)` namedtuple or `mean` of the
+      GP posterior on the `test` set.
     """
     if get is None:
       get = ('nngp', 'ntk')
@@ -715,14 +771,14 @@ def gradient_descent_mse_ensemble(
   Args:
     kernel_fn:
       A kernel function that computes NNGP and/or NTK. Must have a signature
-      `kernel_fn(x1, x2, get, **kernel_fn_kwargs)` and return a `Kernel` object
-      or a `namedtuple` with `nngp` and/or `ntk` attributes. Therefore, it can
-      be an `AnalyticKernelFn`, but also a `MonteCarloKernelFn`, or an
-      `EmpiricalKernelFn` (but only `nt.empirical_kernel_fn` and not
-      `nt.empirical_ntk_fn` or `nt.empirical_nngp_fn`, since the latter
-      two do not accept a `get` argument). Note that for meaningful outputs,
-      the kernel function must represent or at least approximate the
-      infinite-width kernel.
+      `kernel_fn(x1, x2, get, **kernel_fn_kwargs)` and return a
+      :class:`~neural_tangents.Kernel` object or a `namedtuple` with `nngp`
+      and/or `ntk` attributes. Therefore, it can be an `AnalyticKernelFn`, but
+      also a `MonteCarloKernelFn`, or an `EmpiricalKernelFn` (but only
+      `nt.empirical_kernel_fn` and not `nt.empirical_ntk_fn` or
+      `nt.empirical_nngp_fn`, since the latter two do not accept a `get`
+      argument). Note that for meaningful outputs, the kernel function must
+      represent or at least approximate the infinite-width kernel.
 
     x_train:
       training inputs.
@@ -891,16 +947,20 @@ def gradient_descent_mse_ensemble(
         infinity and returns the same result as `t=np.inf`, but is computed
         using linear solve for test predictions instead of eigendecomposition,
         saving time and precision.
+
       x_test:
         test inputs. `None` means to return non-regularized (`diag_reg=0`)
         predictions on the train-set inputs. For regularized predictions, pass
         `x_test=x_train`.
+
       get:
         string, the mode of the Gaussian process, either "nngp" or "ntk", or a
         tuple. `get=None` is equivalent to `get=("nngp", "ntk")`.
+
       compute_cov:
         if `True` computing both `mean` and `variance` and only `mean`
         otherwise.
+
       **kernel_fn_test_test_kwargs:
         optional keyword arguments passed to `kernel_fn`. See also
         `kernel_fn_train_train_kwargs` argument of the parent function.
@@ -1045,17 +1105,21 @@ def max_learning_rate(
   contraction, which is `2 * batch_size * output_size * lambda_max(NTK)`. When
   `momentum > 0`, we use
   `2 * (1 + momentum) * batch_size * output_size * lambda_max(NTK)` (see
-  `The Dynamics of Momentum` section in https://distill.pub/2017/momentum/).
+  *The Dynamics of Momentum* section in
+  "`Why Momentum Really Works <https://distill.pub/2017/momentum/>`_").
 
   Args:
     ntk_train_train:
       analytic or empirical NTK on the training data.
+
     y_train_size:
       total training set output size, i.e.
       `f(x_train).size ==  y_train.size`. If `output_size=None` it is inferred
       from `ntk_train_train.shape` assuming `trace_axes=()`.
+
     momentum:
       The `momentum` for momentum optimizers.
+
     eps:
       a float to avoid zero divisor.
 
@@ -1113,10 +1177,13 @@ def _get_fns_in_eigenbasis(
   Args:
     k_train_train:
       an n x n matrix.
+
     diag_reg:
       diagonal regularizer strength.
+
     diag_reg_absolute_scale:
       `True` to use absolute (vs relative to mean trace) regulatization.
+
     fns:
       a sequence of functions that add on the eigenvalues (evals, dt) ->
       modified_evals.

@@ -1,9 +1,10 @@
 :github_url: https://github.com/google/neural-tangents/tree/main/docs/stax.rst
 
-.. default-role:: code
+
 
 `nt.stax` -- infinite NNGP and NTK
 ===========================================
+
 
 .. automodule:: neural_tangents.stax
 
@@ -99,6 +100,8 @@ Enums for specifying layer properties. Strings can be used in their place.
 .. autosummary::
  :toctree: _autosummary
 
+    AggregateImplementation
+    AttentionMechanism
     Padding
     PositionalEmbedding
 

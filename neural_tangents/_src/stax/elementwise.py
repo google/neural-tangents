@@ -122,8 +122,8 @@ def Gelu(
   Args:
     approximate:
       only relevant for finite-width network, `apply_fn`. If `True`, computes
-      an approximation via `tanh`, see https://arxiv.org/abs/1606.08415 and
-      `jax.nn.gelu` for details.
+      an approximation via `tanh`, see "`Gaussian Error Linear Units (GELUs)
+      <https://arxiv.org/abs/1606.08415>`_" and :obj:`jax.nn.gelu` for details.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -132,7 +132,11 @@ def Gelu(
     return jax.nn.gelu(x, approximate=approximate)
 
   def kernel_fn(k: Kernel) -> Kernel:
-    """Compute kernels after a `Gelu` layer; NNGP see `arXiv:2002.08517`."""
+    """Compute kernels after a `Gelu` layer.
+
+    For NNGP see "`Avoiding Kernel Fixed Points: Computing with ELU and GELU
+    Infinite Networks <https://arxiv.org/abs/2002.08517>`_".
+    """
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
     cov1_plus_1 = cov1 + 1
@@ -282,7 +286,6 @@ def Rbf(
   def fn(x):
     return np.sqrt(2) * np.sin(np.sqrt(2 * gamma) * x + np.pi/4)
 
-
   def kernel_fn(k: Kernel) -> Kernel:
     """Compute new kernels after an `Rbf` layer."""
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -340,7 +343,8 @@ def ABRelu(
   def kernel_fn(k: Kernel) -> Kernel:
     """Compute new kernels after an `ABRelu` layer.
 
-    See https://arxiv.org/pdf/1711.09090.pdf for the leaky ReLU derivation.
+    See "`Invariance of Weight Distributions in Rectified MLPs
+    <https://arxiv.org/abs/1711.09090>`_" for the leaky ReLU derivation.
     """
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
@@ -575,7 +579,8 @@ def ExpNormalized(
     do_clip: bool = False) -> InternalLayer:
   """Simulates the "Gaussian normalized kernel".
 
-  Source: https://arxiv.org/abs/2003.02237.pdf, page 6.
+  See page 6 in
+  "`Neural Kernels Without Tangents <https://arxiv.org/abs/2003.02237>`_".
 
   Args:
     gamma: exponent scalar coefficient.
@@ -693,18 +698,18 @@ def Elementwise(
 
   Example:
     >>> fn = jax.scipy.special.erf  # type: Callable[[float], float]
-    >>>
+    >>> #
     >>> def nngp_fn(cov12: float, var1: float, var2: float) -> float:
     >>>   prod = (1 + 2 * var1) * (1 + 2 * var2)
     >>>   return np.arcsin(2 * cov12 / np.sqrt(prod)) * 2 / np.pi
-    >>>
+    >>> #
     >>> # Use autodiff and vectorization to construct the layer:
     >>> _, _, kernel_fn_auto = stax.Elementwise(fn, nngp_fn)
-    >>>
+    >>> #
     >>> # Use custom pre-derived expressions
     >>> # (should be faster and more numerically stable):
     >>> _, _, kernel_fn_stax = stax.Erf()
-    >>>
+    >>> #
     >>> kernel_fn_auto(x1, x2) == kernel_fn_stax(x1, x2)  # usually `True`.
 
   Args:
@@ -748,9 +753,10 @@ def Elementwise(
 
   else:
     if d_nngp_fn is None:
+      url = 'https://jax.readthedocs.io/en/latest/faq.html#gradients-contain-nan-where-using-where'
       warnings.warn(
-          'Using JAX autodiff to compute the `fn` derivative for NTK. Beware of '
-          'https://jax.readthedocs.io/en/latest/faq.html#gradients-contain-nan-where-using-where.')
+          f'Using JAX autodiff to compute the `fn` derivative for NTK. Beware '
+          f'of {url}.')
       d_nngp_fn = np.vectorize(grad(nngp_fn))
 
     def kernel_fn(k: Kernel) -> Kernel:
@@ -809,9 +815,10 @@ def ElementwiseNumerical(
   quad_points = osp.special.roots_hermite(deg)
 
   if df is None:
+    url = 'https://jax.readthedocs.io/en/latest/faq.html#gradients-contain-nan-where-using-where'
     warnings.warn(
-        'Using JAX autodiff to compute the `fn` derivative for NTK. Beware of '
-        'https://jax.readthedocs.io/en/latest/faq.html#gradients-contain-nan-where-using-where.')
+        f'Using JAX autodiff to compute the `fn` derivative for NTK. Beware of '
+        f'{url}.')
     df = np.vectorize(grad(fn))
 
   def kernel_fn(k: Kernel) -> Kernel:

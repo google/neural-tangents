@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Requirement management for `stax` layers."""
+"""Requirement management for :obj:`~neural_tangents.stax` layers."""
 
 import enum
 from typing import Callable, Optional, Tuple, Union, Sequence
@@ -35,20 +35,23 @@ import numpy as onp
 
 
 def layer(layer_fn: Callable[..., InternalLayer]) -> Callable[..., Layer]:
-  """A convenience decorator to be added to all public layers like `Relu` etc.
+  """A convenience decorator to be added to all public layers.
 
-  Makes the `kernel_fn` of the layer work with both input `np.ndarray`
-  (when the layer is the first one applied to inputs), and with `Kernel` for
-  intermediary layers. Also adds optional arguments to the `kernel_fn` to
-  allow specifying the computation and returned results with more flexibility.
+  Used in :obj:`~neural_tangents.stax.Relu` etc.
+
+  Makes the `kernel_fn` of the layer work with both input
+  :class:`jax.numpy.ndarray` (when the layer is the first one applied to
+  inputs), and with :class:`~neural_tangents.Kernel` for intermediary layers.
+  Also adds optional arguments to the `kernel_fn` to allow specifying the
+  computation and returned results with more flexibility.
 
   Args:
     layer_fn: Layer function returning triple `(init_fn, apply_fn, kernel_fn)`.
 
   Returns:
     A function with the same signature as `layer` with `kernel_fn` now
-    accepting `np.ndarray` as inputs if needed, and accepts optional `get`,
-    `diagonal_batch`, `diagonal_spatial` arguments.
+    accepting :class:`jax.numpy.ndarray` as inputs if needed, and accepts
+    optional `get`, `diagonal_batch`, `diagonal_spatial` arguments.
   """
   name = layer_fn.__name__
 
@@ -68,7 +71,7 @@ def requires(**static_reqs):
   Use this to specify your `kernel_fn` input kernel requirements.
 
   See Also:
-    `stax.Diagonal`, `stax.Input`, `stax.Output`.
+    :class:`Diagonal`, :class:`Input`, :class:`Output`.
 
   """
 
@@ -145,8 +148,9 @@ def supports_masking(remask_kernel: bool):
   Must be applied before the `layer` decorator.
 
   Args:
-    remask_kernel: `True` to zero-out kernel covariance entries between masked
-      inputs after applying `kernel_fn`. Some layers don't need this and setting
+    remask_kernel:
+      `True` to zero-out kernel covariance entries between masked inputs after
+      applying `kernel_fn`. Some layers don't need this and setting
       `remask_kernel=False` can save compute.
 
   Returns:
@@ -255,7 +259,19 @@ _DEFAULT_INPUT_REQ = frozendict.frozendict(
 
 
 class Bool(enum.IntEnum):
-  """Helper trinary logic class."""
+  """Helper trinary logic class. See :class:`Diagonal` for details.
+
+  Attributes:
+    NO:
+      `False`.
+
+    MAYBE:
+      Maybe.
+
+    YES:
+      `True`.
+
+  """
   NO = 0
   MAYBE = 1
   YES = 2
@@ -273,7 +289,8 @@ class Diagonal:
   The intended behavior is to be diagonal-only iff
     a) output off-diagonal entries are all zeros, and
 
-    b) diagonal-only `Kernel` is sufficient for all steps of computation.
+    b) diagonal-only :class:`~neural_tangents.Kernel` is sufficient for all
+    steps of computation.
 
   Note that currently this parameter is shared between all parallel branches,
   even if this is excessive, and it is defined once for the whole network and
@@ -289,16 +306,16 @@ class Diagonal:
   Attributes:
     input:
       specifies whether inputs to given layer can contain only diagonal
-      entries. `_Bool.YES` means "yes"; `_Bool.MAYBE` means iff off-diagonal
-      entries are zero. `_Bool.NO` means "no". When traversing the network
-      tree from inputs to outputs (as well as parallel branches from left/right
-      to right/left) can only decrease.
+      entries. :attr:`Bool.YES` means "yes"; :attr:`Bool.MAYBE` means iff
+      off-diagonal entries are zero. :attr:`Bool.NO` means "no". When
+      traversing the network tree from inputs to outputs (as well as parallel
+      branches from left/right to right/left) can only decrease.
 
     output:
       specifies whether any outputs (starting from this layer to the output of
-      the network) can contain only diagonal entries. `_Bool.YES` means yes;
-      `_Bool.MAYBE` means "yes" after current layer, but may become "no"
-      further in the network. `_Bool.NO` means "no".
+      the network) can contain only diagonal entries. :attr:`Bool.YES` means
+      yes; :attr:`Bool.MAYBE` means "yes" after current layer, but may become
+      "no" further in the network. :attr:`Bool.NO` means "no".
   """
 
   input: Bool = Bool.YES
@@ -423,14 +440,19 @@ def _cov(
   """Computes uncentered covariance (nngp) between two batches of inputs.
 
   Args:
-    x1: a (2+S)D (S >= 0) `np.ndarray` of shape
+    x1:
+      a (2+S)D (S >= 0) `np.ndarray` of shape
       `(batch_size_1, <S spatial dimensions>, n_channels)`. `batch_size_1`,
       `n_channels` may be in different positions based on `batch_axis` and
       `channel_axis`.
-    x2: an optional `np.ndarray` that has the same shape as `a` apart from
+
+    x2:
+      an optional `np.ndarray` that has the same shape as `a` apart from
       possibly different batch (`batch_size_2`) dimension. `None` means
       `x2 == x1`.
-    diagonal_spatial: Specifies whether only the diagonals of the
+
+    diagonal_spatial:
+      Specifies whether only the diagonals of the
       location-location covariances will be computed,
       (`diagonal_spatial == True`,
        `nngp.shape == (batch_size_1, batch_size_2, height, width, depth, ...)`),
@@ -438,9 +460,14 @@ def _cov(
       (`diagonal_spatial == False`,
        `nngp.shape == (batch_size_1, batch_size_2, height, height,
                        width, width, depth, depth, ...)`).
-    batch_axis: Specifies which axis is the batch axis.
-    channel_axis: Specifies which axis is the channel / feature axis.
-      For `kernel_fn`, channel size is considered to be infinite.
+
+    batch_axis:
+      Specifies which axis is the batch axis.
+
+    channel_axis:
+      Specifies which axis is the channel / feature axis. For `kernel_fn`,
+      channel size is considered to be infinite.
+
   Returns:
     Matrix of uncentred batch covariances with shape
     `(batch_size_1, batch_size_2, <S spatial dimensions>)`
@@ -490,42 +517,45 @@ def _inputs_to_kernel(
   Example:
     >>> x = np.ones((10, 32, 16, 3))
     >>> o = _inputs_to_kernel(x, None,
-    >>>                       diagonal_batch=True,
-    >>>                       diagonal_spatial=False,
-    >>>                       compute_ntk=True,
-    >>>                       batch_axis=0,
-    >>>                       channel_axis=-1)
+    >>>                      diagonal_batch=True,
+    >>>                      diagonal_spatial=False,
+    >>>                      compute_ntk=True,
+    >>>                      batch_axis=0,
+    >>>                      channel_axis=-1)
     >>> o.cov1.shape, o.ntk.shape
     (10, 32, 32, 16, 16), (10, 10, 32, 32, 16, 16)
     >>> o = _inputs_to_kernel(x, None,
-    >>>                       diagonal_batch=True,
-    >>>                       diagonal_spatial=True,
-    >>>                       compute_ntk=True,
-    >>>                       batch_axis=0,
-    >>>                       channel_axis=-1)
+    >>>                      diagonal_batch=True,
+    >>>                      diagonal_spatial=True,
+    >>>                      compute_ntk=True,
+    >>>                      batch_axis=0,
+    >>>                      channel_axis=-1)
     >>> o.cov1.shape, o.ntk.shape
     (10, 32, 16), (10, 10, 32, 16)
     >>> x1 = np.ones((10, 128))
     >>> x2 = np.ones((20, 128))
     >>> o = _inputs_to_kernel(x1, x2,
-    >>>                       diagonal_batch=True,
-    >>>                       diagonal_spatial=True,
-    >>>                       compute_ntk=False,
-    >>>                       batch_axis=0,
-    >>>                       channel_axis=-1)
+    >>>                      diagonal_batch=True,
+    >>>                      diagonal_spatial=True,
+    >>>                      compute_ntk=False,
+    >>>                      batch_axis=0,
+    >>>                      channel_axis=-1)
     >>> o.cov1.shape, o.nngp.shape
     (10,), (10, 20)
 
   Args:
-    x1: an `(S+2)`-dimensional `np.ndarray` of shape
+    x1:
+      an `(S+2)`-dimensional `np.ndarray` of shape
       `(batch_size_1, height, width, depth, ..., n_channels)` with `S` spatial
       dimensions (`S >= 0`). Dimensions may be in different order based on
       `batch_axis` and `channel_axis`.
 
-    x2: an optional `np.ndarray` with the same shape as `x1` apart
-      from possibly different batch size. `None` means `x2 == x1`.
+    x2:
+      an optional `np.ndarray` with the same shape as `x1` apart from possibly
+      different batch size. `None` means `x2 == x1`.
 
-    diagonal_batch: Specifies whether `cov1` and `cov2` store only
+    diagonal_batch:
+      Specifies whether `cov1` and `cov2` store only
       the diagonal of the sample-sample covariance
       (`diagonal_batch == True`,
        `cov1.shape == (batch_size_1, ...)`),
@@ -533,9 +563,9 @@ def _inputs_to_kernel(
       (`diagonal_batch == False`,
        `cov1.shape == (batch_size_1, batch_size_1, ...)`).
 
-    diagonal_spatial: Specifies whether all (`cov1`, `ntk`, etc.)
-      input covariance matrcies should store only the diagonals of the
-      location-location covariances
+    diagonal_spatial:
+      Specifies whether all (`cov1`, `ntk`, etc.) input covariance matrcies
+      should store only the diagonals of the location-location covariances
       (`diagonal_spatial == True`,
        `nngp.shape == (batch_size_1, batch_size_2, height, width, depth, ...)`),
       or the full covariance
@@ -543,27 +573,31 @@ def _inputs_to_kernel(
        `nngp.shape == (batch_size_1, batch_size_2, height, height,
                        width, width, depth, depth, ...)`).
 
-    compute_ntk: `True` to compute both NTK and NNGP kernels,
-      `False` to only compute NNGP.
+    compute_ntk:
+      `True` to compute both NTK and NNGP kernels, `False` to only compute NNGP.
 
-    batch_axis: Specifies which axis is the batch axis.
+    batch_axis:
+      Specifies which axis is the batch axis.
 
-    channel_axis: Specifies which axis is the channel / feature axis.
-      For `kernel_fn`, channel size is considered to be infinite.
+    channel_axis:
+      Specifies which axis is the channel / feature axis. For `kernel_fn`,
+      channel size is considered to be infinite.
 
-    mask_constant: an optional `float`, the value in inputs to be considered as
-      masked (e.g. padding in a batch of sentences). `None` means no masking.
-      Can also be `np.nan`, `np.inf` etc. Beware of floating point precision
-      errors and try to use an atypical for inputs value.
+    mask_constant:
+      an optional `float`, the value in inputs to be considered as masked (e.g.
+      padding in a batch of sentences). `None` means no masking. Can also be
+      `np.nan`, `np.inf` etc. Beware of floating point precision errors and try
+      to use an atypical for inputs value.
 
-    eps: a small number used to check whether x1 and x2 are the same up to
-      `eps`.
+    eps:
+      a small number used to check whether x1 and x2 are the same up to `eps`.
 
-    **kwargs: other arguments passed to all intermediary `kernel_fn` calls (not
-      used here).
+    **kwargs:
+      other arguments passed to all intermediary `kernel_fn` calls (not used
+      here).
 
   Returns:
-    The `Kernel` object containing inputs covariance[s].
+    The :class:`~neural_tangents.Kernel` object containing inputs covariance[s].
   """
 
   if not (isinstance(x1, (onp.ndarray, np.ndarray)) and

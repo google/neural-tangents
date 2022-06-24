@@ -14,7 +14,6 @@
 
 """Linear functions."""
 
-
 import enum
 import functools
 import operator as op
@@ -40,20 +39,51 @@ from ..utils.typing import Axes, InternalLayer, InternalLayerMasked, PyTree
 
 
 class Padding(enum.Enum):
-  """Type of padding in pooling and convolutional layers."""
+  """Type of padding in pooling and convolutional layers.
+
+  Attributes:
+    CIRCULAR:
+      circular padding, as if the input were a torus.
+
+    SAME:
+      same, a.k.a. zero padding.
+
+    VALID:
+      valid, a.k.a. no padding.
+  """
   CIRCULAR = 'CIRCULAR'
   SAME = 'SAME'
   VALID = 'VALID'
 
 
 class _Pooling(enum.Enum):
-  """Type of pooling in pooling layers."""
+  """Type of pooling in pooling layers.
+
+  Attributes:
+    AVG:
+      average pooling, the output is normalized by the input receptive field
+      size.
+
+    SUM:
+      sum pooling, no normalization.
+  """
   AVG = 'AVG'
   SUM = 'SUM'
 
 
 class AggregateImplementation(enum.Enum):
-  """Implementation of the `Aggregate` layer."""
+  """Implementation of the :obj:`Aggregate` layer.
+
+  See :obj:`Aggregate` docstring for details.
+
+  Attributes:
+    DENSE:
+      Is recommended for dense graphs, where the number of edges `E` is
+      proportional to the number of vertices `V` to the power of 1.5 or more.
+
+    SPARSE:
+      Is recommended for sparse graphs, where `E ~ O(V)` or less.
+  """
   DENSE = 'DENSE'
   SPARSE = 'SPARSE'
 
@@ -64,9 +94,9 @@ class AggregateImplementation(enum.Enum):
 @layer
 @supports_masking(remask_kernel=False)
 def Identity() -> InternalLayer:
-  """Layer construction function for an identity layer.
+  """Identity (no-op).
 
-  Based on `jax.example_libraries.stax.Identity`.
+  Based on :obj:`jax.example_libraries.stax.Identity`.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -87,7 +117,7 @@ def DotGeneral(
     batch_axis: int = 0,
     channel_axis: int = -1
 ) -> InternalLayerMasked:
-  r"""Layer constructor for a constant (non-trainable) rhs/lhs Dot General.
+  r"""Constant (non-trainable) rhs/lhs Dot General.
 
   Dot General allows to express any linear transformation on the inputs,
   including but not limited to matrix multiplication, pooling, convolutions,
@@ -100,40 +130,40 @@ def DotGeneral(
   on whether `lhs` or `rhs` is specified (not `None`).
 
   Example:
-    >>>  from jax import random
-    >>>  import jax.numpy as np
-    >>>  from neural_tangents import stax
-    >>>
-    >>>  # Two time series stacked along the second (H) dimension.
-    >>>  x = random.normal(random.PRNGKey(1), (5, 2, 32, 3))  # NHWC
-    >>>
-    >>>  # Multiply all outputs by a scalar:
-    >>>  nn = stax.serial(
-    >>>      stax.Conv(128, (1, 3)),
-    >>>      stax.Relu(),
-    >>>      stax.DotGeneral(rhs=2.),  # output shape is (5, 2, 30, 128)
-    >>>      stax.GlobalAvgPool()      # (5, 128)
-    >>>  )
-    >>>
-    >>>  # Subtract second time series from the first one:
-    >>>  nn = stax.serial(
-    >>>      stax.Conv(128, (1, 3)),
-    >>>      stax.Relu(),
-    >>>      stax.DotGeneral(
-    >>>          rhs=np.array([1., -1.]),
-    >>>          dimension_numbers=(((1,), (0,)), ((), ()))),  # (5, 30, 128)
-    >>>      stax.GlobalAvgPool()                              # (5, 128)
-    >>>  )
-    >>>
-    >>>  # Flip outputs with each other
-    >>>  nn = stax.serial(
-    >>>      stax.Conv(128, (1, 3)),
-    >>>      stax.Relu(),
-    >>>      stax.DotGeneral(
-    >>>          lhs=np.array([[0., 1.], [1., 0.]]),
-    >>>          dimension_numbers=(((1,), (1,)), ((), ()))),  # (5, 2, 30, 128)
-    >>>      stax.GlobalAvgPool()                              # (5, 128)
-    >>>  )
+    >>> from jax import random
+    >>> import jax.numpy as np
+    >>> from neural_tangents import stax
+    >>> #
+    >>> # Two time series stacked along the second (H) dimension.
+    >>> x = random.normal(random.PRNGKey(1), (5, 2, 32, 3))  # NHWC
+    >>> #
+    >>> # Multiply all outputs by a scalar:
+    >>> nn = stax.serial(
+    >>>     stax.Conv(128, (1, 3)),
+    >>>     stax.Relu(),
+    >>>     stax.DotGeneral(rhs=2.),  # output shape is (5, 2, 30, 128)
+    >>>     stax.GlobalAvgPool()      # (5, 128)
+    >>> )
+    >>> #
+    >>> # Subtract second time series from the first one:
+    >>> nn = stax.serial(
+    >>>     stax.Conv(128, (1, 3)),
+    >>>     stax.Relu(),
+    >>>     stax.DotGeneral(
+    >>>         rhs=np.array([1., -1.]),
+    >>>         dimension_numbers=(((1,), (0,)), ((), ()))),  # (5, 30, 128)
+    >>>     stax.GlobalAvgPool()                              # (5, 128)
+    >>> )
+    >>> #
+    >>> # Flip outputs with each other
+    >>> nn = stax.serial(
+    >>>     stax.Conv(128, (1, 3)),
+    >>>     stax.Relu(),
+    >>>     stax.DotGeneral(
+    >>>         lhs=np.array([[0., 1.], [1., 0.]]),
+    >>>         dimension_numbers=(((1,), (1,)), ((), ()))),  # (5, 2, 30, 128)
+    >>>     stax.GlobalAvgPool()                              # (5, 128)
+    >>> )
 
   See Also:
     https://www.tensorflow.org/xla/operation_semantics#dotgeneral
@@ -221,9 +251,11 @@ def Aggregate(
     to_dense: Optional[Callable[[np.ndarray], np.ndarray]] = lambda p: p,
     implementation: str = AggregateImplementation.DENSE.value
 ) -> InternalLayer:
-  r"""Layer constructor for aggregation operator (graphical neural network).
+  r"""Aggregation operator (graphical neural network).
 
-  See e.g. https://arxiv.org/abs/1905.13192.
+  See e.g.
+  "`Graph Neural Tangent Kernel: Fusing Graph Neural Networks with Graph Kernels
+  <https://arxiv.org/abs/1905.13192>`_".
 
   Specifically, each `N+2`-D `input` of shape `(batch, X_1, ..., X_N, channels)`
   (subject to `batch_axis` and `channel_axis`) is accompanied by an array
@@ -289,89 +321,87 @@ def Aggregate(
     sparse and dense patterns.
 
   Example:
-    >>>  # 1D inputs
-    >>>  x = random.normal(random.PRNGKey(1), (5, 3, 32))  # NCH
-    >>>
-    >>>  # 1) NHH dense binary adjacency matrix
-    >>>  A = random.bernoulli(random.PRNGKey(2), 0.5, (5, 32, 32))
-    >>>  # `A[n, h1, h2] == True`
-    >>>  # means an edge between tokens `h1` and `h2` in sample `n`.
-    >>>
-    >>>  init_fn, apply_fn, kernel_fn = stax.Aggregate(aggregate_axis=2,
-    >>>                                                batch_axis=0,
-    >>>                                                channel_axis=1)
-    >>>
-    >>>  out = apply_fn((), x, pattern=A)
-    >>>  # output is the same as `x @ A` of shape (5, 3, 32)
-    >>>
-    >>>  # Sparse NHH binary pattern with 10 edges
-    >>>  n_edges = 10
-    >>>  A_sparse = random.randint(random.PRNGKey(3),
-    >>>                            shape=(x.shape[0], n_edges, 1, 2),
-    >>>                            minval=0,
-    >>>                            maxval=x.shape[2])
-    >>>
-    >>>  # Setting `implementation="SPARSE"` to invoke the segment sum
-    >>>  # implementation.
-    >>>  init_fn, apply_fn, kernel_fn = stax.Aggregate(aggregate_axis=2,
-    >>>                                                batch_axis=0,
-    >>>                                                channel_axis=1,
-    >>>                                                implementation="SPARSE")
-    >>>
-    >>>  out = apply_fn((), x, pattern=A_sparse)
-    >>>  # output is of shape (5, 3, 32), computed via `jax.ops.segment_sum`.
-    >>>
-    >>>  # 2D inputs
-    >>>  x = random.normal(random.PRNGKey(1), (5, 3, 32, 16))  # NCHW
-    >>>
-    >>>  # 2) NHWHW dense binary adjacency matrix
-    >>>  A = random.bernoulli(random.PRNGKey(2), 0.5, (5, 32, 16, 32, 16))
-    >>>  # `A[n, h1, w1, h2, w2] == True`
-    >>>  # means an edge between pixels `(h1, w1)` and `(h2, w2)` in image `n`.
-    >>>
-    >>>  init_fn, apply_fn, kernel_fn = stax.Aggregate(aggregate_axis=(2, 3),
-    >>>                                                batch_axis=0,
-    >>>                                                channel_axis=1)
-    >>>
-    >>>  out = apply_fn((), x, pattern=A)
-    >>>  # output is of shape (5, 3, 32, 16), the same as
-    >>>  # `(x.reshape((5, 3, 32 * 16)) @ A.reshape((5, 32 * 16, 32 * 16))
-    >>>  #  ).reshape(x.shape)`
-    >>>
-    >>>
-    >>>  # 3) NWW binary adjacency matrix
-    >>>  A = random.bernoulli(random.PRNGKey(2), 0.5, (5, 16, 16))
-    >>>  # `A[n, w1, w2] == True`
-    >>>  # means an edge between rows `w1` and `w2` in image `n`.
-    >>>
-    >>>  init_fn, apply_fn, kernel_fn = stax.Aggregate(aggregate_axis=(3,),
-    >>>                                                batch_axis=0,
-    >>>                                                channel_axis=1)
-    >>>
-    >>>  out = apply_fn((), x, pattern=A)
-    >>>  # output is of shape (5, 3, 32, 16), the same as
-    >>>  # `(x.reshape((5, 3 * 32, 16)) @ A).reshape(x.shape)`
-    >>>
-    >>>
-    >>>  # 4) Infinite width example
-    >>>  x1 = random.normal(random.PRNGKey(1), (5, 3, 32))  # NCH
-    >>>  x2 = random.normal(random.PRNGKey(2), (2, 3, 32))  # NCH
-    >>>
-    >>>  # NHH binary adjacency matrices
-    >>>  A1 = random.bernoulli(random.PRNGKey(2), 0.5, (5, 32, 32))
-    >>>  A2 = random.bernoulli(random.PRNGKey(2), 0.5, (2, 32, 32))
-    >>>
-    >>>  _, _, kernel_fn_id = stax.Identity()
-    >>>
-    >>>  _, _, kernel_fn_agg = stax.Aggregate(aggregate_axis=2,
-    >>>                                       batch_axis=0,
-    >>>                                       channel_axis=1)
-    >>>
-    >>>  nngp = kernel_fn_id(x1, x2, get='nngp', channel_axis=1)
-    >>>  # initial NNGP of shape (5, 2, 32, 32)
-    >>>  K_agg = kernel_fn_agg(x1, x2, get='nngp', pattern=(A1, A2))
-    >>>  # output NNGP of same shape (5, 2, 32, 32):
-    >>>  # `K_agg[n1, n2] == A1[n1].T @ nngp[n1, n2] @ A2[n2]`
+    >>> # 1D inputs
+    >>> x = random.normal(random.PRNGKey(1), (5, 3, 32))  # NCH
+    >>> #
+    >>> # 1) NHH dense binary adjacency matrix
+    >>> A = random.bernoulli(random.PRNGKey(2), 0.5, (5, 32, 32))
+    >>> # `A[n, h1, h2] == True`
+    >>> # means an edge between tokens `h1` and `h2` in sample `n`.
+    >>> #
+    >>> init_fn, apply_fn, kernel_fn = stax.Aggregate(aggregate_axis=2,
+    >>>                                               batch_axis=0,
+    >>>                                               channel_axis=1)
+    >>> #
+    >>> out = apply_fn((), x, pattern=A)
+    >>> # output is the same as `x @ A` of shape (5, 3, 32)
+    >>> #
+    >>> # Sparse NHH binary pattern with 10 edges
+    >>> n_edges = 10
+    >>> A_sparse = random.randint(random.PRNGKey(3),
+    >>>                           shape=(x.shape[0], n_edges, 1, 2),
+    >>>                           minval=0,
+    >>>                           maxval=x.shape[2])
+    >>> #
+    >>> # Setting `implementation="SPARSE"` to invoke the segment sum
+    >>> # implementation.
+    >>> init_fn, apply_fn, kernel_fn = stax.Aggregate(aggregate_axis=2,
+    >>>                                               batch_axis=0,
+    >>>                                               channel_axis=1,
+    >>>                                               implementation="SPARSE")
+    >>> #
+    >>> out = apply_fn((), x, pattern=A_sparse)
+    >>> # output is of shape (5, 3, 32), computed via `jax.ops.segment_sum`.
+    >>> #
+    >>> # 2D inputs
+    >>> x = random.normal(random.PRNGKey(1), (5, 3, 32, 16))  # NCHW
+    >>> #
+    >>> # 2) NHWHW dense binary adjacency matrix
+    >>> A = random.bernoulli(random.PRNGKey(2), 0.5, (5, 32, 16, 32, 16))
+    >>> # `A[n, h1, w1, h2, w2] == True`
+    >>> # means an edge between pixels `(h1, w1)` and `(h2, w2)` in image `n`.
+    >>> #
+    >>> init_fn, apply_fn, kernel_fn = stax.Aggregate(aggregate_axis=(2, 3),
+    >>>                                               batch_axis=0,
+    >>>                                               channel_axis=1)
+    >>> #
+    >>> out = apply_fn((), x, pattern=A)
+    >>> # output is of shape (5, 3, 32, 16), the same as
+    >>> # `(x.reshape((5, 3, 32 * 16)) @ A.reshape((5, 32 * 16, 32 * 16))
+    >>> #  ).reshape(x.shape)`
+    >>> #
+    >>> # 3) NWW binary adjacency matrix
+    >>> A = random.bernoulli(random.PRNGKey(2), 0.5, (5, 16, 16))
+    >>> # `A[n, w1, w2] == True`
+    >>> # means an edge between rows `w1` and `w2` in image `n`.
+    >>> #
+    >>> init_fn, apply_fn, kernel_fn = stax.Aggregate(aggregate_axis=(3,),
+    >>>                                               batch_axis=0,
+    >>>                                               channel_axis=1)
+    >>> #
+    >>> out = apply_fn((), x, pattern=A)
+    >>> # output is of shape (5, 3, 32, 16), the same as
+    >>> # `(x.reshape((5, 3 * 32, 16)) @ A).reshape(x.shape)`
+    >>> #
+    >>> # 4) Infinite width example
+    >>> x1 = random.normal(random.PRNGKey(1), (5, 3, 32))  # NCH
+    >>> x2 = random.normal(random.PRNGKey(2), (2, 3, 32))  # NCH
+    >>> #
+    >>> # NHH binary adjacency matrices
+    >>> A1 = random.bernoulli(random.PRNGKey(2), 0.5, (5, 32, 32))
+    >>> A2 = random.bernoulli(random.PRNGKey(2), 0.5, (2, 32, 32))
+    >>> #
+    >>> _, _, kernel_fn_id = stax.Identity()
+    >>> #
+    >>> _, _, kernel_fn_agg = stax.Aggregate(aggregate_axis=2,
+    >>>                                      batch_axis=0,
+    >>>                                      channel_axis=1)
+    >>> #
+    >>> nngp = kernel_fn_id(x1, x2, get='nngp', channel_axis=1)
+    >>> # initial NNGP of shape (5, 2, 32, 32)
+    >>> K_agg = kernel_fn_agg(x1, x2, get='nngp', pattern=(A1, A2))
+    >>> # output NNGP of same shape (5, 2, 32, 32):
+    >>> # `K_agg[n1, n2] == A1[n1].T @ nngp[n1, n2] @ A2[n2]`
 
   Args:
     aggregate_axis:
@@ -399,7 +429,7 @@ def Aggregate(
       (`E ~> O(V^1.5)`), while `"SPARSE"` uses `jax.ops.segment_sum` and is
       recommended for sparse graphs (`E ~< O(V)`). Note that different
       `implementation`s require different `pattern` array format - see the
-      layer docstring above for details.
+      :obj:`Aggregate` layer docstring above for details.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -725,9 +755,9 @@ def Dense(
     parameterization: str = 'ntk',
     s: Tuple[int, int] = (1, 1),
 ) -> InternalLayerMasked:
-  r"""Layer constructor function for a dense (fully-connected) layer.
+  r"""Dense (fully-connected, matrix product).
 
-  Based on `jax.example_libraries.stax.Dense`.
+  Based on :obj:`jax.example_libraries.stax.Dense`.
 
   Args:
     out_dim:
@@ -751,14 +781,18 @@ def Dense(
     parameterization:
       Either `"ntk"` or `"standard"`.
 
-      Under `"ntk"` parameterization (https://arxiv.org/abs/1806.07572, page 3),
+      Under `"ntk"` parameterization (page 3 in "`Neural Tangent Kernel:
+      Convergence and Generalization in Neural Networks
+      <https://arxiv.org/abs/1806.07572>`_"),
       weights and biases are initialized as
       :math:`W_{ij} \sim \mathcal{N}(0,1)`, :math:`b_i \sim \mathcal{N}(0,1)`,
       and the finite width layer equation is
       :math:`z_i = \sigma_W / \sqrt{N} \sum_j W_{ij} x_j + \sigma_b b_i`, where
       `N` is `out_dim`.
 
-      Under `"standard"` parameterization (https://arxiv.org/abs/2001.07301),
+      Under `"standard"` parameterization ("`On the infinite width limit of
+      neural networks with a standard parameterization
+      <https://arxiv.org/abs/2001.07301>`_".),
       weights and biases are initialized as :math:`W_{ij} \sim \mathcal{N}(0,
       W_{std}^2/N)`,
       :math:`b_i \sim \mathcal{N}(0,\sigma_b^2)`, and the finite width layer
@@ -766,22 +800,26 @@ def Dense(
       :math:`z_i = \frac{1}{s} \sum_j W_{ij} x_j + b_i`, where `N` is `out_dim`.
 
       `N` corresponds to the respective variable in
-      https://arxiv.org/abs/2001.07301.
+      "`On the infinite width limit of neural networks with a standard
+      parameterization <https://arxiv.org/abs/2001.07301>`_".
 
     s:
       only applicable when `parameterization="standard"`. A tuple of integers
       specifying the width scalings of the input and the output of the layer,
       i.e. the weight matrix `W` of the layer has shape
       `(s[0] * in_dim, s[1] * out_dim)`, and the bias has size `s[1] * out_dim`.
-      Note that we need `s[0]` (scaling of the previous layer) to infer
-      `in_dim` from `input_shape`. Also note that for the bottom layer, `s[0]`
-      must be `1`, and for all other layers `s[0]` must be equal to `s[1]` of
-      the previous layer. For the top layer, `s[1]` is expected to be `1`
-      (recall that the output size is `s[1] * out_dim`, and in common infinite
-      network research input and output sizes are considered fixed).
+
+      .. note::
+        We need `s[0]` (scaling of the previous layer) to infer `in_dim` from
+        `input_shape`. Further, for the bottom layer, `s[0]` must be `1`, and
+        for all other layers `s[0]` must be equal to `s[1]` of the previous
+        layer. For the top layer, `s[1]` is expected to be `1` (recall that the
+        output size is `s[1] * out_dim`, and in common infinite network
+        research input and output sizes are considered fixed).
 
       `s` corresponds to the respective variable in
-      https://arxiv.org/abs/2001.07301.
+      "`On the infinite width limit of neural networks with a standard
+      parameterization <https://arxiv.org/abs/2001.07301>`_".
 
       For `parameterization="ntk"`, or for standard, finite-width networks
       corresponding to He initialization, `s=(1, 1)`.
@@ -893,9 +931,9 @@ def Conv(
     parameterization: str = 'ntk',
     s: Tuple[int, int] = (1, 1),
 ) -> InternalLayerMasked:
-  """Layer construction function for a general convolution layer.
+  """General convolution.
 
-  Based on `jax.example_libraries.stax.GeneralConv`.
+  Based on :obj:`jax.example_libraries.stax.GeneralConv`.
 
   Args:
     out_chan:
@@ -953,9 +991,9 @@ def ConvTranspose(
     parameterization: str = 'ntk',
     s: Tuple[int, int] = (1, 1),
 ) -> InternalLayerMasked:
-  """Layer construction function for a general transpose convolution layer.
+  """General transpose convolution.
 
-  Based on `jax.example_libraries.stax.GeneralConvTranspose`.
+  Based on :obj:`jax.example_libraries.stax.GeneralConvTranspose`.
 
   Args:
     out_chan:
@@ -1013,7 +1051,7 @@ def ConvLocal(
     parameterization: str = 'ntk',
     s: Tuple[int, int] = (1, 1),
 ) -> InternalLayerMasked:
-  """Layer construction function for a general unshared convolution layer.
+  """General unshared convolution.
 
   Also known and "Locally connected networks" or LCNs, these are equivalent to
   convolutions except for having separate (unshared) kernels at different
@@ -1075,9 +1113,9 @@ def _Conv(
     transpose: bool,
     shared_weights: bool
 ) -> InternalLayerMasked:
-  """Layer construction function for a general convolution layer.
+  """General convolution.
 
-  Based on `jax.example_libraries.stax.GeneralConv`.
+  Based on :obj:`jax.example_libraries.stax.GeneralConv`.
 
   Args:
     out_chan:
@@ -1183,7 +1221,7 @@ def _Conv(
       lax_conv = functools.partial(lax.conv_general_dilated_local,
                                    filter_shape=filter_shape)
       def ntk_init_fn(rng, input_shape):
-        """Adapted from `jax.example_libraries.stax.GeneralConv`."""
+        """Adapted from :obj:`jax.example_libraries.stax.GeneralConv`."""
         filter_shape_iter = iter(filter_shape)
         conv_kernel_shape = [out_chan if c == 'O' else
                              input_shape[lhs_spec.index('C')] if c == 'I' else
@@ -1385,7 +1423,9 @@ def _Conv(
         rhs_shape.insert(rhs_spec.index(c), 1)
 
       # TODO(romann): revisit based on http://b/235531081.
-      rhs = np.ones(rhs_shape, dtype=None if jax.default_backend() == 'gpu' else mask.dtype)
+      rhs = np.ones(
+          rhs_shape,
+          dtype=None if jax.default_backend() == 'gpu' else mask.dtype)
       mask = lax.conv_transpose(
           mask.astype(rhs.dtype),
           rhs,
@@ -1411,9 +1451,9 @@ def AvgPool(window_shape: Sequence[int],
             normalize_edges: bool = False,
             batch_axis: int = 0,
             channel_axis: int = -1) -> InternalLayerMasked:
-  """Layer construction function for an average pooling layer.
+  """Average pooling.
 
-  Based on `jax.example_libraries.stax.AvgPool`.
+  Based on :obj:`jax.example_libraries.stax.AvgPool`.
 
   Args:
     window_shape: The number of pixels over which pooling is to be performed.
@@ -1445,9 +1485,9 @@ def SumPool(window_shape: Sequence[int],
             padding: str = Padding.VALID.name,
             batch_axis: int = 0,
             channel_axis: int = -1) -> InternalLayerMasked:
-  """Layer construction function for a 2D sum pooling layer.
+  """Sum pooling.
 
-  Based on `jax.example_libraries.stax.SumPool`.
+  Based on :obj:`jax.example_libraries.stax.SumPool`.
 
   Args:
     window_shape: The number of pixels over which pooling is to be performed.
@@ -1476,10 +1516,10 @@ def _Pool(
     normalize_edges: bool,
     batch_axis: int,
     channel_axis: int) -> InternalLayerMasked:
-  """Layer construction function for a 2D pooling layer.
+  """General pooling.
 
-  Based on `jax.example_libraries.stax.AvgPool` and
-  `jax.example_libraries.stax.SumPool`.
+  Based on :obj:`jax.example_libraries.stax.AvgPool` and
+  :obj:`jax.example_libraries.stax.SumPool`.
 
   Args:
     pool_type: specifies whether average or sum pooling should be performed.
@@ -1594,7 +1634,7 @@ def GlobalSumPool(
     batch_axis: int = 0,
     channel_axis: int = -1
 ) -> InternalLayerMasked:
-  """Layer construction function for a global sum pooling layer.
+  """Global sum pooling.
 
   Sums over and removes (`keepdims=False`) all spatial dimensions, preserving
   the order of batch and channel axes.
@@ -1618,7 +1658,7 @@ def GlobalAvgPool(
     batch_axis: int = 0,
     channel_axis: int = -1
 ) -> InternalLayerMasked:
-  """Layer construction function for a global average pooling layer.
+  """Global average pooling.
 
   Averages over and removes (`keepdims=False`) all spatial dimensions,
   preserving the order of batch and channel axes.
@@ -1641,7 +1681,7 @@ def _GlobalPool(
     batch_axis: int,
     channel_axis: int
 ) -> InternalLayerMasked:
-  """Layer construction function for a global pooling layer.
+  """General global pooling.
 
   Pools over and removes (`keepdims=False`) all spatial dimensions, preserving
     the order of batch and channel axes.
@@ -1728,16 +1768,17 @@ def Flatten(
     batch_axis: int = 0,
     batch_axis_out: int = 0
 ) -> InternalLayerMasked:
-  """Layer construction function for flattening all non-batch dimensions.
+  """Flattening all non-batch dimensions.
 
-  Based on `jax.example_libraries.stax.Flatten`, but allows to specify batch
-  axes.
+  Based on :obj:`jax.example_libraries.stax.Flatten`, but allows to specify
+  batch axes.
 
   Args:
-    batch_axis: Specifies the input batch dimension. Defaults to `0`, the
-      leading axis.
-    batch_axis_out: Specifies the output batch dimension. Defaults to `0`, the
-      leading axis.
+    batch_axis:
+      Specifies the input batch dimension. Defaults to `0`, the leading axis.
+
+    batch_axis_out:
+      Specifies the output batch dimension. Defaults to `0`, the leading axis.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -1818,14 +1859,42 @@ def Flatten(
 
 
 class PositionalEmbedding(enum.Enum):
-  """Type of positional embeddings to use in a `GlobalSelfAttention` layer."""
+  """Type of positional embeddings to use in a :obj:`GlobalSelfAttention` layer.
+
+  Attributes:
+    NONE:
+      no additional positional embeddings.
+
+    SUM:
+      positional embeddings are added to activations.
+
+    CONCAT:
+      positional embeddings are concatenated with activations.
+  """
   NONE = 'NONE'
   SUM = 'SUM'
   CONCAT = 'CONCAT'
 
 
 class AttentionMechanism(enum.Enum):
-  """Type of nonlinearity to use in a `GlobalSelfAttention` layer."""
+  """Type of nonlinearity to use in a :obj:`GlobalSelfAttention` layer.
+
+  Attributes:
+    SOFTMAX:
+      attention weights are computed by passing the dot product between keys
+      and queries through :obj:`jax.nn.softmax`.
+
+    IDENTITY:
+      attention weights are the dot product between keys and queries.
+
+    ABS:
+      attention weights are computed by passing the dot product between keys
+      and queries through :obj:`jax.numpy.abs`.
+
+    RELU:
+      attention weights are computed by passing the dot product between keys
+      and queries through :obj:`jax.nn.relu`.
+  """
   SOFTMAX = 'SOFTMAX'
   IDENTITY = 'IDENTITY'
   ABS = 'ABS'
@@ -1862,9 +1931,11 @@ def GlobalSelfAttention(
     val_pos_emb: bool = False,
     batch_axis: int = 0,
     channel_axis: int = -1) -> InternalLayerMasked:
-  """Layer construction function for (global) scaled dot-product self-attention.
+  """Global scaled dot-product self-attention.
 
-  Infinite width results based on https://arxiv.org/abs/2006.10540.
+  Infinite width results based on
+  "`Infinite attention: NNGP and NTK for deep attention networks
+  <https://arxiv.org/abs/2006.10540>`_".
 
   Two versions of attention are available (the version to be used is
   determined by the argument `linear_scaling`):
@@ -1884,37 +1955,47 @@ def GlobalSelfAttention(
   attention weights.
 
   The final computation for single head is then
-  :math:`f_h (x) + attention_mechanism(<scaling> Q(x) K(x)^T) V(x)`
+  `f_h (x) + attention_mechanism(<scaling> Q(x) K(x)^T) V(x)`
   and the output of this layer is computed as
-  :math:`f(x) = concat[f_1(x) , ... , f_{<n_{heads}>} (x)] W_{out} + b`
+  `f(x) = concat[f_1(x) , ... , f_{<n_{heads}>} (x)] W_{out} + b`
   where the shape of `b` is `(n_chan_out,)`, i.e., single bias per channel.
 
   The `kernel_fn` computes the limiting kernel of the outputs of this layer
   as the number of heads and the number of feature dimensions of keys/queries
   goes to infinity.
 
+  For details, please see "`Infinite attention: NNGP and NTK for deep attention
+  networks <https://arxiv.org/abs/2006.10540>`_".
+
   Args:
     n_chan_out:
       number of feature dimensions of outputs.
+
     n_chan_key:
       number of feature dimensions of keys/queries.
+
     n_chan_val:
       number of feature dimensions of values.
+
     n_heads:
       number of attention heads.
+
     linear_scaling:
       if `True`, the dot products between keys and queries are scaled by
       `1 / n_chan_key` and the key and query weight matrices are tied;
       if `False`, the dot products are scaled by `1 / sqrt(n_chan_key)` and
       the key and query matrices are independent.
+
     W_key_std:
       init standard deviation of the key weights values. Due to NTK
       parameterization, influences computation only through the product
       `W_key_std * W_query_std`.
+
     W_value_std:
       init standard deviation of the value weights values. Due to NTK
       parameterization, influences computation only through the product
       `W_out_std * W_value_std`.
+
     W_query_std:
       init standard deviation of the query weights values; if `linear_scaling`
       is `True` (and thus key and query weights are tied - see above) then keys
@@ -1922,15 +2003,19 @@ def GlobalSelfAttention(
       computed with `WQ = W_query_std * W / sqrt(n_chan_in)` weight matrices.
       Due to NTK parameterization, influences computation only through the
       product `W_key_std * W_query_std`.
+
     W_out_std:
       initial standard deviation of the output weights values. Due to NTK
       parameterization, influences computation only through the product
       `W_out_std * W_value_std`.
+
     b_std:
       initial standard deviation of the bias values. `None` means no bias.
+
     attention_mechanism:
       a string, `"SOFTMAX"`, `"IDENTITY"`, `"ABS"`, or `"RELU"`, the
       transformation applied to dot product attention weights.
+
     pos_emb_type:
       a string, `"NONE"`, `"SUM"`, or `"CONCAT"`, the type of positional
       embeddings to use. In the infinite-width limit, `"SUM"` and `"CONCAT"`
@@ -1940,11 +2025,13 @@ def GlobalSelfAttention(
       which leads to different effective variances when using `"SUM"` and
       `"CONCAT"` embeddings, even if all variance scales like `W_key_std` etc.
       are the same.
+
     pos_emb_p_norm:
       use the unnormalized L-`p` distance to the power of `p` (with
       `p == pos_emb_p_norm`) to compute pairwise distances for positional
       embeddings (see `pos_emb_decay_fn` for details). Used only if
       `pos_emb_type != "NONE"`  and `pos_emb_decay_fn is not None`.
+
     pos_emb_decay_fn:
       a function applied to the L-`p` distance to the power of `p` (with
       `p == pos_emb_p_norm`) distance between two spatial positions to produce
@@ -1952,6 +2039,7 @@ def GlobalSelfAttention(
       exponential decay, etc.). `None` is equivalent to an indicator function
       `lambda d: d == 0`, and returns a diagonal covariance matrix. Used only
       if `pos_emb_type != "NONE"`.
+
     n_chan_pos_emb:
       number of channels in positional embeddings. `None` means use the same
       number of channels as in the layer inputs. Can be used to tune the
@@ -1959,6 +2047,7 @@ def GlobalSelfAttention(
       if `pos_emb_type == "CONCAT"`. Used only if `pos_emb_type != "NONE"`.
       Will trigger an error if `pos_emb_type == "SUM"`  and `n_chan_pos_emb` is
       not `None` or does not match the layer inputs channel size at runtime.
+
     W_pos_emb_std:
       init standard deviation of the random positional embeddings. Can be used
       to tune the contribution of positional embeddings relative to the
@@ -1967,12 +2056,15 @@ def GlobalSelfAttention(
       `n_chan_pos_emb` when `pos_emb_type == "CONCAT"`, or, if
       `pos_emb_type == "CONCAT"`, adjust `W_key_std` etc. relative to
       `W_pos_emb_std`, to keep the total output variance fixed.
+
     val_pos_emb:
       `True` indicates using positional embeddings when computing all of the
       keys/queries/values matrices, `False` makes them only used for keys and
       queries, but not values. Used only if `pos_emb_type != "NONE"`.
+
     batch_axis:
       Specifies the batch dimension. Defaults to `0`, the leading axis.
+
     channel_axis:
       Specifies the channel / feature dimension. Defaults to `-1`, the trailing
       axis. For `kernel_fn`, channel size is considered to be infinite.
@@ -2443,14 +2535,15 @@ def LayerNorm(
 @layer
 @supports_masking(remask_kernel=False)
 def Dropout(rate: float, mode: str = 'train') -> InternalLayer:
-  """Dropout layer.
+  """Dropout.
 
-  Based on `jax.example_libraries.stax.Dropout`.
+  Based on :obj:`jax.example_libraries.stax.Dropout`.
 
   Args:
     rate:
       Specifies the keep `rate`, e.g. `rate=1` is equivalent to keeping all
       neurons.
+
     mode:
       Either `"train"` or `"test"`.
 
@@ -2504,7 +2597,7 @@ def ImageResize(
     batch_axis: int = 0,
     channel_axis: int = -1
 ) -> InternalLayerMasked:
-  """Image resize function mimicking `jax.image.resize`.
+  """Image resize function mimicking :obj:`jax.image.resize`.
 
   Docstring adapted from
   https://jax.readthedocs.io/en/latest/_modules/jax/_src/image/scale.html#resize
@@ -2521,7 +2614,7 @@ def ImageResize(
     are ignored.
 
   `ResizeMethod.LINEAR`, `"linear"`, `"bilinear"`, `"trilinear"`, `"triangle"`:
-    `Linear interpolation`_. If `antialias` is ``True``, uses a triangular
+    `Linear interpolation`_. If `antialias` is `True`, uses a triangular
     filter when downsampling.
 
   The following methods are NOT SUPPORTED in `kernel_fn` (only `init_fn` and
@@ -2536,7 +2629,8 @@ def ImageResize(
   `ResizeMethod.LANCZOS5`, `"lanczos5"`:
     `Lanczos resampling`_, using a kernel of radius 5.
 
-  .. _Nearest neighbor interpolation: https://en.wikipedia.org/wiki/Nearest-neighbor_interpolation
+  .. _Nearest neighbor interpolation:
+    https://en.wikipedia.org/wiki/Nearest-neighbor_interpolation
   .. _Linear interpolation: https://en.wikipedia.org/wiki/Bilinear_interpolation
   .. _Cubic interpolation: https://en.wikipedia.org/wiki/Bicubic_interpolation
   .. _Lanczos resampling: https://en.wikipedia.org/wiki/Lanczos_resampling
@@ -2548,10 +2642,12 @@ def ImageResize(
       distinguish spatial dimensions from batch or channel dimensions, so this
       includes all dimensions of the image. To leave a certain dimension
       (e.g. batch or channel) unchanged, set the respective entry to `-1`.
-      Note that setting it to the respective size of the `input` also works,
-      but will make `kernel_fn` computation much more expensive with no benefit.
-      Further, note that `kernel_fn` does not support resizing the
-      `channel_axis`, therefore `shape[channel_axis]` should be set to `-1`.
+
+      .. note::
+        Setting a `shape` entry to the respective size of the `input` also
+        works, but will make `kernel_fn` computation much more expensive with
+        no benefit. Further, note that `kernel_fn` does not support resizing the
+        `channel_axis`, therefore `shape[channel_axis]` should be set to `-1`.
 
     method:
       the resizing method to use; either a `ResizeMethod` instance or a
@@ -2590,30 +2686,33 @@ def ImageResize(
                             precision=precision)
 
   def mask_fn(mask, input_shape):
-    # Interpolation (except for "NEAREST") is done in float format:
-    # https://github.com/google/jax/issues/3811. Float converted back to bool
-    # rounds up all non-zero elements to `True`, so naively resizing the `mask`
-    # will mark any output that has at least one contribution from a masked
-    # input as fully masked. This can lead to mask growing unexpectedly, e.g.
-    # consider a 5x5 image with a single masked pixel in the center:
-    #
-    # >>> mask = np.array([[0, 0, 0, 0, 0],
-    # >>>                  [0, 0, 0, 0, 0],
-    # >>>                  [0, 0, 1, 0, 0],
-    # >>>                  [0, 0, 0, 0, 0],
-    # >>>                  [0, 0, 0, 0, 0]], dtype=np.bool_)
-    #
-    # Downsampling this mask to 2x2 will mark all output pixels as masked!
-    #
-    # >>> jax.image.resize(mask, (2, 2), method='bilinear').astype(np.bool_)
-    # >>> DeviceArray([[ True,  True],
-    # >>>              [ True,  True]], dtype=bool)
-    #
-    # Therefore, througout `stax` we rather follow the convention of marking
-    # outputs as masked if they _only_ have contributions from masked elements
-    # (in other words, we don't let the mask destroy information; let content
-    # have preference over mask). For this we invert the mask before and after
-    # resizing, to round up unmasked outputs instead.
+    """Behavior of interpolation with masking.
+
+    Interpolation (except for "NEAREST") is done in float format:
+    https://github.com/google/jax/issues/3811. Float converted back to bool
+    rounds up all non-zero elements to `True`, so naively resizing the `mask`
+    will mark any output that has at least one contribution from a masked
+    input as fully masked. This can lead to mask growing unexpectedly, e.g.
+    consider a 5x5 image with a single masked pixel in the center:
+
+      >>> mask = np.array([[0, 0, 0, 0, 0],
+      >>>                 [0, 0, 0, 0, 0],
+      >>>                 [0, 0, 1, 0, 0],
+      >>>                 [0, 0, 0, 0, 0],
+      >>>                 [0, 0, 0, 0, 0]], dtype=np.bool_)
+
+    Downsampling this mask to 2x2 will mark all output pixels as masked!
+
+      >>> jax.image.resize(mask, (2, 2), method='bilinear').astype(np.bool_)
+      DeviceArray([[ True,  True],
+                   [ True,  True]], dtype=bool)
+
+    Therefore, througout `stax` we rather follow the convention of marking
+    outputs as masked if they _only_ have contributions from masked elements
+    (in other words, we don't let the mask destroy information; let content
+    have preference over mask). For this we invert the mask before and after
+    resizing, to round up unmasked outputs instead.
+    """
     return ~jax.image.resize(image=~mask,
                              shape=_shape(mask.shape),
                              method=method,
@@ -2732,21 +2831,32 @@ def _same_pad_for_filter_shape(
     axes: Sequence[int],
     mode: str = 'wrap',
 ) -> np.ndarray:
-  """Pad an array to imitate `SAME` padding with `VALID`.
+  """Padding imitating :attr:`Padding.SAME` padding with :attr:`Padding.VALID`.
 
   See `Returns` section for details. This function is usually needed to
-    implement `CIRCULAR` padding using `VALID` padding.
+    implement :attr:`Padding.CIRCULAR` padding using :attr:`Padding.VALID`
+    padding.
 
   Args:
-    x: `np.ndarray` to pad, e.g. a 4D `NHWC` image.
-    filter_shape: tuple of positive integers, the convolutional filters spatial
-      shape (e.g. `(3, 3)` for a 2D convolution).
-    strides: tuple of positive integers, the convolutional spatial strides, e.g.
-      e.g. `(1, 1)` for a 2D convolution.
-    axes: tuple of non-negative integers, the spatial axes to apply
-      convolution over (e.g. `(1, 2)` for an `NHWC` image).
-    mode: a string, padding mode, for all options see
+    x:
+      `np.ndarray` to pad, e.g. a 4D `NHWC` image.
+
+    filter_shape:
+      tuple of positive integers, the convolutional filters spatial shape (e.g.
+      `(3, 3)` for a 2D convolution).
+
+    strides:
+      tuple of positive integers, the convolutional spatial strides, e.g.
+      `(1, 1)` for a 2D convolution.
+
+    axes:
+      tuple of non-negative integers, the spatial axes to apply convolution
+      over (e.g. `(1, 2)` for an `NHWC` image).
+
+    mode:
+      a string, padding mode, for all options see
       https://docs.scipy.org/doc/numpy/reference/generated/numpy.pad.html.
+
   Returns:
     A `np.ndarray` of the same dimensionality as `x` padded to a potentially
     larger shape such that a `"VALID"` convolution with `filter_shape` applied
@@ -3082,7 +3192,8 @@ def _conv_kernel_full_spatial_loop(
     filter_shape: Sequence[int],
     strides: Sequence[int],
     padding: Padding,
-    lax_conv: Callable,
+    lax_conv: Callable[
+        [np.ndarray, np.ndarray, Tuple[int, ...], str], np.ndarray],
     get_n_channels: Callable[[int], int]
 ) -> np.ndarray:
   padding = Padding.VALID if padding == Padding.CIRCULAR else padding
@@ -3285,7 +3396,7 @@ def _pool_kernel(
 
 def _normalize(lhs, out, normalize_edges, padding, strides, window_shape):
   if padding == Padding.SAME and normalize_edges:
-    # `SAME` padding in `jax.example_libraries.stax.AvgPool` normalizes by
+    # `SAME` padding in :obj:`jax.example_libraries.stax.AvgPool` normalizes by
     # actual window size, which is smaller at the edges.
     one = np.ones_like(lhs, lhs.dtype)
     window_sizes = lax.reduce_window(one, 0., lax.add, window_shape, strides,
@@ -3473,9 +3584,10 @@ def _pool_mask(
 
 
 def _pooling_layer(reducer, init_val, rescaler=None):
-  """Adapted from `jax.example_libraries.stax`."""
+  """Adapted from :obj:`jax.example_libraries.stax`."""
+
   def PoolingLayer(window_shape, strides=None, padding='VALID', spec=None):
-    """Layer construction function for a pooling layer."""
+    """Pooling."""
     window_shape = tuple(window_shape)
     strides = strides or (1,) * len(window_shape)
     rescale = rescaler(window_shape, strides, padding) if rescaler else None
@@ -3496,11 +3608,13 @@ def _pooling_layer(reducer, init_val, rescaler=None):
       out_shape = lax.reduce_window_shape_tuple(
           input_shape, window_shape, strides, padding_vals, ones, ones)
       return out_shape, ()
+
     def apply_fun(params, inputs, **kwargs):
       out = lax.reduce_window(inputs, init_val, reducer, window_shape,
                               strides, padding)
       return rescale(out, inputs, spec) if rescale else out
     return init_fun, apply_fun
+
   return PoolingLayer
 
 

@@ -15,86 +15,90 @@
 """Compute empirical NNGP and NTK; approximate functions via Taylor series.
 
 All functions in this module are applicable to any JAX functions of proper
-signatures (not only those from `nt.stax`).
+signatures (not only those from :obj:`~neural_tangents.stax`).
 
-NNGP and NTK are computed using `nt.empirical_nngp_fn`, `nt.empirical_ntk_fn`,
-or `nt.empirical_kernel_fn` (for both). The kernels have a very specific output
-shape convention that may be unexpected. Further, NTK has multiple
-implementations that may perform differently depending on the task. Please read
-individual functions' docstrings.
+NNGP and NTK are computed using :obj:`~neural_tangents.empirical_nngp_fn`,
+:obj:`~neural_tangents.empirical_ntk_fn`, or
+:obj:`~neural_tangents.empirical_kernel_fn` (for both). The kernels have a very
+specific output shape convention that may be unexpected. Further, NTK has
+multiple implementations that may perform differently depending on the task.
+Please read individual functions' docstrings.
+
+For details, please see "`Fast Finite Width Neural Tangent Kernel
+<https://arxiv.org/abs/2206.08720>`_".
 
 Example:
-  >>>  from jax import random
-  >>>  import neural_tangents as nt
-  >>>  from neural_tangents import stax
-  >>>
-  >>>  key1, key2, key3 = random.split(random.PRNGKey(1), 3)
-  >>>  x_train = random.normal(key1, (20, 32, 32, 3))
-  >>>  y_train = random.uniform(key1, (20, 10))
-  >>>  x_test = random.normal(key2, (5, 32, 32, 3))
-  >>>
-  >>>  # A narrow CNN.
-  >>>  init_fn, f, _ = stax.serial(
-  >>>      stax.Conv(32, (3, 3)),
-  >>>      stax.Relu(),
-  >>>      stax.Conv(32, (3, 3)),
-  >>>      stax.Relu(),
-  >>>      stax.Conv(32, (3, 3)),
-  >>>      stax.Flatten(),
-  >>>      stax.Dense(10)
-  >>>  )
-  >>>
-  >>>  _, params = init_fn(key3, x_train.shape)
-  >>>
-  >>>  # Default setting: reducing over logits; pass `vmap_axes=0` because the
-  >>>  # network is iid along the batch axis, no BatchNorm. Use default
-  >>>  # `implementation=nt.NtkImplementation.JACOBIAN_CONTRACTION` (`1`).
-  >>>  kernel_fn = nt.empirical_kernel_fn(
-  >>>      f, trace_axes=(-1,), vmap_axes=0,
-  >>>      implementation=nt.NtkImplementation.JACOBIAN_CONTRACTION)
-  >>>
-  >>>  # (5, 20) np.ndarray test-train NNGP/NTK
-  >>>  nngp_test_train = kernel_fn(x_test, x_train, 'nngp', params)
-  >>>  ntk_test_train = kernel_fn(x_test, x_train, 'ntk', params)
-  >>>
-  >>>  # Full kernel: not reducing over logits. Use structured derivatives
-  >>>  # `implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES` (`3`) for
-  >>>  # typically faster computation and lower memory cost.
-  >>>  kernel_fn = nt.empirical_kernel_fn(
-  >>>      f, trace_axes=(), vmap_axes=0,
-  >>>      implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES)
-  >>>
-  >>>  # (5, 20, 10, 10) np.ndarray test-train NNGP/NTK namedtuple.
-  >>>  k_test_train = kernel_fn(x_test, x_train, None, params)
-  >>>
-  >>>  # A wide FCN with lots of parameters and many (`100`) outputs.
-  >>>  init_fn, f, _ = stax.serial(
-  >>>      stax.Flatten(),
-  >>>      stax.Dense(1024),
-  >>>      stax.Relu(),
-  >>>      stax.Dense(1024),
-  >>>      stax.Relu(),
-  >>>      stax.Dense(100)
-  >>>  )
-  >>>
-  >>>  _, params = init_fn(key3, x_train.shape)
-  >>>
-  >>>  # Use ntk-vector products
-  >>>  # (`implementation=nt.NtkImplementation.NTK_VECTOR_PRODUCTS`) since the
-  >>>  # network has many parameters relative to the cost of forward pass,
-  >>>  # large outputs.
-  >>>  ntk_fn = nt.empirical_ntk_fn(
+  >>> from jax import random
+  >>> import neural_tangents as nt
+  >>> from neural_tangents import stax
+  >>> #
+  >>> key1, key2, key3 = random.split(random.PRNGKey(1), 3)
+  >>> x_train = random.normal(key1, (20, 32, 32, 3))
+  >>> y_train = random.uniform(key1, (20, 10))
+  >>> x_test = random.normal(key2, (5, 32, 32, 3))
+  >>> #
+  >>> # A narrow CNN.
+  >>> init_fn, f, _ = stax.serial(
+  >>>     stax.Conv(32, (3, 3)),
+  >>>     stax.Relu(),
+  >>>     stax.Conv(32, (3, 3)),
+  >>>     stax.Relu(),
+  >>>     stax.Conv(32, (3, 3)),
+  >>>     stax.Flatten(),
+  >>>     stax.Dense(10)
+  >>> )
+  >>> #
+  >>> _, params = init_fn(key3, x_train.shape)
+  >>> #
+  >>> # Default setting: reducing over logits; pass `vmap_axes=0` because the
+  >>> # network is iid along the batch axis, no BatchNorm. Use default
+  >>> # `implementation=nt.NtkImplementation.JACOBIAN_CONTRACTION` (`1`).
+  >>> kernel_fn = nt.empirical_kernel_fn(
+  >>>     f, trace_axes=(-1,), vmap_axes=0,
+  >>>     implementation=nt.NtkImplementation.JACOBIAN_CONTRACTION)
+  >>> #
+  >>> # (5, 20) np.ndarray test-train NNGP/NTK
+  >>> nngp_test_train = kernel_fn(x_test, x_train, 'nngp', params)
+  >>> ntk_test_train = kernel_fn(x_test, x_train, 'ntk', params)
+  >>> #
+  >>> # Full kernel: not reducing over logits. Use structured derivatives
+  >>> # `implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES` (`3`) for
+  >>> # typically faster computation and lower memory cost.
+  >>> kernel_fn = nt.empirical_kernel_fn(
+  >>>     f, trace_axes=(), vmap_axes=0,
+  >>>     implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES)
+  >>> #
+  >>> # (5, 20, 10, 10) np.ndarray test-train NNGP/NTK namedtuple.
+  >>> k_test_train = kernel_fn(x_test, x_train, None, params)
+  >>> #
+  >>> # A wide FCN with lots of parameters and many (`100`) outputs.
+  >>> init_fn, f, _ = stax.serial(
+  >>>     stax.Flatten(),
+  >>>     stax.Dense(1024),
+  >>>     stax.Relu(),
+  >>>     stax.Dense(1024),
+  >>>     stax.Relu(),
+  >>>     stax.Dense(100)
+  >>> )
+  >>> #
+  >>> _, params = init_fn(key3, x_train.shape)
+  >>> #
+  >>> # Use ntk-vector products
+  >>> # (`implementation=nt.NtkImplementation.NTK_VECTOR_PRODUCTS`) since the
+  >>> # network has many parameters relative to the cost of forward pass,
+  >>> # large outputs.
+  >>> ntk_fn = nt.empirical_ntk_fn(
   >>>     f, vmap_axes=0,
   >>>     implementation=nt.NtkImplementation.NTK_VECTOR_PRODUCTS)
-  >>>
-  >>>  # (5, 5) np.ndarray test-test NTK
-  >>>  ntk_test_test = ntk_fn(x_test, None, params)
-  >>>
-  >>>  # Compute only output variances:
-  >>>  nngp_fn = nt.empirical_nngp_fn(f, diagonal_axes=(0,))
-  >>>
-  >>>  # (20,) np.ndarray train-train diagonal NNGP
-  >>>  nngp_train_train_diag = nngp_fn(x_train, None, params)
+  >>> #
+  >>> # (5, 5) np.ndarray test-test NTK
+  >>> ntk_test_test = ntk_fn(x_test, None, params)
+  >>> #
+  >>> # Compute only output variances:
+  >>> nngp_fn = nt.empirical_nngp_fn(f, diagonal_axes=(0,))
+  >>> #
+  >>> # (20,) np.ndarray train-train diagonal NNGP
+  >>> nngp_train_train_diag = nngp_fn(x_train, None, params)
 """
 
 import enum
@@ -215,14 +219,15 @@ def empirical_nngp_fn(
   The Neural Network Gaussian Process (NNGP) kernel is defined as
   :math:`f(X_1) f(X_2)^T`, i.e. the outer product of the function outputs.
 
-  WARNING: resulting kernel shape is *nearly* `zip(f(x1).shape, f(x2).shape)`
-  subject to `trace_axes` and `diagonal_axes` parameters, which make certain
-  assumptions about the outputs `f(x)` that may only be true in the infinite
-  width / infinite number of samples limit, or may not apply to your
-  architecture. For most precise results in the context of linearized training
-  dynamics of a specific finite-width network, set both `trace_axes=()` and
-  `diagonal_axes=()` to obtain the kernel exactly of shape
-  `zip(f(x1).shape, f(x2).shape)`.
+  .. warning::
+    Resulting kernel shape is *nearly* `zip(f(x1).shape, f(x2).shape)`
+    subject to `trace_axes` and `diagonal_axes` parameters, which make certain
+    assumptions about the outputs `f(x)` that may only be true in the infinite
+    width / infinite number of samples limit, or may not apply to your
+    architecture. For most precise results in the context of linearized training
+    dynamics of a specific finite-width network, set both `trace_axes=()` and
+    `diagonal_axes=()` to obtain the kernel exactly of shape
+    `zip(f(x1).shape, f(x2).shape)`.
 
   For networks with multiple (i.e. lists, tuples, PyTrees) outputs, in principal
   the empirical kernels will have terms measuring the covariance between the
@@ -327,66 +332,64 @@ def empirical_nngp_fn(
 class NtkImplementation(enum.IntEnum):
   """Implementation method of the underlying finite width NTK computation.
 
-  Below is a very brief summary of each method. For details see
-  "Fast Finite Width Neural Tangent Kernel", ICML 2022.
+  Below is a very brief summary of each method. For details, please see "`Fast
+  Finite Width Neural Tangent Kernel <https://arxiv.org/abs/2206.08720>`_".
 
-  `AUTO` (`0`) evaluates FLOPs of all other methods at compilation time, and
-  selects the fastest method. However, at the time it only works correctly on
-  TPUs, and on CPU/GPU can return wrong results, which is why it is not the
-  default. TODO(romann): revisit based on http://b/202218145.
+  Attributes:
+    AUTO:
+      (or `0`) evaluates FLOPs of all other methods at compilation time,
+      and selects the fastest method. However, at the time it only works
+      correctly on TPUs, and on CPU/GPU can return wrong results, which is why
+      it is not the default. TODO(romann): revisit based on http://b/202218145.
 
-  `JACOBIAN_CONTRACTION` (`1`) computes the NTK as the outer product of two
-  Jacobians, each computed using reverse-mode Autodiff (vector-Jacobian
-  products, VJPs). When JITted, the contraction is performed in a layerwise
-  fashion, so that entire Jacobians aren't necessarily instantiated in memory
-  at once, and the memory usage of the method can be lower than memory needed to
-  instantiate the two Jacobians. This method is best suited for networks with
-  small outputs (such as scalar outputs for binary classification or regression,
-  as opposed to 1000 ImageNet classes), and an expensive forward pass relative
-  to the number of parameters (such as CNNs, where forward pass reuses a small
-  filter bank many times). It is also the the most reliable method, since its
-  implementation is simplest, and reverse-mode Autodiff is most commonly used
-  and well tested elsewhere. For this reason it is set as the default.
+    JACOBIAN_CONTRACTION:
+      (or `1`) computes the NTK as the outer product of two Jacobians, each
+      computed using reverse-mode Autodiff (vector-Jacobian products, VJPs).
+      When JITted, the contraction is performed in a layerwise fashion, so that
+      entire Jacobians aren't necessarily instantiated in memory at once, and
+      the memory usage of the method can be lower than memory needed to
+      instantiate the two Jacobians. This method is best suited for networks
+      with small outputs (such as scalar outputs for binary classification or
+      regression, as opposed to 1000 ImageNet classes), and an expensive
+      forward pass relative to the number of parameters (such as CNNs, where
+      forward pass reuses a small filter bank many times). It is also the the
+      most reliable method, since its implementation is simplest, and
+      reverse-mode Autodiff is most commonly used and well tested elsewhere.
+      For this reason it is set as the default.
 
-  `NTK_VECTOR_PRODUCTS` (`2`) computes the NTK as a sequence of NTK-vector
-  products, similarly to how a Jacobian is computed as a sequence of
-  Jacobian-vector products (JVPs) or vector-Jacobian products (VJPs). This
-  amounts to using both forward (JVPs) and reverse (VJPs) mode Autodiff, and
-  allows to eliminate the Jacobian contraction at the expense of additional
-  forward passes. Therefore this method is recommended for networks with a cheap
-  forwards pass relative to the number of parameters (e.g.
-  fully-connected networks, where each parameter matrix is used only once in the
-  forward pass), and networks with large outputs (e.g. 1000 ImageNet classes).
-  Memory requirements of this method are same as `JACOBIAN_CONTRACTION` (`1`).
-  Due to reliance of forward-mode Autodiff, this method is slightly more prone
-  to JAX and XLA bugs than `JACOBIAN_CONTRACTION` (`1`), but overall is quite
-  simple and reliable.
+    NTK_VECTOR_PRODUCTS:
+      (or `2`) computes the NTK as a sequence of NTK-vector products, similarly
+      to how a Jacobian is computed as a sequence of Jacobian-vector products
+      (JVPs) or vector-Jacobian products (VJPs). This amounts to using both
+      forward (JVPs) and reverse (VJPs) mode Autodiff, and allows to eliminate
+      the Jacobian contraction at the expense of additional forward passes.
+      Therefore this method is recommended for networks with a cheap forward
+      pass relative to the number of parameters (e.g. fully-connected networks,
+      where each parameter matrix is used only once in the forward pass), and
+      networks with large outputs (e.g. 1000 ImageNet classes). Memory
+      requirements of this method are same as :attr:`JACOBIAN_CONTRACTION`
+      (`1`). Due to reliance of forward-mode Autodiff, this method is slightly
+      more prone to JAX and XLA bugs than :attr:`JACOBIAN_CONTRACTION` (`1`),
+      but overall is quite simple and reliable.
 
-  `STRUCTURED_DERIVATIVES` (`3`) uses a custom JAX interpreter to compute the
-  NTK more efficiently than other methods. It traverses the computational graph
-  of a function in the same order as during reverse-mode Autodiff, but instead
-  of computing VJPs, it directly computes MJJMPs,
-  "matrix-Jacobian-Jacobian-matrix" products, which arise in the computation of
-  an NTK. Each MJJMP computation relies on the structure in the Jacobians, hence
-  the name. This method can be dramatically faster (up to several orders of
-  magnitude) then other methods on
-  fully-connected networks, and is usually faster or equivalent on CNNs,
-  Transformers, and other architectures, but exact speedup (e.g. from no
-  speedup to 10X) depends on each specific setting. It can also use less memory
-  than other methods. In our experience it consistently outperforms other
-  methods in most settings. However, its implementation is significantly more
-  complex (hence bug-prone), and it doesn't yet support functions using more
-  exotic JAX primitives (e.g. `remat`, parallel collectives such as `psum`,
-  compiled loops, etc.), which is why it is highly-recommended to try, but not
-  set as the default yet.
-
-  WARNING: since different implementations use different Autodiff modes, they
-  can return slightly different numerical values due to different order of
-  contractions. If out-of-bounds indexing happens anywhere in the computation,
-  results can be completely different
-  (https://jax.readthedocs.io/en/latest/notebooks/Common_Gotchas_in_JAX.html#out-of-bounds-indexing).
-  Type conversion inside the computation can also lead to differently-typed
-  results.
+    STRUCTURED_DERIVATIVES:
+      (or `3`) uses a custom JAX interpreter to compute the NTK more
+      efficiently than other methods. It traverses the computational graph of a
+      function in the same order as during reverse-mode Autodiff, but instead
+      of computing VJPs, it directly computes MJJMPs,
+      "matrix-Jacobian-Jacobian-matrix" products, which arise in the
+      computation of an NTK. Each MJJMP computation relies on the structure in
+      the Jacobians, hence the name. This method can be dramatically faster
+      (up to several orders of magnitude) then other methods on fully-connected
+      networks, and is usually faster or equivalent on CNNs, Transformers, and
+      other architectures, but exact speedup (e.g. from no speedup to 10X)
+      depends on each specific setting. It can also use less memory than other
+      methods. In our experience it consistently outperforms other methods in
+      most settings. However, its implementation is significantly more complex
+      (hence bug-prone), and it doesn't yet support functions using more exotic
+      JAX primitives (e.g. :obj:`jax.checkpoint`, parallel collectives such as
+      :obj:`jax.lax.psum`, compiled loops like :obj:`jax.lax.scan`, etc.), which
+      is why it is highly-recommended to try, but not set as the default yet.
   """
   AUTO = 0
   JACOBIAN_CONTRACTION = 1
@@ -902,14 +905,15 @@ def empirical_ntk_fn(
   3) make sure to set `vmap_axes` correctly.
   4) try different `implementation` values.
 
-  WARNING: Resulting kernel shape is *nearly* `zip(f(x1).shape, f(x2).shape)`
-  subject to `trace_axes` and `diagonal_axes` parameters, which make certain
-  assumptions about the outputs `f(x)` that may only be true in the infinite
-  width / infinite number of samples limit, or may not apply to your
-  architecture. For most precise results in the context of linearized training
-  dynamics of a specific finite-width network, set both `trace_axes=()` and
-  `diagonal_axes=()` to obtain the kernel exactly of shape
-  `zip(f(x1).shape, f(x2).shape)`.
+  .. warning::
+    Resulting kernel shape is *nearly* `zip(f(x1).shape, f(x2).shape)`
+    subject to `trace_axes` and `diagonal_axes` parameters, which make certain
+    assumptions about the outputs `f(x)` that may only be true in the infinite
+    width / infinite number of samples limit, or may not apply to your
+    architecture. For most precise results in the context of linearized training
+    dynamics of a specific finite-width network, set both `trace_axes=()` and
+    `diagonal_axes=()` to obtain the kernel exactly of shape
+    `zip(f(x1).shape, f(x2).shape)`.
 
   For networks with multiple (i.e. lists, tuples, PyTrees) outputs, in principal
   the empirical kernels will have terms measuring the covariance between the
@@ -981,31 +985,34 @@ def empirical_ntk_fn(
       set to `None`, to avoid wrong (and potentially silent) results.
 
     implementation:
-      Applicable only to NTK, an `NtkImplementation` value (or an integer `0`,
-      `1`, `2`, or `3`). See the `NtkImplementation` enum docstring for details.
+      An :class:`NtkImplementation` value (or an :class:`int`  `0`, `1`, `2`,
+      or `3`). See the :class:`NtkImplementation` docstring for details.
 
     _j_rules:
-      Internal debugging parameter, applicable only to NTK when
-      `implementation` is `STRUCTURED_DERIVATIVES` (`3`) or `AUTO` (`0`). Set to
-      `True` to allow custom Jacobian rules for intermediary primitive `dy/dw`
-      computations for MJJMPs (matrix-Jacobian-Jacobian-matrix products). Set to
-      `False` to use JVPs or VJPs, via JAX's `jacfwd` or `jacrev`. Custom
+      Internal debugging parameter, applicable only when
+      `implementation` is :attr:`~NtkImplementation.STRUCTURED_DERIVATIVES`
+      (`3`) or :attr:`~NtkImplementation.AUTO` (`0`). Set to `True` to allow
+      custom Jacobian rules for intermediary primitive `dy/dw` computations for
+      MJJMPs (matrix-Jacobian-Jacobian-matrix products). Set to `False` to use
+      JVPs or VJPs, via JAX's :obj:`jax.jacfwd` or :obj:`jax.jacrev`. Custom
       Jacobian rules (`True`) are expected to be not worse, and sometimes better
       than automated alternatives, but in case of a suboptimal implementation
       setting it to `False` could improve performance.
 
     _s_rules:
-      Internal debugging parameter, applicable only to NTK when
-      `implementation` is `STRUCTURED_DERIVATIVES` (`3`) or `AUTO` (`0`). Set to
-      `True` to allow efficient MJJMp rules for structured `dy/dw` primitive
-      Jacobians. In practice should be set to `True`, and setting it to `False`
-      can lead to dramatic deterioration of performance.
+      Internal debugging parameter, applicable only when
+      `implementation` is :attr:`~NtkImplementation.STRUCTURED_DERIVATIVES`
+      (`3`) or :attr:`~NtkImplementation.AUTO` (`0`). Set to `True` to allow
+      efficient MJJMp rules for structured `dy/dw` primitive Jacobians. In
+      practice should be set to `True`, and setting it to `False` can lead to
+      dramatic deterioration of performance.
 
     _fwd:
-      Internal debugging parameter, applicable only to NTK when
-      `implementation` is `STRUCTURED_DERIVATIVES` (`3`) or `AUTO` (`0`). Set to
-      `True` to allow `jvp` in intermediary primitive Jacobian `dy/dw`
-      computations, `False` to always use `vjp`. `None` to decide automatically
+      Internal debugging parameter, applicable only when
+      `implementation` is :attr:`~NtkImplementation.STRUCTURED_DERIVATIVES`
+      (`3`) or :attr:`~NtkImplementation.AUTO` (`0`). Set to `True` to allow
+      :obj:`jax.jvp` in intermediary primitive Jacobian `dy/dw` computations,
+      `False` to always use :obj:`jax.vjp`. `None` to decide automatically
       based on input/output sizes. Applicable when `_j_rules=False`, or when a
       primitive does not have a Jacobian rule. Should be set to `None` for best
       performance.
@@ -1039,14 +1046,15 @@ def empirical_kernel_fn(
 ) -> EmpiricalGetKernelFn:
   r"""Returns a function that computes single draws from NNGP and NT kernels.
 
-  WARNING: resulting kernel shape is *nearly* `zip(f(x1).shape, f(x2).shape)`
-  subject to `trace_axes` and `diagonal_axes` parameters, which make certain
-  assumptions about the outputs `f(x)` that may only be true in the infinite
-  width / infinite number of samples limit, or may not apply to your
-  architecture. For most precise results in the context of linearized training
-  dynamics of a specific finite-width network, set both `trace_axes=()` and
-  `diagonal_axes=()` to obtain the kernel exactly of shape
-  `zip(f(x1).shape, f(x2).shape)`.
+  .. warning::
+    Resulting kernel shape is *nearly* `zip(f(x1).shape, f(x2).shape)`
+    subject to `trace_axes` and `diagonal_axes` parameters, which make certain
+    assumptions about the outputs `f(x)` that may only be true in the infinite
+    width / infinite number of samples limit, or may not apply to your
+    architecture. For most precise results in the context of linearized training
+    dynamics of a specific finite-width network, set both `trace_axes=()` and
+    `diagonal_axes=()` to obtain the kernel exactly of shape
+    `zip(f(x1).shape, f(x2).shape)`.
 
   For networks with multiple (i.e. lists, tuples, PyTrees) outputs, in principal
   the empirical kernels will have terms measuring the covariance between the
@@ -1121,31 +1129,35 @@ def empirical_kernel_fn(
       set to `None`, to avoid wrong (and potentially silent) results.
 
     implementation:
-      Applicable only to NTK, an `NtkImplementation` value (or an integer `0`,
-      `1`, `2`, or `3`). See the `NtkImplementation` enum docstring for details.
+      Applicable only to NTK, an :class:`NtkImplementation` value (or an
+      :class:`int`  `0`, `1`, `2`, or `3`). See the :class:`NtkImplementation`
+      docstring for details.
 
     _j_rules:
       Internal debugging parameter, applicable only to NTK when
-      `implementation` is `STRUCTURED_DERIVATIVES` (`3`) or `AUTO` (`0`). Set to
-      `True` to allow custom Jacobian rules for intermediary primitive `dy/dw`
-      computations for MJJMPs (matrix-Jacobian-Jacobian-matrix products). Set to
-      `False` to use JVPs or VJPs, via JAX's `jacfwd` or `jacrev`. Custom
+      `implementation` is :attr:`~NtkImplementation.STRUCTURED_DERIVATIVES`
+      (`3`) or :attr:`~NtkImplementation.AUTO` (`0`). Set to `True` to allow
+      custom Jacobian rules for intermediary primitive `dy/dw` computations for
+      MJJMPs (matrix-Jacobian-Jacobian-matrix products). Set to `False` to use
+      JVPs or VJPs, via JAX's :obj:`jax.jacfwd` or :obj:`jax.jacrev`. Custom
       Jacobian rules (`True`) are expected to be not worse, and sometimes better
       than automated alternatives, but in case of a suboptimal implementation
       setting it to `False` could improve performance.
 
     _s_rules:
       Internal debugging parameter, applicable only to NTK when
-      `implementation` is `STRUCTURED_DERIVATIVES` (`3`) or `AUTO` (`0`). Set to
-      `True` to allow efficient MJJMp rules for structured `dy/dw` primitive
-      Jacobians. In practice should be set to `True`, and setting it to `False`
-      can lead to dramatic deterioration of performance.
+      `implementation` is :attr:`~NtkImplementation.STRUCTURED_DERIVATIVES`
+      (`3`) or :attr:`~NtkImplementation.AUTO` (`0`). Set to `True` to allow
+      efficient MJJMp rules for structured `dy/dw` primitive Jacobians. In
+      practice should be set to `True`, and setting it to `False` can lead to
+      dramatic deterioration of performance.
 
     _fwd:
       Internal debugging parameter, applicable only to NTK when
-      `implementation` is `STRUCTURED_DERIVATIVES` (`3`) or `AUTO` (`0`). Set to
-      `True` to allow `jvp` in intermediary primitive Jacobian `dy/dw`
-      computations, `False` to always use `vjp`. `None` to decide automatically
+      `implementation` is :attr:`~NtkImplementation.STRUCTURED_DERIVATIVES`
+      (`3`) or :attr:`~NtkImplementation.AUTO` (`0`). Set to `True` to allow
+      :obj:`jax.jvp` in intermediary primitive Jacobian `dy/dw` computations,
+      `False` to always use :obj:`jax.vjp`. `None` to decide automatically
       based on input/output sizes. Applicable when `_j_rules=False`, or when a
       primitive does not have a Jacobian rule. Should be set to `None` for best
       performance.
@@ -1410,10 +1422,10 @@ def _expand_dims_array(x: _ArrayOrShape, axis: int) -> _ArrayOrShape:
 
 
 def _expand_dims(
-    x: Optional[PyTree],
+    x: Union[Optional[PyTree], UndefinedPrimal],
     axis: Optional[PyTree]
 ) -> Optional[PyTree]:
-  if axis is None or x is None:
+  if axis is None or x is None or isinstance(x, UndefinedPrimal):
     return x
   return tree_map(_expand_dims_array, x, axis)
 
@@ -1757,7 +1769,9 @@ def _backward_pass(
           if not isinstance(cts_in, ShapedArray):
             raise TypeError(cts_in)
           trimmed_cts_in = _trim_cotangents(cts_in, structure)
-          eqn = _trim_eqn(eqn, i_eqn, trimmed_invals, trimmed_cts_in)
+
+          if _s_rules:
+            eqn = _trim_eqn(eqn, i_eqn, trimmed_invals, trimmed_cts_in)
 
           def j_fn(invals):
             return _get_jacobian(eqn=eqn,

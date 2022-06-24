@@ -14,79 +14,87 @@
 
 """Experimental prototype of empirical NTK computation in Tensorflow.
 
-This module is applicable to `tf.Module`, `tf.keras.Model`, or `tf.function`
-functions, subject to some conditions (see docstring of `empirical_ntk_fn_tf`).
+This module is applicable to :class:`tf.Module`, :class:`tf.keras.Model`, or
+:obj:`tf.function` functions, subject to some conditions (see docstring of
+:obj:`empirical_ntk_fn_tf`).
 
-The kernel function follows the API of `neural_tangents.empirical_ntk_fn`.
+The kernel function follows the API of :obj:`neural_tangents.empirical_ntk_fn`.
 Please read the respective docstring for more details.
 
+.. warning::
+  This module currently appears to have long compile times (but OK runtime),
+  is prone to triggering XLA errors, and does not distinguish between trainable
+  and non-trainable parameters of the model.
+
+For details about the empirical (finite width) NTK computation, please see
+"`Fast Finite Width Neural Tangent Kernel <https://arxiv.org/abs/2206.08720>`_".
+
 Example:
-  >>>  import tensorflow as tf
-  >>>  from tensorflow.keras import layers
-  >>>  import neural_tangents as nt
-  >>>
-  >>>  x_train = tf.random.normal((20, 32, 32, 3))
-  >>>  x_test = tf.random.normal((5, 32, 32, 3))
-  >>>
-  >>>  # A CNN.
-  >>>  f = tf.keras.Sequential()
-  >>>  f.add(layers.Conv2D(32, (3, 3), activation='relu',
-  >>>                      input_shape=x_train.shape[1:]))
-  >>>  f.add(layers.Conv2D(32, (3, 3), activation='relu'))
-  >>>  f.add(layers.Conv2D(32, (3, 3)))
-  >>>  f.add(layers.Flatten())
-  >>>  f.add(layers.Dense(10))
-  >>>
-  >>>  f.build((None, *x_train.shape[1:]))
-  >>>  _, params = nt.experimental.get_apply_fn_and_params(f)
-  >>>
-  >>>  # Default setting: reducing over logits (default `trace_axes=(-1,)`;
-  >>>  # pass `vmap_axes=0` because the network is iid along the batch axis, no
-  >>>  # BatchNorm.
-  >>>  kernel_fn = nt.experimental.empirical_ntk_fn_tf(f, vmap_axes=0)
-  >>>
-  >>>  # (5, 20) tf.Tensor test-train NTK
-  >>>  nngp_test_train = kernel_fn(x_test, x_train, params)
-  >>>  ntk_test_train = kernel_fn(x_test, x_train, params)
-  >>>
-  >>>  # Full kernel: not reducing over logits.
-  >>>  kernel_fn = nt.experimental.empirical_ntk_fn_tf(f, trace_axes=(),
-  >>>                                                  vmap_axes=0)
-  >>>
-  >>>  # (5, 20, 10, 10) tf.Tensor test-train NTK.
-  >>>  k_test_train = kernel_fn(x_test, x_train, params)
-  >>>
-  >>>  # An FCN
-  >>>  f = tf.keras.Sequential()
-  >>>  f.add(layers.Flatten())
-  >>>  f.add(layers.Dense(1024, activation='relu'))
-  >>>  f.add(layers.Dense(1024, activation='relu'))
-  >>>  f.add(layers.Dense(10))
-  >>>
-  >>>  f.build((None, *x_train.shape[1:]))
-  >>>  _, params = nt.experimental.get_apply_fn_and_params(f)
-  >>>
-  >>>  # Use ntk-vector products since the network has many parameters
-  >>>  # relative to the cost of forward pass.
-  >>>  ntk_fn = nt.experimental.empirical_ntk_fn_tf(f, vmap_axes=0,
-  >>>                                               implementation=2)
-  >>>
-  >>>  # (5, 5) tf.Tensor test-test NTK
-  >>>  ntk_test_test = ntk_fn(x_test, None, params)
-  >>>
-  >>>  # Compute only NTK diagonal variances:
-  >>>  ntk_fn = nt.experimental.empirical_ntk_fn_tf(f, diagonal_axes=(0,))
-  >>>
-  >>>  # (20,) tf.Tensor train-train NTK diagonal
-  >>>  ntk_train_train_diag = ntk_fn(x_train, None, params)
+  >>> import tensorflow as tf
+  >>> from tensorflow.keras import layers
+  >>> import neural_tangents as nt
+  >>> #
+  >>> x_train = tf.random.normal((20, 32, 32, 3))
+  >>> x_test = tf.random.normal((5, 32, 32, 3))
+  >>> #
+  >>> # A CNN.
+  >>> f = tf.keras.Sequential()
+  >>> f.add(layers.Conv2D(32, (3, 3), activation='relu',
+  >>>                     input_shape=x_train.shape[1:]))
+  >>> f.add(layers.Conv2D(32, (3, 3), activation='relu'))
+  >>> f.add(layers.Conv2D(32, (3, 3)))
+  >>> f.add(layers.Flatten())
+  >>> f.add(layers.Dense(10))
+  >>> #
+  >>> f.build((None, *x_train.shape[1:]))
+  >>> _, params = nt.experimental.get_apply_fn_and_params(f)
+  >>> #
+  >>> # Default setting: reducing over logits (default `trace_axes=(-1,)`;
+  >>> # pass `vmap_axes=0` because the network is iid along the batch axis, no
+  >>> # BatchNorm.
+  >>> kernel_fn = nt.experimental.empirical_ntk_fn_tf(f, vmap_axes=0)
+  >>> #
+  >>> # (5, 20) tf.Tensor test-train NTK
+  >>> nngp_test_train = kernel_fn(x_test, x_train, params)
+  >>> ntk_test_train = kernel_fn(x_test, x_train, params)
+  >>> #
+  >>> # Full kernel: not reducing over logits.
+  >>> kernel_fn = nt.experimental.empirical_ntk_fn_tf(f, trace_axes=(),
+  >>>                                                 vmap_axes=0)
+  >>> #
+  >>> # (5, 20, 10, 10) tf.Tensor test-train NTK.
+  >>> k_test_train = kernel_fn(x_test, x_train, params)
+  >>> #
+  >>> # An FCN
+  >>> f = tf.keras.Sequential()
+  >>> f.add(layers.Flatten())
+  >>> f.add(layers.Dense(1024, activation='relu'))
+  >>> f.add(layers.Dense(1024, activation='relu'))
+  >>> f.add(layers.Dense(10))
+  >>> #
+  >>> f.build((None, *x_train.shape[1:]))
+  >>> _, params = nt.experimental.get_apply_fn_and_params(f)
+  >>> #
+  >>> # Use ntk-vector products since the network has many parameters
+  >>> # relative to the cost of forward pass.
+  >>> ntk_fn = nt.experimental.empirical_ntk_fn_tf(f, vmap_axes=0,
+  >>>                                              implementation=2)
+  >>> #
+  >>> # (5, 5) tf.Tensor test-test NTK
+  >>> ntk_test_test = ntk_fn(x_test, None, params)
+  >>> #
+  >>> # Compute only NTK diagonal variances:
+  >>> ntk_fn = nt.experimental.empirical_ntk_fn_tf(f, diagonal_axes=(0,))
+  >>> #
+  >>> # (20,) tf.Tensor train-train NTK diagonal
+  >>> ntk_train_train_diag = ntk_fn(x_train, None, params)
 """
 
 from typing import Callable, Optional, Union
 import warnings
 
 from jax.experimental import jax2tf
-import neural_tangents as nt
-from neural_tangents._src.empirical import DEFAULT_NTK_IMPLEMENTATION, _DEFAULT_NTK_FWD, _DEFAULT_NTK_J_RULES, _DEFAULT_NTK_S_RULES
+from neural_tangents._src.empirical import NtkImplementation, empirical_ntk_fn, DEFAULT_NTK_IMPLEMENTATION, _DEFAULT_NTK_FWD, _DEFAULT_NTK_J_RULES, _DEFAULT_NTK_S_RULES
 from neural_tangents._src.utils.typing import Axes, NTTree, PyTree, VMapAxes
 import tensorflow as tf
 import tf2jax
@@ -97,37 +105,43 @@ def empirical_ntk_fn_tf(
     trace_axes: Axes = (-1,),
     diagonal_axes: Axes = (),
     vmap_axes: VMapAxes = None,
-    implementation: Union[
-        nt.NtkImplementation, int] = DEFAULT_NTK_IMPLEMENTATION,
+    implementation: Union[NtkImplementation, int] = DEFAULT_NTK_IMPLEMENTATION,
     _j_rules: bool = _DEFAULT_NTK_J_RULES,
     _s_rules: bool = _DEFAULT_NTK_S_RULES,
     _fwd: Optional[bool] = _DEFAULT_NTK_FWD,
 ) -> Callable[..., NTTree[tf.Tensor]]:
   r"""Returns a function to draw a single sample the NTK of a given network `f`.
 
-  This function follows the API of `neural_tangents.empirical_ntk_fn`, but is
-  applicable to Tensorflow `tf.function` or `tf.keras.Model`, via a TF->JAX->TF
-  roundtrip using `tf2jax` and `jax2tf`. Docstring below adapted from
-  `neural_tangents.empirical_ntk_fn`.
+  This function follows the API of :obj:`neural_tangents.empirical_ntk_fn`, but
+  is applicable to Tensorflow :class:`tf.Module`, :class:`tf.keras.Model`, or
+  :obj:`tf.function`, via a TF->JAX->TF roundtrip using `tf2jax` and `jax2tf`.
+  Docstring below adapted from :obj:`neural_tangents.empirical_ntk_fn`.
 
-  WARNING: this function is highly experimental and risks returning wrong
-  results or performing slowly. It is intended to demonstrate the usage of
-  `neural_tangents.empirical_ntk_fn` in Tensorflow, but has not been
-  extensively tested.
+  .. warning::
+    This function is experimental and risks returning wrong results or
+    performing slowly. It is intended to demonstrate the usage of
+    :obj:`neural_tangents.empirical_ntk_fn` in Tensorflow, but has not been
+    extensively tested. Specifically, it appears to have very long
+    compile times (but OK runtime), is prone to triggering XLA errors, and does
+    not distinguish between trainable and non-trainable parameters of the model.
 
-  TODO(romann): support proper division between trainable and non-trainable
-    variables.
+  TODO(romann): support division between trainable and non-trainable variables.
 
   TODO(romann): investigate slow compile times.
 
   Args:
     f:
-      `tf.Module` or `tf.function` whose NTK we are computing. Must
+      :class:`tf.Module` or :obj:`tf.function` whose NTK we are computing. Must
       satisfy the following:
-        - if a `tf.function`, must have the signature of `f(params, x)`.
-        - if a `tf.Module`, must be either a `tf.keras.Model`, or be callable.
-        - input signature (`f.input_shape` for `tf.Module` or `tf.keras.Model`,
-          or `f.input_signature` for `tf.function`) must be known.
+
+        - if a :obj:`tf.function`, must have the signature of `f(params, x)`.
+
+        - if a :class:`tf.Module`, must be either a :class:`tf.keras.Model`, or
+          be callable.
+
+        - input signature (`f.input_shape` for :class:`tf.Module` or
+          :class:`tf.keras.Model`, or `f.input_signature` for `tf.function`)
+          must be known.
 
     trace_axes:
       output axes to trace the output kernel over, i.e. compute only the trace
@@ -180,31 +194,34 @@ def empirical_ntk_fn_tf(
       set to `None`, to avoid wrong (and potentially silent) results.
 
     implementation:
-      Applicable only to NTK, an `NtkImplementation` value (or an integer `0`,
-      `1`, `2`, or `3`). See the `NtkImplementation` enum docstring for details.
+      An :class:`NtkImplementation` value (or an :class:`int` `0`, `1`, `2`, or
+      `3`). See the :class:`NtkImplementation` docstring for details.
 
     _j_rules:
-      Internal debugging parameter, applicable only to NTK when
-      `implementation` is `STRUCTURED_DERIVATIVES` (`3`) or `AUTO` (`0`). Set to
-      `True` to allow custom Jacobian rules for intermediary primitive `dy/dw`
-      computations for MJJMPs (matrix-Jacobian-Jacobian-matrix products). Set to
-      `False` to use JVPs or VJPs, via JAX's `jacfwd` or `jacrev`. Custom
-      Jacobian rules (`True`) are expected to be not worse, and sometimes better
-      than automated alternatives, but in case of a suboptimal implementation
-      setting it to `False` could improve performance.
+      Internal debugging parameter, applicable only when
+      `implementation` is :attr:`NtkImplementation.STRUCTURED_DERIVATIVES`
+      (`3`) or :attr:`NtkImplementation.AUTO` (`0`). Set to `True` to allow
+      custom Jacobian rules for intermediary primitive `dy/dw` computations for
+      MJJMPs (matrix-Jacobian-Jacobian-matrix products). Set to `False` to use
+      JVPs or VJPs, via JAX's :obj:`jax.jacfwd` or :obj:`jax.jacrev`. Custom
+      Jacobian rules (`True`) are expected to be not worse, and sometimes
+      better than automated alternatives, but in case of a suboptimal
+      implementation setting it to `False` could improve performance.
 
     _s_rules:
-      Internal debugging parameter, applicable only to NTK when
-      `implementation` is `STRUCTURED_DERIVATIVES` (`3`) or `AUTO` (`0`). Set to
-      `True` to allow efficient MJJMp rules for structured `dy/dw` primitive
-      Jacobians. In practice should be set to `True`, and setting it to `False`
-      can lead to dramatic deterioration of performance.
+      Internal debugging parameter, applicable only when `implementation` is
+      :attr:`NtkImplementation.STRUCTURED_DERIVATIVES` (`3`) or
+      :attr:`NtkImplementation.AUTO` (`0`). Set to `True` to allow efficient
+      MJJMp rules for structured `dy/dw` primitive Jacobians. In practice
+      should be set to `True`, and setting it to `False` can lead to dramatic
+      deterioration of performance.
 
     _fwd:
-      Internal debugging parameter, applicable only to NTK when
-      `implementation` is `STRUCTURED_DERIVATIVES` (`3`) or `AUTO` (`0`). Set to
-      `True` to allow `jvp` in intermediary primitive Jacobian `dy/dw`
-      computations, `False` to always use `vjp`. `None` to decide automatically
+      Internal debugging parameter, applicable only when `implementation` is
+      :attr:`NtkImplementation.STRUCTURED_DERIVATIVES` (`3`) or
+      :attr:`NtkImplementation.AUTO` (`0`). Set to `True` to allow
+      :obj:`jax.jvp` in intermediary primitive Jacobian `dy/dw` computations,
+      `False` to always use :obj:`jax.vjp`. `None` to decide automatically
       based on input/output sizes. Applicable when `_j_rules=False`, or when a
       primitive does not have a Jacobian rule. Should be set to `None` for best
       performance.
@@ -234,22 +251,27 @@ def empirical_ntk_fn_tf(
                               f'please file a bug at '
                               f'https://github.com/google/neural-tangents.')
 
-  ntk_fn = nt.empirical_ntk_fn(apply_fn, **kwargs)
+  ntk_fn = empirical_ntk_fn(apply_fn, **kwargs)
   ntk_fn = jax2tf.convert(ntk_fn)
   ntk_fn = tf.function(ntk_fn, jit_compile=True, autograph=False)
   return ntk_fn
 
 
 def get_apply_fn_and_params(f: tf.Module):
-  """Converts a `tf.Module` into a forward-pass `apply_fn` and `params`.
+  """Converts a :class:`tf.Module` into a forward-pass `apply_fn` and `params`.
 
   Use this function to extract `params` to pass to the Tensorflow empirical NTK
   kernel function.
 
+  .. warning::
+    This function does not distinguish between trainable and non-trainable
+    parameters of the model.
+
   Args:
-    f: a `tf.Module` to convert to a `apply_fn(params, x)` function. Must have
-      an `input_shape` attribute set (specifying shape of `x`), and be callable
-      or be a `tf.keras.Model`.
+    f:
+      a :class:`tf.Module` to convert to a `apply_fn(params, x)` function. Must
+      have an `input_shape` attribute set (specifying shape of `x`), and be
+      callable or be a :class:`tf.keras.Model`.
 
   Returns:
     A tuple fo `(apply_fn, params)`, where `params` is an `NTTree[tf.Tensor]`.

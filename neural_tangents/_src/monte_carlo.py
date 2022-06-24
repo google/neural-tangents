@@ -20,9 +20,10 @@ details on how individual samples are computed, refer to `utils/empirical.py`.
 
 Note that the `monte_carlo_kernel_fn` accepts arguments like `batch_size`,
 `device_count`, and `store_on_device`, and is appropriately batched /
-parallelized. You don't need to apply the `nt.batch` or `jax.jit` decorators to
-it. Further, you do not need to apply `jax.jit` to the input `apply_fn`
-function, as the resulting empirical kernel function is JITted internally.
+parallelized. You don't need to apply the :obj:`~neural_tangents.batch` or
+:obj:`jax.jit` decorators to it. Further, you do not need to apply
+:obj:`jax.jit` to the input `apply_fn` function, as the resulting empirical
+kernel function is JITted internally.
 """
 
 
@@ -139,13 +140,13 @@ def monte_carlo_kernel_fn(
   Args:
     init_fn:
       a function initializing parameters of the neural network. From
-      `jax.example_libraries.stax`: "takes an rng key and an input shape and
-      returns an `(output_shape, params)` pair".
+      :obj:`jax.example_libraries.stax`: "takes an rng key and an input shape
+      and returns an `(output_shape, params)` pair".
 
     apply_fn:
       a function computing the output of the neural network.
-      From `jax.example_libraries.stax`: "takes params, inputs, and an rng key
-      and applies the layer".
+      From :obj:`jax.example_libraries.stax`: "takes params, inputs, and an
+      rng key and applies the layer".
 
     key:
       RNG (`jax.random.PRNGKey`) for sampling random networks. Must have
@@ -218,32 +219,35 @@ def monte_carlo_kernel_fn(
       set to `None`, to avoid wrong (and potentially silent) results.
 
     implementation:
-      Applicable only to NTK, an `NtkImplementation` value (or an integer `0`,
-      `1`, `2`, or `3`). See the `neural_tangents.NtkImplementation` enum
+      Applicable only to NTK, an :class:`NtkImplementation` value (or an
+      :class:`int`  `0`, `1`, `2`, or `3`). See the :class:`NtkImplementation`
       docstring for details.
 
     _j_rules:
       Internal debugging parameter, applicable only to NTK when
-      `implementation` is `STRUCTURED_DERIVATIVES` (`3`) or `AUTO` (`0`). Set to
-      `True` to allow custom Jacobian rules for intermediary primitive `dy/dw`
-      computations for MJJMPs (matrix-Jacobian-Jacobian-matrix products). Set to
-      `False` to use JVPs or VJPs, via JAX's `jacfwd` or `jacrev`. Custom
+      `implementation` is :attr:`~NtkImplementation.STRUCTURED_DERIVATIVES`
+      (`3`) or :attr:`~NtkImplementation.AUTO` (`0`). Set to `True` to allow
+      custom Jacobian rules for intermediary primitive `dy/dw` computations for
+      MJJMPs (matrix-Jacobian-Jacobian-matrix products). Set to `False` to use
+      JVPs or VJPs, via JAX's :obj:`jax.jacfwd` or :obj:`jax.jacrev`. Custom
       Jacobian rules (`True`) are expected to be not worse, and sometimes better
       than automated alternatives, but in case of a suboptimal implementation
       setting it to `False` could improve performance.
 
     _s_rules:
       Internal debugging parameter, applicable only to NTK when
-      `implementation` is `STRUCTURED_DERIVATIVES` (`3`) or `AUTO` (`0`). Set to
-      `True` to allow efficient MJJMp rules for structured `dy/dw` primitive
-      Jacobians. In practice should be set to `True`, and setting it to `False`
-      can lead to dramatic deterioration of performance.
+      `implementation` is :attr:`~NtkImplementation.STRUCTURED_DERIVATIVES`
+      (`3`) or :attr:`~NtkImplementation.AUTO` (`0`). Set to `True` to allow
+      efficient MJJMp rules for structured `dy/dw` primitive Jacobians. In
+      practice should be set to `True`, and setting it to `False` can lead to
+      dramatic deterioration of performance.
 
     _fwd:
       Internal debugging parameter, applicable only to NTK when
-      `implementation` is `STRUCTURED_DERIVATIVES` (`3`) or `AUTO` (`0`). Set to
-      `True` to allow `jvp` in intermediary primitive Jacobian `dy/dw`
-      computations, `False` to always use `vjp`. `None` to decide automatically
+      `implementation` is :attr:`~NtkImplementation.STRUCTURED_DERIVATIVES`
+      (`3`) or :attr:`~NtkImplementation.AUTO` (`0`). Set to `True` to allow
+      :obj:`jax.jvp` in intermediary primitive Jacobian `dy/dw` computations,
+      `False` to always use :obj:`jax.vjp`. `None` to decide automatically
       based on input/output sizes. Applicable when `_j_rules=False`, or when a
       primitive does not have a Jacobian rule. Should be set to `None` for best
       performance.
@@ -259,12 +263,12 @@ def monte_carlo_kernel_fn(
     >>> from jax import random
     >>> import neural_tangents as nt
     >>> from neural_tangents import stax
-    >>>
+    >>> #
     >>> key1, key2 = random.split(random.PRNGKey(1), 2)
     >>> x_train = random.normal(key1, (20, 32, 32, 3))
     >>> y_train = random.uniform(key1, (20, 10))
     >>> x_test = random.normal(key2, (5, 32, 32, 3))
-    >>>
+    >>> #
     >>> init_fn, apply_fn, _ = stax.serial(
     >>>     stax.Conv(128, (3, 3)),
     >>>     stax.Relu(),
@@ -274,12 +278,12 @@ def monte_carlo_kernel_fn(
     >>>     stax.Flatten(),
     >>>     stax.Dense(10)
     >>> )
-    >>>
+    >>> #
     >>> n_samples = 200
     >>> kernel_fn = nt.monte_carlo_kernel_fn(init_fn, apply_fn, key1, n_samples)
     >>> kernel = kernel_fn(x_train, x_test, get=('nngp', 'ntk'))
     >>> # `kernel` is a tuple of NNGP and NTK MC estimate using `n_samples`.
-    >>>
+    >>> #
     >>> n_samples = [1, 10, 100, 1000]
     >>> kernel_fn_generator = nt.monte_carlo_kernel_fn(init_fn, apply_fn, key1,
     >>>                                                n_samples)

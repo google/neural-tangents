@@ -12,7 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Minimal highly-experimental Tensorflow NTK example."""
+"""Minimal highly-experimental Tensorflow NTK example.
+
+Specifically, Tensorflow NTK appears to have very long compile times (but OK
+runtime), is prone to triggering XLA errors, and does not distinguish between
+trainable and non-trainable parameters of the model.
+
+For details about the empirical (finite width) NTK computation, please see
+"`Fast Finite Width Neural Tangent Kernel <https://arxiv.org/abs/2206.08720>`_".
+"""
 
 from absl import app
 import neural_tangents as nt
