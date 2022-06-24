@@ -71,7 +71,7 @@ def requires(**static_reqs):
   Use this to specify your `kernel_fn` input kernel requirements.
 
   See Also:
-    :class:`Diagonal`, :class:`Input`, :class:`Output`.
+    :class:`Diagonal`, :class:`Bool`.
 
   """
 
