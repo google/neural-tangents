@@ -40,26 +40,19 @@ test_utils.update_test_tolerance()
 prandom.seed(1)
 
 
-@parameterized.named_parameters(
-    test_utils.cases_from_list(
-        {
-            'testcase_name':
-                ' [{}_out={}_in={}]'.format(
-                    'same_inputs' if same_inputs else 'different_inputs',
-                    readout[0].__name__,
-                    readin[0].__name__
-                ),
-            'same_inputs': same_inputs,
-            'readout': readout,
-            'readin': readin
-        }
-        for same_inputs in [False, True]
-        for readout in [stax.Flatten(),
-                        stax.GlobalAvgPool(),
-                        stax.Identity()]
-        for readin in [stax.Flatten(),
-                       stax.GlobalAvgPool(),
-                       stax.Identity()]))
+@parameterized.product(
+    same_inputs=[False, True],
+    readout=[
+        stax.Flatten(),
+        stax.GlobalAvgPool(),
+        stax.Identity()
+    ],
+    readin=[
+        stax.Flatten(),
+        stax.GlobalAvgPool(),
+        stax.Identity()
+    ]
+)
 class DiagonalTest(test_utils.NeuralTangentsTestCase):
 
   def _get_kernel_fn(self, same_inputs, readin, readout):
@@ -139,14 +132,9 @@ class DiagonalClassTest(test_utils.NeuralTangentsTestCase):
           self.assertEqual(ab_c, _ab_c)
 
 
-@parameterized.parameters([
-    {
-        'same_inputs': True
-    },
-    {
-        'same_inputs': False
-    },
-])
+@parameterized.product(
+    same_inputs=[True, False]
+)
 class InputReqTest(test_utils.NeuralTangentsTestCase):
 
   def test_input_req(self, same_inputs):
@@ -252,31 +240,18 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
 
 class MaskingTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list(
-          {
-              'testcase_name':
-                  ' [{}_get={}_axis={}_mask={}_concat={}_p={}]'.format(
-                      'same_inputs' if same_inputs else 'different_inputs',
-                      get,
-                      mask_axis,
-                      mask_constant,
-                      concat,
-                      p,
-                  ),
-              'same_inputs': same_inputs,
-              'get': get,
-              'mask_axis': mask_axis,
-              'mask_constant': mask_constant,
-              'concat': concat,
-              'p': p,
-          }
-          for same_inputs in [False] for get in ['ntk']
-          for concat in [None, 0, 1] for p in [0.5]
-          for mask_axis in [(),
-                            (0,),
-                            (1, 3)]
-          for mask_constant in [10.]))
+  @parameterized.product(
+      same_inputs=[False],
+      get=['ntk'],
+      concat=[None, 0, 1],
+      p=[0.5],
+      mask_axis=[
+          (),
+          (0,),
+          (1, 3)
+      ],
+      mask_constant=[10.]
+  )
   def test_mask_fc(self, same_inputs, get, concat, p, mask_axis, mask_constant):
     width = 512
     n_samples = 128
@@ -339,40 +314,32 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
     empirical = kernel_fn_mc(x1, x2, get=get, mask_constant=mask_constant)
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              ' [{}_get={}_axis={}_mask={}_concat={}_{}_p={}_n={}_{}]'
-              ''.format(
-                  'same_inputs' if same_inputs else 'different_inputs',
-                  get,
-                  mask_axis,
-                  mask_constant,
-                  concat,
-                  proj,
-                  p,
-                  n,
-                  'transpose' if transpose else ''
-              ),
-          'same_inputs': same_inputs,
-          'get': get,
-          'mask_axis': mask_axis,
-          'mask_constant': mask_constant,
-          'concat': concat,
-          'proj': proj,
-          'p': p,
-          'n': n,
-          'transpose': transpose
-      }
-                                 for proj in ['flatten', 'avg']
-                                 for same_inputs in [False]
-                                 for get in ['ntk'] for n in [0, 1]
-                                 for concat in [None] + list(range(n + 1))
-                                 for mask_constant in [10.] for p in [0.5]
-                                 for transpose in [True, False]
-                                 for mask_axis in [(), (0,), (0, 1, 2, 3)]))
-  def test_mask_conv(self, same_inputs, get, mask_axis, mask_constant, concat,
-                     proj, p, n, transpose):
+  @parameterized.product(
+      proj=['flatten', 'avg'],
+      same_inputs=[False],
+      get=['ntk'],
+      n=[0, 1],
+      concat=[None, 0, 1],
+      mask_constant=[10.],
+      p=[0.5],
+      transpose=[True, False],
+      mask_axis=[(), (0,), (0, 1, 2, 3)]
+  )
+  def test_mask_conv(
+      self,
+      same_inputs,
+      get,
+      mask_axis,
+      mask_constant,
+      concat,
+      proj,
+      p,
+      n,
+      transpose
+  ):
+    if isinstance(concat, int) and concat > n:
+      raise absltest.SkipTest('Concatenation axis out of bounds.')
+
     test_utils.skip_test(self)
     if default_backend() == 'gpu' and n > 3:
       raise absltest.SkipTest('>=4D-CNN is not supported on GPUs.')

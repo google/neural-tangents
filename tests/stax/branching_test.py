@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for neural_tangents/_src/stax/branching.py."""
+"""Tests for `neural_tangents/_src/stax/branching.py`."""
 
 import random as prandom
 
@@ -47,38 +47,23 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
         2: stax.Abs()
     }[i % 3]
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list(
-          {
-              'testcase_name':
-                  ' [{}_axis={}_n_branches={}_{}_{}_{}]'.format(
-                      'same_inputs' if same_inputs else 'different_inputs',
-                      axis,
-                      n_branches,
-                      get,
-                      branch_in,
-                      fan_in_mode),
-              'same_inputs':
-                  same_inputs,
-              'axis':
-                  axis,
-              'n_branches':
-                  n_branches,
-              'get':
-                  get,
-              'branch_in':
-                  branch_in,
-              'fan_in_mode':
-                  fan_in_mode,
-          }
-          for same_inputs in [False]
-          for axis in [0, 1]
-          for n_branches in [3] for get in ['ntk']
-          for branch_in in ['dense_before_branch_in',
-                            'dense_after_branch_in']
-          for fan_in_mode in ['FanInSum', 'FanInConcat', 'FanInProd']))
-  def test_fan_in_fc(self, same_inputs, axis, n_branches, get, branch_in,
-                     fan_in_mode):
+  @parameterized.product(
+      same_inputs=[False],
+      axis=[0, 1],
+      n_branches=[3],
+      get=['ntk'],
+      branch_in=['dense_before_branch_in', 'dense_after_branch_in'],
+      fan_in_mode=['FanInSum', 'FanInConcat', 'FanInProd']
+  )
+  def test_fan_in_fc(
+      self,
+      same_inputs,
+      axis,
+      n_branches,
+      get,
+      branch_in,
+      fan_in_mode
+  ):
     if fan_in_mode in ['FanInSum', 'FanInProd']:
       if axis != 0:
         raise absltest.SkipTest('`FanInSum` and `FanInProd` are skipped when '
@@ -161,47 +146,25 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
     empirical = kernel_fn_mc(X0_1, X0_2, get=get)
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list(
-          {
-              'testcase_name':
-                  ' [{}_axis={}_n_branches={}_{}_{}_{}_{}]'.format(
-                      'same_inputs' if same_inputs else 'different_inputs',
-                      axis,
-                      n_branches,
-                      get,
-                      branch_in,
-                      readout,
-                      fan_in_mode),
-              'same_inputs':
-                  same_inputs,
-              'axis':
-                  axis,
-              'n_branches':
-                  n_branches,
-              'get':
-                  get,
-              'branch_in':
-                  branch_in,
-              'readout':
-                  readout,
-              'fan_in_mode':
-                  fan_in_mode,
-          }
-          for same_inputs in [False]
-          for axis in [0, 1, 2, 3]
-          for n_branches in [2] for get in ['ntk']
-          for branch_in in ['dense_before_branch_in', 'dense_after_branch_in']
-          for readout in ['pool', 'flatten']
-          for fan_in_mode in ['FanInSum', 'FanInConcat', 'FanInProd']))
-  def test_fan_in_conv(self,
-                       same_inputs,
-                       axis,
-                       n_branches,
-                       get,
-                       branch_in,
-                       readout,
-                       fan_in_mode):
+  @parameterized.product(
+      same_inputs=[False],
+      axis=[0, 1, 2, 3],
+      n_branches=[2],
+      get=['ntk'],
+      branch_in=['dense_before_branch_in', 'dense_after_branch_in'],
+      readout=['pool', 'flatten'],
+      fan_in_mode=['FanInSum', 'FanInConcat', 'FanInProd']
+  )
+  def test_fan_in_conv(
+      self,
+      same_inputs,
+      axis,
+      n_branches,
+      get,
+      branch_in,
+      readout,
+      fan_in_mode
+  ):
     test_utils.skip_test(self)
     if fan_in_mode in ['FanInSum', 'FanInProd']:
       if axis != 0:

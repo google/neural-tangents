@@ -46,7 +46,7 @@ flags.DEFINE_integer(
 
 FLAGS = flags.FLAGS
 
-# Utility functions forked from jax._src.public_test_util
+# Utility functions forked from :obj:`jax._src.public_test_util`.
 
 
 _python_scalar_dtypes: Dict[type, onp.dtype] = {

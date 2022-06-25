@@ -44,14 +44,9 @@ test_utils.update_test_tolerance()
 prandom.seed(1)
 
 
-@parameterized.parameters([
-    {
-        'same_inputs': True
-    },
-    {
-        'same_inputs': False
-    },
-])
+@parameterized.product(
+    same_inputs=[True, False]
+)
 class FlattenTest(test_utils.NeuralTangentsTestCase):
 
   def test_flatten(self, same_inputs):
@@ -148,44 +143,27 @@ class FlattenTest(test_utils.NeuralTangentsTestCase):
 
 class ConvNDTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              ' [{}_n={}_{}_{}_{}_{}_{}_{}]'.format(
-                  'same_inputs' if same_inputs else 'different_inputs', n, get,
-                  proj,
-                  'attn' if use_attn else '',
-                  'channels_first' if channels_first else 'channels_last',
-                  'dropout' if use_dropout else '',
-                  'layernorm' if use_layernorm else ''
-              ),
-          'same_inputs':
-              same_inputs,
-          'n':
-              n,
-          'get':
-              get,
-          'proj':
-              proj,
-          'use_attn':
-              use_attn,
-          'channels_first':
-              channels_first,
-          'use_dropout':
-              use_dropout,
-          'use_layernorm':
-              use_layernorm
-      }
-                                 for same_inputs in [False]
-                                 for n in [0, 1, 2]
-                                 for get in ['ntk']
-                                 for proj in ['flatten', 'pool']
-                                 for use_attn in [True]
-                                 for channels_first in [True, False]
-                                 for use_dropout in [True]
-                                 for use_layernorm in [True]))
-  def test_conv_nd(self, same_inputs, n, get, proj, use_attn, channels_first,
-                   use_dropout, use_layernorm):
+  @parameterized.product(
+      same_inputs=[False],
+      n=[0, 1, 2],
+      get=['ntk'],
+      proj=['flatten', 'pool'],
+      use_attn=[True],
+      channels_first=[True, False],
+      use_dropout=[True],
+      use_layernorm=[True],
+  )
+  def test_conv_nd(
+      self,
+      same_inputs,
+      n,
+      get,
+      proj,
+      use_attn,
+      channels_first,
+      use_dropout,
+      use_layernorm
+  ):
     platform = default_backend()
     if platform == 'cpu':
       test_utils.skip_test(self)
@@ -283,72 +261,62 @@ class ConvNDTest(test_utils.NeuralTangentsTestCase):
 
 class AttentionTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              f'[same_inputs={same_inputs}_'
-              f'get={get}_'
-              f'axis={mask_axis}'
-              f'_mask={mask_constant}_'
-              f'p={p}_'
-              f'linear_scaling={linear_scaling}_'
-              f'n={n}_pos_emb_type={pos_emb_type}_'
-              f'n_chan_pos_emb={n_chan_pos_emb}'
-              f'_pos_emb_decay_fn={pos_emb_decay_fn}_'
-              f'val_pos_emb={val_pos_emb}_'
-              f'W_pos_emb_std={W_pos_emb_std}]',
-          'same_inputs': same_inputs,
-          'get': get,
-          'n': n,
-          'linear_scaling': linear_scaling,
-          'mask_constant': mask_constant,
-          'p': p,
-          'mask_axis': mask_axis,
-          'pos_emb_type': pos_emb_type,
-          'n_chan_pos_emb': n_chan_pos_emb,
-          'pos_emb_decay_fn': pos_emb_decay_fn,
-          'val_pos_emb': val_pos_emb,
-          'W_pos_emb_std': W_pos_emb_std
-      }
-                                 for same_inputs in [
-                                     False
-                                 ]
-                                 for get in [
-                                     'ntk'
-                                 ]
-                                 for n in [
-                                     2,
-                                 ]
-                                 for linear_scaling in [
-                                     True,
-                                     False
-                                 ]
-                                 for mask_constant in [
-                                     10.
-                                 ]
-                                 for p in [0.5]
-                                 for mask_axis in [(-1,)]
-                                 for pos_emb_type in [
-                                     'CONCAT',
-                                     'SUM',
-                                     'NONE'
-                                 ]
-                                 for n_chan_pos_emb in (
-                                     [None] if pos_emb_type != 'CONCAT'
-                                     else [None, 512]
-                                     )
-                                 for pos_emb_decay_fn in [
-                                     None,
-                                     'linear'
-                                 ]
-                                 for val_pos_emb in ([
-                                     True,
-                                     False
-                                 ] if pos_emb_type != 'NONE' else [True])
-                                 for W_pos_emb_std in ([
-                                     2,
-                                 ] if pos_emb_type != 'NONE' else [0.])
-                                 ))
+  @parameterized.parameters(
+      test_utils.cases_from_list(
+          dict(
+              same_inputs=same_inputs,
+              get=get,
+              n=n,
+              linear_scaling=linear_scaling,
+              mask_constant=mask_constant,
+              p=p,
+              mask_axis=mask_axis,
+              pos_emb_type=pos_emb_type,
+              n_chan_pos_emb=n_chan_pos_emb,
+              pos_emb_decay_fn=pos_emb_decay_fn,
+              val_pos_emb=val_pos_emb,
+              W_pos_emb_std=W_pos_emb_std
+          )
+          for same_inputs in [
+              False
+          ]
+          for get in [
+              'ntk'
+          ]
+          for n in [
+              2,
+          ]
+          for linear_scaling in [
+              True,
+              False
+          ]
+          for mask_constant in [
+              10.
+          ]
+          for p in [0.5]
+          for mask_axis in [(-1,)]
+          for pos_emb_type in [
+              'CONCAT',
+              'SUM',
+              'NONE'
+          ]
+          for n_chan_pos_emb in (
+              [None] if pos_emb_type != 'CONCAT'
+              else [None, 512]
+          )
+          for pos_emb_decay_fn in [
+              None,
+              'linear'
+          ]
+          for val_pos_emb in ([
+              True,
+              False
+          ] if pos_emb_type != 'NONE' else [True])
+          for W_pos_emb_std in ([
+              2,
+          ] if pos_emb_type != 'NONE' else [0.])
+      )
+  )
   def test_attention(
       self,
       same_inputs,
@@ -362,7 +330,8 @@ class AttentionTest(test_utils.NeuralTangentsTestCase):
       n_chan_pos_emb,
       pos_emb_decay_fn,
       val_pos_emb,
-      W_pos_emb_std):
+      W_pos_emb_std
+  ):
     test_utils.skip_test(self)
 
     width = 1024
@@ -437,73 +406,80 @@ class AttentionTest(test_utils.NeuralTangentsTestCase):
 
 class AggregateTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              f'{get}-{name}-same_inp={same_input}-{act_name}'
-              f'-mask_constant={mask_constant}'
-              f'-shape={shape}-batch_axis={batch_axis}'
-              f'-channel_axis={channel_axis}-agg_axes={agg_axes}'
-              f'-batch={do_batch}-to_dense={to_dense}'
-              f'-implementation={implementation}',
-          'get': get,
-          'readout': readout,
-          'same_input': same_input,
-          'activation': activation,
-          'mask_constant': mask_constant,
-          'shape': shape,
-          'batch_axis': batch_axis,
-          'channel_axis': channel_axis,
-          'agg_axes': agg_axes,
-          'do_batch': do_batch,
-          'implementation': implementation,
-          'to_dense': to_dense
-      }
-                                 for get in [
-                                     'ntk',
-                                 ]
-                                 for same_input in [
-                                     False,
-                                     True
-                                 ]
-                                 for act_name, activation in [
-                                     ('Relu', stax.Relu()),
-                                 ]
-                                 for mask_constant in [
-                                     10.
-                                 ]
-                                 for shape in [
-                                     (4,),
-                                     (3, 2),
-                                 ]
-                                 for batch_axis in range(len(shape) + 2)
-                                 for channel_axis in
-                                 [
-                                     c for c in range(len(shape) + 2)
-                                     if c != batch_axis
-                                 ]
-                                 for agg_axes in [None] +
-                                 list(more_itertools.powerset(
-                                     [p for p in range(len(shape) + 2)
-                                      if p not in (batch_axis, channel_axis)]))
-                                 for do_batch in ([
-                                     True
-                                 ] if batch_axis == 0 else [False])
-                                 for implementation in ['DENSE', 'SPARSE']
-                                 for to_dense in [
-                                     'identity',
-                                     'sparse_to_dense',
-                                 ]
-                                 for name, readout in [
-                                     ('Pooling',
-                                      stax.GlobalAvgPool(
-                                          batch_axis=batch_axis,
-                                          channel_axis=channel_axis)),
-                                 ]
-                                 ))
-  def test_aggregate(self, get, readout, same_input, activation, mask_constant,
-                     shape, batch_axis, channel_axis, agg_axes, do_batch,
-                     implementation, to_dense):
+  @parameterized.parameters(
+      test_utils.cases_from_list(
+          dict(
+              get=get,
+              readout=readout,
+              same_input=same_input,
+              activation=activation,
+              mask_constant=mask_constant,
+              shape=shape,
+              batch_axis=batch_axis,
+              channel_axis=channel_axis,
+              agg_axes=agg_axes,
+              do_batch=do_batch,
+              implementation=implementation,
+              to_dense=to_dense
+          )
+          for get in [
+              'ntk',
+          ]
+          for same_input in [
+              False,
+              True
+          ]
+          for act_name, activation in [
+              ('Relu', stax.Relu()),
+          ]
+          for mask_constant in [
+              10.
+          ]
+          for shape in [
+              (4,),
+              (3, 2),
+          ]
+          for batch_axis in range(len(shape) + 2)
+          for channel_axis in
+          [
+              c for c in range(len(shape) + 2)
+              if c != batch_axis
+          ]
+          for agg_axes in [None] +
+          list(more_itertools.powerset(
+              [p for p in range(len(shape) + 2)
+               if p not in (batch_axis, channel_axis)]))
+          for do_batch in ([
+              True
+          ] if batch_axis == 0 else [False])
+          for implementation in ['DENSE', 'SPARSE']
+          for to_dense in [
+              'identity',
+              'sparse_to_dense',
+          ]
+          for name, readout in [
+              ('Pooling',
+               stax.GlobalAvgPool(
+                   batch_axis=batch_axis,
+                   channel_axis=channel_axis)),
+          ]
+      )
+  )
+  def test_aggregate(
+      self,
+      get,
+      readout,
+      same_input,
+      activation,
+      mask_constant,
+      shape,
+      batch_axis,
+      channel_axis,
+      agg_axes,
+      do_batch,
+      implementation,
+      to_dense
+  ):
     if len(shape) > 1:
       test_utils.skip_test(self)
 
@@ -610,9 +586,10 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
           stax.Aggregate(aggregate_axis=agg_axes,
                          batch_axis=batch_axis,
                          channel_axis=channel_axis,
-                         to_dense={
-                             'identity': lambda p: p,
-                             'sparse_to_dense': sparse_to_dense}[to_dense],
+                         to_dense=dict(
+                             identity=lambda p: p,
+                             sparse_to_dense=sparse_to_dense
+                         )[to_dense],
                          implementation=implementation
                          ),
           readout,
@@ -703,29 +680,25 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
 
 class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              f'_same_inputs={same_inputs}_{padding}_size={size}_'
-              f'strides={strides}_filter={filter_shape}_'
-              f'diag_batch={diagonal_batch}_diag_spatial={diagonal_spatial}',
-          'padding': padding,
-          'size': size,
-          'same_inputs': same_inputs,
-          'filter_shape': filter_shape,
-          'strides': strides,
-          'diagonal_batch': diagonal_batch,
-          'diagonal_spatial': diagonal_spatial
-      }
-                                 for padding in ['CIRCULAR', 'SAME', 'VALID']
-                                 for same_inputs in [False]
-                                 for filter_shape in range(2, 5)
-                                 for strides in range(2, 5)
-                                 for size in range(2, 5)
-                                 for diagonal_batch in [True]
-                                 for diagonal_spatial in [True, False]))
-  def test_conv_transpose(self, same_inputs, padding, filter_shape, strides,
-                          size, diagonal_batch, diagonal_spatial):
+  @parameterized.product(
+      padding=['CIRCULAR', 'SAME', 'VALID'],
+      same_inputs=[False],
+      filter_shape=[2, 3, 4],
+      strides=[2, 3, 4],
+      size=[2, 3, 4],
+      diagonal_batch=[True],
+      diagonal_spatial=[True, False],
+  )
+  def test_conv_transpose(
+      self,
+      same_inputs,
+      padding,
+      filter_shape,
+      strides,
+      size,
+      diagonal_batch,
+      diagonal_spatial
+  ):
     if size > 2:
       test_utils.skip_test(self)
 
@@ -766,12 +739,14 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
     test_utils.assert_close_matrices(self, k_mc, k, tol)
 
   @classmethod
-  def _conv_transpose_circular_via_grad(cls,
-                                        lhs,
-                                        params,
-                                        strides,
-                                        padding,
-                                        dimension_numbers):
+  def _conv_transpose_circular_via_grad(
+      cls,
+      lhs,
+      params,
+      strides,
+      padding,
+      dimension_numbers
+  ):
     """Helper method: calculates conv transpose via grad for testing.
 
     Adapted from `jax.tests.lax_test`.
@@ -806,12 +781,14 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
     return g(lhs)[0]
 
   @classmethod
-  def _conv_transpose_circular(cls,
-                               lhs,
-                               params,
-                               strides,
-                               padding,
-                               dimension_numbers):
+  def _conv_transpose_circular(
+      cls,
+      lhs,
+      params,
+      strides,
+      padding,
+      dimension_numbers
+  ):
     """Helper method: calculates conv transpose."""
     _, apply_fn, _ = stax.ConvTranspose(
         out_chan=params[0].shape[dimension_numbers[1].index('O')],
@@ -823,17 +800,11 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
     )
     return apply_fn((params[0], 0.), lhs)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              f'size={size}_strides={strides}_filter={filter_shape}',
-          'size': size,
-          'filter_shape': filter_shape,
-          'strides': strides,
-      }
-                                 for filter_shape in range(1, 5)
-                                 for strides in range(1, 5)
-                                 for size in range(1, 5)))
+  @parameterized.product(
+      filter_shape=[1, 2, 3, 4],
+      strides=[1, 2, 3, 4],
+      size=[1, 2, 3, 4]
+  )
   def test_conv_transpose_circular(self, size, filter_shape, strides):
     if size > 2:
       test_utils.skip_test(self)
@@ -854,38 +825,22 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
 
 class DotGeneralTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.named_parameters(
+  @parameterized.parameters(
       test_utils.cases_from_list(
-          {
-              'testcase_name':
-                  ' [{}_n={}_dn=(({}, {}), ({}, {}))_channel_axis={}_'
-                  'batch_axis={}_{}_{}_batch={}_spatial={}]'.format(
-                      'same_inputs' if same_inputs else 'different_inputs',
-                      n,
-                      contracting_dims,
-                      c_dims,
-                      batch_dims,
-                      b_dims,
-                      channel_axis,
-                      batch_axis,
-                      'rhs' if is_rhs else 'lhs',
-                      r_permutation,
-                      diagonal_batch,
-                      diagonal_spatial
-                  ),
-              'same_inputs': same_inputs,
-              'n': n,
-              'batch_dims': batch_dims,
-              'contracting_dims': contracting_dims,
-              'b_dims': b_dims,
-              'c_dims': c_dims,
-              'r_permutation': r_permutation,
-              'channel_axis': channel_axis,
-              'batch_axis': batch_axis,
-              'is_rhs': is_rhs,
-              'diagonal_spatial': diagonal_spatial,
-              'diagonal_batch': diagonal_batch
-          }
+          dict(
+              same_inputs=same_inputs,
+              n=n,
+              batch_dims=batch_dims,
+              contracting_dims=contracting_dims,
+              b_dims=b_dims,
+              c_dims=c_dims,
+              r_permutation=r_permutation,
+              channel_axis=channel_axis,
+              batch_axis=batch_axis,
+              is_rhs=is_rhs,
+              diagonal_spatial=diagonal_spatial,
+              diagonal_batch=diagonal_batch
+          )
           for same_inputs in [True, False]
           for n in [2, 3]
           for is_rhs in [False, True]
@@ -904,9 +859,21 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
           for r_permutation in itertools.permutations(range(n))
       )
   )
-  def test_dot_general(self, same_inputs, n, batch_dims, contracting_dims,
-                       c_dims, b_dims, r_permutation, channel_axis, is_rhs,
-                       diagonal_spatial, diagonal_batch, batch_axis):
+  def test_dot_general(
+      self,
+      same_inputs,
+      n,
+      batch_dims,
+      contracting_dims,
+      c_dims,
+      b_dims,
+      r_permutation,
+      channel_axis,
+      is_rhs,
+      diagonal_spatial,
+      diagonal_batch,
+      batch_axis
+  ):
     if n != 2:
       test_utils.skip_test(self)
 
@@ -1048,34 +1015,23 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
           test_utils.assert_close_matrices(
               self, get_empirical(get), getattr(exact, get), 0.01, atol)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list(
-          {
-              'testcase_name': ' [{}_get={}_n={}_{}_{}_{}]'.format(
-                  'same_inputs' if same_inputs else 'different_inputs',
-                  get,
-                  n,
-                  'pool' if do_pool else 'flat',
-                  'rhs' if is_rhs else 'lhs',
-                  'dot_first' if dot_first else 'conv_first'
-              ),
-              'same_inputs': same_inputs,
-              'get': get,
-              'n': n,
-              'do_pool': do_pool,
-              'is_rhs': is_rhs,
-              'dot_first': dot_first
-          }
-          for same_inputs in [False, True]
-          for get in ['ntk']
-          for do_pool in [True, False]
-          for n in [3, 4]
-          for is_rhs in [False, True]
-          for dot_first in [True, False]
-      )
+  @parameterized.product(
+      same_inputs=[False, True],
+      get=['ntk'],
+      do_pool=[True, False],
+      n=[3, 4],
+      is_rhs=[False, True],
+      dot_first=[True, False]
   )
-  def test_dot_general_nn(self, same_inputs, get, n, is_rhs, do_pool,
-                          dot_first):
+  def test_dot_general_nn(
+      self,
+      same_inputs,
+      get,
+      n,
+      is_rhs,
+      do_pool,
+      dot_first
+  ):
     if n != 2:
       test_utils.skip_test(self)
 
@@ -1178,35 +1134,20 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
 
 class ImageResizeTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.named_parameters(
+  @parameterized.parameters(
       test_utils.cases_from_list(
-          {
-              'testcase_name':
-                  ' [{}_n={}_channel_axis={}_'
-                  'batch_axis={}_batch={}_spatial={}_method={}_antialias={}_'
-                  'precison={}_shape={}]'.format(
-                      'same_inputs' if same_inputs else 'different_inputs',
-                      n,
-                      channel_axis,
-                      batch_axis,
-                      diagonal_batch,
-                      diagonal_spatial,
-                      method,
-                      antialias,
-                      precision,
-                      shape
-                  ),
-              'same_inputs': same_inputs,
-              'n': n,
-              'channel_axis': channel_axis,
-              'batch_axis': batch_axis,
-              'diagonal_spatial': diagonal_spatial,
-              'diagonal_batch': diagonal_batch,
-              'method': method,
-              'antialias': antialias,
-              'precision': precision,
-              'shape': shape
-          }
+          dict(
+              same_inputs=same_inputs,
+              n=n,
+              channel_axis=channel_axis,
+              batch_axis=batch_axis,
+              diagonal_spatial=diagonal_spatial,
+              diagonal_batch=diagonal_batch,
+              method=method,
+              antialias=antialias,
+              precision=precision,
+              shape=shape
+          )
           for same_inputs in [
               True,
               False
@@ -1245,9 +1186,19 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
           ]]
       )
   )
-  def test_image_resize(self, same_inputs, n, channel_axis, diagonal_spatial,
-                        diagonal_batch, batch_axis, method, antialias,
-                        precision, shape):
+  def test_image_resize(
+      self,
+      same_inputs,
+      n,
+      channel_axis,
+      diagonal_spatial,
+      diagonal_batch,
+      batch_axis,
+      method,
+      antialias,
+      precision,
+      shape
+  ):
     if n > 2:
       test_utils.skip_test(self)
 
@@ -1359,46 +1310,34 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
           test_utils.assert_close_matrices(
               self, get_empirical(get), getattr(exact, get), tol)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list(
-          {
-              'testcase_name': ' [{}_get={}_n={}_{}_{}_{}_shape={}]'.format(
-                  'same_inputs' if same_inputs else 'different_inputs',
-                  get,
-                  n,
-                  'pool' if do_pool else 'flat',
-                  method,
-                  bottom_layer,
-                  shape
-              ),
-              'same_inputs': same_inputs,
-              'get': get,
-              'n': n,
-              'do_pool': do_pool,
-              'method': method,
-              'bottom_layer': bottom_layer,
-              'shape': shape
-          }
-          for same_inputs in [False, True]
-          for get in ['ntk']
-          for do_pool in [True, False]
-          for n in [3]
-          for bottom_layer in ['resize', 'conv', 'relu']
-          for method in ['linear', 'nearest']
-          for shape in [
-              (1, 2, 4),
-              (2, 1, 1),
-              (-1, 2, -1),
-              (2, 4, -1),
-              (9, -1, -1),
-              (-1, -1, -1),
-              (3, 4, -1),
-              (1, 1, -1),
-          ]
-      )
+  @parameterized.product(
+      same_inputs=[False, True],
+      get=['ntk'],
+      do_pool=[True, False],
+      n=[3],
+      bottom_layer=['resize', 'conv', 'relu'],
+      method=['linear', 'nearest'],
+      shape=[
+          (1, 2, 4),
+          (2, 1, 1),
+          (-1, 2, -1),
+          (2, 4, -1),
+          (9, -1, -1),
+          (-1, -1, -1),
+          (3, 4, -1),
+          (1, 1, -1),
+      ]
   )
-  def test_image_resize_nn(self, same_inputs, get, n, do_pool, bottom_layer,
-                           method, shape):
+  def test_image_resize_nn(
+      self,
+      same_inputs,
+      get,
+      n,
+      do_pool,
+      bottom_layer,
+      method,
+      shape
+  ):
     if n != 2:
       test_utils.skip_test(self)
 
@@ -1458,12 +1397,9 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
 
 class ConvLocalTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name': f'_diag_spatial={diagonal_spatial}_',
-          'diagonal_spatial': diagonal_spatial,
-      }
-                                 for diagonal_spatial in [True, False]))
+  @parameterized.product(
+      diagonal_spatial=[True, False]
+  )
   def test_whitened_inputs(self, diagonal_spatial):
     test_utils.skip_test(self)
 
@@ -1501,35 +1437,29 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
     else:
       self._test_against_mc(apply_fn, init_fn, k.nngp, x, None)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              f'_same_inputs={same_inputs}_{padding}_size={size}_'
-              f'strides={strides}_filter={filter_shape}_'
-              f'diag_batch={diagonal_batch}_diag_spatial={diagonal_spatial}_'
-              f'get={get}_parameterization={parameterization}',
-          'padding': padding,
-          'size': size,
-          'same_inputs': same_inputs,
-          'filter_shape': filter_shape,
-          'strides': strides,
-          'diagonal_batch': diagonal_batch,
-          'diagonal_spatial': diagonal_spatial,
-          'get': get,
-          'parameterization': parameterization
-      }
-                                 for padding in ['SAME', 'VALID', 'CIRCULAR']
-                                 for same_inputs in [False]
-                                 for filter_shape in range(2, 4)
-                                 for strides in range(1, 3)
-                                 for size in range(2, 4)
-                                 for diagonal_batch in [True]
-                                 for diagonal_spatial in [True, False]
-                                 for get in ['cov1', 'nngp', 'ntk']
-                                 for parameterization in ['standard', 'ntk']))
-  def test_conv_local(self, same_inputs, padding, filter_shape, strides,
-                      size, diagonal_batch, diagonal_spatial, get,
-                      parameterization):
+  @parameterized.product(
+      padding=['SAME', 'VALID', 'CIRCULAR'],
+      same_inputs=[False],
+      filter_shape=[2, 3],
+      strides=[1, 2],
+      size=[2, 3],
+      diagonal_batch=[True],
+      diagonal_spatial=[True, False],
+      get=['cov1', 'nngp', 'ntk'],
+      parameterization=['standard', 'ntk']
+  )
+  def test_conv_local(
+      self,
+      same_inputs,
+      padding,
+      filter_shape,
+      strides,
+      size,
+      diagonal_batch,
+      diagonal_spatial,
+      get,
+      parameterization
+  ):
     test_utils.skip_test(self)
 
     if diagonal_batch and get != 'cov1':
@@ -1586,33 +1516,27 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
     tol = 0.005 if default_backend() == 'tpu' else 0.001
     self.assertAllClose(k_conv, k, atol=tol, rtol=tol)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              f'_get={get}'
-              f'_same_inputs={same_inputs}_'
-              f'readout={readout[0].__name__}_'
-              f'parameterization={parameterization}_'
-              f'pool={pool[0].__name__}',
-          'same_inputs': same_inputs,
-          'parameterization': parameterization,
-          'readout': readout,
-          'pool': pool,
-          'get': get
-      }
-                                 for pool in [
-                                     stax.Identity(),
-                                     stax.AvgPool((2, 3), (2, 1), 'VALID')
-                                 ]
-                                 for readout in [
-                                     stax.Flatten(),
-                                     stax.GlobalAvgPool()
-                                 ]
-                                 for same_inputs in [False]
-                                 for get in ['ntk']
-                                 for parameterization in ['ntk', 'standard']))
-  def test_conv_local_deep(self, get, pool, same_inputs, readout,
-                           parameterization):
+  @parameterized.product(
+      pool=[
+          stax.Identity(),
+          stax.AvgPool((2, 3), (2, 1), 'VALID')
+      ],
+      readout=[
+          stax.Flatten(),
+          stax.GlobalAvgPool()
+      ],
+      same_inputs=[False],
+      get=['ntk'],
+      parameterization=['ntk', 'standard']
+  )
+  def test_conv_local_deep(
+      self,
+      get,
+      pool,
+      same_inputs,
+      readout,
+      parameterization
+  ):
     test_utils.skip_test(self)
 
     key1, key2, key_mc = random.split(random.PRNGKey(1), 3)

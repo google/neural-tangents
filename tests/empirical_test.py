@@ -166,11 +166,9 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
     x0 = random.normal(split, (shape[-1], 1))
     return key, params, x0
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name': '_{}'.format(shape),
-          'shape': shape
-      } for shape in TAYLOR_MATRIX_SHAPES))
+  @parameterized.product(
+      shape=TAYLOR_MATRIX_SHAPES
+  )
   def testLinearization(self, shape):
     key, params, x0 = self._get_init_data(shape)
 
@@ -186,11 +184,9 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
                   x0, x, params, do_alter, do_shift_x=do_shift_x),
               f_lin(x, params, do_alter, do_shift_x=do_shift_x))
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name': '_{}'.format(shape),
-          'shape': shape
-      } for shape in TAYLOR_MATRIX_SHAPES))
+  @parameterized.product(
+      shape=TAYLOR_MATRIX_SHAPES
+  )
   def testTaylorExpansion(self, shape):
 
     def f_2_exact(x0, x, params, do_alter, do_shift_x=True):
@@ -245,22 +241,13 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
     for i, ntk in ntks_vmapped.items():
       self.assertAllClose(ntk_ref, ntk, err_msg=f'{i} vmapped impl. fails.')
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name': '_train_shape={}_test_shape={}_network={}_{}'.format(
-              train, test, network, name),
-          'train_shape': train,
-          'test_shape': test,
-          'network': network,
-          'name': name,
-          'kernel_fn': kernel_fn
-      }
-                                 for train, test, network in zip(TRAIN_SHAPES,
-                                                                 TEST_SHAPES,
-                                                                 NETWORK)
-                                 for name, kernel_fn in KERNELS.items()))
-  def testNTKAgainstDirect(
-      self, train_shape, test_shape, network, name, kernel_fn):
+  @parameterized.product(
+      train_test_network=list(zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)),
+      kernel_type=list(KERNELS.keys())
+  )
+  def testNTKAgainstDirect(self, train_test_network, kernel_type):
+    kernel_fn = KERNELS[kernel_type]
+    train_shape, test_shape, network = train_test_network
     key = random.PRNGKey(0)
     key, self_split, other_split = random.split(key, 3)
     x1 = random.normal(self_split, train_shape)
@@ -286,42 +273,37 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
     self._compare_kernels(x1, None, ntk_fns, ntk_fns_vmapped, nngp_fn)
     self._compare_kernels(x1, x2, ntk_fns, ntk_fns_vmapped, nngp_fn)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name': '_diagonal_axes={}_trace_axes={}'.format(
-              diagonal_axes, trace_axes),
-          'diagonal_axes': diagonal_axes,
-          'trace_axes': trace_axes,
-      }
-                                 for diagonal_axes in [
-                                     (),
-                                     (0,),
-                                     (0, 1),
-                                     (0, 1, 2),
-                                     (0, 1, 2, 3),
-                                     (-1,),
-                                     (-2,),
-                                     (0, -1),
-                                     (1, -2),
-                                     (2, 3),
-                                     (3, 0, 2)
-                                 ]
-                                 for trace_axes in [
-                                     (),
-                                     (0,),
-                                     (0, 1),
-                                     (-1,),
-                                     (1,),
-                                     (0, -1),
-                                     (-1, -2),
-                                     (0, 1, 2, 3),
-                                     (3, 1, 2, 0),
-                                     (1, 2, 3),
-                                     (-3, -2),
-                                     (-3, -1),
-                                     (-2, -4),
-                                     (2, 0, -1)
-                                 ]))
+  @parameterized.product(
+      diagonal_axes=[
+          (),
+          (0,),
+          (0, 1),
+          (0, 1, 2),
+          (0, 1, 2, 3),
+          (-1,),
+          (-2,),
+          (0, -1),
+          (1, -2),
+          (2, 3),
+          (3, 0, 2)
+      ],
+      trace_axes=[
+          (),
+          (0,),
+          (0, 1),
+          (-1,),
+          (1,),
+          (0, -1),
+          (-1, -2),
+          (0, 1, 2, 3),
+          (3, 1, 2, 0),
+          (1, 2, 3),
+          (-3, -2),
+          (-3, -1),
+          (-2, -4),
+          (2, 0, -1)
+      ]
+  )
   def testAxes(self, diagonal_axes, trace_axes):
     key = random.PRNGKey(0)
     key, self_split, other_split = random.split(key, 3)
@@ -351,11 +333,9 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
     if 0 not in _trace_axes and 0 not in _diagonal_axes:
       self._compare_kernels(x1, x2, ntk_fns, ntk_fns_vmapped, nngp_fn)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name': '_same_inputs={}'.format(same_inputs),
-          'same_inputs': same_inputs
-      } for same_inputs in [True, False]))
+  @parameterized.product(
+      same_inputs=[True, False]
+  )
   def test_parallel_in_out(self, same_inputs):
     rng = random.PRNGKey(0)
     input_key1, input_key2, net_key = random.split(rng, 3)
@@ -401,11 +381,9 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
     self.assertEqual(nngp[1].shape, (3, 3 if same_inputs else 4))
     self._compare_kernels(x1, x2, ntk_fns, ntk_fns_vmapped, nngp_fn)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name': '_same_inputs={}'.format(same_inputs),
-          'same_inputs': same_inputs
-      } for same_inputs in [True, False]))
+  @parameterized.product(
+      same_inputs=[True, False]
+  )
   def test_parallel_nested(self, same_inputs):
     rng = random.PRNGKey(0)
     input_key1, input_key2, net_key = random.split(rng, 3)
@@ -462,11 +440,9 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
     self.assertEqual(nngp[0][1].shape, nngp_shape)
     self.assertEqual(nngp[1].shape, nngp_shape)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name': '_same_inputs={}'.format(same_inputs),
-          'same_inputs': same_inputs
-      } for same_inputs in [True, False]))
+  @parameterized.product(
+      same_inputs=[True, False]
+  )
   def test_vmap_axes(self, same_inputs):
     n1, n2 = 3, 4
     c1, c2, c3 = 9, 5, 7
@@ -867,133 +843,104 @@ def _compare_ntks(
 
 class StructuredDerivativesTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              '_same_inputs={}_f={}_shapes={}_p_list={}_x_list={}_dtype={}'
-              '_do_jit={}_do_remat={}_j_rules={}_s_rules={}_fwd={}'.format(
-                  same_inputs,
-                  f_name,
-                  shapes,
-                  p_list,
-                  x_list,
-                  dtype,
-                  do_jit,
-                  do_remat,
-                  _j_rules,
-                  _s_rules,
-                  _fwd
-              ),
-          'same_inputs': same_inputs,
-          'f_name': f_name,
-          'f': f,
-          'shapes': shapes,
-          'p_list': p_list,
-          'x_list': x_list,
-          'dtype': dtype,
-          'do_jit': do_jit,
-          'do_remat': do_remat,
-          '_j_rules': _j_rules,
-          '_s_rules': _s_rules,
-          '_fwd': _fwd
-      }
-                                 for _j_rules in [
-                                     True,
-                                     False
-                                 ]
-                                 for _s_rules in [
-                                     True,
-                                     False
-                                 ]
-                                 for _fwd in [
-                                     True,
-                                     False,
-                                     None,
-                                 ]
-                                 for same_inputs in [
-                                     # True,
-                                     False
-                                 ]
-                                 for shapes in [
-                                     # [[p_i.shape for i in range(num_params)],
-                                     #  [x1.shape, x2.shape]]
-                                     [[(3, 3), (3, 3), (3, 3)],
-                                      [(3, 3), (3, 3)]],
-                                     [[(5, 1, 2), (2, 1, 3), (4, 3, 1)],
-                                      [(2, 3), (3, 2)]],
-                                     [[(2, 3), (3, 2, 1), (2, 3, 5)],
-                                      [(2, 3), (3, 2)]],
-                                     [[(2, 2), (2, 2), (2, 2)],
-                                      [(3, 3), (3, 3)]],
-                                     [[(3, 3), (3, 3), (3, 3)],
-                                      [(3, 3), (2, 3)]],
-                                     [[(3, 2), (2, 3), (3, 1)],
-                                      [(1,), (1,)]],
-                                     [[(3, 2), (2, 3), (3, 1)],
-                                      [(2,), (1,)]],
-                                     [[(2, 1), (2, 4), (4, 1)],
-                                      [(2, 2), (2, 2)]],
-                                     [[(2, 1), (2, 4), (4, 1)],
-                                      [(1, 2), (2, 2)]],
-                                     [[(5,), (1, 5), (5, 1)],
-                                      [(5, 5), (5, 5)]],
-                                     [[(5,), (1, 5), (5, 1)],
-                                      [(4, 5), (5, 5)]],
-                                     [[(1, 1), (0, 0), (0, 1)],
-                                      [(1, 0), (1, 0)]],
-                                     [[(1, 1), (0, 0), (0, 1)],
-                                      [(2, 0), (2, 0)]],
-                                     [[(1, 2), (2, 0), (3, 1)],
-                                      [(1, 4), (1, 4)]],
-                                     [[(1, 2), (2, 0), (3, 1)],
-                                      [(1, 4), (2, 4)]],
-                                     [[(3, 2), (2, 1), (3, 1)],
-                                      [(1, 4), (1, 3)]],
-                                     [[(3, 2), (2, 1), (3, 1)],
-                                      [(1, 4), (2, 4)]],
-                                     [[(), (2, 1), (3, 1)],
-                                      [(1,), (2,)]],
-                                     [[(1,), (1,), (1,)],
-                                      [(2,), (2,)]],
-                                     [[(0,), (0,), (0,)],
-                                      [(0,), (0,)]],
-                                     [[(), (), ()],
-                                      [(), ()]],
-                                     [[(), (), ()],
-                                      [(2,), (1,)]],
-                                     [[(2,), (), (1,)],
-                                      [(0,), (2,)]],
-                                     [[(2,), (0, 3), (1,)],
-                                      [(3, 2), (2, 1)]]
-                                 ]
-                                 for p_list in [
-                                     True,
-                                     # False
-                                 ]
-                                 for x_list in [
-                                     # True,
-                                     False
-                                 ]
-                                 for dtype in [
-                                     np.float32,
-                                     # np.float64,
-                                     # np.float16,
-                                 ]
-                                 for do_jit in [
-                                     True,
-                                     # False
-                                 ]
-                                 for do_remat in [
-                                     # TODO(romann): support remat
-                                     # True,
-                                     False
-                                 ]
-                                 for f_name, f in _functions.items()))
+  @parameterized.product(
+      _j_rules=[
+          True,
+          False
+      ],
+      _s_rules=[
+          True,
+          False
+      ],
+      _fwd=[
+          True,
+          False,
+          None,
+      ],
+      same_inputs=[
+          # True,
+          False
+      ],
+      shapes=[
+          # [[p_i.shape for i in range(num_params)],
+          #  [x1.shape, x2.shape]]
+          [[(3, 3), (3, 3), (3, 3)],
+           [(3, 3), (3, 3)]],
+          [[(5, 1, 2), (2, 1, 3), (4, 3, 1)],
+           [(2, 3), (3, 2)]],
+          [[(2, 3), (3, 2, 1), (2, 3, 5)],
+           [(2, 3), (3, 2)]],
+          [[(2, 2), (2, 2), (2, 2)],
+           [(3, 3), (3, 3)]],
+          [[(3, 3), (3, 3), (3, 3)],
+           [(3, 3), (2, 3)]],
+          [[(3, 2), (2, 3), (3, 1)],
+           [(1,), (1,)]],
+          [[(3, 2), (2, 3), (3, 1)],
+           [(2,), (1,)]],
+          [[(2, 1), (2, 4), (4, 1)],
+           [(2, 2), (2, 2)]],
+          [[(2, 1), (2, 4), (4, 1)],
+           [(1, 2), (2, 2)]],
+          [[(5,), (1, 5), (5, 1)],
+           [(5, 5), (5, 5)]],
+          [[(5,), (1, 5), (5, 1)],
+           [(4, 5), (5, 5)]],
+          [[(1, 1), (0, 0), (0, 1)],
+           [(1, 0), (1, 0)]],
+          [[(1, 1), (0, 0), (0, 1)],
+           [(2, 0), (2, 0)]],
+          [[(1, 2), (2, 0), (3, 1)],
+           [(1, 4), (1, 4)]],
+          [[(1, 2), (2, 0), (3, 1)],
+           [(1, 4), (2, 4)]],
+          [[(3, 2), (2, 1), (3, 1)],
+           [(1, 4), (1, 3)]],
+          [[(3, 2), (2, 1), (3, 1)],
+           [(1, 4), (2, 4)]],
+          [[(), (2, 1), (3, 1)],
+           [(1,), (2,)]],
+          [[(1,), (1,), (1,)],
+           [(2,), (2,)]],
+          [[(0,), (0,), (0,)],
+           [(0,), (0,)]],
+          [[(), (), ()],
+           [(), ()]],
+          [[(), (), ()],
+           [(2,), (1,)]],
+          [[(2,), (), (1,)],
+           [(0,), (2,)]],
+          [[(2,), (0, 3), (1,)],
+           [(3, 2), (2, 1)]]
+      ],
+      p_list=[
+          True,
+          # False
+      ],
+      x_list=[
+          # True,
+          False
+      ],
+      dtype=[
+          np.float32,
+          # np.float64,
+          # np.float16,
+      ],
+      do_jit=[
+          True,
+          # False
+      ],
+      do_remat=[
+          # TODO(romann): support remat
+          # True,
+          False
+      ],
+      f_name=list(_functions.keys())
+  )
   def test_function(
       self,
       same_inputs,
       f_name,
-      f,
       shapes,
       p_list,
       x_list,
@@ -1041,7 +988,7 @@ class StructuredDerivativesTest(test_utils.NeuralTangentsTestCase):
         self,
         do_jit=do_jit,
         do_remat=do_remat,
-        f=f,
+        f=_functions[f_name],
         p=p,
         x1=x1,
         x2=x2,
@@ -1326,55 +1273,36 @@ def _get_mixer_b16_config() -> Dict[str, Any]:
   )
 
 
-@parameterized.named_parameters(
-    test_utils.cases_from_list({
-        'testcase_name':
-            '_same_inputs={}_do_jit={}_do_remat={}_dtype={}_j_rules={}_'
-            's_rules={}_fwd={}'.format(
-                same_inputs,
-                do_jit,
-                do_remat,
-                dtype,
-                j_rules,
-                s_rules,
-                fwd
-            ),
-        'same_inputs': same_inputs,
-        'do_jit': do_jit,
-        'do_remat': do_remat,
-        'dtype': dtype,
-        'j_rules': j_rules,
-        's_rules': s_rules,
-        'fwd': fwd
-    }
-                               for j_rules in [
-                                   True,
-                                   False
-                               ]
-                               for s_rules in [
-                                   True,
-                                   # False
-                               ]
-                               for fwd in [
-                                   True,
-                                   False,
-                                   None,
-                               ]
-                               for same_inputs in [
-                                   # True,
-                                   False
-                               ]
-                               for do_jit in [
-                                   True,
-                                   # False
-                               ]
-                               for do_remat in [
-                                   # True,
-                                   False
-                               ]
-                               for dtype in [
-                                   jax.dtypes.canonicalize_dtype(np.float64),
-                               ]))
+@parameterized.product(
+  j_rules=[
+      True,
+      False
+  ],
+  s_rules=[
+      True,
+      # False
+  ],
+  fwd=[
+      True,
+      False,
+      None,
+  ],
+  same_inputs=[
+      # True,
+      False
+  ],
+  do_jit=[
+      True,
+      # False
+  ],
+  do_remat=[
+      # True,
+      False
+  ],
+  dtype=[
+      jax.dtypes.canonicalize_dtype(np.float64),
+  ]
+)
 class FlaxOtherTest(test_utils.NeuralTangentsTestCase):
 
   def test_mlp(self, same_inputs, do_jit, do_remat, dtype, j_rules,
