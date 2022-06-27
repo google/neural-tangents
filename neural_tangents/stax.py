@@ -19,7 +19,7 @@ This library contains layers mimicking those in
 
 1) Instead of `(init_fn, apply_fn)` tuple, layers return a triple
 `(init_fn, apply_fn, kernel_fn)`, where the added `kernel_fn` maps a
-:class:`~neural_tangents..Kernel` to a new :class:`~neural_tangents.Kernel`, and
+:class:`~neural_tangents.Kernel` to a new :class:`~neural_tangents.Kernel`, and
 represents the change in the analytic NTK and NNGP kernels
 (:attr:`~neural_tangents.Kernel.nngp`, :attr:`~neural_tangents.Kernel.ntk`).
 These functions are chained / stacked together within the :obj:`serial` or
@@ -38,7 +38,7 @@ neural networks with a standard parameterization
 
 3) Some functionality may be missing (e.g.
 :obj:`jax.example_libraries.stax.BatchNorm`), and some may be
-present only in our library (e.g. :attr:`Padding.CIRCULAR` padding,
+present only in our library (e.g. :attr:`~Padding.CIRCULAR` padding,
 :obj:`LayerNorm`, :obj:`GlobalAvgPool`, :obj:`GlobalSelfAttention`, flexible
 batch and channel axes etc.).
 

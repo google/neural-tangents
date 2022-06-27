@@ -310,7 +310,7 @@ def Aggregate(
     input samples have different `n_edges`. Note that this means you can't use
     negative indexing to specify vertices.
 
-    This implementation uses `jax.ops.segment_sum` instead of matrix
+    This implementation uses :obj:`jax.ops.segment_sum` instead of matrix
     multiplication. This makes `apply_fn` cost `O(V + E)` memory and `O(V + E)`
     time, and `kernel_fn` cost `O(V^2)` memory and `O(V^2 + E^2 + V * E)` time.
     This is beneficial for sparse graphs, i.e. `E << V^2`, but detrimental for
@@ -426,9 +426,9 @@ def Aggregate(
     implementation:
       `"DENSE"` or `"SPARSE"`, specifying which implementation to use.
       `"DENSE"` uses matrix multiplications and is recommended for dense graphs
-      (`E ~> O(V^1.5)`), while `"SPARSE"` uses `jax.ops.segment_sum` and is
+      (`E ~> O(V^1.5)`), while `"SPARSE"` uses :obj:`jax.ops.segment_sum` and is
       recommended for sparse graphs (`E ~< O(V)`). Note that different
-      `implementation`s require different `pattern` array format - see the
+      `implementation` require different `pattern` array format - see the
       :obj:`Aggregate` layer docstring above for details.
 
   Returns:
@@ -960,16 +960,16 @@ def Conv(
 
     dimension_numbers:
       Specifies which axes should be convolved over. Should match the
-      specification in `jax.lax.conv_general_dilated`.
+      specification in :obj:`jax.lax.conv_general_dilated`.
 
     parameterization:
       Either `"ntk"` or `"standard"`. These parameterizations are the direct
       analogues for convolution of the corresponding parameterizations for
-      `Dense` layers.
+      :obj:`Dense` layers.
 
     s:
       A tuple of integers, a direct convolutional analogue of the respective
-      parameters for the `Dense` layer.
+      parameters for the :obj:`Dense` layer.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -1020,16 +1020,16 @@ def ConvTranspose(
 
     dimension_numbers:
       Specifies which axes should be convolved over. Should match the
-      specification in `jax.lax.conv_general_dilated`.
+      specification in :obj:`jax.lax.conv_general_dilated`.
 
     parameterization:
       Either `"ntk"` or `"standard"`. These parameterizations are the direct
       analogues for convolution of the corresponding parameterizations for
-      `Dense` layers.
+      :obj:`Dense` layers.
 
     s:
       A tuple of integers, a direct convolutional analogue of the respective
-      parameters for the `Dense` layer.
+      parameters for the :obj:`Dense` layer.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -1082,16 +1082,16 @@ def ConvLocal(
 
     dimension_numbers:
       Specifies which axes should be convolved over. Should match the
-      specification in `jax.lax.conv_general_dilated`.
+      specification in :obj:`jax.lax.conv_general_dilated`.
 
     parameterization:
       Either `"ntk"` or `"standard"`. These parameterizations are the direct
       analogues for convolution of the corresponding parameterizations for
-      `Dense` layers.
+      :obj:`Dense` layers.
 
     s:
       A tuple of integers, a direct convolutional analogue of the respective
-      parameters for the `Dense` layer.
+      parameters for the :obj:`Dense` layer.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -1142,7 +1142,7 @@ def _Conv(
 
     dimension_numbers:
       Specifies which axes should be convolved over. Should match the
-      specification in `jax.lax.dot_general_dilated`.
+      specification in :obj:`jax.lax.dot_general_dilated`.
 
     parameterization:
       Either `"ntk"` or `"standard"`. These parameterizations are the direct
@@ -1151,7 +1151,7 @@ def _Conv(
 
     s:
       A tuple of integers, a direct convolutional analogue of the respective
-      parameters for the `Dense` layer.
+      parameters for the :obj:`Dense` layer.
 
     transpose:
       `True` to use transpose convolution.

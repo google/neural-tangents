@@ -54,8 +54,9 @@ def FanOut(num: int) -> InternalLayer:
 def FanInSum() -> InternalLayerMasked:
   """Fan-in sum.
 
-  This layer takes a number of inputs (e.g. produced by `FanOut`) and sums the
-  inputs to produce a single output.
+  This layer takes a number of inputs (e.g. produced by
+  :obj:`~neural_tangents.stax.FanOut`) and sums the inputs to produce a single
+  output. Based on :obj:`jax.example_libraries.stax.FanInSum`.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -116,8 +117,9 @@ def FanInSum() -> InternalLayerMasked:
 def FanInProd() -> InternalLayerMasked:
   """Fan-in product.
 
-  This layer takes a number of inputs (e.g. produced by `FanOut`) and
-  elementwise-multiplies the inputs to produce a single output.
+  This layer takes a number of inputs (e.g. produced by
+  :obj:`~neural_tangents.stax.FanOut`) and elementwise-multiplies the inputs to
+  produce a single output.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -182,7 +184,9 @@ def FanInProd() -> InternalLayerMasked:
 def FanInConcat(axis: int = -1) -> InternalLayerMasked:
   """Fan-in concatenation.
 
-  Based on :obj:`jax.example_libraries.stax.FanInConcat`.
+  This layer takes a number of inputs (e.g. produced by
+  :obj:`~neural_tangents.stax.FanOut`) and concatenates the inputs to produce a
+  single output. Based on :obj:`jax.example_libraries.stax.FanInConcat`.
 
   Args:
     axis: Specifies the axis along which input tensors should be concatenated.

@@ -962,10 +962,6 @@ class StructuredDerivativesTest(test_utils.NeuralTangentsTestCase):
     p = [random.normal(random.PRNGKey(i), s, dtype) for i, s in
          enumerate(shapes[0])]
 
-    if f_name == 'lax.map_1' and p[1].size == 0:
-      # TODO(romann): file an XLA:GPU bug.
-      raise absltest.SkipTest('GPU crashes on this case.')
-
     k1, k2 = random.split(random.PRNGKey(len(shapes)))
     x1 = random.normal(k1, shapes[1][0], dtype)
     x2 = None if same_inputs else random.normal(k2, shapes[1][1], dtype)
@@ -1373,12 +1369,8 @@ class FlaxOtherTest(test_utils.NeuralTangentsTestCase):
     x2 = None if same_inputs else random.normal(k2, (1, 1), dtype)
     p = model.init(ki, x1, z_rng=kzi)
 
-    # TODO(romann): poor agreement between Jacobian contraction and
-    #   structured derivatives on TPU here.
-    atol = 3. if jax.default_backend() == 'tpu' else None
-
     _compare_ntks(self, do_jit, do_remat, partial(model.apply, z_rng=kza),
-                  p, x1, x2, j_rules, s_rules, fwd, atol=atol)
+                  p, x1, x2, j_rules, s_rules, fwd)
 
   def test_resnet18(self, same_inputs, do_jit, do_remat, dtype, j_rules,
                     s_rules, fwd):

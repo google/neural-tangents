@@ -535,7 +535,7 @@ to the list!
 
 If you use the code in a publication, please cite our papers:
 
-```
+```bibtex
 # Infinite width NTK/NNGP:
 @inproceedings{neuraltangents2020,
     title={Neural Tangents: Fast and Easy Infinite Neural Networks in Python},

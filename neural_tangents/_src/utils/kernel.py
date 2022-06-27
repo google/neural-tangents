@@ -284,7 +284,7 @@ class Kernel:
       is_lhs: bool,
       dimension_numbers: lax.DotDimensionNumbers
   ) -> 'Kernel':
-    """Return covariances of `lax.dot_general` of `x1/2` with `other1/2`."""
+    """Covariances of :obj:`jax.lax.dot_general` of `x1/2` with `other1/2`."""
     if other1 is None and other2 is None:
       return self
 
