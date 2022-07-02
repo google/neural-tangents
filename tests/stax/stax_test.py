@@ -20,7 +20,6 @@ import random as prandom
 from typing import Tuple
 
 from absl.testing import absltest
-from absl.testing import parameterized
 from jax import default_backend
 from jax import jit
 from jax import random
@@ -362,7 +361,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
           use_pooling):
       raise absltest.SkipTest('FC models do not have these parameters.')
 
-  @parameterized.product(
+  @test_utils.product(
       model=MODELS,
       width=WIDTHS,
       phi=ACTIVATIONS,
@@ -407,7 +406,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     _check_agreement_with_empirical(
         self, net, same_inputs, use_dropout, is_ntk, RTOL, 1.2)
 
-  @parameterized.product(
+  @test_utils.product(
       model=MODELS,
       width=WIDTHS,
       same_inputs=[False],
@@ -454,7 +453,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     _check_agreement_with_empirical(self, net, same_inputs, use_dropout, is_ntk,
                                     0.07)
 
-  @parameterized.product(
+  @test_utils.product(
       width=WIDTHS,
       same_inputs=[False],
       is_ntk=[False, True],
@@ -535,7 +534,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     cov2 = np.broadcast_to(np.expand_dims(ker_unnorm, 0), ker.cov2.shape)
     self.assertAllClose((nngp, cov1, cov2), (ker.nngp, ker.cov1, ker.cov2))
 
-  @parameterized.product(
+  @test_utils.product(
       model=MODELS,
       width=WIDTHS,
       same_inputs=[True, False],
@@ -576,7 +575,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
                    pool_type, layer_norm, parameterization, 1, use_dropout)
     _check_agreement_with_empirical(self, net, same_inputs, use_dropout, is_ntk)
 
-  @parameterized.product(
+  @test_utils.product(
       act=['erf', 'relu'],
       do_stabilize=[True, False],
       kernel=['nngp', 'ntk']
@@ -648,7 +647,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     composed_ker_out = composed_ker_fn(x1, x2)
     self.assertAllClose(ker_out, composed_ker_out)
 
-  @parameterized.product(
+  @test_utils.product(
       avg_pool=[True, False],
       same_inputs=[True, False]
   )
@@ -686,7 +685,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
 
 class ParameterizationTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.product(
+  @test_utils.product(
       get=['nngp', 'ntk'],
       s=[2**9, 2**8, 2**7],
       depth=[0, 1, 2],
@@ -731,7 +730,7 @@ class ParameterizationTest(test_utils.NeuralTangentsTestCase):
     _check_agreement_with_empirical(
         self, net, same_inputs, False, get == 'ntk', rtol=0.02, atol=10)
 
-  @parameterized.product(
+  @test_utils.product(
       model=MODELS,
       width=[2**11],
       same_inputs=[False],
@@ -806,7 +805,7 @@ class ParameterizationTest(test_utils.NeuralTangentsTestCase):
 
 class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.product(
+  @test_utils.product(
       same_inputs=[True, False],
       kernel_type=['ntk']
   )
@@ -842,7 +841,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
                                      kernel_fn_empirical(x1, x2, kernel_type),
                                      rtol)
 
-  @parameterized.product(
+  @test_utils.product(
       same_inputs=[True, False],
       kernel_type=['ntk']
   )
@@ -875,7 +874,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
                                      kernel_fn_empirical(x1, x2, kernel_type),
                                      rtol)
 
-  @parameterized.product(
+  @test_utils.product(
       same_inputs=[True, False],
       kernel_type=['ntk']
   )
@@ -924,7 +923,7 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
 
     K_readout_fn(K_readin_fn(x1, x2))
 
-  @parameterized.product(
+  @test_utils.product(
       same_inputs=[True, False],
       kernel_type=['ntk']
   )

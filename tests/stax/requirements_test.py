@@ -19,7 +19,6 @@ import itertools
 import random as prandom
 
 from absl.testing import absltest
-from absl.testing import parameterized
 from jax import default_backend
 from jax import jit
 from jax import random
@@ -40,7 +39,7 @@ test_utils.update_test_tolerance()
 prandom.seed(1)
 
 
-@parameterized.product(
+@test_utils.product(
     same_inputs=[False, True],
     readout=[
         stax.Flatten(),
@@ -132,7 +131,7 @@ class DiagonalClassTest(test_utils.NeuralTangentsTestCase):
           self.assertEqual(ab_c, _ab_c)
 
 
-@parameterized.product(
+@test_utils.product(
     same_inputs=[True, False]
 )
 class InputReqTest(test_utils.NeuralTangentsTestCase):
@@ -240,7 +239,7 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
 
 class MaskingTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.product(
+  @test_utils.product(
       same_inputs=[False],
       get=['ntk'],
       concat=[None, 0, 1],
@@ -314,7 +313,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
     empirical = kernel_fn_mc(x1, x2, get=get, mask_constant=mask_constant)
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
-  @parameterized.product(
+  @test_utils.product(
       proj=['flatten', 'avg'],
       same_inputs=[False],
       get=['ntk'],

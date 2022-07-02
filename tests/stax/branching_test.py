@@ -17,7 +17,6 @@
 import random as prandom
 
 from absl.testing import absltest
-from absl.testing import parameterized
 from jax import default_backend
 from jax import random
 from jax.config import config
@@ -47,7 +46,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
         2: stax.Abs()
     }[i % 3]
 
-  @parameterized.product(
+  @test_utils.product(
       same_inputs=[False],
       axis=[0, 1],
       n_branches=[3],
@@ -146,7 +145,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
     empirical = kernel_fn_mc(X0_1, X0_2, get=get)
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
-  @parameterized.product(
+  @test_utils.product(
       same_inputs=[False],
       axis=[0, 1, 2, 3],
       n_branches=[2],

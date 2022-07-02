@@ -15,7 +15,6 @@
 """Tests for `neural_tangents/_src/monte_carlo.py`."""
 
 from absl.testing import absltest
-from absl.testing import parameterized
 import jax
 from jax import random
 from jax.config import config
@@ -67,7 +66,7 @@ def _get_inputs_and_model(width=1, n_classes=2, use_conv=True):
 
 class MonteCarloTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.product(
+  @test_utils.product(
       batch_size=BATCH_SIZES,
       device_count=DEVICE_COUNTS,
       store_on_device=STORE_ON_DEVICE,
@@ -93,7 +92,7 @@ class MonteCarloTest(test_utils.NeuralTangentsTestCase):
     one_sample_batch = sample_once_batch_fn(x1, x2, key, get)
     self.assertAllClose(one_sample, one_sample_batch)
 
-  @parameterized.product(
+  @test_utils.product(
       batch_size=BATCH_SIZES,
       device_count=DEVICE_COUNTS,
       store_on_device=STORE_ON_DEVICE,
@@ -118,7 +117,7 @@ class MonteCarloTest(test_utils.NeuralTangentsTestCase):
     one_batch_sample = batch_sample_once_fn(x1, x2, key, get)
     self.assertAllClose(one_sample, one_batch_sample)
 
-  @parameterized.product(
+  @test_utils.product(
       batch_size=BATCH_SIZES,
       device_count=DEVICE_COUNTS,
       store_on_device=STORE_ON_DEVICE
@@ -143,7 +142,7 @@ class MonteCarloTest(test_utils.NeuralTangentsTestCase):
 
     test_utils.assert_close_matrices(self, ker_analytic, ker_empirical, 2e-2)
 
-  @parameterized.product(
+  @test_utils.product(
       batch_size=BATCH_SIZES,
       device_count=DEVICE_COUNTS,
       store_on_device=STORE_ON_DEVICE
@@ -169,7 +168,7 @@ class MonteCarloTest(test_utils.NeuralTangentsTestCase):
 
     test_utils.assert_close_matrices(self, ker_analytic, ker_empirical, 2e-2)
 
-  @parameterized.product(
+  @test_utils.product(
       batch_size=BATCH_SIZES,
       device_count=DEVICE_COUNTS,
       store_on_device=STORE_ON_DEVICE,
@@ -240,7 +239,7 @@ class MonteCarloTest(test_utils.NeuralTangentsTestCase):
     self.assertAllClose(ker_analytic_12, s_12, atol=2., rtol=2.)
     self.assertAllClose(ker_analytic_12, ker_analytic_34)
 
-  @parameterized.product(
+  @test_utils.product(
       same_inputs=[True, False],
       batch_size=[1, 2]
   )

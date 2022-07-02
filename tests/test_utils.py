@@ -15,10 +15,11 @@
 """Utilities for testing."""
 
 import dataclasses
+import itertools
 import logging
 import os
-from typing import Dict, Sequence, Tuple, Optional, Callable
 from types import ModuleType
+from typing import Callable, Dict, Optional, Sequence, Tuple
 
 from absl import flags
 from absl.testing import parameterized
@@ -132,7 +133,7 @@ def _tolerance(dtype: onp.dtype, tol: Optional[float] = None) -> float:
 _CACHED_INDICES: Dict[int, Sequence[int]] = {}
 
 
-def cases_from_list(xs):
+def _cases_from_list(xs):
   xs = list(xs)
   n = len(xs)
   if n < FLAGS.nt_num_generated_cases:
@@ -145,6 +146,88 @@ def cases_from_list(xs):
     rng = onp.random.RandomState(42)
     _CACHED_INDICES[n] = indices = rng.permutation(n)
   return [xs[i] for i in indices[:k]]
+
+
+def product(*kwargs_seqs, **testgrid):
+  """Test case decorator to randomly subset a cartesian product of parameters.
+
+  Forked from `absltest.parameterized.product`.
+
+  Args:
+    *kwargs_seqs: Each positional parameter is a sequence of keyword arg dicts;
+      every test case generated will include exactly one kwargs dict from each
+      positional parameter; these will then be merged to form an overall list
+      of arguments for the test case.
+    **testgrid: A mapping of parameter names and their possible values. Possible
+      values should given as either a list or a tuple.
+
+  Raises:
+    NoTestsError: Raised when the decorator generates no tests.
+
+  Returns:
+     A test generator to be handled by TestGeneratorMetaclass.
+  """
+
+  for name, values in testgrid.items():
+    assert isinstance(values, (list, tuple)), (
+        'Values of {} must be given as list or tuple, found {}'.format(
+            name, type(values)))
+
+  prior_arg_names = set()
+  for kwargs_seq in kwargs_seqs:
+    assert ((isinstance(kwargs_seq, (list, tuple))) and
+            all(isinstance(kwargs, dict) for kwargs in kwargs_seq)), (
+                'Positional parameters must be a sequence of keyword arg'
+                'dicts, found {}'
+                .format(kwargs_seq))
+    if kwargs_seq:
+      arg_names = set(kwargs_seq[0])
+      assert all(set(kwargs) == arg_names for kwargs in kwargs_seq), (
+          'Keyword argument dicts within a single parameter must all have the '
+          'same keys, found {}'.format(kwargs_seq))
+      assert not (arg_names & prior_arg_names), (
+          'Keyword argument dict sequences must all have distinct argument '
+          'names, found duplicate(s) {}'
+          .format(sorted(arg_names & prior_arg_names)))
+      prior_arg_names |= arg_names
+
+  assert not (prior_arg_names & set(testgrid)), (
+      'Arguments supplied in kwargs dicts in positional parameters must not '
+      'overlap with arguments supplied as named parameters; found duplicate '
+      'argument(s) {}'.format(sorted(prior_arg_names & set(testgrid))))
+
+  # Convert testgrid into a sequence of sequences of kwargs dicts and combine
+  # with the positional parameters.
+  # So foo=[1,2], bar=[3,4] --> [[{foo: 1}, {foo: 2}], [{bar: 3, bar: 4}]]
+  testgrid = (tuple({k: v} for v in vs) for k, vs in testgrid.items())
+  testgrid = tuple(kwargs_seqs) + tuple(testgrid)
+
+  # Create all possible combinations of parameters as a cartesian product
+  # of parameter values.
+  testcases = [
+      dict(itertools.chain.from_iterable(case.items()
+                                         for case in cases))
+      for cases in itertools.product(*testgrid)
+  ]
+  return parameters(testcases)
+
+
+def parameters(testcases):
+  """A decorator for parameterized tests randomly sampled from the list.
+
+  Adapted from `absltest.parameterized.parameters`.
+
+  Args:
+    testcases: an iterable of test cases.
+
+  Raises:
+    NoTestsError: Raised when the decorator generates no tests.
+
+  Returns:
+     A test generator to be handled by TestGeneratorMetaclass.
+  """
+  subset = _cases_from_list(testcases)
+  return parameterized.parameters(subset)
 
 
 class NeuralTangentsTestCase(parameterized.TestCase):

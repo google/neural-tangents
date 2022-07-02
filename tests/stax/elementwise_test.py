@@ -18,7 +18,6 @@ import itertools
 import random as prandom
 
 from absl.testing import absltest
-from absl.testing import parameterized
 from jax import default_backend
 from jax import grad, jacfwd, jacrev, jit, jvp, value_and_grad
 from jax import random
@@ -26,8 +25,8 @@ from jax.config import config
 import jax.numpy as np
 import neural_tangents as nt
 from neural_tangents import stax
-from tests import test_utils
 from neural_tangents._src.empirical import _DEFAULT_TESTING_NTK_IMPLEMENTATION
+from tests import test_utils
 
 
 config.parse_flags_with_absl()
@@ -135,7 +134,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
       test_utils.assert_close_matrices(self, analytic_kernel,
                                        direct_rbf_kernel, rtol)
 
-  @parameterized.product(
+  @test_utils.product(
       model=[
           'fc',
           'conv-pool',
@@ -187,11 +186,11 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
       raise NotImplementedError(f'Activation {phi_name} is not implemented.')
     self._test_activation(activation, same_inputs, model, get)
 
-  @parameterized.product(
+  @test_utils.product(
       model=[
-         'fc',
-         'conv-pool',
-         'conv-flatten'
+          'fc',
+          'conv-pool',
+          'conv-flatten'
       ],
       same_inputs=[False, True],
       get=['nngp', 'ntk'],
@@ -202,7 +201,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
     self._test_activation(activation, same_inputs, model, get,
                           rbf_gamma=gamma)
 
-  @parameterized.product(
+  @test_utils.product(
       a=[-0.5, 0.25],
       b=[-0.5, -0.1, 0.1],
       phi=[stax.Gaussian, stax.Exp],
@@ -283,7 +282,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
     k_manual = kernel_fn_manual(x1, x2)
     self.assertAllClose(k_manual, k)
 
-  @parameterized.product(
+  @test_utils.product(
       same_inputs=[False, True],
       degree=[1, 2, 3, 4, 5, 6],
       get=['ntk', 'nngp'],
@@ -321,7 +320,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
 
 class ElementwiseTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.product(
+  @test_utils.product(
       phi=[
           stax.Identity(),
           stax.Erf(),
@@ -396,7 +395,7 @@ class ElementwiseTest(test_utils.NeuralTangentsTestCase):
 
 class ElementwiseNumericalTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.product(
+  @test_utils.product(
       model=[
           'fc',
           'conv-pool',
@@ -453,7 +452,7 @@ class ElementwiseNumericalTest(test_utils.NeuralTangentsTestCase):
                                      numerical_activation_kernel, rtol)
 
 
-@parameterized.product(
+@test_utils.product(
     same_inputs=[True, False],
     do_stabilize=[True, False],
 )
@@ -557,7 +556,7 @@ class ABReluTest(test_utils.NeuralTangentsTestCase):
 
 class AutodiffTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.product(
+  @test_utils.product(
       get=[
           'ntk',
           'nngp'
@@ -650,7 +649,7 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
       assert_close(np.moveaxis(k_fwd_1, (0, 2, 4), (1, 3, 5)), k_fwd_10)
       assert_close(np.moveaxis(k_rev_1, (0, 2, 4), (1, 3, 5)), k_rev_10)
 
-  @parameterized.product(
+  @test_utils.product(
       get=[
           'ntk',
           'nngp'
@@ -851,7 +850,7 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
                                        rtol=0.05,
                                        atol=10.)
 
-  @parameterized.product(
+  @test_utils.product(
       architecture=[
           'conv',
           'wrn'

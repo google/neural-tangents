@@ -15,7 +15,6 @@
 """Tests for `neural_tangents/_src/batching.py`."""
 
 from absl.testing import absltest
-from absl.testing import parameterized
 
 from functools import partial
 from jax import jit
@@ -158,7 +157,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     kernel_fn = kernel_fn(key, input_shape, network, **kwargs)
     return data_other, data_self, kernel_fn
 
-  @parameterized.product(
+  @test_utils.product(
       train_size=TRAIN_SIZES,
       test_size=TEST_SIZES,
       input_shape=INPUT_SHAPES,
@@ -189,7 +188,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
 
   # We also exclude tests for dropout + parallel. It is not clear what is the
   # best way to handle this case.
-  @parameterized.product(
+  @test_utils.product(
       train_size=TRAIN_SIZES,
       test_size=TEST_SIZES,
       input_shape=INPUT_SHAPES,
@@ -217,7 +216,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
                                  data_other, True)
 
-  @parameterized.product(
+  @test_utils.product(
       train_size=TRAIN_SIZES,
       test_size=TEST_SIZES,
       input_shape=INPUT_SHAPES,
@@ -250,7 +249,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
                                  data_other)
 
-  @parameterized.product(
+  @test_utils.product(
       train_size=TRAIN_SIZES,
       test_size=TEST_SIZES,
       input_shape=INPUT_SHAPES,
@@ -334,7 +333,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
       composed_ker_out = composed_ker_out.replace(x1_is_x2=ker_out.x1_is_x2)
     self.assertAllClose(ker_out, composed_ker_out)
 
-  @parameterized.product(
+  @test_utils.product(
       store_on_device=[True, False],
       batch_size=[2, 8]
   )
@@ -349,7 +348,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     test_utils.stub_out_pmap(batching, 2)
     self._test_analytic_kernel_composition(batching._parallel)
 
-  @parameterized.product(
+  @test_utils.product(
       store_on_device=[True, False],
       batch_size=[2, 8]
   )
@@ -428,7 +427,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
           self.assertAllClose(res_1[0][1], res_2[0][1])
           self.assertAllClose(tree_map(broadcast, res_1[1]), res_2[1])
 
-  @parameterized.product(
+  @test_utils.product(
       same_inputs=[True, False]
   )
   def test_parallel_in_out(self, same_inputs):
@@ -483,7 +482,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
         batch_K_readout_fn(batch_K_readin_fn(x1, x2)),
         RTOL)
 
-  @parameterized.product(
+  @test_utils.product(
       same_inputs=[True, False]
   )
   def test_parallel_in_out_empirical(self, same_inputs):
@@ -533,7 +532,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
         batch_kernel_fn(x1, x2, params),
         RTOL)
 
-  @parameterized.product(
+  @test_utils.product(
       same_inputs=[True, False],
       device_count=[-1, 0, 1, 2],
       trace_axes=[(-1,), (1, -1), ()],

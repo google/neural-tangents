@@ -169,7 +169,6 @@ def _resnet(x, blocks_per_layer, classes, filters):
   x = tf.keras.layers.MaxPool2D(pool_size=3, strides=2, name='maxpool')(x)
 
   x = _make_layer(x, filters, blocks_per_layer[0], name='layer1')
-  x = _make_layer(x, 2 * filters, blocks_per_layer[1], stride=2, name='layer2')
 
   x = tf.keras.layers.GlobalAveragePooling2D(name='avgpool')(x)
   initializer = tf.keras.initializers.RandomUniform(-1.0 / (2 * filters)**0.5,
@@ -182,7 +181,7 @@ def _resnet(x, blocks_per_layer, classes, filters):
 
 def _MiniResNet(classes, input_shape, weights):
   inputs = tf.keras.Input(shape=input_shape)
-  outputs = _resnet(inputs, [1, 1, 1, 1], classes=classes, filters=2)
+  outputs = _resnet(inputs, [1, 1, 1, 1], classes=classes, filters=4)
   return tf.keras.Model(inputs=inputs, outputs=outputs)
 
 

@@ -19,7 +19,6 @@ import logging
 import operator
 from typing import Any, Callable, Sequence, Tuple, Optional, Dict, List
 from absl.testing import absltest
-from absl.testing import parameterized
 from flax import linen as nn
 import jax
 from jax import jacobian, lax, remat
@@ -166,7 +165,7 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
     x0 = random.normal(split, (shape[-1], 1))
     return key, params, x0
 
-  @parameterized.product(
+  @test_utils.product(
       shape=TAYLOR_MATRIX_SHAPES
   )
   def testLinearization(self, shape):
@@ -184,7 +183,7 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
                   x0, x, params, do_alter, do_shift_x=do_shift_x),
               f_lin(x, params, do_alter, do_shift_x=do_shift_x))
 
-  @parameterized.product(
+  @test_utils.product(
       shape=TAYLOR_MATRIX_SHAPES
   )
   def testTaylorExpansion(self, shape):
@@ -241,7 +240,7 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
     for i, ntk in ntks_vmapped.items():
       self.assertAllClose(ntk_ref, ntk, err_msg=f'{i} vmapped impl. fails.')
 
-  @parameterized.product(
+  @test_utils.product(
       train_test_network=list(zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)),
       kernel_type=list(KERNELS.keys())
   )
@@ -273,7 +272,7 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
     self._compare_kernels(x1, None, ntk_fns, ntk_fns_vmapped, nngp_fn)
     self._compare_kernels(x1, x2, ntk_fns, ntk_fns_vmapped, nngp_fn)
 
-  @parameterized.product(
+  @test_utils.product(
       diagonal_axes=[
           (),
           (0,),
@@ -333,7 +332,7 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
     if 0 not in _trace_axes and 0 not in _diagonal_axes:
       self._compare_kernels(x1, x2, ntk_fns, ntk_fns_vmapped, nngp_fn)
 
-  @parameterized.product(
+  @test_utils.product(
       same_inputs=[True, False]
   )
   def test_parallel_in_out(self, same_inputs):
@@ -381,7 +380,7 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
     self.assertEqual(nngp[1].shape, (3, 3 if same_inputs else 4))
     self._compare_kernels(x1, x2, ntk_fns, ntk_fns_vmapped, nngp_fn)
 
-  @parameterized.product(
+  @test_utils.product(
       same_inputs=[True, False]
   )
   def test_parallel_nested(self, same_inputs):
@@ -440,7 +439,7 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
     self.assertEqual(nngp[0][1].shape, nngp_shape)
     self.assertEqual(nngp[1].shape, nngp_shape)
 
-  @parameterized.product(
+  @test_utils.product(
       same_inputs=[True, False]
   )
   def test_vmap_axes(self, same_inputs):
@@ -843,7 +842,7 @@ def _compare_ntks(
 
 class StructuredDerivativesTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.product(
+  @test_utils.product(
       _j_rules=[
           True,
           False
@@ -1269,7 +1268,7 @@ def _get_mixer_b16_config() -> Dict[str, Any]:
   )
 
 
-@parameterized.product(
+@test_utils.product(
   j_rules=[
       True,
       False
@@ -1405,7 +1404,7 @@ class FlaxOtherTest(test_utils.NeuralTangentsTestCase):
                   s_rules, fwd)
 
 
-@parameterized.product(
+@test_utils.product(
     j_rules=[
         True,
         False
@@ -1457,7 +1456,7 @@ class FlaxCnnTest(test_utils.NeuralTangentsTestCase):
                   s_rules, fwd, vmap_axes=0)
 
 
-@parameterized.product(
+@test_utils.product(
     j_rules=[
         True,
         False

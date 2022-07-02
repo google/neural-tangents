@@ -22,7 +22,6 @@ from typing import Tuple
 import warnings
 
 from absl.testing import absltest
-from absl.testing import parameterized
 import jax
 from jax import lax
 from jax.config import config
@@ -568,18 +567,16 @@ class JacobianRulesTest(test_utils.NeuralTangentsTestCase):
         for i in structure.out_broadcast:
           self._assert_constant(j=j, axis=i)
 
-  @parameterized.parameters(
-      test_utils.cases_from_list(
-          dict(
-              primitive=primitive,
-              shape=shape,
-              dtype=dtype,
-              params=params,
-          )
-          for shape in _SHAPES for dtype in _DTYPES
-          for primitive in _UNARY_PRIMITIVES.keys()
-          for params in _UNARY_PRIMITIVES[primitive](shape, dtype)
+  @test_utils.parameters(
+      dict(
+          primitive=primitive,
+          shape=shape,
+          dtype=dtype,
+          params=params,
       )
+      for shape in _SHAPES for dtype in _DTYPES
+      for primitive in _UNARY_PRIMITIVES.keys()
+      for params in _UNARY_PRIMITIVES[primitive](shape, dtype)
   )
   def test_unary(self, primitive: Optional[Primitive], shape, dtype, params):
     if primitive == jax._src.dispatch.device_put_p:
@@ -592,21 +589,19 @@ class JacobianRulesTest(test_utils.NeuralTangentsTestCase):
     else:
       self._test_primitive(primitive, [shape], dtype, params)
 
-  @parameterized.parameters(
-      test_utils.cases_from_list(
-          dict(
-              primitive=primitive,
-              shape1=shape1,
-              shape2=shape2,
-              dtype=dtype,
-              params=params
-          )
-          for shape1 in _SHAPES
-          for shape2 in _SHAPES
-          for dtype in _DTYPES
-          for primitive in _BINARY_PRIMITIVES.keys()
-          for params in _BINARY_PRIMITIVES[primitive](shape1, shape2)
+  @test_utils.parameters(
+      dict(
+          primitive=primitive,
+          shape1=shape1,
+          shape2=shape2,
+          dtype=dtype,
+          params=params
       )
+      for shape1 in _SHAPES
+      for shape2 in _SHAPES
+      for dtype in _DTYPES
+      for primitive in _BINARY_PRIMITIVES.keys()
+      for params in _BINARY_PRIMITIVES[primitive](shape1, shape2)
   )
   def test_binary(
       self,
@@ -629,19 +624,17 @@ class JacobianRulesTest(test_utils.NeuralTangentsTestCase):
 
     self._test_primitive(primitive, [shape1, shape2], dtype, params)
 
-  @parameterized.parameters(
-      test_utils.cases_from_list(
-          dict(
-              primitive=primitive,
-              shapes=shapes,
-              dtype=dtype,
-              params=params
-          )
-          for shapes in _concat_shapes(4, *_SHAPES)
-          for dtype in _DTYPES
-          for primitive in _N_ARY_PRIMITIVES.keys()
-          for params in _N_ARY_PRIMITIVES[primitive](*shapes)
+  @test_utils.parameters(
+      dict(
+          primitive=primitive,
+          shapes=shapes,
+          dtype=dtype,
+          params=params
       )
+      for shapes in _concat_shapes(4, *_SHAPES)
+      for dtype in _DTYPES
+      for primitive in _N_ARY_PRIMITIVES.keys()
+      for params in _N_ARY_PRIMITIVES[primitive](*shapes)
   )
   def test_n_ary(self, primitive: Optional[Primitive], shapes, dtype, params):
     self._test_primitive(primitive, shapes, dtype, params)
