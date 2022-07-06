@@ -312,9 +312,6 @@ class EmpiricalTfTest(parameterized.TestCase):
       diagonal_axes,
       vmap_axes,
   ):
-    if tf.config.list_physical_devices('GPU') and diagonal_axes:
-      raise absltest.SkipTest('http://b/237035658')
-
     f = tf.keras.Sequential()
     f.add(tf.keras.layers.Conv2D(4, (3, 3), activation='relu'))
     f.add(tf.keras.layers.Conv2D(2, (2, 2), activation='relu'))
