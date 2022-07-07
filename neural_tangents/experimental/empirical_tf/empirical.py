@@ -95,7 +95,7 @@ import warnings
 
 from jax.experimental import jax2tf
 from neural_tangents._src.empirical import NtkImplementation, empirical_ntk_fn, DEFAULT_NTK_IMPLEMENTATION, _DEFAULT_NTK_FWD, _DEFAULT_NTK_J_RULES, _DEFAULT_NTK_S_RULES
-from neural_tangents._src.utils.typing import Axes, NTTree, PyTree, VMapAxes
+from neural_tangents._src.utils.typing import Axes, PyTree, VMapAxes
 import tensorflow as tf
 import tf2jax
 
@@ -109,7 +109,7 @@ def empirical_ntk_fn_tf(
     _j_rules: bool = _DEFAULT_NTK_J_RULES,
     _s_rules: bool = _DEFAULT_NTK_S_RULES,
     _fwd: Optional[bool] = _DEFAULT_NTK_FWD,
-) -> Callable[..., NTTree[tf.Tensor]]:
+) -> Callable[..., PyTree]:
   r"""Returns a function to draw a single sample the NTK of a given network `f`.
 
   This function follows the API of :obj:`neural_tangents.empirical_ntk_fn`, but
@@ -198,33 +198,33 @@ def empirical_ntk_fn_tf(
       `3`). See the :class:`NtkImplementation` docstring for details.
 
     _j_rules:
-      Internal debugging parameter, applicable only when
-      `implementation` is :attr:`NtkImplementation.STRUCTURED_DERIVATIVES`
-      (`3`) or :attr:`NtkImplementation.AUTO` (`0`). Set to `True` to allow
-      custom Jacobian rules for intermediary primitive `dy/dw` computations for
-      MJJMPs (matrix-Jacobian-Jacobian-matrix products). Set to `False` to use
-      JVPs or VJPs, via JAX's :obj:`jax.jacfwd` or :obj:`jax.jacrev`. Custom
-      Jacobian rules (`True`) are expected to be not worse, and sometimes
-      better than automated alternatives, but in case of a suboptimal
-      implementation setting it to `False` could improve performance.
+      Internal debugging parameter, applicable only when `implementation` is
+      :attr:`~neural_tangents.NtkImplementation.STRUCTURED_DERIVATIVES` (`3`)
+      or :attr:`~neural_tangents.NtkImplementation.AUTO` (`0`). Set to `True`
+      to allow custom Jacobian rules for intermediary primitive `dy/dw`
+      computations for MJJMPs (matrix-Jacobian-Jacobian-matrix products). Set
+      to `False` to use JVPs or VJPs, via JAX's :obj:`jax.jacfwd` or
+      :obj:`jax.jacrev`. Custom Jacobian rules (`True`) are expected to be not
+      worse, and sometimes better than automated alternatives, but in case of a
+      suboptimal implementation setting it to `False` could improve performance.
 
     _s_rules:
       Internal debugging parameter, applicable only when `implementation` is
-      :attr:`NtkImplementation.STRUCTURED_DERIVATIVES` (`3`) or
-      :attr:`NtkImplementation.AUTO` (`0`). Set to `True` to allow efficient
-      MJJMp rules for structured `dy/dw` primitive Jacobians. In practice
-      should be set to `True`, and setting it to `False` can lead to dramatic
-      deterioration of performance.
+      :attr:`~neural_tangents.NtkImplementation.STRUCTURED_DERIVATIVES` (`3`) or
+      :attr:`~neural_tangents.NtkImplementation.AUTO` (`0`). Set to `True` to
+      allow efficient MJJMp rules for structured `dy/dw` primitive Jacobians.
+      In practice should be set to `True`, and setting it to `False` can lead
+      to dramatic deterioration of performance.
 
     _fwd:
       Internal debugging parameter, applicable only when `implementation` is
-      :attr:`NtkImplementation.STRUCTURED_DERIVATIVES` (`3`) or
-      :attr:`NtkImplementation.AUTO` (`0`). Set to `True` to allow
-      :obj:`jax.jvp` in intermediary primitive Jacobian `dy/dw` computations,
-      `False` to always use :obj:`jax.vjp`. `None` to decide automatically
-      based on input/output sizes. Applicable when `_j_rules=False`, or when a
-      primitive does not have a Jacobian rule. Should be set to `None` for best
-      performance.
+      :attr:`~neural_tangents.NtkImplementation.STRUCTURED_DERIVATIVES` (`3`) or
+      :attr:`~neural_tangents.NtkImplementation.AUTO` (`0`). Set to `True` to
+      allow :obj:`jax.jvp` in intermediary primitive Jacobian `dy/dw`
+      computations, `False` to always use :obj:`jax.vjp`. `None` to decide
+      automatically based on input/output sizes. Applicable when
+      `_j_rules=False`, or when a primitive does not have a Jacobian rule.
+      Should be set to `None` for best performance.
 
   Returns:
     A function `ntk_fn` that computes the empirical ntk.
@@ -274,10 +274,10 @@ def get_apply_fn_and_params(f: tf.Module):
       callable or be a :class:`tf.keras.Model`.
 
   Returns:
-    A tuple fo `(apply_fn, params)`, where `params` is an `NTTree[tf.Tensor]`.
+    A tuple fo `(apply_fn, params)`, where `params` is a `PyTree[tf.Tensor]`.
   """
   @tf.function
-  def forward_tf(x: tf.Tensor) -> NTTree[tf.Tensor]:
+  def forward_tf(x: PyTree) -> PyTree:
     if isinstance(f, tf.keras.Model):
       return f.call(x, training=False)
 
@@ -295,7 +295,7 @@ def get_apply_fn_and_params(f: tf.Module):
 
   apply_fn_, params = tf2jax.convert(forward_tf, tf.TensorSpec(f.input_shape))
 
-  def apply_fn(params: PyTree, x: tf.Tensor) -> NTTree[tf.Tensor]:
+  def apply_fn(params: PyTree, x: PyTree) -> PyTree:
     outputs, _ = apply_fn_(params, x)  # Dropping parameters (not updated).
     return outputs
 

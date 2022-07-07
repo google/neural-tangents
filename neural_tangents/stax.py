@@ -143,9 +143,11 @@ from ._src.stax.linear import (
 
 # Decorators and classes for constructing your own layers.
 from ._src.stax.requirements import (
-    layer,
-    supports_masking,
-    requires,
     Bool,
-    Diagonal
+    Diagonal,
+    MaskedArray,
+    layer,
+    requires,
+    supports_masking,
+    unmask_fn,
 )

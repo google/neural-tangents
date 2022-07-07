@@ -325,8 +325,13 @@ def _check_agreement_with_empirical(
 
   def _get_empirical(n_samples, get):
     kernel_fn_empirical = nt.monte_carlo_kernel_fn(
-        init_fn, apply_fn, key, n_samples, device_count=device_count,
-        trace_axes=(channel_axis,), batch_size=batch_size,
+        init_fn=init_fn,
+        apply_fn=apply_fn,
+        key=key,
+        n_samples=n_samples,
+        device_count=device_count,
+        trace_axes=(channel_axis,),
+        batch_size=batch_size,
         implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION
     )
     if same_inputs:
@@ -732,7 +737,7 @@ class ParameterizationTest(test_utils.NeuralTangentsTestCase):
 
   @test_utils.product(
       model=MODELS,
-      width=[2**11],
+      width=[2**10],
       same_inputs=[False],
       is_ntk=[False, True],
       filter_shape=FILTER_SHAPES,
@@ -976,7 +981,10 @@ class ParallelInOutTest(test_utils.NeuralTangentsTestCase):
         stax.Conv(N_in + 3, (2,)))
 
     kernel_fn_empirical = nt.monte_carlo_kernel_fn(
-        init_fn, apply_fn, mc_key, N_SAMPLES,
+        init_fn=init_fn,
+        apply_fn=stax.unmask_fn(apply_fn),
+        key=mc_key,
+        n_samples=N_SAMPLES,
         implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         vmap_axes=(((((0, 0), 0), 0), (((0, 0), 0), 0), {})
                    if platform == 'tpu' else None)

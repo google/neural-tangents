@@ -50,7 +50,8 @@ else:
 
   Mimicking JAX, we use a lightweight tree structure called an :class:`NTTree`.
   :class:`NTTree` has internal nodes that are either lists or tuples and leaves
-  which are either :class:`jax.numpy.ndarray` or :class:`~neural_tangents.Kernel` objects.
+  which are either :class:`jax.numpy.ndarray` or
+  :class:`~neural_tangents.Kernel` objects.
   """
 
   NTTrees = Union[List[T], Tuple[T, ...]]
@@ -233,7 +234,10 @@ Kernels = Union[List[Kernel], Tuple[Kernel, ...]]
 """
 
 
-_VMapAxis = Optional[NTTree[int]]
+_VMapAxis = Optional[PyTree]
+"""A `PyTree` of integers.
+"""
+
 VMapAxisTriple = Tuple[_VMapAxis, _VMapAxis, Dict[str, _VMapAxis]]
 VMapAxes = Union[_VMapAxis, VMapAxisTriple]
 """Specifies `(input, output, kwargs)` axes for `vmap` in empirical NTK.

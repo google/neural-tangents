@@ -104,7 +104,7 @@ Example:
 import enum
 import functools
 import operator
-from typing import Callable, Dict, KeysView, List, Optional, Set, Tuple, TypeVar, Union
+from typing import Callable, Dict, KeysView, List, Optional, Set, Tuple, TypeVar, Union, Iterable
 import warnings
 
 import jax
@@ -121,7 +121,7 @@ from jax.util import safe_map as map, safe_zip as zip
 import numpy as onp
 from .utils import rules
 from .utils import utils
-from .utils.typing import ApplyFn, Axes, EmpiricalGetKernelFn, EmpiricalKernelFn, NTTree, PyTree, VMapAxes, VMapAxisTriple
+from .utils.typing import ApplyFn, Axes, EmpiricalGetKernelFn, EmpiricalKernelFn, PyTree, VMapAxes, VMapAxisTriple
 
 
 # LINEARIZATION AND TAYLOR EXPANSION
@@ -237,8 +237,8 @@ def empirical_nngp_fn(
   Args:
     f:
       the function whose NNGP we are computing. It should have the signature
-      `f(params, x, **kwargs)` where `params` is a `PyTree`, `x` is an
-      `NTTree[np.ndarray]`, and `f` should also return an `NTTree[np.ndarray]`.
+      `f(params, x, **kwargs)` where `params` is a `PyTree`, `x` is a `PyTree`,
+      and `f` should also return a `PyTree`.
 
     trace_axes:
       output axes to trace the output kernel over, i.e. compute only the trace
@@ -273,10 +273,10 @@ def empirical_nngp_fn(
   Returns:
      A function to draw a single sample the NNGP of a given network `f`.
   """
-  def nngp_fn(x1: NTTree[np.ndarray],
-              x2: Optional[NTTree[np.ndarray]],
+  def nngp_fn(x1: PyTree,
+              x2: Optional[PyTree],
               params: PyTree,
-              **apply_fn_kwargs) -> NTTree[np.ndarray]:
+              **apply_fn_kwargs) -> PyTree:
     """Computes a single sample of the empirical NNGP.
 
     Args:
@@ -308,20 +308,18 @@ def empirical_nngp_fn(
     """
 
     def output(x, **kwargs):
-      out = f(params, x, **kwargs)
-      return _unmask(out)
+      return f(params, x, **kwargs)
 
     kwargs1, kwargs2 = utils.split_kwargs(apply_fn_kwargs, x1, x2)
 
     out1 = output(x1, **kwargs1)
     out2 = output(x2, **kwargs2) if not utils.all_none(x2) else out1
 
-    @utils.nt_tree_fn()
-    def contract(out1, out2):
-      dot = utils.dot_general(out1, out2, trace_axes, diagonal_axes)
+    def contract(out1: np.ndarray, out2: np.ndarray) -> np.ndarray:
+      dot = _dot_general(out1, out2, trace_axes, diagonal_axes)
       return dot / utils.size_at(out1, trace_axes)
 
-    return contract(out1, out2)
+    return tree_map(contract, out1, out2)
 
   return nngp_fn
 
@@ -450,8 +448,8 @@ def _empirical_auto_ntk_fn(**kwargs) -> EmpiricalGetKernelFn:
   cache = {}
 
   def ntk_fn(
-      x1: NTTree[np.ndarray],
-      x2: Optional[NTTree[np.ndarray]],
+      x1: PyTree,
+      x2: Optional[PyTree],
       params: PyTree,
       **apply_fn_kwargs
   ) -> np.ndarray:
@@ -493,8 +491,7 @@ def _empirical_auto_ntk_fn(**kwargs) -> EmpiricalGetKernelFn:
       for implementation in NtkImplementation:
         if implementation != NtkImplementation.AUTO:
           ntk_fn = empirical_ntk_fn(**kwargs, implementation=implementation)
-          flops = utils.get_flops(ntk_fn, True, x1, x2, params,
-                                  **apply_fn_kwargs)
+          flops = _get_flops(ntk_fn, True, x1, x2, params, **apply_fn_kwargs)
           print(f'impl={implementation}, flops={flops}')
           if flops < best_flops:
             best_flops = flops
@@ -518,7 +515,6 @@ def _jacobian_contraction_ntk_fn(
 ) -> EmpiricalKernelFn:
   """Compute NTK by directly instantiating Jacobians and contracting."""
 
-  @utils.nt_tree_fn(tree_structure_argnum=0)
   def sum_and_contract(fx, j1, j2):
     ndim = fx.ndim
     size = utils.size_at(fx, trace_axes)
@@ -529,13 +525,13 @@ def _jacobian_contraction_ntk_fn(
     def contract(x, y):
       param_axes = list(range(x.ndim))[ndim:]
       contract_axes = _trace_axes + param_axes
-      return utils.dot_general(x, y, contract_axes, _diagonal_axes) / size
+      return _dot_general(x, y, contract_axes, _diagonal_axes) / size
 
     return tree_reduce(operator.add, tree_map(contract, j1, j2))
 
   def ntk_fn(
-      x1: NTTree[np.ndarray],
-      x2: Optional[NTTree[np.ndarray]],
+      x1: PyTree,
+      x2: Optional[PyTree],
       params: PyTree,
       **apply_fn_kwargs
   ) -> np.ndarray:
@@ -577,13 +573,13 @@ def _jacobian_contraction_ntk_fn(
       jx = jacobian(fx)(params)
       return jx
 
-    if x_axis is not None or kw_axes:
+    if not utils.all_none(x_axis) or not utils.all_none(kw_axes):
       in_axes = [x_axis] + [kw_axes[k] if k in kw_axes else None for k in keys]
       j_fn = vmap(j_fn, in_axes=in_axes, out_axes=fx_axis)
 
     j1 = j_fn(x1, *args1)
     j2 = j_fn(x2, *args2) if not utils.all_none(x2) else j1
-    ntk = sum_and_contract(fx1, j1, j2)
+    ntk = tree_map(sum_and_contract, fx1, j1, j2)
     return ntk
 
   return ntk_fn
@@ -599,8 +595,8 @@ def _ntk_vector_products_ntk_fn(
   """Compute NTK via NTK-vector products."""
 
   def ntk_fn(
-      x1: NTTree[np.ndarray],
-      x2: Optional[NTTree[np.ndarray]],
+      x1: PyTree,
+      x2: Optional[PyTree],
       params: PyTree,
       **apply_fn_kwargs
   ) -> np.ndarray:
@@ -645,14 +641,13 @@ def _ntk_vector_products_ntk_fn(
         return jvp(f1, (params,), delta_vjp(delta))[1]
 
       fx1, fx2 = eval_shape(f1, params), eval_shape(f2, params)
-      eye = utils.std_basis(fx1)
+      eye = _std_basis(fx1)
       ntk = vmap(linear_transpose(delta_vjp_jvp, fx2))(eye)
-      ntk = tree_map(lambda fx12: utils.unravel_array_into_pytree(fx1, 0, fx12),
-                     ntk)
+      ntk = tree_map(lambda fx12: _unravel_array_into_pytree(fx1, 0, fx12), ntk)
       ntk = _diagonal(ntk, fx1)
       return ntk
 
-    if x_axis is not None or kw_axes:
+    if not utils.all_none(x_axis) or not utils.all_none(kw_axes):
       x2 = x1 if utils.all_none(x2) else x2
 
       kw_in_axes = [kw_axes[k] if k in kw_axes else None for k in keys]
@@ -665,8 +660,10 @@ def _ntk_vector_products_ntk_fn(
                      in_axes2,
                      _add(fx_axis, _ndim(fx1)))
 
-    return _trace_and_diagonal(get_ntk(x1, x2, *args1, *args2),
-                               trace_axes, diagonal_axes)
+    ntk = get_ntk(x1, x2, *args1, *args2)
+    ntk = tree_map(lambda x: _trace_and_diagonal(x, trace_axes, diagonal_axes),
+                   ntk)
+    return ntk
 
   return ntk_fn
 
@@ -682,16 +679,16 @@ def _structured_derivatives_ntk_fn(
 ) -> EmpiricalKernelFn:
   """Compute NTK by using structured derivatives."""
 
-  @utils.nt_tree_fn(tree_structure_argnum=0, nargs=5)
-  def sum_and_contract(fx1: np.ndarray,
-                       fx2: np.ndarray,
-                       fx_axis,
-                       df_dys_1: List[Union[np.ndarray, Zero]],
-                       df_dys_2: List[Union[np.ndarray, Zero]],
-                       dy_dws_1: List[Tuple[np.ndarray, rules.Structure]],
-                       dy_dws_2: List[Tuple[np.ndarray, rules.Structure]],
-                       dtype: np.dtype
-                       ):
+  def sum_and_contract(
+      fx1: np.ndarray,
+      fx2: np.ndarray,
+      fx_axis,
+      df_dys_1: List[Union[np.ndarray, Zero]],
+      df_dys_2: List[Union[np.ndarray, Zero]],
+      dy_dws_1: List[Tuple[np.ndarray, rules.Structure]],
+      dy_dws_2: List[Tuple[np.ndarray, rules.Structure]],
+      dtype: np.dtype
+  ):
     ndim = fx1.ndim
     size = utils.size_at(fx1, trace_axes)
 
@@ -807,8 +804,8 @@ def _structured_derivatives_ntk_fn(
     return ntk
 
   def ntk_fn(
-      x1: NTTree[np.ndarray],
-      x2: Optional[NTTree[np.ndarray]],
+      x1: PyTree,
+      x2: Optional[PyTree],
       params: PyTree,
       **apply_fn_kwargs
   ) -> np.ndarray:
@@ -852,7 +849,7 @@ def _structured_derivatives_ntk_fn(
                                               _s_rules=_s_rules, _fwd=_fwd)
       return df_dys, dy_dws
 
-    if x_axis is not None or kw_axes:
+    if not utils.all_none(x_axis) or not utils.all_none(kw_axes):
       in_axes = [x_axis] + [kw_axes[k] if k in kw_axes else None for k in keys]
       j_fn = vmap(j_fn, in_axes=in_axes, out_axes=0)
 
@@ -861,14 +858,18 @@ def _structured_derivatives_ntk_fn(
         df_dys_1, dy_dws_1)
 
     fx_axis, dtype = _get_fx_axis_and_dtype(fx1, fx_axis, params)
-    ntk = sum_and_contract(fx1,
-                           fx2,
-                           fx_axis,
-                           df_dys_1,
-                           df_dys_2,
-                           dy_dws_1,
-                           dy_dws_2,
-                           dtype)
+    ntk = tree_map(
+        functools.partial(
+            sum_and_contract,
+            dy_dws_1=dy_dws_1,
+            dy_dws_2=dy_dws_2,
+            dtype=dtype),
+        fx1,
+        fx2,
+        fx_axis,
+        df_dys_1,
+        df_dys_2,
+    )
 
     return ntk
 
@@ -923,8 +924,8 @@ def empirical_ntk_fn(
   Args:
     f:
       the function whose NTK we are computing. It should have the signature
-      `f(params, x, **kwargs)` where `params` is a `PyTree`, `x` is an
-      `NTTree[np.ndarray]`, and `f` should also return an `NTTree[np.ndarray]`.
+      `f(params, x, **kwargs)` where `params` is a `PyTree`, `x` is a `PyTree`,
+      and `f` should also return a `PyTree`.
 
     trace_axes:
       output axes to trace the output kernel over, i.e. compute only the trace
@@ -1065,8 +1066,7 @@ def empirical_kernel_fn(
     f:
       the function whose kernel(s) (NNGP and/or NTK) we are computing. It
       should have the signature `f(params, x, **kwargs)` where `params` is a
-      `PyTree`, `x` is an  `NTTree[np.ndarray]`, and `f` should also return an
-      `NTTree[np.ndarray]`.
+      `PyTree`, `x` is a  `PyTree`, and `f` should also return a `PyTree`.
 
     trace_axes:
       output axes to trace the output kernel over, i.e. compute only the trace
@@ -1187,12 +1187,12 @@ def empirical_kernel_fn(
 
   @utils.get_namedtuple('EmpiricalKernel')
   def kernel_fn(
-      x1: NTTree[np.ndarray],
-      x2: Optional[NTTree[np.ndarray]],
+      x1: PyTree,
+      x2: Optional[PyTree],
       get: Union[None, str, Tuple[str, ...]],
       params: PyTree,
       **apply_fn_kwargs
-  ) -> NTTree[Dict[str, np.ndarray]]:
+  ) -> PyTree:
     """Computes a single sample of the empirical kernel of type `get`.
 
     Args:
@@ -1245,7 +1245,6 @@ def empirical_kernel_fn(
 # INTERNAL UTILITIES
 
 
-@utils.nt_tree_fn(nargs=1)
 def _trace_and_diagonal(
     ntk: np.ndarray,
     trace_axes: Axes,
@@ -1295,7 +1294,7 @@ def _trace_and_diagonal(
     ntk = np.diagonal(ntk, axis1=axis1, axis2=axis2)
 
   ntk = utils.zip_axes(ntk, 0, ntk.ndim - n_diag)
-  res_diagonal_axes = utils.get_res_batch_dims(trace_axes, diagonal_axes)
+  res_diagonal_axes = _get_res_batch_dims(trace_axes, diagonal_axes)
   ntk = np.moveaxis(ntk, range(-n_diag, 0), res_diagonal_axes)
   return ntk / contract_size
 
@@ -1328,10 +1327,6 @@ def _get_f_params(
 
   def _f(p: PyTree) -> PyTree:
     fx = f(p, x, **apply_fn_kwargs)
-    fx = utils.get_masked_array(fx)
-
-    get_masked = utils.nt_tree_fn()(lambda o: o.masked_value)
-    fx = get_masked(fx)
     return _squeeze(fx, fx_axis)
 
   return _f
@@ -1347,13 +1342,8 @@ def _get_args(
 ):
   kwargs1, kwargs2 = utils.split_kwargs(apply_fn_kwargs, x1, x2)
 
-  @utils.nt_tree_fn()
-  def unmask(x):
-    return x.masked_value if isinstance(x, utils.MaskedArray) else x
-
-  fx1 = unmask(eval_shape(f, params, x1, **kwargs1))
-  fx2 = fx1 if utils.all_none(x2) else unmask(
-      eval_shape(f, params, x2, **kwargs2))
+  fx1 = eval_shape(f, params, x1, **kwargs1)
+  fx2 = fx1 if utils.all_none(x2) else eval_shape(f, params, x2, **kwargs2)
 
   x_axis, fx_axis, kw_axes = _canonicalize_axes(vmap_axes, x1, fx1, **kwargs1)
 
@@ -1448,26 +1438,45 @@ def _squeeze(x: PyTree, axis: Optional[PyTree]) -> PyTree:
   if axis is None:
     return x
 
-  return tree_map(utils.squeeze, x, axis)
+  def squeeze(
+      x: np.ndarray,
+      axis: Union[None, int, Tuple[int, ...]]
+  ) -> np.ndarray:
+    """`np.squeeze` analog working with 0-sized axes."""
+    if isinstance(axis, int):
+      axis = (axis,)
+
+    non_zero_axes = tuple()
+    shift = 0
+
+    for a in sorted(axis):
+      if x.shape[a - shift] == 0:
+        new_shape = x.shape[:a] + x.shape[a + 1:]
+        if utils.size_at(new_shape) == 0:
+          x = x.reshape(new_shape)
+        else:
+          x = np.zeros(new_shape, x.dtype)
+
+        shift += 1
+      else:
+        non_zero_axes += (a - shift,)
+
+    return np.squeeze(x, non_zero_axes)
+
+  return tree_map(squeeze, x, axis)
 
 
-@utils.nt_tree_fn()
-def _ndim(x: np.ndarray) -> int:
-  return x.ndim
+def _ndim(x: PyTree) -> PyTree:
+  return tree_map(lambda x: x.ndim, x)
 
 
 def _mod(
-    x: Optional[NTTree[np.ndarray]],
+    x: Optional[PyTree],
     y: PyTree
-) -> Optional[NTTree[np.ndarray]]:
+) -> PyTree:
   if x is None:
     return None
   return tree_map(operator.mod, x, y)
-
-
-def _unmask(x: PyTree) -> PyTree:
-  masked_output = utils.get_masked_array(x)
-  return utils.nt_tree_fn()(lambda x: x.masked_value)(masked_output)
 
 
 def _diagonal(ntk: PyTree, fx: PyTree) -> PyTree:
@@ -1480,8 +1489,8 @@ def _diagonal(ntk: PyTree, fx: PyTree) -> PyTree:
 
 def _canonicalize_axes(
     vmap_axes: Optional[VMapAxes],
-    x: NTTree[np.ndarray],
-    fx: NTTree[np.ndarray],
+    x: PyTree,
+    fx: PyTree,
     **kwargs
 ) -> VMapAxisTriple:
   if isinstance(vmap_axes, tuple) and len(vmap_axes) == 3:
@@ -1489,16 +1498,14 @@ def _canonicalize_axes(
   else:
     x_axis, fx_axis, kw_axes = vmap_axes, vmap_axes, {}
 
-  is_leaf = lambda x: isinstance(x, (np.ndarray, utils.MaskedArray))
-
   if isinstance(x_axis, int):
-    x_axis = tree_map(lambda _: x_axis, x, is_leaf=is_leaf)
+    x_axis = tree_map(lambda _: x_axis, x)
 
   if isinstance(fx_axis, int):
-    fx_axis = tree_map(lambda _: fx_axis, fx, is_leaf=is_leaf)
+    fx_axis = tree_map(lambda _: fx_axis, fx)
 
   if isinstance(kw_axes, int):
-    kw_axes = tree_map(lambda _: kw_axes, kwargs, is_leaf=is_leaf)
+    kw_axes = tree_map(lambda _: kw_axes, kwargs)
 
   x_axis = _mod(x_axis, _ndim(x))
   fx_axis = _mod(fx_axis, _ndim(fx))
@@ -1583,13 +1590,10 @@ def _vmap(f: Callable, in_axes, out_axes, squeeze_out: bool = True) -> Callable:
 
 def _get_fx_axis_and_dtype(fx, fx_axis, params: PyTree):
   if fx_axis is None:
-    fx_axis = tree_map(
-        lambda x: None, fx,
-        is_leaf=lambda x: isinstance(x, (np.ndarray, utils.MaskedArray))
-    )
+    fx_axis = tree_map(lambda x: None, fx)
   # Set the default type to be the least common type ancestor.
   dtypes, _ = tree_flatten(tree_map(np.dtype, params))
-  if len(dtypes) == 0:
+  if not dtypes:
     dtype = None
   else:
     dtype = functools.reduce(np.promote_types, dtypes)
@@ -1597,7 +1601,7 @@ def _get_fx_axis_and_dtype(fx, fx_axis, params: PyTree):
 
 
 def _unravel_dfs(dfs: PyTree, params: PyTree, y: PyTree) -> PyTree:
-  dfs = tree_map(functools.partial(utils.unravel_array_into_pytree, y, 0), dfs)
+  dfs = tree_map(functools.partial(_unravel_array_into_pytree, y, 0), dfs)
 
   if tree_structure(dfs).num_leaves > 0:
     dfs = tree_transpose(tree_structure(tree_map(lambda x, y: [x] * len(y),
@@ -1629,7 +1633,7 @@ def _get_df_dys_and_dy_dws(
                                          params)
 
   primals_out, pullback_df_dy = primals_out_and_pullback(_MODE.DF_DY)
-  df_dys = vmap(pullback_df_dy)(utils.std_basis(primals_out))
+  df_dys = vmap(pullback_df_dy)(_std_basis(primals_out))
   df_dys = _unravel_dfs(df_dys[0], params, primals_out)
 
   _, pullback_dy_dw = primals_out_and_pullback(_MODE.DY_DW)
@@ -2078,7 +2082,7 @@ def _get_jacobian(
       def jac_fn(cotangents):
         return _eqn_vjp_fn(eqn, cotangents, *invals)[idx]
 
-    eye = utils.std_basis(inputs)
+    eye = _std_basis(inputs)
     dy_dw = vmap(jac_fn, out_axes=out_axes)(eye)
     dy_dw = dy_dw.reshape(cts_in_shape + inval_shape)
 
@@ -2149,3 +2153,97 @@ def _get_fwd(
     in_size = onp.prod(inval_shape)
     _fwd = out_size > in_size
   return _fwd
+
+
+def _get_flops(f: Callable, optimize: bool, *a, **kw) -> float:
+  m = jax.xla_computation(f)(*a, **kw)
+  client = jax.lib.xla_bridge.get_backend()
+  if optimize:
+    m = client.compile(m).hlo_modules()[0]
+  else:
+    m = m.as_hlo_module()
+  analysis = jax.lib.xla_client._xla.hlo_module_cost_analysis(client, m)
+  return analysis['flops']
+
+
+def _std_basis(pytree: PyTree) -> PyTree:
+  """Similar to `jax.api._std_basis` without host-side ops."""
+  leaves, _ = tree_flatten(pytree)
+  ndim = sum(map(np.size, leaves))
+  dtype = jax.dtypes.result_type(*leaves)
+  flat_basis = np.eye(ndim, dtype=dtype)
+  return _unravel_array_into_pytree(pytree, 1, flat_basis)
+
+
+def _unravel_array_into_pytree(
+    pytree: PyTree,
+    axis: int,
+    arr: np.ndarray
+) -> PyTree:
+  """Similar to `jax.api._unravel_array_into_pytree` without host-side ops."""
+  leaves, treedef = tree_flatten(pytree)
+  if arr.ndim > 0:
+    axis %= arr.ndim
+  shapes = [arr.shape[:axis] + np.shape(l) + arr.shape[axis+1:] for l in leaves]
+  parts = np.split(arr, onp.cumsum([np.size(l) for l in leaves[:-1]]), axis)
+  reshaped_parts = [np.reshape(x, shape) for x, shape in zip(parts, shapes)]
+  return tree_unflatten(treedef, reshaped_parts)
+
+
+def _get_res_batch_dims(
+    contracting_dims: Iterable[int],
+    batch_dims: Iterable[int]
+) -> List[int]:
+  res_batch_dims = [2 * b - i for i, b in enumerate(batch_dims)]
+  for i, b in enumerate(batch_dims):
+    for c in contracting_dims:
+      if b > c:
+        res_batch_dims[i] -= 2
+  return res_batch_dims
+
+
+def _dot_general(
+    lhs: np.ndarray,
+    rhs: np.ndarray,
+    contracting_dims: Axes,
+    batch_dims: Axes,
+    precision=None
+) -> np.ndarray:
+  """`jax.lax.dot_general` with preserved dims order and shared lhs / rhs dims.
+
+  Precisely, returns `jax.lax.dot_general(lhs, rhs, dimension_numbers)` where
+  `dimension_numbers == ((contracting_dims, contracting_dims),
+                         (batch_dims, batch_dims))`,
+  but preserves the dimension order in the output. See XLA's
+   `DotGeneral<https://www.tensorflow.org/xla/operation_semantics#dotgeneral>`.
+
+  Args:
+    lhs: array.
+    rhs: array, must have the same dimensionality as `lhs`.
+    contracting_dims: contracting dimensions.
+    batch_dims: batch dimensions.
+    precision: Optional. Either `None`, which means the default precision for
+      the backend, or a `Precision` enum value.
+
+  Returns:
+    Dot product result with preserved dimension order.
+  """
+  if lhs.ndim != rhs.ndim:
+    raise ValueError(f'`lhs` and `rhs` must have the same dimensionality, got'
+                     f'`lhs.ndim == {lhs.ndim}` and `rhs.ndim == {rhs.ndim}`.')
+
+  contracting_dims = utils.canonicalize_axis(contracting_dims, lhs)
+  batch_dims = utils.canonicalize_axis(batch_dims, lhs)
+
+  n_batch_dims = len(batch_dims)
+  leading_batch_dims = range(n_batch_dims)
+
+  dimension_numbers = ((contracting_dims, contracting_dims),
+                       (batch_dims, batch_dims))
+
+  prod = lax.dot_general(lhs, rhs, dimension_numbers, precision)
+  prod = utils.zip_axes(prod, n_batch_dims)
+
+  res_batch_dims = _get_res_batch_dims(contracting_dims, batch_dims)
+  prod = np.moveaxis(prod, leading_batch_dims, res_batch_dims)
+  return prod

@@ -128,10 +128,13 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
       w2 /= 0.9
     if do_shift_x:
       x = x * 2 + 1.
-    return [0.5 * np.dot(np.dot(x.T, w1), x) + np.dot(w2, x) + b,
-            (np.dot(w1, x),
-             w2)
-            ]
+    return ({'list': [
+        {
+            'quadratic': 0.5 * np.dot(np.dot(x.T, w1), x) + np.dot(w2, x) + b,
+            'linear': np.dot(w1, x)
+        },
+        w2
+    ]},)
 
   @classmethod
   def _f_lin_exact(cls, x0, x, params, do_alter, do_shift_x=True):
@@ -145,12 +148,17 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
       b *= 2.
       w1 += 5.
       w2 /= 0.9
-    return tree_map(operator.add,
-                    f0,
-                    [
-                        np.dot(np.dot(x0.T, w1) + w2, dx),
-                        (np.dot(w1, dx), 0.)
-                    ])
+    return tree_map(
+        operator.add,
+        f0,
+        ({'list': [
+            {
+                'quadratic': np.dot(np.dot(x0.T, w1) + w2, dx),
+                'linear': np.dot(w1, dx)
+            },
+            0.
+        ]},)
+    )
 
   @classmethod
   def _get_init_data(cls, shape):
@@ -199,12 +207,17 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
         w1 += 5.
         w2 /= 0.9
       dx = x - x0
-      return tree_map(operator.add,
-                      f_lin,
-                      [
-                          0.5 * np.dot(np.dot(dx.T, w1), dx),
-                          (0., 0.)
-                      ])
+      return tree_map(
+          operator.add,
+          f_lin,
+          ({'list': [
+              {
+                  'quadratic': 0.5 * np.dot(np.dot(dx.T, w1), dx),
+                  'linear': 0.
+              },
+              0.
+          ]},)
+      )
 
     key, params, x0 = self._get_init_data(shape)
 
@@ -440,9 +453,11 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
     self.assertEqual(nngp[1].shape, nngp_shape)
 
   @test_utils.product(
-      same_inputs=[True, False]
+      same_inputs=[True, False, None],
+      in_dict=[True, False],
+      out_dict=[True, False]
   )
-  def test_vmap_axes(self, same_inputs):
+  def test_vmap_axes(self, same_inputs, out_dict, in_dict):
     n1, n2 = 3, 4
     c1, c2, c3 = 9, 5, 7
     h2, h3, w3 = 6, 8, 2
@@ -456,12 +471,24 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
       return x
 
     x1 = get_x(n1, random.PRNGKey(1))
-    x2 = get_x(n2, random.PRNGKey(2)) if not same_inputs else None
-
     p1 = random.normal(random.PRNGKey(5), (n1, h2, h2))
-    p2 = p1 if same_inputs else random.normal(random.PRNGKey(6), (n2, h2, h2))
 
-    init_fn, apply_fn, _ = stax.serial(
+    if same_inputs is None:
+      x2 = None
+      p2 = p1
+
+    elif same_inputs is False:
+      x2 = get_x(n2, random.PRNGKey(2))
+      p2 = random.normal(random.PRNGKey(6), (n2, h2, h2))
+
+    elif same_inputs is True:
+      x2 = [(None, None), None]
+      p2 = p1
+
+    else:
+      raise ValueError(same_inputs)
+
+    init_fn, apply_fn_, _ = stax.serial(
         stax.parallel(
             stax.parallel(
                 stax.serial(stax.Dense(4, 2., 0.1),
@@ -487,6 +514,42 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
     )
 
     _, params = init_fn(random.PRNGKey(3), tree_map(np.shape, x1))
+
+    in_axes = [(0, 1), 2]
+    out_axes = [-2, -3]
+
+    def nttree_to_pytree_in(x):
+      if x is None:
+        return x
+      return {'x1_x2': (x[0][0], x[0][1]), 'x3': (None, x[1],)}
+
+    def pytree_to_nttree_in(x):
+      if x is None:
+        return x
+      return [(x['x1_x2'][0], x['x1_x2'][1]), x['x3'][1]]
+
+    def nttree_to_pytree_out(x):
+      if x is None:
+        return None
+      return {'outs': [{'out_1': x[0]}, (x[1], None)]}
+
+    if in_dict:
+      x1 = nttree_to_pytree_in(x1)
+      x2 = nttree_to_pytree_in(x2)
+      in_axes = nttree_to_pytree_in(in_axes)
+
+    if out_dict:
+      out_axes = nttree_to_pytree_out(out_axes)
+
+    def apply_fn(params, x, **kwargs):
+      if in_dict:
+        x = pytree_to_nttree_in(x)
+
+      out = apply_fn_(params, x, **kwargs)
+      if out_dict:
+        out = nttree_to_pytree_out(out)
+      return out
+
     ntk_fns = {
         i: jit(nt.empirical_ntk_fn(apply_fn, implementation=i))
         for i in nt.NtkImplementation
@@ -496,7 +559,7 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
         i: jit(nt.empirical_ntk_fn(
             apply_fn,
             implementation=i,
-            vmap_axes=([(0, 1), 2], [-2, -3], dict(pattern=0))
+            vmap_axes=(in_axes, out_axes, dict(pattern=0))
         ))
         for i in nt.NtkImplementation
     }

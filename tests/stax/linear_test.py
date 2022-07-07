@@ -388,7 +388,10 @@ class AttentionTest(test_utils.NeuralTangentsTestCase):
       raise ValueError(get)
 
     kernel_fn_mc = nt.monte_carlo_kernel_fn(
-        init_fn, apply_fn, key, n_samples,
+        init_fn=init_fn,
+        apply_fn=stax.unmask_fn(apply_fn),
+        key=key,
+        n_samples=n_samples,
         device_count=-1,
         implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         vmap_axes=0
@@ -640,7 +643,7 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
     # Test agreement with empirical kernel
     kernel_mc_fn = nt.monte_carlo_kernel_fn(
         init_fn=init_fn,
-        apply_fn=apply_fn,
+        apply_fn=stax.unmask_fn(apply_fn),
         key=random.PRNGKey(10),
         n_samples=2**6,
         batch_size=2 if (default_backend() == 'tpu' and batch_axis == 0) else 0,
@@ -980,7 +983,7 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
 
         kernel_fn_mc = nt.monte_carlo_kernel_fn(
             init_fn=init_fn,
-            apply_fn=apply_fn,
+            apply_fn=stax.unmask_fn(apply_fn),
             key=key1,
             n_samples=1,
             trace_axes=(out_c_axis,),
@@ -1082,7 +1085,10 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
     )
 
     kernel_fn_mc = nt.monte_carlo_kernel_fn(
-        init_fn, apply_fn, key1, n_samples,
+        init_fn=init_fn,
+        apply_fn=stax.unmask_fn(apply_fn),
+        key=key1,
+        n_samples=n_samples,
         trace_axes=(int(out_c_axis > out_b_axis) if do_pool else 1,),
         device_count=0,
         implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
@@ -1259,7 +1265,7 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
 
         kernel_fn_mc = nt.monte_carlo_kernel_fn(
             init_fn=init_fn,
-            apply_fn=apply_fn,
+            apply_fn=stax.unmask_fn(apply_fn),
             key=key1,
             n_samples=1,
             trace_axes=(channel_axis,),
@@ -1368,7 +1374,10 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
     )
 
     kernel_fn_mc = nt.monte_carlo_kernel_fn(
-        init_fn, apply_fn, key1, n_samples,
+        init_fn=init_fn,
+        apply_fn=stax.unmask_fn(apply_fn),
+        key=key1,
+        n_samples=n_samples,
         device_count=0,
         implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
     )

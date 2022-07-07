@@ -2154,8 +2154,8 @@ def GlobalSelfAttention(
                **kwargs) -> np.ndarray:
     query_matrices, key_matrices, val_matrices, W_out, b, pos_emb = params
 
-    spatial_shape, spatial_axes = utils.shape_and_axes(
-        inputs, (batch_axis, channel_axis))
+    spatial_shape, spatial_axes = _shape_and_axes(inputs.shape,
+                                                  (batch_axis, channel_axis))
     n = inputs.shape[batch_axis]
 
     if pos_emb is not None:
@@ -3661,7 +3661,7 @@ def _get_all_pos_emb(k: Kernel,
   if pos_emb_type == PositionalEmbedding.NONE:
     return None, None, None
 
-  shape, _ = utils.shape_and_axes(k.shape1, (k.batch_axis, k.channel_axis))
+  shape, _ = _shape_and_axes(k.shape1, (k.batch_axis, k.channel_axis))
   R = _pos_emb_pdist(shape, pos_emb_p_norm, pos_emb_decay_fn)
 
   if k.is_reversed:
@@ -3677,3 +3677,14 @@ def _get_all_pos_emb(k: Kernel,
   R12 = utils.mask(R12, mask12)
   R22 = utils.mask(R22, mask22)
   return R11, R12, R22
+
+
+def _shape_and_axes(
+    x: Tuple[int, ...],
+    ignore_axes: Iterable[int] = ()
+) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+  ndim = len(x)
+  ignore_axes = tuple(i % ndim for i in ignore_axes)
+  axes = tuple(i for i in range(ndim) if i not in ignore_axes)
+  shape = tuple(x[i] for i in axes)
+  return shape, axes

@@ -35,7 +35,7 @@ BATCH_SIZES = [
     4,
 ]
 
-WIDTH = 256
+WIDTH = 192
 
 DEVICE_COUNTS = [0, 1, 2]
 

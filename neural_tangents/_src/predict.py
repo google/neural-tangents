@@ -30,7 +30,7 @@ set / timesteps.
 
 import collections
 from functools import lru_cache
-from typing import Callable, Dict, Generator, Iterable, NamedTuple, Optional, Tuple, Union
+from typing import Callable, Dict, Generator, Iterable, NamedTuple, Optional, Tuple, Union, Any
 
 import jax
 from jax import grad
@@ -43,6 +43,9 @@ import scipy as osp
 from typing_extensions import Protocol
 from .utils import dataclasses, utils
 from .utils.typing import Axes, Get, KernelFn
+
+
+PyTree = Any
 
 
 ArrayOrScalar = Union[None, int, float, np.ndarray]
@@ -738,8 +741,8 @@ def gp_inference(
   return predict_fn
 
 
-"""Helper type to fit cache dictionaries to `get` API."""
 _Kernel = collections.namedtuple('Kernel', 'nngp ntk')
+"""Helper type to fit cache dictionaries to `get` API."""
 _Kernel.__new__.__defaults__ = (None,) * len(_Kernel._fields)
 
 
@@ -1129,7 +1132,7 @@ def max_learning_rate(
   ntk_train_train = utils.make_2d(ntk_train_train)
   factor = ntk_train_train.shape[0] if y_train_size is None else y_train_size
 
-  if utils.is_on_cpu(ntk_train_train):
+  if _is_on_cpu(ntk_train_train):
     max_eva = osp.linalg.eigvalsh(ntk_train_train,
                                   eigvals=(ntk_train_train.shape[0] - 1,
                                            ntk_train_train.shape[0] - 1))[-1]
@@ -1327,3 +1330,18 @@ def _get_attr(k, g: str) -> np.ndarray:
   if isinstance(k, (onp.ndarray, np.ndarray)):
     return k
   return getattr(k, g)
+
+
+def _is_on_cpu(x: PyTree) -> bool:
+  def _arr_is_on_cpu(x: np.ndarray) -> bool:
+    # TODO(romann): revisit when https://github.com/google/jax/issues/1431 and
+    # https://github.com/google/jax/issues/1432 are fixed.
+    if hasattr(x, 'device_buffer'):
+      return 'cpu' in str(x.device_buffer.device()).lower()
+
+    if isinstance(x, (onp.ndarray, np.ndarray)):
+      return True
+
+    raise NotImplementedError(type(x))
+
+  return tree_all(tree_map(_arr_is_on_cpu, x))

@@ -15,7 +15,7 @@
 """Requirement management for :obj:`~neural_tangents.stax` layers."""
 
 import enum
-from typing import Callable, Optional, Tuple, Union, Sequence
+from typing import Callable, Optional, Tuple, Union, Sequence, Type
 import warnings
 
 import frozendict
@@ -23,11 +23,12 @@ import jax
 from jax import lax
 from jax import numpy as np
 from jax import eval_shape, ShapedArray
-from jax.tree_util import tree_map
+from jax.tree_util import tree_map, tree_all
 from ..utils import utils
 import dataclasses
+from ..utils import dataclasses as nt_dataclasses
 from ..utils.kernel import Kernel
-from ..utils.typing import AnalyticKernelFn, Axes, Get, InitFn, ApplyFn, InternalLayer, Layer, LayerKernelFn, NTTree
+from ..utils.typing import AnalyticKernelFn, Axes, Get, InitFn, ApplyFn, InternalLayer, Layer, LayerKernelFn, NTTree, PyTree
 import numpy as onp
 
 
@@ -147,6 +148,9 @@ def supports_masking(remask_kernel: bool):
 
   Must be applied before the `layer` decorator.
 
+  See Also:
+    Example of masking application in `examples/imdb.py`.
+
   Args:
     remask_kernel:
       `True` to zero-out kernel covariance entries between masked inputs after
@@ -185,9 +189,20 @@ def supports_masking(remask_kernel: bool):
 
       def apply_fn_with_masking(params, inputs, *,
                                 mask_constant=None, **kwargs):
-        masked_inputs = utils.get_masked_array(inputs, mask_constant)
-        inputs = utils.nt_tree_fn()(lambda x: x.masked_value)(masked_inputs)
-        mask = utils.nt_tree_fn()(lambda x: x.mask)(masked_inputs)
+        masked_inputs = tree_map(
+            lambda x: _get_masked_array(x, mask_constant),
+            inputs,
+            is_leaf=lambda x: isinstance(x, (np.ndarray, MaskedArray)))
+
+        is_leaf = lambda x: isinstance(x, MaskedArray)
+        inputs = tree_map(
+            lambda x: x.masked_value,
+            masked_inputs,
+            is_leaf=is_leaf)
+        mask = tree_map(
+            lambda x: x.mask,
+            masked_inputs,
+            is_leaf=is_leaf)
 
         outputs = apply_fn(params, inputs, mask=mask, **kwargs)
         outputs_mask = mask_fn(mask,
@@ -195,25 +210,25 @@ def supports_masking(remask_kernel: bool):
                                else [i.shape for i in inputs])
         if outputs_mask is None:
           return outputs
-        return utils.MaskedArray(outputs, outputs_mask)  # pytype:disable=wrong-arg-count
+        return MaskedArray(outputs, outputs_mask)  # pytype:disable=wrong-arg-count
 
       def kernel_fn_with_masking(k: NTTree[Kernel], **user_reqs):
-        mask1 = utils.nt_tree_fn()(lambda k: k.mask1)(k)
-        shape1 = utils.nt_tree_fn()(lambda k: k.shape1)(k)
-        mask2 = utils.nt_tree_fn()(lambda k: k.mask2)(k)
-        shape2 = utils.nt_tree_fn()(lambda k: k.shape2)(k)
+        is_leaf = lambda k: isinstance(k, Kernel)
+        mask1 = tree_map(lambda k: k.mask1, k, is_leaf=is_leaf)
+        shape1 = tree_map(lambda k: k.shape1, k, is_leaf=is_leaf)
+        mask2 = tree_map(lambda k: k.mask2, k, is_leaf=is_leaf)
+        shape2 = tree_map(lambda k: k.shape2, k, is_leaf=is_leaf)
 
         mask1, mask2 = mask_fn(mask1, shape1), mask_fn(mask2, shape2)
 
         k = kernel_fn(k, **user_reqs)  # type: Kernel
 
         if remask_kernel:
-          remask_fn = utils.nt_tree_fn()(lambda k, m1, m2: k.mask(m1, m2))
-          k = remask_fn(k, mask1, mask2)
+          remask_fn = lambda k, m1, m2: k.mask(m1, m2)
         else:
-          replace_fn = utils.nt_tree_fn()(
-              lambda k, m1, m2: k.replace(mask1=m1, mask2=m2))
-          k = replace_fn(k, mask1, mask2)
+          remask_fn = lambda k, m1, m2: k.replace(mask1=m1, mask2=m2)
+
+        k = tree_map(remask_fn, k, mask1, mask2, is_leaf=is_leaf)
         return k
 
       if _has_req(kernel_fn):
@@ -226,7 +241,118 @@ def supports_masking(remask_kernel: bool):
   return supports_masking
 
 
+def unmask_fn(fn: ApplyFn) -> ApplyFn:
+  """Make a function returning a `MaskedArray` return a `np.ndarray`.
+
+  Useful if you pass `masked_constant` to your `apply_fn` in order to have
+  variable-length inputs. In this case `apply_fn` returns a `MaskedArray`
+  that stores the information about which entries are masked (for convenient
+  chaining with further functions operating on masked inputs). This decorator
+  replaces the output `MaskedArray` with an `np.ndarray` where masked
+  entries are zeroed-out, which is convenient to pass to functions operating on
+  arrays, such as :obj:`~neural_tangents.monte_carlo_kernel_fn` or
+  :obj:`~neural_tangents.empirical_kernel_fn`.
+
+  .. warning::
+    In some cases you may want to define your own custom unmasking behavior,
+    e.g. one that normalizes the values based on the number of non-zero entries.
+
+  See Also:
+    :class:`MaskedArray`, and an example masking application in
+    `examples/imdb.py`.
+
+  Args:
+    fn: function returning a :class:`MaskedArray`.
+
+  Returns:
+    Function of same signature as `fn`, where the output :class:`MaskedArray` is
+    replaced with the :class:`jax.numpy.ndarray` with masked entries zeroed-out.
+  """
+  def unmask(x: Union[MaskedArray, np.ndarray]) -> np.ndarray:
+    if isinstance(x, MaskedArray):
+      x = utils.mask(x.masked_value, x.mask)
+    return x
+
+  def is_leaf(x) -> bool:
+    return isinstance(x, (np.ndarray, MaskedArray))
+
+  @utils.wraps(fn)
+  def fn_no_mask(*args, **kwargs):
+    out = fn(*args, **kwargs)
+    out = tree_map(unmask, out, is_leaf=is_leaf)
+    return out
+
+  return fn_no_mask
+
+
 # INTERNAL UTILITIES
+
+
+@nt_dataclasses.dataclass
+class MaskedArray:
+  """A dataclass representing a masked :class:`jax.numpy.ndarray` or a `PyTree`.
+
+  This type may be returned by an `apply_fn` if you provide the
+  `masked_constant` argument, i.e. indicate that values of `x` equal to
+  `masked_constant` are considered as masked. In this case the output of the
+  `apply_fn` will be a :class:`MaskedArray`, containing information about which
+  output entries are considered masked.
+
+  See Also:
+    :obj:`unmask_fn`, and an example masking application in `examples/imdb.py`.
+
+  Attributes:
+    masked_value:
+      :class:`jax.numpy.ndarray` or a `PyTree` with values.
+
+    mask:
+      a boolean :class:`jax.numpy.ndarray` or a `PyTree` with `True` indicating
+      that the respective entry in `masked_value` is considered masked.
+  """
+  masked_value: PyTree
+  mask: PyTree
+
+
+def _get_masked_array(
+    x: Union[None, np.ndarray, ShapedArray, MaskedArray],
+    mask_constant: Optional[float] = None
+) -> MaskedArray:
+  """Return `x` with entries equal to `mask_constant` zeroed-out, and the mask.
+
+  The mask returned is a boolean `np.ndarray` with masked indices having `True`.
+
+  Args:
+    x:
+      `np.ndarray` to mask. If `x` is a :class:`MaskedArray`, treat it as
+      `(masked_x, mask)` and pass it through.
+
+    mask_constant: an optional `float`, the value in inputs to be considered as
+      masked (e.g. padding in a batch of sentences). `None` means no masking.
+      Can also be `np.nan`, `np.inf` etc.
+
+  Returns:
+    A :class:`MaskedArray` of `(masked_x, boolean_mask)`.
+  """
+
+  if x is None:
+    mask_mat = None
+
+  elif isinstance(x, MaskedArray):
+    x, mask_mat = x.masked_value, x.mask
+
+  elif isinstance(x, (onp.ndarray, np.ndarray, float, int)):
+    if mask_constant is None:
+      mask_mat = None
+    else:
+      mask_mat = lax.cond(np.isnan(mask_constant),
+                          np.isnan,
+                          lambda x: x == mask_constant,
+                          x)
+  else:
+    raise TypeError(x, type(x))
+
+  x = utils.mask(x, mask_mat)
+  return MaskedArray(x, mask_mat)  # pytype: disable=wrong-arg-count
 
 
 _INPUT_REQ = 'input_req'
@@ -486,7 +612,6 @@ def _cov(
   return ret / x1.shape[channel_axis]
 
 
-@utils.nt_tree_fn(2)
 def _inputs_to_kernel(
     x1: np.ndarray,
     x2: Optional[np.ndarray],
@@ -636,7 +761,7 @@ def _inputs_to_kernel(
       raise ValueError(f'Inputs must be at least 2D (a batch dimension and a '
                        f'channel/feature dimension), got {x.ndim}.')
 
-    x = utils.get_masked_array(x, mask_constant)
+    x = _get_masked_array(x, mask_constant)
     x, mask = x.masked_value, x.mask
 
     # TODO(schsam): Think more about dtype automatic vs manual dtype promotion.
@@ -693,7 +818,7 @@ def _propagate_shape(init_fn: InitFn,
     # shape constant.
     pass
 
-  if isinstance(shaped, utils.MaskedArray):
+  if isinstance(shaped, MaskedArray):
     shaped = shaped.masked_value
 
   return shaped
@@ -706,23 +831,21 @@ def _set_shapes(init_fn: InitFn,
                 **kwargs
                 ) -> NTTree[Kernel]:
   """Apply a kernel_fn to a Kernel propagating side information."""
+  is_leaf = lambda k: isinstance(k, Kernel)
 
-  get_shape1_fn = utils.nt_tree_fn()(lambda k:
-                                     ShapedArray(k.shape1, k.nngp.dtype))
-  get_shape2_fn = utils.nt_tree_fn()(lambda k:
-                                     ShapedArray(k.shape2, k.nngp.dtype))
-  shape1 = get_shape1_fn(in_kernel)
-  shape2 = get_shape2_fn(in_kernel)
+  shape1 = tree_map(lambda k: ShapedArray(k.shape1, k.nngp.dtype),
+                    in_kernel, is_leaf=is_leaf)
+  shape2 = tree_map(lambda k: ShapedArray(k.shape2, k.nngp.dtype),
+                    in_kernel, is_leaf=is_leaf)
 
   kwargs1, kwargs2 = utils.split_kwargs(kwargs)
 
-  shape1 = _propagate_shape(init_fn, apply_fn, shape1, **kwargs1)
-  shape2 = _propagate_shape(init_fn, apply_fn, shape2, **kwargs2)
+  shape1 = _propagate_shape(init_fn, unmask_fn(apply_fn), shape1, **kwargs1)
+  shape2 = _propagate_shape(init_fn, unmask_fn(apply_fn), shape2, **kwargs2)
 
-  set_shape_fn = utils.nt_tree_fn()(
-      lambda k, s1, s2: k.replace(shape1=s1.shape, shape2=s2.shape))
+  set_shape_fn = lambda k, s1, s2: k.replace(shape1=s1.shape, shape2=s2.shape)
 
-  return set_shape_fn(out_kernel, shape1, shape2)
+  return tree_map(set_shape_fn, out_kernel, shape1, shape2, is_leaf=is_leaf)
 
 
 def _fuse_requirements(
@@ -790,7 +913,11 @@ def _preprocess_kernel_fn(
 
     if x2 is None:
       x2 = tree_map(lambda x: None, x1)
-    kernel = _inputs_to_kernel(x1, x2, compute_ntk=compute_ntk, **reqs)
+
+    def input_fn(x1, x2):
+      return _inputs_to_kernel(x1, x2, compute_ntk=compute_ntk, **reqs)
+    kernel = tree_map(input_fn, x1, x2)
+
     out_kernel = kernel_fn(kernel, **kwargs)
     return _set_shapes(init_fn, apply_fn, kernel, out_kernel, **kwargs)
 
@@ -859,7 +986,19 @@ def _preprocess_kernel_fn(
       requested information. If `get` is `None` then a `Kernel` object is
       returned containing all the data.
     """
-    if utils.is_nt_tree_of(x1_or_kernel, Kernel):
+    def all_of(x, cls: Type) -> bool:
+
+      def is_leaf(x) -> bool:
+        return isinstance(x, (Kernel, np.ndarray, onp.ndarray))
+
+      return tree_all(
+          tree_map(
+              lambda x: isinstance(x, cls),
+              x,
+              is_leaf=is_leaf)
+          )
+
+    if all_of(x1_or_kernel, Kernel) and x2 is None:
       return kernel_fn_kernel(x1_or_kernel,
                               pattern=pattern,
                               diagonal_batch=diagonal_batch,

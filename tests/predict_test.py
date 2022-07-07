@@ -28,6 +28,7 @@ import jax.numpy as np
 import jax.tree_util
 import neural_tangents as nt
 from neural_tangents import predict, stax
+from neural_tangents._src.predict import _is_on_cpu
 from tests import test_utils
 
 
@@ -1147,6 +1148,40 @@ class PredictKwargsTest(test_utils.NeuralTangentsTestCase):
                                        compute_cov=False,
                                        **kw_dd)
     self.assertAllClose(out_mse, out_ensemble, atol=atol, rtol=rtol)
+
+
+class IsOnCpuTest(test_utils.NeuralTangentsTestCase):
+
+  def test_is_on_cpu(self):
+    dtypes = [np.float16, np.float32]
+    float64 = jax.dtypes.canonicalize_dtype(np.float64)
+    if float64 != np.float32:
+      dtypes += [float64]
+
+    for dtype in dtypes:
+      with self.subTest(dtype=dtype):
+
+        def x():
+          return random.normal(random.PRNGKey(1), (2, 3), dtype)
+
+        def x_cpu():
+          return jax.device_get(random.normal(random.PRNGKey(1), (2, 3), dtype))
+
+        x_jit = jit(x)
+        # x_cpu_jit = jit(x_cpu)
+        x_cpu_jit_cpu = jit(x_cpu, backend='cpu')
+
+        self.assertTrue(_is_on_cpu(x_cpu()))
+        # TODO(mattjj): re-enable this when device_put under jit works
+        # self.assertTrue(predict._is_on_cpu(x_cpu_jit()))
+        self.assertTrue(_is_on_cpu(x_cpu_jit_cpu()))
+
+        if jax.default_backend() == 'cpu':
+          self.assertTrue(_is_on_cpu(x()))
+          self.assertTrue(_is_on_cpu(x_jit()))
+        else:
+          self.assertFalse(_is_on_cpu(x()))
+          self.assertFalse(_is_on_cpu(x_jit()))
 
 
 if __name__ == '__main__':

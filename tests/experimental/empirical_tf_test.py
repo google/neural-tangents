@@ -243,7 +243,7 @@ class EmpiricalTfTest(parameterized.TestCase):
       rtol_jax = 0.15  # TODO(romann): revisit poor TPU agreement.
     else:
       atol = 1e-5
-      rtol = 5e-5
+      rtol = 1e-4
       atol_jax = 0.
       rtol_jax = 5e-5
 
