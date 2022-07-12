@@ -583,3 +583,68 @@ def split_kwargs(kwargs, x1=None, x2=None):
       kwargs1[k] = kwargs2[k] = v
 
   return kwargs1, kwargs2
+
+
+_SingleSlice = Union[int, slice, type(Ellipsis)]
+
+
+SliceType = Union[_SingleSlice, Tuple[_SingleSlice, ...]]
+"""A type to specify a slice of an array.
+
+For instance, when indexing `x[1, :, 2:8:3]` a slice tuple
+`(1, slice(None), slice(2, 8, 3))` is created. But since slice functions cannot
+accept slice specifications like `1, :, 2:8:3` as arguments, you must either
+pass this object, or, for convenience, an :cls:`~neural_tangents.stax.Slice`
+slice, such as `nt.stax.Slice[1, :, 2:8:3]`.
+"""
+
+
+def canonicalize_idx(
+    idx: SliceType,
+    ndim: int
+) -> Tuple[Union[int, slice], ...]:
+  if idx is Ellipsis or isinstance(idx, (int, slice)):
+    idx = (idx,) + (slice(None),) * (ndim - 1)
+
+  for i, s in enumerate(idx):
+    if s is Ellipsis:
+      idx = idx[:i] + (slice(None),) * (ndim - len(idx) + 1) + idx[i + 1:]
+
+  idx += (slice(None),) * (ndim - len(idx))
+  return idx
+
+
+def slice_shape(shape: Tuple[int, ...], idx: SliceType) -> Tuple[int, ...]:
+  # Keep `None` or negative-sized axes if they aren't indexed into.
+  canonical_idx = canonicalize_idx(idx, len(shape))
+
+  np_shape = list(shape)
+  unknown_axes = {}
+  n_ints = 0  # Keep track of vanishing axes due to integer indexing.
+
+  for a, (i, s) in enumerate(zip(canonical_idx, shape)):
+    if s < 0 or s is None:
+      if i == slice(None):
+        np_shape[a] = 0
+        unknown_axes[a - n_ints] = s
+      else:
+        raise ValueError(
+            f'Trying to index with {i} axis {a} of unknown size {s}. '
+            f'Please provide input shape {shape} with non-negative integer '
+            f'size at axis {a}.')
+
+    if isinstance(i, int):
+      n_ints += 1
+
+  out_shape = list(onp.empty(np_shape)[idx].shape)
+  for a, v in unknown_axes.items():
+    out_shape[a] = v
+
+  return tuple(out_shape)
+
+
+_T = TypeVar('_T')
+
+
+def double_tuple(x: Iterable[_T]) -> Tuple[_T, ...]:
+  return tuple(v for v in x for _ in range(2))

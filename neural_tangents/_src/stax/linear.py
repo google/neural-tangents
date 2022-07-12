@@ -1596,9 +1596,9 @@ def _Pool(
       window_shape_kernel = window_shape
       strides_kernel = strides
     else:
-      window_shape_kernel = _double_tuple(
+      window_shape_kernel = utils.double_tuple(
           window_shape[::(-1 if k.is_reversed else 1)])
-      strides_kernel = _double_tuple(strides[::(-1 if k.is_reversed else 1)])
+      strides_kernel = utils.double_tuple(strides[::(-1 if k.is_reversed else 1)])
 
     def pool(mat, batch_ndim):
       if mat is None or mat.ndim == 0:
@@ -2785,6 +2785,87 @@ def ImageResize(
   return init_fn, apply_fn, kernel_fn, mask_fn
 
 
+@layer
+@supports_masking(remask_kernel=False)
+def Index(
+    idx: utils.SliceType,
+    batch_axis: int = 0,
+    channel_axis: int = -1
+) -> InternalLayerMasked:
+  """Index into the array mimicking :cls:`onp.ndarray` indexing.
+
+  .. warning::
+    Two limitations in the kernel regime (`kernel_fn`): the `channel_axis`
+    (infinite width) cannot be indexed, and the `batch_axis` can only be
+    indexed with tuples/slices, but not integers, since the library requires
+    there always to be a batch axis in a `Kernel`.
+
+  Args:
+    idx:
+      a `slice` object that would result from indexing an array as `x[idx]`.
+      To create this object, use the helper class :cls:`Slice`, i.e. pass
+      `idx=stax.Slice[1:10, :, ::-1]` (which is equivalent to passing an
+      explicit `idx=(slice(1, 10, None), slice(None), slice(None, None, -1)`.
+
+    batch_axis:
+      batch axis for `inputs`. Defaults to `0`, the leading axis.
+
+    channel_axis:
+      channel axis for `inputs`. Defaults to `-1`, the trailing axis. For
+      `kernel_fn`, channel size is considered to be infinite.
+
+  Returns:
+    `(init_fn, apply_fn, kernel_fn)`.
+
+  Example:
+    >>> from neural_tangents import stax
+    >>> #
+    >>> init_fn, apply_fn, kernel_fn = stax.serial(
+    >>>     stax.Conv(128, (3, 3)),
+    >>>     stax.Relu(),
+    >>>     # Select every other element from the batch (leading axis), cropped
+    >>>     # to the upper-left 4x4 corner.
+    >>>     stax.Index(idx=stax.Slice[::2, :4, :4])
+    >>>     stax.Conv(128, (2, 2)),
+    >>>     stax.Relu(),
+    >>>     # Select the first row. Notice that the image becomes 1D.
+    >>>     stax.Index(idx=stax.Slice[:, 0, ...])
+    >>>     stax.Conv(128, (2,))
+    >>>     stax.GlobalAvgPool(),
+    >>>     stax.Dense(10)
+    >>> )
+  """
+  def init_fn(rng, input_shape):
+    return utils.slice_shape(input_shape, idx), ()
+
+  def apply_fn(params, x, **kwargs):
+    return x[idx]
+
+  def mask_fn(mask, input_shape):
+    return mask[idx]
+
+  @requires(batch_axis=batch_axis, channel_axis=channel_axis)
+  def kernel_fn(k: Kernel, **kwargs) -> Kernel:
+    return k[idx]
+
+  return init_fn, apply_fn, kernel_fn, mask_fn
+
+
+class _Slice:
+
+  def __getitem__(self, idx: utils.SliceType) -> utils.SliceType:
+    return idx
+
+
+Slice = _Slice()
+"""A helper object to pass the slicing index `idx` to the :obj:`Index` layer.
+
+Since we cannot pass slice specifications like `1, :, 2:8:3` as function
+arguments, pass `Slice[1, :, 2:8:3] == (1, slice(None), slice(2, 8, 3))`
+instead.
+"""
+
+
 # INTERNAL UTILITIES
 
 
@@ -3004,8 +3085,8 @@ def _conv_kernel_full_spatial_shared(
 
   if padding == Padding.CIRCULAR:
     spatial_axes = tuple(range(batch_ndim, lhs.ndim))
-    total_filter_shape = _double_tuple(filter_shape)
-    total_strides = _double_tuple(strides)
+    total_filter_shape = utils.double_tuple(filter_shape)
+    total_strides = utils.double_tuple(strides)
     lhs = _same_pad_for_filter_shape(lhs,
                                      total_filter_shape,
                                      total_strides,
@@ -3057,13 +3138,6 @@ def _conv_kernel_full_spatial_shared(
   out = _conv_kernel_full_spatial_loop(lhs, filter_shape, strides, padding,
                                        lax_conv, get_n_channels)
   return out
-
-
-_T = TypeVar('_T')
-
-
-def _double_tuple(x: Iterable[_T]) -> Tuple[_T, ...]:
-  return tuple(v for v in x for _ in range(2))
 
 
 def _conv_kernel_full_spatial_unshared(
@@ -3173,8 +3247,8 @@ def _conv_kernel_full_spatial_transpose(
 
   if padding == Padding.CIRCULAR:
     spatial_axes = tuple(range(batch_ndim, out.ndim))
-    total_filter_shape = _double_tuple(filter_shape)
-    total_strides = _double_tuple(strides)
+    total_filter_shape = utils.double_tuple(filter_shape)
+    total_strides = utils.double_tuple(strides)
     out_shape = eval_shape(lambda x: _pool_transpose(x,
                                                      total_filter_shape,
                                                      total_strides,

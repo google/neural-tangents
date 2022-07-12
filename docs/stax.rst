@@ -93,9 +93,9 @@ Pointwise nonlinear layers.
     Sin
 
 
-Helper enums
+Helper classes
 --------------------------------------
-Enums for specifying layer properties. Strings can be used in their place.
+Utility classes for specifying layer properties. For enums, strings can be passed in their place.
 
 .. autosummary::
  :toctree: _autosummary
@@ -104,6 +104,7 @@ Enums for specifying layer properties. Strings can be used in their place.
     AttentionMechanism
     Padding
     PositionalEmbedding
+    Slice
 
 
 For developers

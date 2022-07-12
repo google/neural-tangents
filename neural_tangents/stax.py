@@ -111,6 +111,7 @@ from ._src.stax.linear import (
     ConvTranspose,
     Dense,
     Identity,
+    Index,
     DotGeneral,
     Dropout,
     Flatten,
@@ -120,6 +121,12 @@ from ._src.stax.linear import (
     ImageResize,
     LayerNorm,
     SumPool,
+)
+
+
+# Helper object for the `Index` layer.
+from ._src.stax.linear import (
+    Slice
 )
 
 

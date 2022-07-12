@@ -438,3 +438,71 @@ class Kernel:
     return self
 
   __pos__ = __neg__
+
+  def __getitem__(self, idx: utils.SliceType) -> 'Kernel':
+    idx = utils.canonicalize_idx(idx, len(self.shape1))
+
+    channel_idx = idx[self.channel_axis]
+    batch_idx = idx[self.batch_axis]
+
+    # Not allowing to index the channel axis.
+    if channel_idx != slice(None):
+      raise NotImplementedError(
+          f'Indexing into the (infinite) channel axis {self.channel_axis} not '
+          f'supported.'
+      )
+
+    # Removing the batch.
+    if isinstance(batch_idx, int):
+      raise NotImplementedError(
+          f'Indexing an axis with an integer index (e.g. `0` vs `(0,)` removes '
+          f'the respective axis. Neural Tangents requires there to always be a '
+          f'batch axis ({self.batch_axis}), so it cannot be indexed with '
+          f'integers (please use tuples or `slice` instead).'
+      )
+
+    spatial_idx = tuple(s for i, s in enumerate(idx) if i not in
+                        (self.batch_axis, self.channel_axis))
+
+    if self.is_reversed:
+      spatial_idx = spatial_idx[::-1]
+
+    if not self.diagonal_spatial:
+      spatial_idx = utils.double_tuple(spatial_idx)
+
+    nngp_batch_slice = (batch_idx, batch_idx)
+    cov_batch_slice = (batch_idx,) if self.diagonal_batch else (batch_idx,) * 2
+
+    nngp_slice = nngp_batch_slice + spatial_idx
+    cov_slice = cov_batch_slice + spatial_idx
+
+    nngp = self.nngp[nngp_slice]
+    ntk = (self.ntk if (self.ntk is None or self.ntk.ndim == 0) else
+           self.ntk[nngp_slice])  # pytype: disable=attribute-error
+
+    cov1 = self.cov1[cov_slice]
+    cov2 = None if self.cov2 is None else self.cov2[cov_slice]
+
+    # Axes may shift if some indices are integers (and not tuples / slices).
+    channel_axis = self.channel_axis
+    batch_axis = self.batch_axis
+
+    for i, s in reversed(list(enumerate(idx))):
+      if isinstance(s, int):
+        if i < channel_axis:
+          channel_axis -= 1
+        if i < batch_axis:
+          batch_axis -= 1
+
+    return self.replace(
+        nngp=nngp,
+        ntk=ntk,
+        cov1=cov1,
+        cov2=cov2,
+        channel_axis=channel_axis,
+        batch_axis=batch_axis,
+        shape1=utils.slice_shape(self.shape1, idx),
+        shape2=utils.slice_shape(self.shape2, idx),
+        mask1=None if self.mask1 is None else self.mask1[idx],
+        mask2=None if self.mask2 is None else self.mask2[idx],
+    )

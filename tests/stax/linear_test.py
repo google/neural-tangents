@@ -1676,5 +1676,151 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
     test_utils.assert_close_matrices(self, k_mc, k, tol)
 
 
+class IndexTest(test_utils.NeuralTangentsTestCase):
+
+  @test_utils.product(
+      same_inputs=[
+          True,
+          False
+      ],
+      get=[
+          'nngp',
+          'ntk',
+          'cov1',
+          'cov2',
+      ],
+      index_layer=[
+          0,
+          1,
+          2,
+          3
+      ],
+      mask_constant=[
+          None,
+          10.
+      ],
+      idx=[
+          stax.Slice[0],
+          stax.Slice[-1],
+          stax.Slice[:],
+          stax.Slice[:, 0],
+          stax.Slice[:, -1],
+          stax.Slice[:, -3:],
+          stax.Slice[:, :],
+          stax.Slice[::2],
+          stax.Slice[...],
+          stax.Slice[0, ...],
+          stax.Slice[1:2, ...],
+          stax.Slice[0:2, ...],
+          stax.Slice[:, ::-2, ...],
+          stax.Slice[::2, ::-2, 0, ...],
+          stax.Slice[..., 1],
+          stax.Slice[..., :2],
+          stax.Slice[::2, 1, ...],
+          stax.Slice[:, 1, -1, :],
+          stax.Slice[..., 1::2],
+          stax.Slice[:3, 1, 2],
+          stax.Slice[:2, :2, :2],
+          stax.Slice[..., ::2],
+          stax.Slice[1:2:-1, 1, 2],
+          stax.Slice[:, 0, :],
+      ],
+      readout=[
+          stax.GlobalAvgPool,
+          stax.Flatten,
+      ]
+  )
+  def test_index(
+      self,
+      same_inputs,
+      get,
+      index_layer,
+      mask_constant,
+      idx,
+      readout,
+  ):
+    if index_layer == 3 and isinstance(idx, tuple) and len(idx) > 2:
+      raise absltest.SkipTest(f'Readout outputs have only 2 dimensions, but '
+                              f'the index has {len(idx)}.')
+
+    if get == 'cov2' and same_inputs:
+      raise absltest.SkipTest('cov2 is None when x2 is None.')
+
+    width = 2**7
+    n_samples = 2**7
+    tol = 0.05
+    key1, key2, key_mc = random.split(random.PRNGKey(1), 3)
+
+    x1 = np.cos(random.normal(key1, [6, 3, 4, 5]))
+    if mask_constant is not None:
+      mask1 = random.bernoulli(key1, p=0.2, shape=x1.shape)
+      x1 = np.where(mask1, mask_constant, x1)
+
+    if same_inputs:
+      x2 = None
+    else:
+      x2 = np.cos(random.normal(key2, [7, 3, 4, 5]))
+      if mask_constant is not None:
+        mask2 = random.bernoulli(key2, p=0.1, shape=x2.shape)
+        x2 = np.where(mask2, mask_constant, x2)
+
+    canonical_idx = utils.canonicalize_idx(
+        idx=idx,
+        ndim=x1.ndim if index_layer != 3 else 2
+    )
+
+    filter_shape = (2, 3)
+    if index_layer == 0:
+      for i, s in enumerate(canonical_idx):
+        if isinstance(s, int) and i in (1, 2):
+          filter_shape = filter_shape[:-1]
+
+    layers = [
+        stax.Conv(width, filter_shape, padding='SAME'),
+        stax.Relu(),
+        readout(),
+        stax.Dense(1 if get == 'ntk' else width)
+    ]
+
+    layers.insert(index_layer, stax.Index(idx=idx))
+    init_fn, apply_fn, kernel_fn = stax.serial(*layers)
+
+    def get_exact():
+      return kernel_fn(x1, x2, get, mask_constant=mask_constant)
+
+    if isinstance(canonical_idx[0], int) or canonical_idx[-1] != slice(None):
+      # Unsupported integer indexing into batch axis, or any indexing into
+      # the channel axis.
+      self.assertRaises(NotImplementedError, get_exact)
+
+    else:
+      exact = get_exact()
+
+      if get in ('cov1', 'cov2'):
+        diagonal_axes = (0,)
+        get_e = 'nngp'
+        if get == 'cov1':
+          x1_e, x2_e = x1, None
+        elif get == 'cov2':
+          x1_e, x2_e = x2, None
+      else:
+        diagonal_axes = ()
+        x1_e, x2_e = x1, x2
+        get_e = get
+
+      kernel_fn_mc = nt.monte_carlo_kernel_fn(
+          init_fn=init_fn,
+          apply_fn=stax.unmask_fn(apply_fn),
+          key=key_mc,
+          n_samples=n_samples,
+          device_count=0,
+          diagonal_axes=diagonal_axes,
+          implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
+      )
+      empirical = kernel_fn_mc(x1_e, x2_e, get_e, mask_constant=mask_constant)
+
+      test_utils.assert_close_matrices(self, empirical, exact, tol)
+
+
 if __name__ == '__main__':
   absltest.main()
