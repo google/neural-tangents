@@ -477,8 +477,8 @@ class Kernel:
     cov_slice = cov_batch_slice + spatial_idx
 
     nngp = self.nngp[nngp_slice]
-    ntk = (self.ntk if (self.ntk is None or self.ntk.ndim == 0) else
-           self.ntk[nngp_slice])  # pytype: disable=attribute-error
+    ntk = (self.ntk if (self.ntk is None or self.ntk.ndim == 0) else  # pytype: disable=attribute-error
+           self.ntk[nngp_slice])
 
     cov1 = self.cov1[cov_slice]
     cov2 = None if self.cov2 is None else self.cov2[cov_slice]

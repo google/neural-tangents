@@ -2794,12 +2794,6 @@ def Index(
 ) -> InternalLayerMasked:
   """Index into the array mimicking :cls:`onp.ndarray` indexing.
 
-  .. warning::
-    Two limitations in the kernel regime (`kernel_fn`): the `channel_axis`
-    (infinite width) cannot be indexed, and the `batch_axis` can only be
-    indexed with tuples/slices, but not integers, since the library requires
-    there always to be a batch axis in a `Kernel`.
-
   Args:
     idx:
       a `slice` object that would result from indexing an array as `x[idx]`.
@@ -2816,6 +2810,22 @@ def Index(
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
+
+  Raises:
+    NotImplementedError:
+      If the `channel_axis` (infinite width) is indexed
+      (except for `:` or `...`) in the kernel regime (`kernel_fn`).
+
+    NotImplementedError:
+      If the `batch_axis` is indexed with an integer (as opposed to a tuple or
+      slice) in the kernel regime (`kernel_fn`), since the library currently
+      requires there always to be `batch_axis` in  the kernel regime (while
+      indexing with integers removes the respective axis).
+
+    ValueError:
+      If `init_fn` is called on a shape with dummy axes (with sizes like `-1`
+      or `None`), that are indexed with non-trivial (not `:` or `...`) slices.
+      For indexing, the size of the respective axis needs to be specified.
 
   Example:
     >>> from neural_tangents import stax

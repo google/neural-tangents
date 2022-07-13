@@ -22,9 +22,9 @@ neural networks (a.k.a. NTK, NNGP).
    :maxdepth: 2
    :caption: Internal:
 
+   experimental
    kernel
    typing
-   experimental
 
 .. toctree::
    :maxdepth: 2

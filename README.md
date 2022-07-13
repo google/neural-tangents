@@ -1,10 +1,10 @@
 # **Stand with Ukraine!** 🇺🇦
 
-Freedom of thought is fundamental to all of science. Right now, our freedom is being suppressed with carpet bombing of civilians in Ukraine. **Don't be against the war - fight against the war!** Support Ukraine at **[stopputin.net](https://stopputin.net/)**.
+Freedom of thought is fundamental to all of science. Right now, our freedom is being suppressed with carpet bombing of civilians in Ukraine. **Don't be against the war - fight against the war! [supportukrainenow.org](https://supportukrainenow.org/)**.
 
 ### News
 
-Our paper "[Fast Finite Width Neural Tangent Kernel](https://arxiv.org/abs/2206.08720)" has been accepted to ICML2022, and the respective code [submitted](https://github.com/romanngg/neural-tangents/commit/60b6c16758652f4526536409b5bc90602287b868) (available starting from version `0.6.0`).
+**[Fast Finite Width Neural Tangent Kernel](https://arxiv.org/abs/2206.08720)** is accepted to ICML2022, and the respective code [submitted](https://github.com/romanngg/neural-tangents/commit/60b6c16758652f4526536409b5bc90602287b868) (available from `0.6.0`). See [video](https://youtu.be/8MWOhYg89fY?t=10984) and [example](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/empirical_ntk_fcn.ipynb).
 
 # Neural Tangents
 [**ICLR 2020 Video**](https://iclr.cc/virtual_2020/poster_SklD9yrFPS.html)
@@ -61,7 +61,7 @@ An easy way to get started with Neural Tangents is by playing around with the fo
 - [Function Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/function_space_linearization.ipynb)
 - [Neural Network Phase Diagram](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/phase_diagram.ipynb)
 - [Performance Benchmark](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/myrtle_kernel_with_neural_tangents.ipynb): simple benchmark for Myrtle kernels used in [[16]](#16-neural-kernels-without-tangents). Also see [Performance](#myrtle-network)
-- Empirical NTK:
+- [**New**] Empirical NTK:
   - [Fully-connected network](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/empirical_ntk_fcn.ipynb)
   - [FLAX ResNet18](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/empirical_ntk_resnet.ipynb)
   - [Experimental: Tensorflow ResNet50](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/experimental/empirical_ntk_resnet_tf.ipynb)
