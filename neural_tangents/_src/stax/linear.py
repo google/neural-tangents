@@ -2792,7 +2792,7 @@ def Index(
     batch_axis: int = 0,
     channel_axis: int = -1
 ) -> InternalLayerMasked:
-  """Index into the array mimicking :class:`onp.ndarray` indexing.
+  """Index into the array mimicking :class:`numpy.ndarray` indexing.
 
   Args:
     idx:
