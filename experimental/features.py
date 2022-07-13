@@ -521,12 +521,14 @@ def _cholesky(mat):
 
 
 @layer
-def ReluNTKFeatures(
-    num_layers: int,
-    poly_degree: int = 16,
-    poly_sketch_dim: int = 1024,
-    W_std: float = 1.,
-):
+def ReluNTKFeatures(num_layers: int,
+                    poly_degree: int = 16,
+                    poly_sketch_dim: int = 1024,
+                    batch_axis: int = 0,
+                    channel_axis: int = -1):
+
+  if batch_axis != 0 or channel_axis != -1:
+    raise NotImplementedError(f'Not supported axes.')
 
   def init_fn(rng, input_shape):
     input_dim = input_shape[0][-1]
@@ -541,14 +543,18 @@ def ReluNTKFeatures(
 
     return (), (polysketch, nngp_coeffs, ntk_coeffs)
 
-  def feature_fn(f, input=None, **kwargs):
+  @requires(batch_axis=batch_axis, channel_axis=channel_axis)
+  def feature_fn(f: Features, input=None, **kwargs):
     input_shape = f.nngp_feat.shape[:-1]
 
     polysketch: PolyTensorSketch = input[0]
     nngp_coeffs: np.ndarray = input[1]
     ntk_coeffs: np.ndarray = input[2]
 
-    polysketch_feats = polysketch.sketch(f.nngp_feat)
+    norms = np.linalg.norm(f.nngp_feat, axis=channel_axis, keepdims=True)
+    nngp_feat = f.nngp_feat / norms
+
+    polysketch_feats = polysketch.sketch(nngp_feat)
     nngp_feat = polysketch.expand_feats(polysketch_feats, nngp_coeffs)
     ntk_feat = polysketch.expand_feats(polysketch_feats, ntk_coeffs)
 
@@ -557,8 +563,11 @@ def ReluNTKFeatures(
     ntk_feat = polysketch.standardsrht(ntk_feat).reshape(input_shape + (-1,))
 
     # Convert complex features to real ones.
-    ntk_feat = np.concatenate((ntk_feat.real, ntk_feat.imag), axis=-1)
     nngp_feat = np.concatenate((nngp_feat.real, nngp_feat.imag), axis=-1)
+    ntk_feat = np.concatenate((ntk_feat.real, ntk_feat.imag), axis=-1)
+
+    nngp_feat *= norms / 2**(num_layers / 2.)
+    ntk_feat *= norms / 2**(num_layers / 2.)
 
     return f.replace(nngp_feat=nngp_feat, ntk_feat=ntk_feat)
 

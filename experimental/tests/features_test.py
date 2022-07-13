@@ -534,6 +534,37 @@ class FeaturesTest(test_utils.NeuralTangentsTestCase):
     self.assertAllClose(k.nngp, f.nngp_feat @ f.nngp_feat.T)
     self.assertAllClose(k.ntk, f.ntk_feat @ f.ntk_feat.T)
 
+  @parameterized.product(n_layers=[1, 2, 3, 4, 5], do_jit=[True, False])
+  def test_onepass_fc_relu_nngp_ntk(self, n_layers, do_jit):
+    rng = random.PRNGKey(1)
+    n, d = 4, 256
+    x = _get_init_data(rng, (n, d))
+
+    kernel_fn = stax.serial(*[stax.Dense(1), stax.Relu()] * n_layers +
+                            [stax.Dense(1)])[2]
+
+    poly_degree = 8
+    poly_sketch_dim = 4096
+
+    init_fn, feature_fn = ft.ReluNTKFeatures(n_layers, poly_degree,
+                                             poly_sketch_dim)
+
+    rng2 = random.PRNGKey(2)
+    _, feat_fn_inputs = init_fn(rng2, x.shape)
+
+    if do_jit:
+      kernel_fn = jit(kernel_fn)
+      feature_fn = jit(feature_fn)
+
+    k = kernel_fn(x)
+    f = feature_fn(x, feat_fn_inputs)
+
+    k_nngp_approx = f.nngp_feat @ f.nngp_feat.T
+    k_ntk_approx = f.ntk_feat @ f.ntk_feat.T
+
+    test_utils.assert_close_matrices(self, k.nngp, k_nngp_approx, 0.2, 1.)
+    test_utils.assert_close_matrices(self, k.ntk, k_ntk_approx, 0.2, 1.)
+
 
 if __name__ == "__main__":
   absltest.main()
