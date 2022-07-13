@@ -2792,12 +2792,12 @@ def Index(
     batch_axis: int = 0,
     channel_axis: int = -1
 ) -> InternalLayerMasked:
-  """Index into the array mimicking :cls:`onp.ndarray` indexing.
+  """Index into the array mimicking :class:`onp.ndarray` indexing.
 
   Args:
     idx:
       a `slice` object that would result from indexing an array as `x[idx]`.
-      To create this object, use the helper class :cls:`Slice`, i.e. pass
+      To create this object, use the helper object :obj:`Slice`, i.e. pass
       `idx=stax.Slice[1:10, :, ::-1]` (which is equivalent to passing an
       explicit `idx=(slice(1, 10, None), slice(None), slice(None, None, -1)`.
 
