@@ -50,7 +50,7 @@ jobs:
 
     - name: Test with pytest and generate coverage report (Ubuntu)
       run: |
-        JAX_ENABLE_X64=${{ matrix.JAX_ENABLE_X64 }} pytest experimental/tests/ -n auto --cov=experimental/ --cov-report=xml --cov-report=term
+        JAX_ENABLE_X64=${{ matrix.JAX_ENABLE_X64 }} PYTHONHASHSEED=0 pytest experimental/tests/ -n auto --cov=experimental/ --cov-report=xml --cov-report=term
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v2.1.0

@@ -1,3 +1,8 @@
 .wy-nav-content {
     max-width: none;
 }
+
+.rst-content code.literal, .rst-content tt.literal {
+    color: #404040;
+    white-space: normal
+}

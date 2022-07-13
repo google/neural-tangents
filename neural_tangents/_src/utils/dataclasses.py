@@ -32,23 +32,24 @@ def dataclass(clz):
   Jax transformations such as `jax.jit` and `jax.grad` require objects that are
   immutable and can be mapped over using the `jax.tree_util` functions.
   The `dataclass` decorator makes it easy to define custom classes that can be
-  passed safely to Jax. For example:
+  passed safely to Jax.
 
-  >>>  from jax import jit, numpy as np
-  >>>  from neural_tangents._src.utils import dataclasses
-  >>>
-  >>>  @dataclasses.dataclass
-  >>>  class Data:
-  >>>    array: np.ndarray
-  >>>    a_boolean: bool = dataclasses.field(pytree_node=False)
-  >>>
-  >>>  data = Data(np.array([1.0]), True)
-  >>>
-  >>>  data.array = np.array([2.0])  # Data is immutable. Will raise an error.
-  >>>  data = data.replace(array=np.array([2.0]))  # Use the replace method.
-  >>>
-  >>>  # This class can now be used safely in Jax.
-  >>>  jit(lambda data: data.array if data.a_boolean else 0)(data)
+  Example:
+    >>> from jax import jit, numpy as np
+    >>> from neural_tangents._src.utils import dataclasses
+    >>> #
+    >>> @dataclasses.dataclass
+    >>> class Data:
+    >>>   array: np.ndarray
+    >>>   a_boolean: bool = dataclasses.field(pytree_node=False)
+    >>> #
+    >>> data = Data(np.array([1.0]), True)
+    >>> #
+    >>> data.array = np.array([2.0])  # Data is immutable. Will raise an error.
+    >>> data = data.replace(array=np.array([2.0]))  # Use the replace method.
+    >>> #
+    >>> # This class can now be used safely in Jax.
+    >>> jit(lambda data: data.array if data.a_boolean else 0)(data)
 
   Args:
     clz: the class that will be transformed by the decorator.

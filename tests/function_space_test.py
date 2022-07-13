@@ -20,6 +20,7 @@ from jax.config import config
 from examples import function_space
 from tests import test_utils
 
+
 config.parse_flags_with_absl()
 config.update('jax_numpy_rank_promotion', 'raise')
 

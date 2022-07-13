@@ -12,27 +12,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""General-purpose internal utilities."""
+"""General-purpose internal utilities.
+
+If a function or class is used in multiple modules, put it here.
+"""
 
 from collections import namedtuple
 import functools
 import inspect
 import operator
 import types
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Sized, Tuple, Union, TypeVar, Type
-
-import jax
-
-from .typing import Axes, PyTree
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Sized, Tuple, Type, TypeVar, Union
 import warnings
 
-from . import dataclasses
-from jax import dtypes, random
-from jax import lax
+import jax
+from jax import random
 import jax.numpy as np
 from jax.tree_util import tree_all, tree_map
-from jax.tree_util import tree_flatten, tree_unflatten
 import numpy as onp
+
+
+PyTree = Any
+
+
+Axes = Union[int, Sequence[int]]
 
 
 def is_list_or_tuple(x) -> bool:
@@ -49,9 +52,11 @@ def is_nt_tree_of(x, dtype: Union[Type, Tuple[Type, ...]]) -> bool:
   return all(is_nt_tree_of(_x, dtype) for _x in x)
 
 
-def nt_tree_fn(nargs: Optional[int] = None,
-               tree_structure_argnum: Optional[int] = None,
-               reduce: Callable = lambda x: x):
+def nt_tree_fn(
+    nargs: Optional[int] = None,
+    tree_structure_argnum: Optional[int] = None,
+    reduce: Callable = lambda x: x
+):
   """Convert a function that acts on single inputs to one that acts on trees.
 
   `nt_tree_fn` treats the first `nargs` arguments as NTTrees and the remaining
@@ -64,14 +69,19 @@ def nt_tree_fn(nargs: Optional[int] = None,
   is used to infer the structure.
 
   Args:
-    nargs: The number of arguments to be treated as NTTrees. If `nargs` is None
+    nargs:
+      The number of arguments to be treated as NTTrees. If `nargs` is `None`
       then all of the arguments are used. `nargs` can also be negative which
       follows numpy's semantics for array indexing.
-    tree_structure_argnum: The argument used to infer the tree structure to be
-      traversed. If `tree_structure_argnum` is None then a check is performed to
-      ensure that all trees have the same structure.
-    reduce: A callable that is applied recursively by each internal tree node
-      to its children.
+
+    tree_structure_argnum:
+      The argument used to infer the tree structure to be traversed. If
+      `tree_structure_argnum` is None then a check is performed to ensure that
+      all trees have the same structure.
+
+    reduce:
+      A callable that is applied recursively by each internal tree node to its
+      children.
 
   Returns:
     A decorator `tree_fn` that transforms a function, `fn`, from acting on
@@ -146,13 +156,13 @@ def canonicalize_get(get):
 _KERNEL_NAMED_TUPLE_CACHE: Dict[Any, Any] = {}
 
 
-def named_tuple_factory(name, get):
+def _named_tuple_factory(name, get):
   key = (name, get)
   if key in _KERNEL_NAMED_TUPLE_CACHE:
     return _KERNEL_NAMED_TUPLE_CACHE[key]
   else:
     _KERNEL_NAMED_TUPLE_CACHE[key] = namedtuple(name, get)
-    return named_tuple_factory(name, get)
+    return _named_tuple_factory(name, get)
 
 
 def _output_to_dict(output):
@@ -215,7 +225,7 @@ def get_namedtuple(name):
       def canonicalize_output(out):
         if get is None:
           if isinstance(out, dict):
-            ReturnType = named_tuple_factory(name, tuple(out.keys()))
+            ReturnType = _named_tuple_factory(name, tuple(out.keys()))
             out = ReturnType(*out.values())
           return out
 
@@ -227,7 +237,7 @@ def get_namedtuple(name):
           else:
             return out[get[0]]
 
-        ReturnType = named_tuple_factory(name, get)
+        ReturnType = _named_tuple_factory(name, get)
         if isinstance(out, types.GeneratorType):
           return (ReturnType(*tuple(output[g] for g in get)) for output in out)
         else:
@@ -280,7 +290,7 @@ def mod(axis: Axes, x: Union[int, Sized, np.ndarray]) -> List[int]:
   n = _get_ndim(x)
   if isinstance(axis, int):
     axis = [axis]
-  return [i % n for i in axis]
+  return [(i % n) if n > 0 else i for i in axis]
 
 
 def canonicalize_axis(axis: Axes,
@@ -376,10 +386,6 @@ def _zip_axes(x: np.ndarray,
   return x
 
 
-def transpose_zipped(x: np.ndarray) -> np.ndarray:
-  return np.moveaxis(x, range(1, x.ndim, 2), range(0, x.ndim, 2))
-
-
 def diagonal_between(x: np.ndarray,
                      start_axis: int = 0,
                      end_axis: Optional[int] = None) -> np.ndarray:
@@ -430,7 +436,10 @@ def outer_prod(x, y, start_axis, end_axis, prod_op):
 
 
 _ArrayOrShape = TypeVar('_ArrayOrShape',
-                        onp.ndarray, np.ndarray, List[int], Tuple[int, ...])
+                        onp.ndarray,
+                        np.ndarray,
+                        List[int],
+                        Tuple[int, ...])
 
 
 def reverse_zipped(
@@ -451,59 +460,6 @@ def reverse_zipped(
   return x
 
 
-@dataclasses.dataclass
-class MaskedArray:
-  masked_value: np.ndarray
-  mask: np.ndarray
-  shape: Tuple[int, ...] = dataclasses.field(init=False, pytree_node=False)
-  ndim: int = dataclasses.field(init=False, pytree_node=False)
-
-  def __post_init__(self):
-    super().__setattr__('shape', self.masked_value.shape)
-    super().__setattr__('ndim', self.masked_value.ndim)
-
-  astuple = ...  # type: Callable[[], Tuple[np.ndarray, np.ndarray, Tuple[int, ...], int]]
-
-
-@nt_tree_fn(nargs=1)
-def get_masked_array(x: Union[None, np.ndarray, MaskedArray],
-                     mask_constant: Optional[float] = None) -> MaskedArray:
-  """Return `x` with entries equal to `mask_constant` zeroed-out, and the mask.
-
-  The mask returned is a boolean `np.ndarray` with masked indices having `True`.
-
-  Args:
-    x: `np.ndarray` to mask. If `x` is a `MaskedArray`, treat it as
-      `(masked_x, mask)` and pass it through.
-    mask_constant: an optional `float`, the value in inputs to be considered as
-      masked (e.g. padding in a batch of sentences). `None` means no masking.
-      Can also be `np.nan`, `np.inf` etc.
-
-  Returns:
-    A `MaskedArray` of `(masked_x, boolean_mask)`.
-  """
-
-  if x is None:
-    mask_mat = None
-
-  elif isinstance(x, MaskedArray):
-    x, mask_mat, _, _ = x.astuple()
-
-  elif isinstance(x, (onp.ndarray, np.ndarray)):
-    if mask_constant is None:
-      mask_mat = None
-    else:
-      mask_mat = lax.cond(np.isnan(mask_constant),
-                          np.isnan,
-                          lambda x: x == mask_constant,
-                          x)
-  else:
-    raise TypeError(x, type(x))
-
-  x = mask(x, mask_mat)
-  return MaskedArray(x, mask_mat)  # pytype: disable=wrong-arg-count
-
-
 def mask(
     x: Optional[np.ndarray],
     mask_mat: Optional[np.ndarray]
@@ -513,8 +469,10 @@ def mask(
   return np.where(mask_mat, np.zeros((), x.dtype), x)
 
 
-def size_at(x: _ArrayOrShape,
-            axes: Optional[Iterable[int]] = None) -> int:
+def size_at(
+    x: Union[_ArrayOrShape, jax.ShapedArray],
+    axes: Optional[Iterable[int]] = None
+) -> int:
   if hasattr(x, 'shape'):
     x = x.shape
 
@@ -524,77 +482,12 @@ def size_at(x: _ArrayOrShape,
   return functools.reduce(operator.mul, [x[a] for a in axes], 1)
 
 
-def shape_and_axes(
-    x: _ArrayOrShape,
-    ignore_axes: Iterable[int] = ()) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
-  if hasattr(x, 'shape'):
-    x = x.shape
-  ndim = len(x)
-  ignore_axes = tuple(i % ndim for i in ignore_axes)
-  axes = tuple(i for i in range(ndim) if i not in ignore_axes)
-  shape = tuple(x[i] for i in axes)
-  return shape, axes
-
-
-def get_res_batch_dims(contracting_dims: Iterable[int],
-                       batch_dims: Iterable[int]) -> List[int]:
-  res_batch_dims = [2 * b - i for i, b in enumerate(batch_dims)]
-  for i, b in enumerate(batch_dims):
-    for c in contracting_dims:
-      if b > c:
-        res_batch_dims[i] -= 2
-  return res_batch_dims
-
-
-def dot_general(lhs: np.ndarray,
-                rhs: np.ndarray,
-                contracting_dims: Axes,
-                batch_dims: Axes,
-                precision=None) -> np.ndarray:
-  """`jax.lax.dot_general` with preserved dims order and shared lhs / rhs dims.
-
-  Precisely, returns `jax.lax.dot_general(lhs, rhs, dimension_numbers)` where
-  `dimension_numbers == ((contracting_dims, contracting_dims),
-                         (batch_dims, batch_dims))`,
-  but preserves the dimension order in the output. See XLA's
-   `DotGeneral<https://www.tensorflow.org/xla/operation_semantics#dotgeneral>`.
-
-  Args:
-    lhs: array.
-    rhs: array, must have the same dimensionality as `lhs`.
-    contracting_dims: contracting dimensions.
-    batch_dims: batch dimensions.
-    precision: Optional. Either `None`, which means the default precision for
-      the backend, or a `Precision` enum value.
-
-  Returns:
-    Dot product result with preserved dimension order.
-  """
-  if lhs.ndim != rhs.ndim:
-    raise ValueError(f'`lhs` and `rhs` must have the same dimensionality, got'
-                     f'`lhs.ndim == {lhs.ndim}` and `rhs.ndim == {rhs.ndim}`.')
-
-  contracting_dims = canonicalize_axis(contracting_dims, lhs)
-  batch_dims = canonicalize_axis(batch_dims, lhs)
-
-  n_batch_dims = len(batch_dims)
-  leading_batch_dims = range(n_batch_dims)
-
-  dimension_numbers = ((contracting_dims, contracting_dims),
-                       (batch_dims, batch_dims))
-
-  prod = lax.dot_general(lhs, rhs, dimension_numbers, precision)
-  prod = zip_axes(prod, n_batch_dims)
-
-  res_batch_dims = get_res_batch_dims(contracting_dims, batch_dims)
-  prod = np.moveaxis(prod, leading_batch_dims, res_batch_dims)
-  return prod
-
-
-def axis_after_dot(axis: int,
-                   contracting_dims: Sequence[int],
-                   batch_dims: Sequence[int],
-                   lhs_ndim: Optional[int] = None) -> int:
+def axis_after_dot(
+    axis: int,
+    contracting_dims: Sequence[int],
+    batch_dims: Sequence[int],
+    lhs_ndim: Optional[int] = None
+) -> int:
   if axis in batch_dims:
     return batch_dims.index(axis)
 
@@ -607,9 +500,11 @@ def axis_after_dot(axis: int,
   )
 
 
-def make_2d(x: Optional[np.ndarray],
-            start_axis: int = 0,
-            end_axis: Optional[int] = None) -> Optional[np.ndarray]:
+def make_2d(
+    x: Optional[np.ndarray],
+    start_axis: int = 0,
+    end_axis: Optional[int] = None
+) -> Optional[np.ndarray]:
   """Makes `x` 2D from `start_axis` to `end_axis`, preserving other axes.
 
   `x` is assumed to follow the (`X, X, Y, Y, Z, Z`) axes layout.
@@ -617,9 +512,9 @@ def make_2d(x: Optional[np.ndarray],
   Example:
     >>> x = np.ones((1, 2, 3, 3, 4, 4))
     >>> make_2d(x).shape == (12, 24)
-    >>>
+    >>> #
     >>> make_2d(x, 2).shape == (1, 2, 12, 12)
-    >>>
+    >>> #
     >>> make_2d(x, 2, 4).shape == (1, 2, 3, 3, 4, 4)
   """
   if x is None:
@@ -636,21 +531,6 @@ def make_2d(x: Optional[np.ndarray],
                  size_at(x.shape[start_axis + half_ndim:end_axis])) +
                 x.shape[end_axis:])
   return x
-
-
-def is_on_cpu(x: PyTree) -> bool:
-  def _arr_is_on_cpu(x: np.ndarray) -> bool:
-    # TODO(romann): revisit when https://github.com/google/jax/issues/1431 and
-    # https://github.com/google/jax/issues/1432 are fixed.
-    if hasattr(x, 'device_buffer'):
-      return 'cpu' in str(x.device_buffer.device()).lower()
-
-    if isinstance(x, (onp.ndarray, np.ndarray)):
-      return True
-
-    raise NotImplementedError(type(x))
-
-  return tree_all(tree_map(_arr_is_on_cpu, x))
 
 
 def _read_keys(key, x1, x2):
@@ -671,7 +551,7 @@ def _read_keys(key, x1, x2):
     warnings.warn('The value of `key[1]` might be replaced by a new value if '
                   'key[0] == key[1] and x1 != x2 or key[0] != key[1] and '
                   'x1 == x2.')
-  elif isinstance(key, (onp.ndarray, np.ndarray)):
+  elif isinstance(key, np.ndarray):
     key1 = key
     key2 = np.where(x1_is_x2(x1, x2), key1, random.fold_in(key, 1))
   else:
@@ -705,23 +585,66 @@ def split_kwargs(kwargs, x1=None, x2=None):
   return kwargs1, kwargs2
 
 
-def std_basis(pytree: PyTree) -> PyTree:
-  """Similar to `jax.api._std_basis` without host-side ops."""
-  leaves, _ = tree_flatten(pytree)
-  ndim = sum(map(np.size, leaves))
-  dtype = dtypes.result_type(*leaves)
-  flat_basis = np.eye(ndim, dtype=dtype)
-  return unravel_array_into_pytree(pytree, 1, flat_basis)
+_SingleSlice = Union[int, slice, type(Ellipsis)]
 
 
-def unravel_array_into_pytree(pytree: PyTree,
-                              axis: int,
-                              arr: np.ndarray) -> PyTree:
-  """Similar to `jax.api._unravel_array_into_pytree` without host-side ops."""
-  leaves, treedef = tree_flatten(pytree)
-  if arr.ndim > 0:
-    axis %= arr.ndim
-  shapes = [arr.shape[:axis] + np.shape(l) + arr.shape[axis+1:] for l in leaves]
-  parts = np.split(arr, onp.cumsum([np.size(l) for l in leaves[:-1]]), axis)
-  reshaped_parts = [np.reshape(x, shape) for x, shape in zip(parts, shapes)]
-  return tree_unflatten(treedef, reshaped_parts)
+SliceType = Union[_SingleSlice, Tuple[_SingleSlice, ...]]
+"""A type to specify a slice of an array.
+
+For instance, when indexing `x[1, :, 2:8:3]` a slice tuple
+`(1, slice(None), slice(2, 8, 3))` is created. But since slice functions cannot
+accept slice specifications like `1, :, 2:8:3` as arguments, you must either
+pass this object, or, for convenience, an :cls:`~neural_tangents.stax.Slice`
+slice, such as `nt.stax.Slice[1, :, 2:8:3]`.
+"""
+
+
+def canonicalize_idx(
+    idx: SliceType,
+    ndim: int
+) -> Tuple[Union[int, slice], ...]:
+  if idx is Ellipsis or isinstance(idx, (int, slice)):
+    idx = (idx,) + (slice(None),) * (ndim - 1)
+
+  for i, s in enumerate(idx):
+    if s is Ellipsis:
+      idx = idx[:i] + (slice(None),) * (ndim - len(idx) + 1) + idx[i + 1:]
+
+  idx += (slice(None),) * (ndim - len(idx))
+  return idx
+
+
+def slice_shape(shape: Tuple[int, ...], idx: SliceType) -> Tuple[int, ...]:
+  # Keep `None` or negative-sized axes if they aren't indexed into.
+  canonical_idx = canonicalize_idx(idx, len(shape))
+
+  np_shape = list(shape)
+  unknown_axes = {}
+  n_ints = 0  # Keep track of vanishing axes due to integer indexing.
+
+  for a, (i, s) in enumerate(zip(canonical_idx, shape)):
+    if s < 0 or s is None:
+      if i == slice(None):
+        np_shape[a] = 0
+        unknown_axes[a - n_ints] = s
+      else:
+        raise ValueError(
+            f'Trying to index with {i} axis {a} of unknown size {s}. '
+            f'Please provide input shape {shape} with non-negative integer '
+            f'size at axis {a}.')
+
+    if isinstance(i, int):
+      n_ints += 1
+
+  out_shape = list(onp.empty(np_shape)[idx].shape)
+  for a, v in unknown_axes.items():
+    out_shape[a] = v
+
+  return tuple(out_shape)
+
+
+_T = TypeVar('_T')
+
+
+def double_tuple(x: Iterable[_T]) -> Tuple[_T, ...]:
+  return tuple(v for v in x for _ in range(2))

@@ -19,14 +19,14 @@ import itertools
 import random as prandom
 
 from absl.testing import absltest
-from absl.testing import parameterized
 from jax import default_backend
 from jax import jit
+from jax import random
 from jax.config import config
 import jax.numpy as np
-import jax.random as random
 import neural_tangents as nt
 from neural_tangents import stax
+from neural_tangents._src.empirical import _DEFAULT_TESTING_NTK_IMPLEMENTATION
 from tests import test_utils
 
 
@@ -39,26 +39,19 @@ test_utils.update_test_tolerance()
 prandom.seed(1)
 
 
-@parameterized.named_parameters(
-    test_utils.cases_from_list(
-        {
-            'testcase_name':
-                ' [{}_out={}_in={}]'.format(
-                    'same_inputs' if same_inputs else 'different_inputs',
-                    readout[0].__name__,
-                    readin[0].__name__
-                ),
-            'same_inputs': same_inputs,
-            'readout': readout,
-            'readin': readin
-        }
-        for same_inputs in [False, True]
-        for readout in [stax.Flatten(),
-                        stax.GlobalAvgPool(),
-                        stax.Identity()]
-        for readin in [stax.Flatten(),
-                       stax.GlobalAvgPool(),
-                       stax.Identity()]))
+@test_utils.product(
+    same_inputs=[False, True],
+    readout=[
+        stax.Flatten(),
+        stax.GlobalAvgPool(),
+        stax.Identity()
+    ],
+    readin=[
+        stax.Flatten(),
+        stax.GlobalAvgPool(),
+        stax.Identity()
+    ]
+)
 class DiagonalTest(test_utils.NeuralTangentsTestCase):
 
   def _get_kernel_fn(self, same_inputs, readin, readout):
@@ -138,14 +131,9 @@ class DiagonalClassTest(test_utils.NeuralTangentsTestCase):
           self.assertEqual(ab_c, _ab_c)
 
 
-@parameterized.parameters([
-    {
-        'same_inputs': True
-    },
-    {
-        'same_inputs': False
-    },
-])
+@test_utils.product(
+    same_inputs=[True, False]
+)
 class InputReqTest(test_utils.NeuralTangentsTestCase):
 
   def test_input_req(self, same_inputs):
@@ -175,10 +163,14 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
         stax.Dense(1024)
     )
 
-    correct_conv_fn_mc = nt.monte_carlo_kernel_fn(init_fn, apply_fn,
-                                                  key, 400,
-                                                  implementation=2,
-                                                  vmap_axes=0)
+    correct_conv_fn_mc = nt.monte_carlo_kernel_fn(
+        init_fn=init_fn,
+        apply_fn=stax.unmask_fn(apply_fn),
+        key=key,
+        n_samples=400,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
+        vmap_axes=0
+    )
     K = correct_conv_fn(x1, x2, get='nngp')
     K_mc = correct_conv_fn_mc(x1, x2, get='nngp')
     self.assertAllClose(K, K_mc, atol=0.01, rtol=0.05)
@@ -203,10 +195,14 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
         stax.Dense(1024)
     )
 
-    correct_conv_fn_mc = nt.monte_carlo_kernel_fn(init_fn, apply_fn,
-                                                  key, 300,
-                                                  implementation=2,
-                                                  vmap_axes=0)
+    correct_conv_fn_mc = nt.monte_carlo_kernel_fn(
+        init_fn=init_fn,
+        apply_fn=stax.unmask_fn(apply_fn),
+        key=key,
+        n_samples=300,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
+        vmap_axes=0
+    )
     K = correct_conv_fn(x1, x2, get='nngp')
     K_mc = correct_conv_fn_mc(x1, x2, get='nngp')
     self.assertAllClose(K, K_mc, atol=0.01, rtol=0.05)
@@ -228,10 +224,14 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
         stax.Dense(1)
     )
 
-    correct_conv_fn_mc = nt.monte_carlo_kernel_fn(init_fn, apply_fn,
-                                                  key, 200,
-                                                  implementation=2,
-                                                  vmap_axes=0)
+    correct_conv_fn_mc = nt.monte_carlo_kernel_fn(
+        init_fn=init_fn,
+        apply_fn=stax.unmask_fn(apply_fn),
+        key=key,
+        n_samples=200,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
+        vmap_axes=0
+    )
     K = correct_conv_fn(x1, x2, get='ntk')
     K_mc = correct_conv_fn_mc(x1, x2, get='ntk')
     self.assertAllClose(K, K_mc, atol=0.01, rtol=0.05)
@@ -239,31 +239,18 @@ class InputReqTest(test_utils.NeuralTangentsTestCase):
 
 class MaskingTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list(
-          {
-              'testcase_name':
-                  ' [{}_get={}_axis={}_mask={}_concat={}_p={}]'.format(
-                      'same_inputs' if same_inputs else 'different_inputs',
-                      get,
-                      mask_axis,
-                      mask_constant,
-                      concat,
-                      p,
-                  ),
-              'same_inputs': same_inputs,
-              'get': get,
-              'mask_axis': mask_axis,
-              'mask_constant': mask_constant,
-              'concat': concat,
-              'p': p,
-          }
-          for same_inputs in [False] for get in ['ntk']
-          for concat in [None, 0, 1] for p in [0.5]
-          for mask_axis in [(),
-                            (0,),
-                            (1, 3)]
-          for mask_constant in [10.]))
+  @test_utils.product(
+      same_inputs=[False],
+      get=['ntk'],
+      concat=[None, 0, 1],
+      p=[0.5],
+      mask_axis=[
+          (),
+          (0,),
+          (1, 3)
+      ],
+      mask_constant=[10.]
+  )
   def test_mask_fc(self, same_inputs, get, concat, p, mask_axis, mask_constant):
     width = 512
     n_samples = 128
@@ -315,57 +302,46 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
       raise ValueError(get)
 
     kernel_fn_mc = nt.monte_carlo_kernel_fn(
-        init_fn, apply_fn, key, n_samples,
+        init_fn=init_fn,
+        apply_fn=stax.unmask_fn(apply_fn),
+        key=key,
+        n_samples=n_samples,
         device_count=0 if concat in (0, -2) else -1,
-        implementation=2,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         vmap_axes=None if concat in (0, -2) else 0,
     )
 
-    kernel_fn = jit(kernel_fn, static_argnums=(2,))
+    kernel_fn = jit(kernel_fn, static_argnames='get')
     exact = kernel_fn(x1, x2, get, mask_constant=mask_constant)
     empirical = kernel_fn_mc(x1, x2, get=get, mask_constant=mask_constant)
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              ' [{}_get={}_axis={}_mask={}_concat={}_{}_p={}_n={}_{}]'
-              ''.format(
-                  'same_inputs' if same_inputs else 'different_inputs',
-                  get,
-                  mask_axis,
-                  mask_constant,
-                  concat,
-                  proj,
-                  p,
-                  n,
-                  'transpose' if transpose else ''
-              ),
-          'same_inputs': same_inputs,
-          'get': get,
-          'mask_axis': mask_axis,
-          'mask_constant': mask_constant,
-          'concat': concat,
-          'proj': proj,
-          'p': p,
-          'n': n,
-          'transpose': transpose
-      }
-                          for proj in ['flatten', 'avg']
-                          for same_inputs in [False]
-                          for get in ['ntk']
-                          for n in [0, 1]
-                          for concat in [None] + list(range(n + 1))
-                          for mask_constant in [10.]
-                          for p in [0.5]
-                          for transpose in [True, False]
-                          for mask_axis in [(),
-                                            (0,),
-                                            (0, 1, 2, 3)
-                                            ]
-                          ))
-  def test_mask_conv(self, same_inputs, get, mask_axis, mask_constant, concat,
-                     proj, p, n, transpose):
+  @test_utils.product(
+      proj=['flatten', 'avg'],
+      same_inputs=[False],
+      get=['ntk'],
+      n=[0, 1],
+      concat=[None, 0, 1],
+      mask_constant=[10.],
+      p=[0.5],
+      transpose=[True, False],
+      mask_axis=[(), (0,), (0, 1, 2, 3)]
+  )
+  def test_mask_conv(
+      self,
+      same_inputs,
+      get,
+      mask_axis,
+      mask_constant,
+      concat,
+      proj,
+      p,
+      n,
+      transpose
+  ):
+    if isinstance(concat, int) and concat > n:
+      raise absltest.SkipTest('Concatenation axis out of bounds.')
+
     test_utils.skip_test(self)
     if default_backend() == 'gpu' and n > 3:
       raise absltest.SkipTest('>=4D-CNN is not supported on GPUs.')
@@ -487,13 +463,16 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
       raise ValueError(get)
 
     kernel_fn_mc = nt.monte_carlo_kernel_fn(
-        init_fn, apply_fn, key, n_samples,
+        init_fn=init_fn,
+        apply_fn=stax.unmask_fn(apply_fn),
+        key=key,
+        n_samples=n_samples,
         device_count=0 if concat in (0, -n) else -1,
-        implementation=2,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         vmap_axes=None if concat in (0, -n) else 0,
     )
 
-    kernel_fn = jit(kernel_fn, static_argnums=(2,))
+    kernel_fn = jit(kernel_fn, static_argnames='get')
     exact = kernel_fn(x1, x2, get, mask_constant=mask_constant)
     empirical = kernel_fn_mc(x1, x2, get=get, mask_constant=mask_constant)
     test_utils.assert_close_matrices(self, empirical, exact, tol)

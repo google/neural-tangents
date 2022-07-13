@@ -65,7 +65,7 @@ main_doc = 'index'
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = 'en'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -80,6 +80,7 @@ intersphinx_mapping = {
     'python': ('https://docs.python.org/3/', None),
     'numpy': ('https://docs.scipy.org/doc/numpy/', None),
     'scipy': ('https://docs.scipy.org/doc/scipy/reference/', None),
+    'jax': ('https://jax.readthedocs.io/en/latest/', None),
 }
 
 
@@ -172,16 +173,20 @@ texinfo_documents = [
      'Miscellaneous'),
 ]
 
+
 # add_module_names = False
 
 
+default_role = 'code'
+
+
 def remove_module_docstring(app, what, name, obj, options, lines):
-  if what == "module" and name == "neural_tangents":
+  if what == 'module' and name == 'neural_tangents':
     del lines[:]
 
 
 def setup(app):
-  app.connect("autodoc-process-docstring", remove_module_docstring)
+  app.connect('autodoc-process-docstring', remove_module_docstring)
   app.add_css_file('style.css')
 
 
@@ -208,4 +213,4 @@ epub_exclude_files = ['search.html']
 # -- Options for intersphinx extension ---------------------------------------
 
 autodoc_mock_imports = [
-    'frozendict', 'jax', 'absl', 'numpy', 'scipy']
+    'frozendict', 'jax', 'absl', 'numpy', 'scipy', 'tensorflow', 'tf2jax']

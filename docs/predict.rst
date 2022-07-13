@@ -1,6 +1,6 @@
 :github_url: https://github.com/google/neural-tangents/tree/main/docs/predict.rst
 
-.. default-role:: code
+
 
 `nt.predict` -- inference w/ NNGP & NTK
 =============================================================
@@ -16,10 +16,10 @@ Functions to make train/test set predictions given NNGP/NTK kernels or the linea
 .. autosummary::
  :toctree: _autosummary
 
+    gp_inference
     gradient_descent
     gradient_descent_mse
     gradient_descent_mse_ensemble
-    gp_inference
 
 
 Utilities

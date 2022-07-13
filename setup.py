@@ -15,7 +15,6 @@
 
 """Setup the package with pip."""
 
-
 import os
 import setuptools
 
@@ -27,17 +26,21 @@ with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
 
 
 INSTALL_REQUIRES = [
-    'jax>=0.3',
+    'jax>=0.3.13',
     'frozendict>=2.3',
     'typing_extensions>=4.0.1',
+<<<<<<< HEAD
     'jaxopt>=0.3.1',
+=======
+    'tf2jax>=0.3.0',
+>>>>>>> upstream/main
 ]
 
 
 TESTS_REQUIRES = [
     'more-itertools',
-    'tensorflow',
     'tensorflow-datasets',
+    'flax>=0.5.2',
 ]
 
 
@@ -69,14 +72,16 @@ setuptools.setup(
     author_email='neural-tangents-dev@google.com',
     install_requires=INSTALL_REQUIRES,
     extras_require={
-        "testing": TESTS_REQUIRES,
+        'testing': TESTS_REQUIRES,
     },
     url='https://github.com/google/neural-tangents',
     download_url='https://pypi.org/project/neural-tangents/',
     project_urls={
         'Source Code': 'https://github.com/google/neural-tangents',
         'Paper': 'https://arxiv.org/abs/1912.02803',
+        'Finite Width NTK paper': 'https://arxiv.org/abs/2206.08720',
         'Video': 'https://iclr.cc/virtual_2020/poster_SklD9yrFPS.html',
+        'Finite Width NTK video': 'https://youtu.be/8MWOhYg89fY?t=10984',
         'Documentation': 'https://neural-tangents.readthedocs.io/en/latest/?badge=latest',
         'Bug Tracker': 'https://github.com/google/neural-tangents/issues',
         'Release Notes': 'https://github.com/google/neural-tangents/releases',

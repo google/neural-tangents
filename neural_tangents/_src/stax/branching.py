@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Branching functions.
+
 These layers split an input into multiple branches or fuse multiple inputs from
 several branches into one.
 """
@@ -31,7 +32,7 @@ from ..utils.typing import InternalLayer, InternalLayerMasked, Kernels
 
 @layer
 def FanOut(num: int) -> InternalLayer:
-  """Layer construction function for a fan-out layer.
+  """Fan-out.
 
   This layer takes an input and produces `num` copies that can be fed into
   different branches of a neural network (for example with residual
@@ -51,10 +52,11 @@ def FanOut(num: int) -> InternalLayer:
 @layer
 @supports_masking(remask_kernel=False)
 def FanInSum() -> InternalLayerMasked:
-  """Layer construction function for a fan-in sum layer.
+  """Fan-in sum.
 
-  This layer takes a number of inputs (e.g. produced by `FanOut`) and sums the
-  inputs to produce a single output.
+  This layer takes a number of inputs (e.g. produced by
+  :obj:`~neural_tangents.stax.FanOut`) and sums the inputs to produce a single
+  output. Based on :obj:`jax.example_libraries.stax.FanInSum`.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -113,10 +115,11 @@ def FanInSum() -> InternalLayerMasked:
 @layer
 @supports_masking(remask_kernel=False)
 def FanInProd() -> InternalLayerMasked:
-  """Layer construction function for a fan-in product layer.
+  """Fan-in product.
 
-  This layer takes a number of inputs (e.g. produced by `FanOut`) and
-  elementwise-multiplies the inputs to produce a single output.
+  This layer takes a number of inputs (e.g. produced by
+  :obj:`~neural_tangents.stax.FanOut`) and elementwise-multiplies the inputs to
+  produce a single output.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -179,9 +182,11 @@ def FanInProd() -> InternalLayerMasked:
 @layer
 @supports_masking(remask_kernel=False)
 def FanInConcat(axis: int = -1) -> InternalLayerMasked:
-  """Layer construction function for a fan-in concatenation layer.
+  """Fan-in concatenation.
 
-  Based on `jax.example_libraries.stax.FanInConcat`.
+  This layer takes a number of inputs (e.g. produced by
+  :obj:`~neural_tangents.stax.FanOut`) and concatenates the inputs to produce a
+  single output. Based on :obj:`jax.example_libraries.stax.FanInConcat`.
 
   Args:
     axis: Specifies the axis along which input tensors should be concatenated.
@@ -223,8 +228,7 @@ def FanInConcat(axis: int = -1) -> InternalLayerMasked:
             'for the case if all input layers guaranteed to be mean-zero '
             'Gaussian, i.e. having all `is_gaussian set to `True`.')
     else:
-      # TODO(romann): allow to apply nonlinearity after
-      # channelwise concatenation.
+      # TODO(romann): allow nonlinearity after channelwise concatenation.
       # TODO(romann): support concatenating different channelwise masks.
       is_gaussian = False
 

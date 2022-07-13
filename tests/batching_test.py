@@ -15,17 +15,17 @@
 """Tests for `neural_tangents/_src/batching.py`."""
 
 from absl.testing import absltest
-from absl.testing import parameterized
 
 from functools import partial
 from jax import jit
 from jax.config import config
 import jax.numpy as np
-import jax.random as random
+from jax import random
 from jax.tree_util import tree_map
 import neural_tangents as nt
 from neural_tangents import stax
 from neural_tangents._src import batching
+from neural_tangents._src.empirical import _DEFAULT_TESTING_NTK_IMPLEMENTATION
 from tests import test_utils
 
 
@@ -39,9 +39,10 @@ INTERMEDIATE_CONV = 'INTERMEDIATE_CONV'
 
 # TODO(schsam): Add a pooling test when multiple inputs are supported in
 # Conv + Pooling.
-TRAIN_SHAPES = [(2, 4), (4, 8), (8, 8), (8, 4, 4, 3), (4, 3, 3, 3)]
-TEST_SHAPES = [(2, 4), (2, 8), (16, 8), (2, 4, 4, 3), (2, 3, 3, 3)]
-NETWORK = [FLAT, FLAT, FLAT, FLAT, INTERMEDIATE_CONV]
+TRAIN_SIZES = [2, 4, 8]
+TEST_SIZES = [2, 16]
+INPUT_SHAPES = [(16,), (4, 4, 3)]
+NETWORK = [FLAT, INTERMEDIATE_CONV, POOLING]
 OUTPUT_LOGITS = [1, 2, 3]
 CONVOLUTION_CHANNELS = 2
 WIDTH = 2
@@ -52,10 +53,13 @@ test_utils.update_test_tolerance(f64_tol=5e-5)
 def _build_network(input_shape, network, out_logits, use_dropout):
   dropout = stax.Dropout(0.9, mode='train') if use_dropout else stax.Identity()
   if len(input_shape) == 1:
-    assert network == 'FLAT'
+    if network != FLAT:
+      raise absltest.SkipTest('Not testing pooling on FCN inputs.')
+
     return stax.serial(
         stax.Dense(WIDTH, W_std=2.0, b_std=0.5), dropout,
         stax.Dense(out_logits, W_std=2.0, b_std=0.5))
+
   elif len(input_shape) == 3:
     if network == POOLING:
       return stax.serial(
@@ -70,6 +74,7 @@ def _build_network(input_shape, network, out_logits, use_dropout):
       return stax.Conv(CONVOLUTION_CHANNELS, (2, 2), W_std=2.0, b_std=0.05)
     else:
       raise ValueError('Unexpected network type found: {}'.format(network))
+
   else:
     raise ValueError('Expected flat or image test input.')
 
@@ -78,7 +83,9 @@ def _empirical_kernel(key, input_shape, network, out_logits, use_dropout):
   init_fn, f, _ = _build_network(input_shape, network, out_logits, use_dropout)
   key, split = random.split(key)
   _, params = init_fn(key, (-1,) + input_shape)
-  kernel_fn = jit(nt.empirical_ntk_fn(f))
+  kernel_fn = jit(nt.empirical_ntk_fn(
+      f,
+      implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION))
   return partial(kernel_fn, params=params, keys=split)
 
 
@@ -105,13 +112,14 @@ KERNELS['theoretical_pytree'] = partial(
     _theoretical_kernel, just_theta=False, use_dropout=True)
 
 
-def _test_kernel_against_batched(cls,
-                                 kernel_fn,
-                                 batched_kernel_fn,
-                                 train,
-                                 test,
-                                 is_parallel_only=False):
-
+def _test_kernel_against_batched(
+    cls,
+    kernel_fn,
+    batched_kernel_fn,
+    train,
+    test,
+    is_parallel_only=False
+):
   g = kernel_fn(train, None)
   g_b = batched_kernel_fn(train, None)
 
@@ -130,33 +138,49 @@ def _test_kernel_against_batched(cls,
 
 class BatchTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              '_train_shape={}_test_shape={}_network={}_{}_batch_size={}'
-              .format(train, test, network, name, batch_size),
-          'train_shape':
-              train,
-          'test_shape':
-              test,
-          'network':
-              network,
-          'name':
-              name,
-          'kernel_fn':
-              kernel_fn,
-          'batch_size':
-              batch_size
-      } for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
-                          for name, kernel_fn in KERNELS.items()
-                          for batch_size in [2, 8]))
-  def testSerial(self, train_shape, test_shape, network, name, kernel_fn,
-                 batch_size):
+  @classmethod
+  def _get_data_and_kernel_fn(
+      self,
+      input_shape,
+      kernel_type,
+      network,
+      test_size,
+      train_size,
+      **kwargs
+  ):
+    test_utils.stub_out_pmap(batching, 2)
     key = random.PRNGKey(0)
     key, self_split, other_split = random.split(key, 3)
-    data_self = random.normal(self_split, train_shape)
-    data_other = random.normal(other_split, test_shape)
-    kernel_fn = kernel_fn(key, train_shape[1:], network)
+    data_self = random.normal(self_split, (train_size, *input_shape))
+    data_other = random.normal(other_split, (test_size, *input_shape))
+    kernel_fn = KERNELS[kernel_type]
+    kernel_fn = kernel_fn(key, input_shape, network, **kwargs)
+    return data_other, data_self, kernel_fn
+
+  @test_utils.product(
+      train_size=TRAIN_SIZES,
+      test_size=TEST_SIZES,
+      input_shape=INPUT_SHAPES,
+      network=NETWORK,
+      kernel_type=list(KERNELS.keys()),
+      batch_size=[2, 8]
+  )
+  def testSerial(
+      self,
+      train_size,
+      test_size,
+      input_shape,
+      network,
+      kernel_type,
+      batch_size
+  ):
+    data_other, data_self, kernel_fn = self._get_data_and_kernel_fn(
+        input_shape,
+        kernel_type,
+        network,
+        test_size,
+        train_size
+    )
     kernel_batched = batching._serial(kernel_fn, batch_size=batch_size)
 
     _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
@@ -164,68 +188,56 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
 
   # We also exclude tests for dropout + parallel. It is not clear what is the
   # best way to handle this case.
-  @parameterized.named_parameters(
-      test_utils.cases_from_list(
-          {
-              'testcase_name':
-                  '_train_shape={}_test_shape={}_network={}_{}'.format(
-                      train, test, network, name),
-              'train_shape':
-                  train,
-              'test_shape':
-                  test,
-              'network':
-                  network,
-              'name':
-                  name,
-              'kernel_fn':
-                  kernel_fn
-          }
-          for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
-          for name, kernel_fn in KERNELS.items()))
-  def testParallel(self, train_shape, test_shape, network, name, kernel_fn):
-    test_utils.stub_out_pmap(batching, 2)
-    key = random.PRNGKey(0)
-    key, self_split, other_split = random.split(key, 3)
-    data_self = random.normal(self_split, train_shape)
-    data_other = random.normal(other_split, test_shape)
-
-    kernel_fn = kernel_fn(key, train_shape[1:], network, use_dropout=False)
+  @test_utils.product(
+      train_size=TRAIN_SIZES,
+      test_size=TEST_SIZES,
+      input_shape=INPUT_SHAPES,
+      network=NETWORK,
+      kernel_type=list(KERNELS.keys()),
+  )
+  def testParallel(
+      self,
+      train_size,
+      test_size,
+      input_shape,
+      network,
+      kernel_type,
+  ):
+    data_other, data_self, kernel_fn = self._get_data_and_kernel_fn(
+        input_shape,
+        kernel_type,
+        network,
+        test_size,
+        train_size,
+        use_dropout=False
+    )
     kernel_batched = batching._parallel(kernel_fn)
 
     _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
                                  data_other, True)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              '_train_shape={}_test_shape={}_network={}_{}_batch_size={}'
-              .format(train, test, network, name, batch_size),
-          'train_shape':
-              train,
-          'test_shape':
-              test,
-          'network':
-              network,
-          'name':
-              name,
-          'kernel_fn':
-              kernel_fn,
-          'batch_size':
-              batch_size
-      } for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
-                          for name, kernel_fn in KERNELS.items()
-                          for batch_size in [2, 8]))
-  def testComposition(self, train_shape, test_shape, network, name, kernel_fn,
-                      batch_size):
-    test_utils.stub_out_pmap(batching, 2)
-
-    key = random.PRNGKey(0)
-    key, self_split, other_split = random.split(key, 3)
-    data_self = random.normal(self_split, train_shape)
-    data_other = random.normal(other_split, test_shape)
-
-    kernel_fn = kernel_fn(key, train_shape[1:], network)
+  @test_utils.product(
+      train_size=TRAIN_SIZES,
+      test_size=TEST_SIZES,
+      input_shape=INPUT_SHAPES,
+      network=NETWORK,
+      kernel_type=list(KERNELS.keys()),
+      batch_size=[2, 8]
+  )
+  def testComposition(
+      self,
+      train_size,
+      test_size,
+      input_shape,
+      network,
+      kernel_type,
+      batch_size
+  ):
+    data_other, data_self, kernel_fn = self._get_data_and_kernel_fn(input_shape,
+                                                                    kernel_type,
+                                                                    network,
+                                                                    test_size,
+                                                                    train_size)
 
     kernel_batched = batching._parallel(
         batching._serial(kernel_fn, batch_size=batch_size))
@@ -237,36 +249,30 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
                                  data_other)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              '_train_shape={}_test_shape={}_network={}_{}_batch_size={}'
-              .format(train, test, network, name, batch_size),
-          'train_shape':
-              train,
-          'test_shape':
-              test,
-          'network':
-              network,
-          'name':
-              name,
-          'kernel_fn':
-              kernel_fn,
-          'batch_size':
-              batch_size
-      } for train, test, network in zip(TRAIN_SHAPES, TEST_SHAPES, NETWORK)
-                          for name, kernel_fn in KERNELS.items()
-                          for batch_size in [2, 8]))
-  def testAutomatic(self, train_shape, test_shape, network, name, kernel_fn,
-                    batch_size):
-    test_utils.stub_out_pmap(batching, 2)
-
-    key = random.PRNGKey(0)
-    key, self_split, other_split = random.split(key, 3)
-    data_self = random.normal(self_split, train_shape)
-    data_other = random.normal(other_split, test_shape)
-
-    kernel_fn = kernel_fn(key, train_shape[1:], network)
+  @test_utils.product(
+      train_size=TRAIN_SIZES,
+      test_size=TEST_SIZES,
+      input_shape=INPUT_SHAPES,
+      network=NETWORK,
+      kernel_type=list(KERNELS.keys()),
+      batch_size=[2, 8]
+  )
+  def testAutomatic(
+      self,
+      train_size,
+      test_size,
+      input_shape,
+      network,
+      kernel_type,
+      batch_size
+  ):
+    data_other, data_self, kernel_fn = self._get_data_and_kernel_fn(
+        input_shape,
+        kernel_type,
+        network,
+        test_size,
+        train_size
+    )
 
     kernel_batched = batching.batch(kernel_fn, batch_size=batch_size)
     _test_kernel_against_batched(self, kernel_fn, kernel_batched, data_self,
@@ -327,15 +333,10 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
       composed_ker_out = composed_ker_out.replace(x1_is_x2=ker_out.x1_is_x2)
     self.assertAllClose(ker_out, composed_ker_out)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              '_on_device={}_batch_size={}'.format(store_on_device, batch_size),
-          'store_on_device':
-              store_on_device,
-          'batch_size':
-              batch_size
-      } for store_on_device in [True, False] for batch_size in [2, 8]))
+  @test_utils.product(
+      store_on_device=[True, False],
+      batch_size=[2, 8]
+  )
   def testAnalyticKernelComposeSerial(self, store_on_device, batch_size):
     self._test_analytic_kernel_composition(
         partial(
@@ -347,15 +348,10 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     test_utils.stub_out_pmap(batching, 2)
     self._test_analytic_kernel_composition(batching._parallel)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              '_on_device={}_batch_size={}'.format(store_on_device, batch_size),
-          'store_on_device':
-              store_on_device,
-          'batch_size':
-              batch_size
-      } for store_on_device in [True, False] for batch_size in [2, 8]))
+  @test_utils.product(
+      store_on_device=[True, False],
+      batch_size=[2, 8]
+  )
   def testAnalyticKernelComposeAutomatic(self, store_on_device, batch_size):
     test_utils.stub_out_pmap(batching, 2)
     self._test_analytic_kernel_composition(
@@ -431,11 +427,9 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
           self.assertAllClose(res_1[0][1], res_2[0][1])
           self.assertAllClose(tree_map(broadcast, res_1[1]), res_2[1])
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name': '_same_inputs={}'.format(same_inputs),
-          'same_inputs': same_inputs
-      } for same_inputs in [True, False]))
+  @test_utils.product(
+      same_inputs=[True, False]
+  )
   def test_parallel_in_out(self, same_inputs):
     test_utils.stub_out_pmap(batching, 2)
     rng = random.PRNGKey(0)
@@ -488,11 +482,9 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
         batch_K_readout_fn(batch_K_readin_fn(x1, x2)),
         RTOL)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name': '_same_inputs={}'.format(same_inputs),
-          'same_inputs': same_inputs
-      } for same_inputs in [True, False]))
+  @test_utils.product(
+      same_inputs=[True, False]
+  )
   def test_parallel_in_out_empirical(self, same_inputs):
     test_utils.stub_out_pmap(batching, 2)
     rng = random.PRNGKey(0)
@@ -529,7 +521,9 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
     init_fn, apply_fn, _ = stax.serial(net(WIDTH), net(1))
     _, params = init_fn(net_key, ((-1, 1), ((-1, 1), (-1, 1))))
 
-    kernel_fn = jit(nt.empirical_ntk_fn(apply_fn))
+    kernel_fn = jit(nt.empirical_ntk_fn(
+        apply_fn,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION))
     batch_kernel_fn = jit(batching.batch(kernel_fn, 2))
 
     test_utils.assert_close_matrices(
@@ -538,24 +532,22 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
         batch_kernel_fn(x1, x2, params),
         RTOL)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list(
-          ({
-              'testcase_name': (f'_same_inputs={same_inputs}'
-                                f'_device_count={device_count}'
-                                f'_trace_axes={trace_axes}'
-                                f'_diagonal_axes={diagonal_axes}'),
-              'same_inputs': same_inputs,
-              'device_count': device_count,
-              'trace_axes': trace_axes,
-              'diagonal_axes': diagonal_axes
-          }
-           for same_inputs in [True, False]
-           for device_count in [-1, 0, 1, 2]
-           for trace_axes, diagonal_axes in zip([(-1,), (1, -1), ()],
-                                                [(1,), (), (1, -1)]))))
-  def test_empirical_ntk_diagonal_outputs(self, same_inputs, device_count,
-                                          trace_axes, diagonal_axes):
+  @test_utils.product(
+      same_inputs=[True, False],
+      device_count=[-1, 0, 1, 2],
+      trace_axes=[(-1,), (1, -1), ()],
+      diagonal_axes=[(1,), (), (1, -1)]
+  )
+  def test_empirical_ntk_diagonal_outputs(
+      self,
+      same_inputs,
+      device_count,
+      trace_axes,
+      diagonal_axes
+  ):
+    if any (t in diagonal_axes for t in trace_axes):
+      raise absltest.SkipTest('Overlapping axes.')
+
     test_utils.stub_out_pmap(batching, 2)
     rng = random.PRNGKey(0)
 
@@ -575,7 +567,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
         trace_axes=trace_axes,
         diagonal_axes=diagonal_axes,
         vmap_axes=0,
-        implementation=2
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION
     )
 
     _, params = init_fn(net_key, test_x1.shape)

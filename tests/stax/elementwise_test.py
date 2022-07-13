@@ -12,20 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for neural_tangents/_src/stax/elementwise.py."""
-
+"""Tests for `neural_tangents/_src/stax/elementwise.py`."""
 
 import itertools
 import random as prandom
+
 from absl.testing import absltest
-from absl.testing import parameterized
-from jax import jit, jvp, jacfwd, jacrev, value_and_grad, grad
-from jax.config import config
 from jax import default_backend
+from jax import grad, jacfwd, jacrev, jit, jvp, value_and_grad
+from jax import random
+from jax.config import config
 import jax.numpy as np
-import jax.random as random
 import neural_tangents as nt
 from neural_tangents import stax
+from neural_tangents._src.empirical import _DEFAULT_TESTING_NTK_IMPLEMENTATION
 from tests import test_utils
 
 
@@ -67,8 +67,14 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
           nngp=np.exp(-input_dim * gamma * (cov1 + cov2 - 2 * nngp)))
     return init_fn, apply_fn, kernel_fn
 
-  def _test_activation(self, activation_fn, same_inputs, model, get,
-                       rbf_gamma=None):
+  def _test_activation(
+      self,
+      activation_fn,
+      same_inputs,
+      model,
+      get,
+      rbf_gamma=None
+  ):
     if 'conv' in model:
       test_utils.skip_test(self)
 
@@ -112,7 +118,8 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
         *[affine, activation_fn]*depth, readout)
     analytic_kernel = kernel_fn(X0_1, X0_2, get)
     mc_kernel_fn = nt.monte_carlo_kernel_fn(
-        init_fn, apply_fn, split, num_samplings, implementation=2,
+        init_fn, apply_fn, split, num_samplings,
+        implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION,
         vmap_axes=0
     )
     empirical_kernel = mc_kernel_fn(X0_1, X0_2, get)
@@ -127,39 +134,28 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
       test_utils.assert_close_matrices(self, analytic_kernel,
                                        direct_rbf_kernel, rtol)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              '_model={}_phi={}_{}_get={}_abc={}_approximate={}'.format(
-                  model,
-                  phi_name,
-                  'Same_inputs' if same_inputs else 'Different_inputs',
-                  get,
-                  abc,
-                  approximate),
-          'model': model,
-          'phi_name': phi_name,
-          'same_inputs': same_inputs,
-          'get': get,
-          'abc': abc,
-          'approximate': approximate
-      }
-                          for model in ['fc', 'conv-pool', 'conv-flatten']
-                          for phi_name in [
-                              'Sin',
-                              'Cos',
-                              'Erf',
-                              'Gelu',
-                              'Sign',
-                          ]
-                          for same_inputs in [False]
-                          for get in ['nngp', 'ntk']
-                          for approximate in [True, False]
-                          for abc in itertools.product(
-                              [2., 0.3],
-                              [1.5, 0.3],
-                              [0., -np.pi/4., np.pi/2.]
-                              )))
+  @test_utils.product(
+      model=[
+          'fc',
+          'conv-pool',
+          'conv-flatten'
+      ],
+      phi_name=[
+          'Sin',
+          'Cos',
+          'Erf',
+          'Gelu',
+          'Sign',
+      ],
+      same_inputs=[False],
+      get=['nngp', 'ntk'],
+      approximate=[True, False],
+      abc=list(itertools.product(
+          [2., 0.3],
+          [1.5, 0.3],
+          [0., -np.pi/4., np.pi/2.]
+      ))
+  )
   def test_activation(
       self,
       same_inputs,
@@ -190,43 +186,28 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
       raise NotImplementedError(f'Activation {phi_name} is not implemented.')
     self._test_activation(activation, same_inputs, model, get)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              '_{}_Rbf_{}_{}_{}'.format(
-                  model,
-                  'Same_inputs' if same_inputs else 'Different_inputs',
-                  get,
-                  gamma),
-          'model': model,
-          'same_inputs': same_inputs,
-          'get': get,
-          'gamma': gamma,
-      }
-                          for model in ['fc', 'conv-pool', 'conv-flatten']
-                          for same_inputs in [False, True]
-                          for get in ['nngp', 'ntk']
-                          for gamma in [1e-6, 1e-4, 1e-2, 1.0, 2.]
-                          ))
+  @test_utils.product(
+      model=[
+          'fc',
+          'conv-pool',
+          'conv-flatten'
+      ],
+      same_inputs=[False, True],
+      get=['nngp', 'ntk'],
+      gamma=[1e-6, 1e-4, 1e-2, 1.0, 2.]
+  )
   def test_rbf(self, same_inputs, model, get, gamma):
     activation = stax.Rbf(gamma)
     self._test_activation(activation, same_inputs, model, get,
                           rbf_gamma=gamma)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name': f'{phi.__name__}_{same_inputs}_a={a}_b={b}_n={n}',
-          'same_inputs': same_inputs,
-          'a': a,
-          'b': b,
-          'n': n,
-          'phi': phi
-      }
-                          for a in [-0.5, 0.25]
-                          for b in [-0.5, -0.1, 0.1]
-                          for phi in [stax.Gaussian, stax.Exp]
-                          for same_inputs in [False, True, None]
-                          for n in [0]))
+  @test_utils.product(
+      a=[-0.5, 0.25],
+      b=[-0.5, -0.1, 0.1],
+      phi=[stax.Gaussian, stax.Exp],
+      same_inputs=[False, True, None],
+      n=[0]
+  )
   def test_nonlineariy(self, phi, same_inputs, a, b, n):
     width = 2**10
     n_samples = 2**9
@@ -301,24 +282,12 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
     k_manual = kernel_fn_manual(x1, x2)
     self.assertAllClose(k_manual, k)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              '_{}_degree={}_get={}_readout={}'.format(
-                  'Same_inputs' if same_inputs else 'Different_inputs',
-                  degree,
-                  get,
-                  readout
-              ),
-          'same_inputs': same_inputs,
-          'degree': degree,
-          'get': get,
-          'readout': readout
-      }
-                          for same_inputs in [False, True]
-                          for degree in [1, 2, 3, 4, 5, 6]
-                          for get in ['ntk', 'nngp']
-                          for readout in ['pool', 'flatten']))
+  @test_utils.product(
+      same_inputs=[False, True],
+      degree=[1, 2, 3, 4, 5, 6],
+      get=['ntk', 'nngp'],
+      readout=['pool', 'flatten']
+  )
   def test_hermite(self, same_inputs, degree, get, readout):
     key = random.PRNGKey(1)
     key1, key2, key = random.split(key, 3)
@@ -351,30 +320,26 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
 
 class ElementwiseTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              '_{}_{}_n={}_diag_batch={}_spatial={}'.format(
-                  phi[0].__name__, same_inputs, n, diagonal_batch,
-                  diagonal_spatial),
-          'phi': phi,
-          'same_inputs': same_inputs,
-          'n': n,
-          'diagonal_batch': diagonal_batch,
-          'diagonal_spatial': diagonal_spatial
-      }
-                          for phi in [
-                              stax.Identity(),
-                              stax.Erf(),
-                              stax.Sin(),
-                              stax.Relu(),
-                          ]
-                          for same_inputs in [False, True, None]
-                          for n in [0, 1, 2]
-                          for diagonal_batch in [True, False]
-                          for diagonal_spatial in [True, False]))
-  def test_elementwise(self, same_inputs, phi, n, diagonal_batch,
-                       diagonal_spatial):
+  @test_utils.product(
+      phi=[
+          stax.Identity(),
+          stax.Erf(),
+          stax.Sin(),
+          stax.Relu(),
+      ],
+      same_inputs=[False, True, None],
+      n=[0, 1, 2],
+      diagonal_batch=[True, False],
+      diagonal_spatial=[True, False]
+  )
+  def test_elementwise(
+      self,
+      same_inputs,
+      phi,
+      n,
+      diagonal_batch,
+      diagonal_spatial
+  ):
     fn = lambda x: phi[1]((), x)
 
     name = phi[0].__name__
@@ -430,27 +395,20 @@ class ElementwiseTest(test_utils.NeuralTangentsTestCase):
 
 class ElementwiseNumericalTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              '_{}_{}_{}_{}'.format(
-                  model,
-                  phi[0].__name__,
-                  'Same_inputs' if same_inputs else 'Different_inputs',
-                  get),
-          'model': model,
-          'phi': phi,
-          'same_inputs': same_inputs,
-          'get': get,
-      }
-                          for model in ['fc', 'conv-pool', 'conv-flatten']
-                          for phi in [
-                              stax.Erf(),
-                              stax.Gelu(),
-                              stax.Sin(),
-                          ]
-                          for same_inputs in [False, True]
-                          for get in ['nngp', 'ntk']))
+  @test_utils.product(
+      model=[
+          'fc',
+          'conv-pool',
+          'conv-flatten'
+      ],
+      phi=[
+          stax.Erf(),
+          stax.Gelu(),
+          stax.Sin(),
+      ],
+      same_inputs=[False, True],
+      get=['nngp', 'ntk']
+  )
   def test_elementwise_numerical(self, same_inputs, model, phi, get):
     if 'conv' in model:
       test_utils.skip_test(self)
@@ -494,24 +452,10 @@ class ElementwiseNumericalTest(test_utils.NeuralTangentsTestCase):
                                      numerical_activation_kernel, rtol)
 
 
-@parameterized.parameters([
-    {
-        'same_inputs': True,
-        'do_stabilize': True
-    },
-    {
-        'same_inputs': False,
-        'do_stabilize': True
-    },
-    {
-        'same_inputs': True,
-        'do_stabilize': False
-    },
-    {
-        'same_inputs': False,
-        'do_stabilize': False
-    },
-])
+@test_utils.product(
+    same_inputs=[True, False],
+    do_stabilize=[True, False],
+)
 class ABReluTest(test_utils.NeuralTangentsTestCase):
 
   def test_ab_relu_relu(self, same_inputs, do_stabilize):
@@ -612,25 +556,20 @@ class ABReluTest(test_utils.NeuralTangentsTestCase):
 
 class AutodiffTest(test_utils.NeuralTangentsTestCase):
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name': f'{get}-{same_inputs}-{phi.__name__}',
-          'get': get,
-          'same_inputs': same_inputs,
-          'phi': phi,
-      }
-                          for get in [
-                              'ntk',
-                              'nngp'
-                          ]
-                          for same_inputs in [True, False, None]
-                          for phi in [
-                              stax.Erf,
-                              stax.Sin,
-                              stax.Gelu,
-                              stax.Relu,
-                              stax.ElementwiseNumerical
-                          ]))
+  @test_utils.product(
+      get=[
+          'ntk',
+          'nngp'
+      ],
+      same_inputs=[True, False, None],
+      phi=[
+          stax.Erf,
+          stax.Sin,
+          stax.Gelu,
+          stax.Relu,
+          stax.ElementwiseNumerical
+      ]
+  )
   def test_autodiff(self, get, same_inputs, phi):
     x1 = np.cos(random.normal(random.PRNGKey(1), (3, 1, 2, 3)))
     if same_inputs is None:
@@ -667,15 +606,11 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
       return jvp(dk, (x1, x2), (dx1, dx2))[1]
 
     _dk = dk(x1, x2)
+    _d2k = d2k(x1, x2)
 
-    if (same_inputs is not False and
-        get == 'ntk' and
-        ('Relu' in name or 'Abs' in name)):
-      # TODO(romann): revisit numerical issues of second derivative of `Relu`
-      _d2k = 0
-      tol = 0.01
+    if same_inputs is not False and get == 'ntk' and 'Relu' in name:
+      tol = 8e-3
     else:
-      _d2k = d2k(x1, x2)
       tol = 2e-3 if name == 'ElementwiseNumerical' else 1e-4
 
     def assert_close(x, y, tol=3e-5):
@@ -714,72 +649,54 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
       assert_close(np.moveaxis(k_fwd_1, (0, 2, 4), (1, 3, 5)), k_fwd_10)
       assert_close(np.moveaxis(k_rev_1, (0, 2, 4), (1, 3, 5)), k_rev_10)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              f'get={get}-'
-              f'param={parameterization}-'
-              f'param_out={parameterization_out}-'
-              f'x1={x1_type}-'
-              f'x2={x2_type}-'
-              f'phi={phi.__name__}-'
-              f'b_std={b_std}-'
-              f'jit={do_jit}-',
-          'get': get,
-          'parameterization': parameterization,
-          'parameterization_out': parameterization_out,
-          'x1_type': x1_type,
-          'x2_type': x2_type,
-          'phi': phi,
-          'b_std': b_std,
-          'do_jit': do_jit
-      }
-                          for get in [
-                              'ntk',
-                              'nngp'
-                          ]
-                          for parameterization in [
-                              'standard',
-                              'ntk'
-                          ]
-                          for parameterization_out in [
-                              'ntk'
-                          ]
-                          for do_jit in [
-                              True,
-                          ]
-                          for x1_type in [
-                              'zeros',
-                              'ones',
-                              'random',
-                          ]
-                          for x2_type in [
-                              'zeros',
-                              'ones',
-                              'random',
-                              'x1',
-                              'none',
-                          ]
-                          for b_std in [
-                              None,
-                              0.1,
-                          ]
-                          for phi in [
-                              stax.Identity,
-                              stax.Erf,
-                              stax.Abs,
-                              stax.Gelu,
-                              stax.Relu,
-                              stax.Sigmoid_like,
-                              stax.ABRelu,
-                              stax.Exp,
-                              stax.ExpNormalized,
-                              stax.Gaussian,
-                              stax.Sign,
-                              stax.Rbf,
-                              stax.Cos,
-                              stax.Sin
-                          ]))
+  @test_utils.product(
+      get=[
+          'ntk',
+          'nngp'
+      ],
+      parameterization=[
+          'standard',
+          'ntk'
+      ],
+      parameterization_out=[
+          'ntk'
+      ],
+      do_jit=[
+          True,
+      ],
+      x1_type=[
+          'zeros',
+          'ones',
+          'random',
+      ],
+      x2_type=[
+          'zeros',
+          'ones',
+          'random',
+          'x1',
+          'none',
+      ],
+      b_std=[
+          None,
+          0.1,
+      ],
+      phi=[
+          stax.Identity,
+          stax.Erf,
+          stax.Abs,
+          stax.Gelu,
+          stax.Relu,
+          stax.Sigmoid_like,
+          stax.ABRelu,
+          stax.Exp,
+          stax.ExpNormalized,
+          stax.Gaussian,
+          stax.Sign,
+          stax.Rbf,
+          stax.Cos,
+          stax.Sin
+      ]
+  )
   def test_activations(
       self,
       get,
@@ -801,7 +718,7 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
       test_utils.skip_test(self)
 
     n_out = 1 if get == 'ntk' else 1024
-    width = 2**10
+    width = 832
 
     W_std_in = width**(-0.5) if parameterization_out == 'standard' else 1.
     if phi == stax.Exp:
@@ -889,7 +806,7 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
     def kernel_fn_emp(x1, x2, get, params):
       return nt.empirical_kernel_fn(apply_fn)(x1, x2, get, params)[0, 0]
 
-    kernel_fn_emp_g = jit(value_and_grad(kernel_fn_emp), static_argnums=(2,))
+    kernel_fn_emp_g = jit(value_and_grad(kernel_fn_emp), static_argnames='get')
 
     def kernel_scalar_mc_grad_mean(x1, x2):
       key = random.PRNGKey(4)
@@ -933,27 +850,19 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
                                        rtol=0.05,
                                        atol=10.)
 
-  @parameterized.named_parameters(
-      test_utils.cases_from_list({
-          'testcase_name':
-              f'get={get}-'
-              f'architecture={architecture}-'
-              f'jit={do_jit}-',
-          'get': get,
-          'architecture': architecture,
-          'do_jit': do_jit
-      }
-                          for architecture in [
-                              'conv',
-                              'wrn'
-                          ]
-                          for get in [
-                              'ntk',
-                              'nngp'
-                          ]
-                          for do_jit in [
-                              True,
-                          ]))
+  @test_utils.product(
+      architecture=[
+          'conv',
+          'wrn'
+      ],
+      get=[
+          'ntk',
+          'nngp'
+      ],
+      do_jit=[
+          True,
+      ]
+  )
   def test_issue_123(
       self,
       get,

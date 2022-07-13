@@ -1,6 +1,6 @@
 :github_url: https://github.com/google/neural-tangents/tree/main/docs/typing.rst
 
-.. default-role:: code
+
 
 Typing
 =============================================================

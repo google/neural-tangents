@@ -1,9 +1,10 @@
 :github_url: https://github.com/google/neural-tangents/tree/main/docs/stax.rst
 
-.. default-role:: code
+
 
 `nt.stax` -- infinite NNGP and NTK
 ===========================================
+
 
 .. automodule:: neural_tangents.stax
 
@@ -15,8 +16,8 @@ Layers to combine multiple other layers into one.
 .. autosummary::
  :toctree: _autosummary
 
-    serial
     parallel
+    serial
 
 
 Branching
@@ -26,10 +27,10 @@ Layers to split outputs into many, or combine many into ones.
 .. autosummary::
  :toctree: _autosummary
 
-    FanOut
     FanInConcat
     FanInProd
     FanInSum
+    FanOut
 
 
 Linear parametric
@@ -39,10 +40,10 @@ Linear layers with trainable parameters.
 .. autosummary::
  :toctree: _autosummary
 
-    Dense
     Conv
     ConvLocal
     ConvTranspose
+    Dense
     GlobalSelfAttention
 
 
@@ -55,13 +56,14 @@ Linear layers without any trainable parameters.
 
     Aggregate
     AvgPool
-    Identity
     DotGeneral
     Dropout
     Flatten
     GlobalAvgPool
     GlobalSumPool
+    Identity
     ImageResize
+    Index
     LayerNorm
     SumPool
 
@@ -92,15 +94,18 @@ Pointwise nonlinear layers.
     Sin
 
 
-Helper enums
+Helper classes
 --------------------------------------
-Enums for specifying layer properties. Strings can be used in their place.
+Utility classes for specifying layer properties. For enums, strings can be passed in their place.
 
 .. autosummary::
  :toctree: _autosummary
 
+    AggregateImplementation
+    AttentionMechanism
     Padding
     PositionalEmbedding
+    Slice
 
 
 For developers
@@ -110,8 +115,8 @@ Classes and decorators helpful for constructing your own layers.
 .. autosummary::
  :toctree: _autosummary
 
-    layer
-    supports_masking
-    requires
     Bool
     Diagonal
+    layer
+    requires
+    supports_masking
