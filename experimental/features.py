@@ -70,7 +70,7 @@ def _preprocess_init_fn(init_fn):
     if _is_single_shape(input_shape_any):
       # Add a dummy shape for ntk_feat
       dummy_shape = (-1,) + (0,) * (len(input_shape_any) - 1)
-      input_shape = (input_shape_any, dummy_shape, '')
+      input_shape = (input_shape_any, dummy_shape, 0)
       return init_fn(rng, input_shape, **kwargs)
     else:
       return init_fn(rng, input_shape_any, **kwargs)
@@ -180,7 +180,7 @@ def DenseFeatures(out_dim: int,
       new_ntk_feat_shape = ntk_feat_shape[:_channel_axis] + (
           ntk_feat_dim,) + ntk_feat_shape[_channel_axis + 1:]
 
-    return (new_nngp_feat_shape, new_ntk_feat_shape, input_shape[2] + 'D'), ()
+    return (new_nngp_feat_shape, new_ntk_feat_shape, input_shape[2]), ()
 
   @requires(batch_axis=batch_axis, channel_axis=channel_axis)
   def feature_fn(f: Features, input, **kwargs):
@@ -222,9 +222,8 @@ def ReluFeatures(method: str = 'RANDFEAT',
   def init_fn(rng, input_shape):
     nngp_feat_shape, ntk_feat_shape = input_shape[0], input_shape[1]
 
-    net_shape = input_shape[2]
-    relu_layers_count = net_shape.count('R')
-    new_net_shape = net_shape + 'R'
+    relu_layers_count = input_shape[2]
+    new_relu_layers_count = relu_layers_count + 1
 
     ndim = len(nngp_feat_shape)
     _channel_axis = channel_axis % ndim
@@ -253,7 +252,7 @@ def ReluFeatures(method: str = 'RANDFEAT',
                               sketch_dim=sketch_dim).init_sketches()  # pytype:disable=wrong-keyword-args
 
       return (new_nngp_feat_shape, new_ntk_feat_shape,
-              new_net_shape), (W0, W1, tensorsrht)
+              new_relu_layers_count), (W0, W1, tensorsrht)
 
     elif method == ReluFeaturesImplementation.POLYSKETCH:
       new_nngp_feat_shape = nngp_feat_shape[:_channel_axis] + (
@@ -291,8 +290,8 @@ def ReluFeatures(method: str = 'RANDFEAT',
                               sketch_dim=sketch_dim).init_sketches()  # pytype:disable=wrong-keyword-args
 
       return (new_nngp_feat_shape, new_ntk_feat_shape,
-              new_net_shape), (polysketch, tensorsrht, kappa0_coeff,
-                               kappa1_coeff)
+              new_relu_layers_count), (polysketch, tensorsrht, kappa0_coeff,
+                                       kappa1_coeff)
 
     elif method == ReluFeaturesImplementation.PSRF:
       new_nngp_feat_shape = nngp_feat_shape[:_channel_axis] + (
@@ -334,7 +333,7 @@ def ReluFeatures(method: str = 'RANDFEAT',
             (int(nngp_feat_shape[_channel_axis] / 2 + 0.5), feature_dim0 // 2))
 
       return (new_nngp_feat_shape, new_ntk_feat_shape,
-              new_net_shape), (W0, polysketch, tensorsrht, kappa1_coeff)
+              new_relu_layers_count), (W0, polysketch, tensorsrht, kappa1_coeff)
 
     elif method == ReluFeaturesImplementation.POLY:
       # This only uses the polynomial approximation without sketching.
@@ -352,7 +351,7 @@ def ReluFeatures(method: str = 'RANDFEAT',
       kappa0_coeff = kappa0_coeffs(poly_degree, relu_layers_count)
 
       return (new_nngp_feat_shape, new_ntk_feat_shape,
-              new_net_shape), (kappa0_coeff, kappa1_coeff)
+              new_relu_layers_count), (kappa0_coeff, kappa1_coeff)
 
     elif method == ReluFeaturesImplementation.EXACT:
       # The exact feature map computation is for debug.
@@ -366,7 +365,8 @@ def ReluFeatures(method: str = 'RANDFEAT',
       new_ntk_feat_shape = ntk_feat_shape[:_channel_axis] + (
           feat_dim,) + ntk_feat_shape[_channel_axis + 1:]
 
-      return (new_nngp_feat_shape, new_ntk_feat_shape, new_net_shape), ()
+      return (new_nngp_feat_shape, new_ntk_feat_shape,
+              new_relu_layers_count), ()
 
     else:
       raise NotImplementedError(f'Invalid method name: {method}')
@@ -606,7 +606,7 @@ def ConvFeatures(out_chan: int,
     new_ntk_feat_shape = ntk_feat_shape[:channel_axis] + (
         ntk_feat_dim,) + ntk_feat_shape[channel_axis + 1:]
 
-    return (new_nngp_feat_shape, new_ntk_feat_shape, input_shape[2] + 'C'), ()
+    return (new_nngp_feat_shape, new_ntk_feat_shape, input_shape[2]), ()
 
   @requires(batch_axis=lhs_spec.index('N'), channel_axis=lhs_spec.index('C'))
   def feature_fn(f: Features, input, **kwargs):
@@ -689,7 +689,7 @@ def AvgPoolFeatures(window_shape: Sequence[int],
                                     ShapedArray(ntk_feat_shape,
                                                 np.float32)).shape
 
-    return (new_nngp_feat_shape, new_ntk_feat_shape, input_shape[2] + 'A'), ()
+    return (new_nngp_feat_shape, new_ntk_feat_shape, input_shape[2]), ()
 
   @requires(batch_axis=batch_axis, channel_axis=channel_axis)
   def feature_fn(f: Features, input, **kwargs):
@@ -770,7 +770,7 @@ def FlattenFeatures(batch_axis: int = 0, batch_axis_out: int = 0):
     new_nngp_feat_shape = get_output_shape(nngp_feat_shape)
     new_ntk_feat_shape = get_output_shape(ntk_feat_shape)
 
-    return (new_nngp_feat_shape, new_ntk_feat_shape, input_shape[2] + 'F'), ()
+    return (new_nngp_feat_shape, new_ntk_feat_shape, input_shape[2]), ()
 
   @requires(batch_axis=batch_axis, channel_axis=None)
   def feature_fn(f: Features, input, **kwargs):

@@ -303,7 +303,6 @@ class FeaturesTest(test_utils.NeuralTangentsTestCase):
     W_std = 1.7
     b_std = 0.1
     key = random.PRNGKey(1)
-    channel_axis %= ndim
 
     if ndim == 2:
       if channel_axis != 1:
