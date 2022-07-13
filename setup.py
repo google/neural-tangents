@@ -29,11 +29,7 @@ INSTALL_REQUIRES = [
     'jax>=0.3.13',
     'frozendict>=2.3',
     'typing_extensions>=4.0.1',
-<<<<<<< HEAD
-    'jaxopt>=0.3.1',
-=======
     'tf2jax>=0.3.0',
->>>>>>> upstream/main
 ]
 
 
