@@ -110,7 +110,7 @@ def batch(kernel_fn: _KernelFn,
   input_req = getattr(kernel_fn, 'input_req', {})
   dropout_in_analytic_kernel = input_req.get('use_dropout', False)
   use_multidevice = device_count > 0 or (device_count == -1 and
-                                         jax.local_device_count() > 1)
+                                         jax.device_count() > 1)
   use_serial = bool(batch_size)
   if use_multidevice:
     kernel_fn = _parallel(kernel_fn, use_serial,
@@ -522,7 +522,7 @@ def _parallel(kernel_fn: _KernelFn,
   """
 
   if device_count == -1:
-    device_count = jax.local_device_count()
+    device_count = jax.device_count()
 
   def _check_dropout(n1, n2, kwargs):
     dropout_in_empirical_kernel = getattr(kwargs, 'rng', None) is not None
@@ -700,7 +700,7 @@ def _get_jit_or_pmap_broadcast():
     key = (f, device_count)
 
     if device_count == -1:
-      device_count = jax.local_device_count()
+      device_count = jax.device_count()
 
     # TODO(romann): adapt this when JAX allows `axis_in` for `pmap`.
     def broadcast(arg: np.ndarray) -> np.ndarray:
