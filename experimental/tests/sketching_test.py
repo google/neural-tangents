@@ -4,7 +4,6 @@ from absl.testing import parameterized
 import jax.numpy as np
 from math import factorial
 import jax.random as random
-from jax import test_util as jtu
 from experimental.sketching import PolyTensorSketch
 from tests import test_utils
 
@@ -12,7 +11,7 @@ NUM_POINTS = [10, 100, 1000]
 NUM_DIMS = [64, 256, 1024]
 
 
-class SketchingTest(jtu.JaxTestCase):
+class SketchingTest(test_utils.NeuralTangentsTestCase):
 
   @classmethod
   def _get_init_data(cls, rng, shape, normalized_output=True):
@@ -22,14 +21,12 @@ class SketchingTest(jtu.JaxTestCase):
     else:
       return x
 
-  @parameterized.named_parameters(
-      jtu.cases_from_list({
-          'testcase_name': f' [n{n}_d{d}]',
-          'n': 4,
-          'd': 32,
-          'sketch_dim': 1024,
-          'degree': 16
-      } for n in NUM_POINTS for d in NUM_DIMS))
+  @parameterized.parameters({
+      'n': n,
+      'd': d,
+      'sketch_dim': 1024,
+      'degree': 16
+  } for n in NUM_POINTS for d in NUM_DIMS)
   def test_exponential_kernel(self, n, d, sketch_dim, degree):
     rng = random.PRNGKey(1)
     x = self._get_init_data(rng, (n, d), True)

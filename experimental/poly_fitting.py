@@ -1,22 +1,21 @@
 from jax import numpy as np
-from jax.lax import fori_loop
 from jaxopt import OSQP
 
 
-def kappa0(x, is_x_matrix=True):
+def kappa0(x, is_x_matrix):
   if is_x_matrix:
     xxt = x @ x.T
-    xnormsq = np.linalg.norm(x, axis=-1)**2
+    xnormsq = np.sum(x**2, axis=-1)
     prod = np.outer(xnormsq, xnormsq)
     return (1 - _arccos(xxt / _sqrt(prod)) / np.pi)
   else:  # vector input
     return (1 - _arccos(x) / np.pi)
 
 
-def kappa1(x, is_x_matrix=True):
+def kappa1(x, is_x_matrix):
   if is_x_matrix:
     xxt = x @ x.T
-    xnormsq = np.linalg.norm(x, axis=-1)**2
+    xnormsq = np.sum(x**2, axis=-1)
     prod = np.outer(xnormsq, xnormsq)
     return (_sqrt(prod - xxt**2) +
             (np.pi - _arccos(xxt / _sqrt(prod))) * xxt) / np.pi
@@ -46,17 +45,17 @@ def poly_fitting_qp(xvals: np.ndarray,
   nx = len(xvals)
   x_powers = np.ones((nx, degree + 1), dtype=xvals.dtype)
   for i in range(degree):
-    x_powers = x_powers.at[:, i + 1].set(x_powers[:, i] * xvals)
+    x_powers = xvals.reshape(nx,
+                             1)**np.arange(degree + 1).reshape(1, degree + 1)
 
   y_weighted = fvals * weights
-  x_powers_weighted = x_powers.T * weights[None,:]
+  x_powers_weighted = x_powers.T * weights[None, :]
 
   dx_powers = x_powers[:-1, :] - x_powers[1:, :]
 
   # OSQP algorithm for solving min_x x'*Q*x + c'*x such that A*x=b, G*x<= h
   P = x_powers_weighted @ x_powers_weighted.T
-  Q = .5 * (P.T + P + 1e-5 * np.eye(P.shape[0], dtype=xvals.dtype)
-           )  # make sure Q is symmetric
+  Q = .5 * (P.T + P + 1e-5 * np.eye(P.shape[0], dtype=xvals.dtype))  # make sure Q is symmetric
   c = -x_powers_weighted @ y_weighted
   G = np.concatenate((dx_powers, -np.eye(degree + 1)), axis=0)
   h = np.zeros(nx + degree, dtype=xvals.dtype)
@@ -73,8 +72,9 @@ def poly_fitting_qp(xvals: np.ndarray,
 def kappa0_coeffs(degree: int, num_layers: int):
 
   # A lower bound of kappa0^{(num_layers)} reduces to alpha_ from -1
-  alpha_ = fori_loop(0, num_layers, lambda i, x_:
-                     (x_ + kappa1(x_, is_x_matrix=False)) / 2., -1.)
+  alpha_ = -1
+  for i in range(num_layers):
+    alpha_ = (alpha_ + kappa1(alpha_, is_x_matrix=False)) / 2.
 
   # Points for polynomial fitting contain (1) equi-spaced ones from [alpha_,1]
   # and (2) non-equi-spaced ones from [0,1]. For (2), cosine function is used
@@ -88,7 +88,7 @@ def kappa0_coeffs(degree: int, num_layers: int):
   # For kappa0, we set all weights to be one.
   weights = np.ones(len(fvals), dtype=xvals.dtype)
 
-  # Coefficients can be obtained by solving QP with OSQP jaxopt.  kappa0 has a 
+  # Coefficients can be obtained by solving QP with OSQP jaxopt.  kappa0 has a
   # sharp slope at x=1, hence we add an equailty condition of p_n(1)=f(x).
   coeffs = poly_fitting_qp(xvals, fvals, weights, degree, eq_last_point=True)
   return np.where(coeffs < 1e-5, 0.0, coeffs)
@@ -97,9 +97,9 @@ def kappa0_coeffs(degree: int, num_layers: int):
 def kappa1_coeffs(degree: int, num_layers: int):
 
   # A lower bound of kappa1^{(num_layers)} reduces to alpha_ from -1
-  alpha_ = fori_loop(
-      0, num_layers, lambda i, x_:
-      (2. * x_ + kappa1(x_, is_x_matrix=False)) / 3., -1.)
+  alpha_ = -1
+  for i in range(num_layers):
+    alpha_ = (2. * alpha_ + kappa1(alpha_, is_x_matrix=False)) / 3.
 
   # Points for polynomial fitting contain (1) equi-spaced ones from [alpha_,1]
   # and (2) non-equi-spaced ones from [0,1]. For (2), cosine function is used
