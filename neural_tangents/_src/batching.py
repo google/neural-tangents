@@ -696,7 +696,7 @@ def _get_jit_or_pmap_broadcast():
     key = (f, device_count)
 
     if device_count == -1:
-      device_count = jax.device_count()
+      device_count = jax.local_device_count()
 
     # TODO(romann): adapt this when JAX allows `axis_in` for `pmap`.
     def broadcast(arg: np.ndarray) -> np.ndarray:
