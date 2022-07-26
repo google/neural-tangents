@@ -441,6 +441,9 @@ as an example. With `NVIDIA V100` 64-bit precision, `nt` took 316/330/508 GPU-ho
 
 Neural Tangents has been used in the following papers (newest first):
 
+1. [Synergy and Symmetry in Deep Learning: Interactions between the Data, Model, and Inference Algorithm](https://arxiv.org/abs/2207.04612)
+1. [Bounding generalization error with input compression: An empirical study with infinite-width networks](https://arxiv.org/abs/2207.09408)
+1. [Graph Neural Network Bandits](https://arxiv.org/abs/2207.06456)
 1. [Making Look-Ahead Active Learning Strategies Feasible with Neural Tangent Kernels](https://arxiv.org/abs/2206.12569)
 2. [A Fast, Well-Founded Approximation to the Empirical Neural Tangent Kernel](https://arxiv.org/abs/2206.12543)
 3. [Limitations of the NTK for Understanding Generalization in Deep Learning](https://arxiv.org/abs/2206.10012)
