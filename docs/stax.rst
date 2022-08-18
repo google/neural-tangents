@@ -83,11 +83,15 @@ Pointwise nonlinear layers.
     Erf
     Exp
     ExpNormalized
+    Gabor
     Gaussian
     Gelu
     Hermite
     LeakyRelu
+    Monomial
+    Polynomial
     Rbf
+    RectifiedMonomial
     Relu
     Sigmoid_like
     Sign

@@ -40,6 +40,88 @@ prandom.seed(1)
 
 class ActivationTest(test_utils.NeuralTangentsTestCase):
 
+  def _test_activation_fc(self, phi, get):
+    key1, key2, key_mc = random.split(random.PRNGKey(1), 3)
+    x1 = np.cos(random.normal(key1, (3, 2)))
+    x2 = np.cos(random.normal(key2, (2, 2)))
+
+    init_fn, apply_fn, kernel_fn = stax.serial(
+        stax.Dense(1024),
+        phi,
+        stax.Dense(1 if get == 'ntk' else 1024)
+    )
+
+    analytic_kernel = kernel_fn(x1, x2, get, diagonal_spatial=True)
+    mc_kernel_fn = nt.monte_carlo_kernel_fn(
+        init_fn=init_fn,
+        apply_fn=apply_fn,
+        key=key_mc,
+        n_samples=800,
+        implementation=2,
+        vmap_axes=0,
+        device_count=0,
+    )
+
+    if get == 'cov1':
+      empirical_kernel = np.diag(mc_kernel_fn(x1, None, 'nngp'))
+    else:
+      empirical_kernel = mc_kernel_fn(x1, x2, get)
+
+    self.assertAllClose(analytic_kernel, empirical_kernel, atol=0.01, rtol=0.05)
+
+  @test_utils.product(
+      phi=[
+          stax.Gabor,
+          stax.Sigmoid_like
+      ],
+      get=['cov1', 'nngp', 'ntk'],
+  )
+  def test_nonparametric(
+      self,
+      phi,
+      get,
+  ):
+    self._test_activation_fc(phi(), get)
+
+  @test_utils.product(
+      phi=[stax.Monomial, stax.RectifiedMonomial],
+      get=['cov1', 'nngp', 'ntk'],
+      degree=[0, 1, 2, 3, 4, 5],
+  )
+  def test_monomial(
+      self,
+      phi,
+      get,
+      degree
+  ):
+    if phi == stax.RectifiedMonomial and default_backend() == 'tpu':
+      raise absltest.SkipTest('`NaN` issues in Rectified Monomials on TPU.')
+    self._test_activation_fc(phi(degree=degree), get)
+
+  @test_utils.product(
+      phi=[stax.Polynomial],
+      get=['cov1', 'nngp', 'ntk'],
+      coef=[
+          [],
+          [0],
+          [-2],
+          [0, 0],
+          [0, 1],
+          [1, 0],
+          [1, -1],
+          [-0.5, 1.2],
+          [1.3, 0, -1.2, -0.5],
+          [-0.1, 2.1, 0, 0, -1.2, -0.5, 0, 0]
+      ],
+  )
+  def test_polynomial(
+      self,
+      phi,
+      get,
+      coef
+  ):
+    self._test_activation_fc(phi(coef=coef), get)
+
   @stax.layer
   def _RBF(self, gamma):
     init_fn = lambda key, input_shape: (input_shape, ())
