@@ -653,7 +653,7 @@ def ExpNormalized(
     do_clip: True to clip normalized covariance, potentially improving accuracy.
 
   Returns:
-    `(init_fn, apply_fn, `kernel_fn)`.
+    `(init_fn, apply_fn, kernel_fn)`.
 
   Raises:
     NotImplementedError: if finite width `apply_fn` is called.
@@ -700,7 +700,7 @@ def Hermite(degree: int) -> InternalLayer:
   so that the L2 norm w.r.t. standard Gaussian is 1.
 
   Args:
-    degree: an integer between 1 and 6.
+    degree: a non-negative integer.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -1018,7 +1018,7 @@ def Elementwise(
   `fn` and the 2D integral `nngp_fn`. NTK function is derived automatically in
   closed form from `nngp_fn`.
 
-  If you cannot provide the `nngp_fn`, see `nt.stax.ElementwiseNumerical` to use
+  If you cannot provide the `nngp_fn`, see :obj:`ElementwiseNumerical` to use
   numerical integration or `nt.monte_carlo.monte_carlo_kernel_fn` to use Monte
   Carlo sampling.
 
