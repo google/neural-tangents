@@ -912,10 +912,12 @@ def RectifiedMonomial(degree: int) -> InternalLayer:
 @layer
 @supports_masking(remask_kernel=False)
 def Polynomial(coef: Sequence[float]) -> InternalLayer:
-  """Polynomials, i.e. `coef[0] + coef[1] * x + ... + coef[n] * x**n`.
+  """Polynomials, i.e. `coef[0] + coef[1] * x + … + coef[n] * x**n`.
 
   Args:
-    coef: a sequence of coefficients. Follows `numpy.polynomial.Polynomial` API.
+    coef:
+      a sequence of coefficients. Follows
+      :class:`numpy.polynomial.polynomial.Polynomial` API.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.

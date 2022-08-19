@@ -3162,7 +3162,7 @@ def _conv_kernel_full_spatial_unshared(
   Used when `kernel.diagonal_spatial == False`. Has the same outputs on the
   spatial diagonal as `_conv_kernel_full_spatial_shared`, but `0` in all
   off-spatial-diagonal entries. The diagonal entries are computed via calling
-  ``_conv_kernel_diagonal_spatial`.
+  `_conv_kernel_diagonal_spatial`.
 
   Args:
     lhs:
