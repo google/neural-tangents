@@ -27,6 +27,7 @@ from jax import lax
 from jax.config import config
 from jax.core import Primitive, ShapedArray
 from jax.interpreters import ad
+from jax._src import dispatch as jax_dispatch
 import jax.numpy as np
 import more_itertools
 from neural_tangents._src.utils import rules
@@ -260,7 +261,7 @@ def _concat_shapes(max_n_args: int = 4, *shapes):
 _UNARY_PRIMITIVES = {
     None: lambda s, _: [{}],
 
-    jax._src.lax.lax.copy_p: lambda s, _: [{}],
+    jax.lax.copy_p: lambda s, _: [{}],
 
     ad.zeros_like_p: lambda s, _: [{}],
 
@@ -333,7 +334,7 @@ _UNARY_PRIMITIVES = {
             'dimensions': d
         } for d in more_itertools.powerset(range(len(s)))],
 
-    jax._src.dispatch.device_put_p:
+    jax_dispatch.device_put_p:
         lambda s, _: [{}],  # Test cases generated elsewhere.
 
     lax.pad_p:
@@ -579,7 +580,7 @@ class JacobianRulesTest(test_utils.NeuralTangentsTestCase):
       for params in _UNARY_PRIMITIVES[primitive](shape, dtype)
   )
   def test_unary(self, primitive: Optional[Primitive], shape, dtype, params):
-    if primitive == jax._src.dispatch.device_put_p:
+    if primitive == jax_dispatch.device_put_p:
       # Can't instantiate devices at test generation time; using subtests.
       for device in [None] + jax.devices() + jax.devices('cpu'):
         with self.subTest(device=device):

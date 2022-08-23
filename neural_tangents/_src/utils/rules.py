@@ -8,6 +8,7 @@ from . import utils
 import jax
 from jax import lax
 from jax.core import JaxprEqn, ShapedArray, Primitive, Jaxpr, Var, AbstractValue, Literal
+from jax._src import dispatch as jax_dispatch
 from jax.interpreters import ad
 import jax.numpy as np
 import numpy as onp
@@ -1116,11 +1117,11 @@ STRUCTURE_RULES[lax.convert_element_type_p] = _eye_s
 JACOBIAN_RULES[lax.convert_element_type_p] = _eye_j
 
 
-device_put_p = jax._src.dispatch.device_put_p
+device_put_p = jax_dispatch.device_put_p
 STRUCTURE_RULES[device_put_p] = _eye_s
 JACOBIAN_RULES[device_put_p] = _eye_j
 
 
-copy_p = jax._src.lax.lax.copy_p
+copy_p = jax.lax.copy_p
 STRUCTURE_RULES[copy_p] = _eye_s
 JACOBIAN_RULES[copy_p] = _eye_j
