@@ -25,6 +25,15 @@ An :class:`enum.IntEnum` specifying NTK implementation method.
 
 .. autoclass:: NtkImplementation
 
+NTK-vector products
+--------------------------------------
+A function to compute NTK-vector products without instantiating the NTK.
+
+.. autosummary::
+ :toctree: _autosummary
+
+    empirical_ntk_vp_fn
+
 Linearization and Taylor expansion
 --------------------------------------
 Decorators to Taylor-expand around function parameters.

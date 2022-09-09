@@ -1332,34 +1332,34 @@ def _get_mixer_b16_config() -> Dict[str, Any]:
 
 
 @test_utils.product(
-  j_rules=[
-      True,
-      False
-  ],
-  s_rules=[
-      True,
-      # False
-  ],
-  fwd=[
-      True,
-      False,
-      None,
-  ],
-  same_inputs=[
-      # True,
-      False
-  ],
-  do_jit=[
-      True,
-      # False
-  ],
-  do_remat=[
-      # True,
-      False
-  ],
-  dtype=[
-      jax.dtypes.canonicalize_dtype(np.float64),
-  ]
+    j_rules=[
+        True,
+        False
+    ],
+    s_rules=[
+        True,
+        # False
+    ],
+    fwd=[
+        True,
+        False,
+        None,
+    ],
+    same_inputs=[
+        # True,
+        False
+    ],
+    do_jit=[
+        True,
+        # False
+    ],
+    do_remat=[
+        # True,
+        False
+    ],
+    dtype=[
+        jax.dtypes.canonicalize_dtype(np.float64),
+    ]
 )
 class FlaxOtherTest(test_utils.NeuralTangentsTestCase):
 
@@ -1627,6 +1627,59 @@ class ConvTest(test_utils.NeuralTangentsTestCase):
 
     _compare_ntks(self, do_jit, do_remat, f, p, x1, x2, j_rules, s_rules, fwd,
                   vmap_axes=vmap_axes)
+
+
+class EmpiricalNtkVpTest(test_utils.NeuralTangentsTestCase):
+
+  @test_utils.product(
+      same_inputs=[
+          True,
+          False
+      ],
+      do_jit=[
+          True,
+          False
+      ],
+  )
+  def test_ntk_vp_fn(
+      self,
+      same_inputs,
+      do_jit,
+  ):
+    N1 = 4
+    N2 = N1 if same_inputs else 6
+    O = 3
+
+    init_fn, f, _ = stax.serial(
+        stax.Dense(8),
+        stax.Relu(),
+        stax.Dense(O)
+    )
+
+    k1, k2, k3, k4 = random.split(random.PRNGKey(1), 4)
+    x1 = random.normal(k1, (N1, 7))
+    x2 = None if same_inputs else random.normal(k2, (N2, 7))
+    _, params = init_fn(k3, x1.shape)
+
+    ntk_ref = nt.empirical_ntk_fn(f, (), vmap_axes=0)(x1, x2, params)
+    ntk_ref = np.moveaxis(ntk_ref, 1, 2)
+
+    # Compute an NTK via NTK-vps and compare to the reference
+    ntk_vp_fn = nt.empirical_ntk_vp_fn(f, x1, x2, params)
+    if do_jit:
+      ntk_vp_fn = jit(ntk_vp_fn)
+
+    eye = np.eye(N2 * O).reshape((N2 * O, N2, O))
+    ntk_vps = jit(jax.vmap(ntk_vp_fn))(eye)
+    ntk_vps = np.moveaxis(ntk_vps, (0,), (2,))
+    ntk_vps = ntk_vps.reshape((N1, O, N2, O))
+    self.assertAllClose(ntk_ref, ntk_vps)
+
+    # Compute a single NTK-vp via reference NTK, and compare to the NTK-vp.
+    cotangents = random.normal(k4, f(params, x1 if same_inputs else x2).shape)
+    ntk_vp_ref = np.tensordot(ntk_ref, cotangents, ((2, 3), (0, 1)))
+    ntk_vp = ntk_vp_fn(cotangents)
+    self.assertAllClose(ntk_vp_ref, ntk_vp)
 
 
 if __name__ == '__main__':

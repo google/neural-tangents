@@ -1242,6 +1242,110 @@ def empirical_kernel_fn(
   return kernel_fn
 
 
+# NTK-VECTOR PRODUCT FUNCTION
+
+
+def empirical_ntk_vp_fn(
+    f: ApplyFn,
+    x1: PyTree,
+    x2: Optional[PyTree],
+    params: PyTree,
+    **apply_fn_kwargs
+) -> Callable[[PyTree], PyTree]:
+  """Returns an NTK-vector product function.
+
+  The function computes NTK-vector product without instantiating the NTK, and
+  has the runtime equivalent to `(N1 + N2)` forward passes through `f`, and
+  memory equivalent to evaluating a vector-Jacobian product of `f`.
+
+  For details, please see section L of "`Fast Finite Width Neural Tangent Kernel
+  <https://arxiv.org/abs/2206.08720>`_".
+
+  Example:
+    >>> from jax import random
+    >>> import neural_tangents as nt
+    >>> from neural_tangents import stax
+    >>> #
+    >>> k1, k2, k3, k4 = random.split(random.PRNGKey(1), 4)
+    >>> x1 = random.normal(k1, (20, 32, 32, 3))
+    >>> x2 = random.normal(k2, (10, 32, 32, 3))
+    >>> #
+    >>> # Define a forward-pass function `f`.
+    >>> init_fn, f, _ = stax.serial(
+    >>>     stax.Conv(32, (3, 3)),
+    >>>     stax.Relu(),
+    >>>     stax.Conv(32, (3, 3)),
+    >>>     stax.Relu(),
+    >>>     stax.Conv(32, (3, 3)),
+    >>>     stax.Flatten(),
+    >>>     stax.Dense(10)
+    >>> )
+    >>> #
+    >>> # Initialize parameters.
+    >>> _, params = init_fn(k3, x1.shape)
+    >>> #
+    >>> # NTK-vp function. Can/should be JITted.
+    >>> ntk_vp_fn = empirical_ntk_vp_fn(f, x1, x2, params)
+    >>> #
+    >>> # Cotangent vector
+    >>> cotangents = random.normal(k4, f(params, x2).shape)
+    >>> #
+    >>> # NTK-vp output
+    >>> ntk_vp = ntk_vp_fn(cotangents)
+    >>> #
+    >>> # Output has same shape as `f(params, x1)`.
+    >>> assert ntk_vp.shape == f(params, x1).shape
+
+  Args:
+    f:
+      forward-pass function of signature `f(params, x)`.
+
+    x1:
+      first batch of inputs.
+
+    x2:
+      second batch of inputs. `x2=None` means `x2=x1`.
+
+    params:
+      A `PyTree` of parameters about which we would like to compute the
+        neural tangent kernel.
+
+    **apply_fn_kwargs:
+      keyword arguments passed to `f`. `apply_fn_kwargs` will be split into
+      `apply_fn_kwargs1` and `apply_fn_kwargs2` by the `split_kwargs` function
+      which will be passed to `f`. In particular, the rng key in
+      `apply_fn_kwargs`, will be split into two different (if `x1!=x2`) or same
+      (if `x1==x2`) rng keys. See the `_read_key` function for more details.
+
+  Returns:
+    An NTK-vector product function accepting a `PyTree` of cotangents of shape
+    and structure of `f(params, x2)`, and returning the NTK-vector product of
+    shape and structure of `f(params, x1)`.
+  """
+  args1, args2, fx1, fx2, fx_axis, keys, kw_axes, x_axis = _get_args(
+      f, apply_fn_kwargs, params, None, x1, x2)
+
+  f1, f2 = _get_f1_f2(f, keys, x_axis, fx_axis, kw_axes, args1 + args2, x1, x2)
+
+  def ntk_vp_fn(cotangents: PyTree) -> PyTree:
+    """Computes a single empirical NTK-vector product.
+
+    Args:
+      cotangents:
+        a `PyTree` of cotangents. Must have the same shape and tree structure
+        as `f(params, x2)`.
+
+    Returns:
+      A single NTK-vector product of shape and tree structure of
+      `f(params, x1)`.
+    """
+    vjp_out = vjp(f2, params)[1](cotangents)
+    jvp_out = jvp(f1, (params,), vjp_out)[1]
+    return jvp_out
+
+  return ntk_vp_fn
+
+
 # INTERNAL UTILITIES
 
 

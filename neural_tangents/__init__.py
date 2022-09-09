@@ -16,7 +16,7 @@
 """Public Neural Tangents modules and functions."""
 
 
-__version__ = '0.6.0'
+__version__ = '0.6.1'
 
 from . import experimental
 from . import predict
@@ -25,6 +25,7 @@ from ._src.batching import batch
 from ._src.empirical import empirical_kernel_fn
 from ._src.empirical import empirical_nngp_fn
 from ._src.empirical import empirical_ntk_fn
+from ._src.empirical import empirical_ntk_vp_fn
 from ._src.empirical import linearize
 from ._src.empirical import NtkImplementation
 from ._src.empirical import taylor_expand
