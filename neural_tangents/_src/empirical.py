@@ -1307,8 +1307,8 @@ def empirical_ntk_vp_fn(
       second batch of inputs. `x2=None` means `x2=x1`.
 
     params:
-      A `PyTree` of parameters about which we would like to compute the
-        neural tangent kernel.
+      A `PyTree` of parameters about which we would like to compute the neural
+      tangent kernel.
 
     **apply_fn_kwargs:
       keyword arguments passed to `f`. `apply_fn_kwargs` will be split into
