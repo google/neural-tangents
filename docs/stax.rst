@@ -70,7 +70,8 @@ Linear layers without any trainable parameters.
 
 Elementwise nonlinear
 --------------------------------------
-Pointwise nonlinear layers.
+Pointwise nonlinear layers. For details, please see "`Fast Neural Kernel Embeddings for General Activations
+<https://arxiv.org/abs/2209.04121>`_".
 
 .. autosummary::
  :toctree: _autosummary

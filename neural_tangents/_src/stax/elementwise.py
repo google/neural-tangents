@@ -12,7 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Elementwise nonlinearities / activation functions."""
+"""Elementwise nonlinearities / activation functions.
+
+For details, please see "`Fast Neural Kernel Embeddings for General Activations
+<https://arxiv.org/abs/2209.04121>`_".
+"""
 
 import functools
 import operator as op
@@ -1028,6 +1032,9 @@ def Elementwise(
   to use the custom implementation, since it uses symbolically simplified
   expressions that are more precise and numerically stable.
 
+  For details, please see "`Fast Neural Kernel Embeddings for General
+  Activations <https://arxiv.org/abs/2209.04121>`_".
+
   See Also:
     `examples/elementwise.py`.
 
@@ -1123,6 +1130,9 @@ def ElementwiseNumerical(
   """Activation function using numerical integration.
 
   Supports general activation functions using Gauss-Hermite quadrature.
+
+  For details, please see "`Fast Neural Kernel Embeddings for General
+  Activations <https://arxiv.org/abs/2209.04121>`_".
 
   See Also:
     `examples/elementwise_numerical.py`.

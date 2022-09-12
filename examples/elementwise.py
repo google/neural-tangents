@@ -14,7 +14,8 @@
 
 """Example of automatically deriving the closed-form NTK from NNGP.
 
-For details, see :obj:`~neural_tangents.stax.Elementwise`.
+For details, see :obj:`~neural_tangents.stax.Elementwise` and "`Fast Neural
+Kernel Embeddings for General Activations <https://arxiv.org/abs/2209.04121>`_".
 """
 
 from absl import app

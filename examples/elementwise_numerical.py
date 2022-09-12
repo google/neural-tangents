@@ -14,7 +14,9 @@
 
 """Example of approximating the NNGP and NTK using quadrature and autodiff.
 
-For details, see :obj:`~neural_tangents.stax.ElementwiseNumerical`.
+For details, see :obj:`~neural_tangents.stax.ElementwiseNumerical` and "`Fast
+Neural Kernel Embeddings for General Activations
+<https://arxiv.org/abs/2209.04121>`_".
 """
 
 from absl import app

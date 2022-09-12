@@ -4,8 +4,11 @@ Adapted from
 https://github.com/google/neural-tangents/blob/main/examples/infinite_fcn.py
 
 By default, this example does inference on a very small subset, and uses small
- word embeddings for performance. A 300/300 train/test split takes 30 seconds
- on a machine with 2 Titan X Pascal GPUs, please adjust settings accordingly.
+word embeddings for performance. A 300/300 train/test split takes 30 seconds
+on a machine with 2 Titan X Pascal GPUs, please adjust settings accordingly.
+
+For details, please see "`Infinite attention: NNGP and NTK for deep attention
+networks <https://arxiv.org/abs/2006.10540>`_".
 """
 
 import time

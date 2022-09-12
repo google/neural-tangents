@@ -3072,14 +3072,18 @@ def _conv_kernel_full_spatial_shared(
       the number of spatial dimensions (e.g. 2 for images). Has shape
       `(batch_size_1, [batch_size_2,] height, height, width, width, depth,
       depth, ...)`.
+
     filter_shape:
       positive integers, the convolutional filters spatial shape
       (e.g. `(3, 3)` for a 2D convolution).
+
     strides:
       positive integers, the CNN strides (e.g. `(1, 1)` for a 2D
       convolution).
+
     padding:
       a `Padding` enum, e.g. `Padding.CIRCULAR`.
+
     batch_ndim:
       number of batch dimensions, 1 or 2.
 
@@ -3171,14 +3175,18 @@ def _conv_kernel_full_spatial_unshared(
       the number of spatial dimensions (e.g. 2 for images). Has shape
       `(batch_size_1, [batch_size_2,] height, height, width, width, depth,
       depth, ...)`.
+
     filter_shape:
       positive integers, the convolutional filters spatial shape
       (e.g. `(3, 3)` for a 2D convolution).
+
     strides:
       positive integers, the CNN strides (e.g. `(1, 1)` for a 2D
       convolution).
+
     padding:
       a `Padding` enum, e.g. `Padding.CIRCULAR`.
+
     batch_ndim:
       number of batch dimensions, 1 or 2.
 
@@ -3222,14 +3230,18 @@ def _conv_kernel_full_spatial_transpose(
       the number of spatial dimensions (e.g. 2 for images). Has shape
       `(batch_size_1, [batch_size_2,] height, height, width, width, depth,
       depth, ...)`.
+
     filter_shape:
       positive integers, the convolutional filters spatial shape
       (e.g. `(3, 3)` for a 2D convolution).
+
     strides:
       positive integers, the CNN strides (e.g. `(1, 1)` for a 2D
       convolution).
+
     padding:
       a `Padding` enum, e.g. `Padding.CIRCULAR`.
+
     batch_ndim:
       number of batch dimensions, 1 or 2.
 
@@ -3328,14 +3340,18 @@ def _conv_kernel_diagonal_spatial(
       sample-sample-(same position) covariances of CNN inputs. Has `batch_ndim`
       batch and `S` spatial dimensions with the shape of `(batch_size_1,
       [batch_size_2,] height, width, depth, ...)`.
+
     filter_shape:
       tuple of positive integers, the convolutional filters spatial shape
       (e.g. `(3, 3)` for a 2D convolution).
+
     strides:
       tuple of positive integers, the CNN strides (e.g. `(1, 1)` for a 2D
       convolution).
+
     padding:
       a `Padding` enum, e.g. `Padding.CIRCULAR`.
+
     batch_ndim:
       number of leading batch dimensions, 1 or 2.
 
@@ -3383,14 +3399,18 @@ def _conv_kernel_diagonal_spatial_transpose(
       sample-sample-(same position) covariances of CNN inputs. Has `batch_ndim`
       batch and `S` spatial dimensions with the shape of `(batch_size_1,
       [batch_size_2,] height, width, depth, ...)`.
+
     filter_shape:
       tuple of positive integers, the convolutional filters spatial shape
       (e.g. `(3, 3)` for a 2D convolution).
+
     strides:
       tuple of positive integers, the CNN strides (e.g. `(1, 1)` for a 2D
       convolution).
+
     padding:
       a `Padding` enum, e.g. `Padding.CIRCULAR`.
+
     batch_ndim:
       number of leading batch dimensions, 1 or 2.
 
@@ -3439,19 +3459,25 @@ def _pool_kernel(
       is the number of spatial dimensions (e.g. 2 for images). Has shape
       `(batch_size_1, [batch_size_2,]
         height, height, width, width, depth, depth, ...)`.
+
     pool_type:
       a `Pooling` enum, e.g. `Pooling.AVG`.
+
     window_shape:
       tuple of positive integers, the pooling spatial shape (e.g. `(3, 3)`).
+
     strides:
       tuple of positive integers, the pooling strides, e.g. `(1, 1)`.
+
     padding:
       a `Padding` enum, e.g. `Padding.CIRCULAR`.
+
     normalize_edges:
       `True` to normalize output by the effective receptive field, `False` to
       normalize by the window size. Only has effect at the edges when `SAME`
       padding is used. Set to `True` to retain correspondence to
       `ostax.AvgPool`.
+
     batch_ndim:
       number of leading batch dimensions, 1 or 2.
 
