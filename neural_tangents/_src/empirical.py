@@ -1674,14 +1674,19 @@ def _get_dims(
   return df_dy_dims_1, df_dy_dims_2, out_dims
 
 
+def _is_abstract_array(x) -> bool:
+  return isinstance(x, np.ndarray) or isinstance(
+      getattr(x, 'aval', None), core.ShapedArray)
+
+
 def _vmap(f: Callable, in_axes, out_axes, squeeze_out: bool = True) -> Callable:
   """An expand-then-squeeze `vmap` for `f` expecting/returning batch dims."""
   in_axes_plus_1 = tree_map(lambda x: x if x in (None, -1) else x + 1, in_axes)
 
   @utils.wraps(f)
   def f_vmapped(*args):
-    args = tree_map(_expand_dims, args, in_axes_plus_1,
-                    is_leaf=lambda x: isinstance(x, np.ndarray))
+    args = tree_map(
+        _expand_dims, args, in_axes_plus_1, is_leaf=_is_abstract_array)
     out = vmap(f, in_axes, out_axes)(*args)
     if squeeze_out:
       out_axes_plus_1 = tree_map(
