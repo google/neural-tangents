@@ -445,6 +445,10 @@ as an example. With `NVIDIA V100` 64-bit precision, `nt` took 316/330/508 GPU-ho
 
 Neural Tangents has been used in the following papers (newest first):
 
+1. [Bidirectional Learning for Offline Infinite-width Model-based Optimization](https://arxiv.org/abs/2209.07507)
+1. [Joint Embedding Self-Supervised Learning in the Kernel Regime](https://arxiv.org/abs/2209.14884)
+1. [What Can the Neural Tangent Kernel Tell Us About Adversarial Robustness?](https://arxiv.org/abs/2210.05577)
+1. [Few-shot Backdoor Attacks via Neural Tangent Kernels](https://arxiv.org/abs/2210.05929)
 1. [Fast Neural Kernel Embeddings for General Activations](https://arxiv.org/abs/2209.04121)
 2. [Neural Tangent Kernel: A Survey](https://arxiv.org/abs/2208.13614)
 3. [Cognitive analyses of machine learning systems](https://www2.eecs.berkeley.edu/Pubs/TechRpts/2022/EECS-2022-209.pdf)
