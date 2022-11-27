@@ -21,7 +21,7 @@ jobs:
 
     strategy:
       matrix:
-        python-version: [3.7, 3.8, 3.9, 3]  # 3 == 3.10 currently.
+        python-version: [3.7, 3.8, 3.9, '3.10']  # 3 == 3.11 currently.
         JAX_ENABLE_X64: [0, 1]
 
     runs-on: ubuntu-latest
