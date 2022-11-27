@@ -18,7 +18,7 @@ import enum
 import functools
 import operator as op
 import string
-from typing import Callable, Iterable, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Callable, Iterable, Optional, Sequence, Tuple, Union
 import warnings
 
 import jax
