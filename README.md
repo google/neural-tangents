@@ -450,7 +450,7 @@ Neural Tangents has been used in the following papers (newest first):
 3. [Bidirectional Learning for Offline Infinite-width Model-based Optimization](https://arxiv.org/abs/2209.07507)
 4. [Joint Embedding Self-Supervised Learning in the Kernel Regime](https://arxiv.org/abs/2209.14884)
 5. [What Can the Neural Tangent Kernel Tell Us About Adversarial Robustness?](https://arxiv.org/abs/2210.05577)
-6. [Few-shot Back door Attacks via Neural Tangent Kernels](https://arxiv.org/abs/2210.05929)
+6. [Few-shot Backdoor Attacks via Neural Tangent Kernels](https://arxiv.org/abs/2210.05929)
 7. [Fast Neural Kernel Embeddings for General Activations](https://arxiv.org/abs/2209.04121)
 8. [Neural Tangent Kernel: A Survey](https://arxiv.org/abs/2208.13614)
 9. [Cognitive analyses of machine learning systems](https://www2.eecs.berkeley.edu/Pubs/TechRpts/2022/EECS-2022-209.pdf)
