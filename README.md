@@ -4,9 +4,7 @@ Freedom of thought is fundamental to all of science. Right now, our freedom is b
 
 ### News
 
-* **[Fast Neural Kernel Embeddings for General Activations](https://arxiv.org/abs/2209.04121)** is accepted to [NeurIPS 2022](https://neurips.cc/virtual/2022/poster/52791) and released with new nonlinearities [submitted](https://github.com/google/neural-tangents/commit/47ffb1bd48206b3cdbc5f5137abd6c6036e6cc4a) (available from `0.6.1`) and [sketching code](https://github.com/insuhan/ntk_activations) coming soon (ongoing [PR](https://github.com/google/neural-tangents/pull/142)). See [sketching](https://github.com/insuhan/ntk_activations) and [nonlinearities](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/elementwise.ipynb) examples.
-
-* **[Fast Finite Width Neural Tangent Kernel](https://arxiv.org/abs/2206.08720)** is accepted to ICML2022, and the respective code [submitted](https://github.com/romanngg/neural-tangents/commit/60b6c16758652f4526536409b5bc90602287b868) (available from `0.6.0`). See [video](https://youtu.be/8MWOhYg89fY?t=10984) and [example](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/empirical_ntk_fcn.ipynb).
+We're at NeurIPS! Come say hi at our poster **[Fast Neural Kernel Embeddings for General Activations](https://neurips.cc/virtual/2022/poster/52791)** at **#806 Hall J, Tue 29 Nov 11 a.m. CST — 1 p.m. CST**.
 
 # Neural Tangents
 [**ICLR 2020 Video**](https://iclr.cc/virtual_2020/poster_SklD9yrFPS.html)
@@ -195,7 +193,7 @@ y_test_nngp, y_test_ntk = predict_fn(x_test=x_test, get=('nngp', 'ntk'))
 
 ### Infinitely WideResnet
 
-We can define a more compex, (infinitely) Wide Residual Network [[14]](#14-wide-residual-networks) using the same `nt.stax` building blocks:
+We can define a more complex, (infinitely) Wide Residual Network [[14]](#14-wide-residual-networks) using the same `nt.stax` building blocks:
 
 ```python
 from neural_tangents import stax
@@ -273,7 +271,7 @@ in the meantime. See [Performance](#performance).
 
 ## Training dynamics of wide but finite networks
 
-The kernel of an infinite network `kernel_fn(x1, x2).ntk` combined with  `nt.predict.gradient_descent_mse` together allow to analytically track the outputs of an infinitely wide neural network trained on MSE loss througout training. Here we discuss the implications for _wide but finite_ neural networks and present tools to study their evolution in _weight space_ (trainable parameters of the network) and _function space_ (outputs of the network).
+The kernel of an infinite network `kernel_fn(x1, x2).ntk` combined with  `nt.predict.gradient_descent_mse` together allow to analytically track the outputs of an infinitely wide neural network trained on MSE loss throughout training. Here we discuss the implications for _wide but finite_ neural networks and present tools to study their evolution in _weight space_ (trainable parameters of the network) and _function space_ (outputs of the network).
 
 ### Weight space
 

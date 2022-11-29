@@ -45,6 +45,7 @@ neural networks (a.k.a. NTK, NNGP).
    Fast Finite Width Neural Tangent Kernel <https://arxiv.org/abs/2206.08720>
    Infinite attention: NNGP and NTK for deep attention networks <https://arxiv.org/abs/2006.10540>
    On the infinite width limit of neural networks with a standard parameterization <https://arxiv.org/abs/2001.07301>
+   Fast Neural Kernel Embeddings for General Activations <https://arxiv.org/abs/2209.04121>
 
 .. toctree::
    :maxdepth: 2
