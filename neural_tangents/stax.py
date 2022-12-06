@@ -77,6 +77,7 @@ Example:
 from ._src.stax.combinators import (
     parallel,
     serial,
+    repeat
 )
 
 

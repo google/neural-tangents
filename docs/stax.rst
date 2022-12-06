@@ -17,6 +17,7 @@ Layers to combine multiple other layers into one.
  :toctree: _autosummary
 
     parallel
+    repeat
     serial
 
 
