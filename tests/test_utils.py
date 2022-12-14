@@ -41,7 +41,7 @@ flags.DEFINE_string(
 
 flags.DEFINE_integer(
     'nt_num_generated_cases',
-    int(os.getenv('NT_NUM_GENERATED_CASES', '10')),
+    int(os.getenv('NT_NUM_GENERATED_CASES', '4')),
     help='Number of generated cases to test'
 )
 
