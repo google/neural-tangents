@@ -2265,14 +2265,16 @@ def _get_fwd(
 
 
 def _get_flops(f: Callable, optimize: bool, *a, **kw) -> float:
-  m = jax.xla_computation(f)(*a, **kw)
-  client = jax.lib.xla_bridge.get_backend()
   if optimize:
-    m = client.compile(m).hlo_modules()[0]
+    e = jax.jit(f).lower(*a, **kw).compile()
+    return e.cost_analysis()[0]['flops']
   else:
+    m = jax.xla_computation(f)(*a, **kw)
+    client = jax.lib.xla_bridge.get_backend()
     m = m.as_hlo_module()
-  analysis = jax.lib.xla_client._xla.hlo_module_cost_analysis(client, m)
-  return analysis['flops']
+    analysis = jax.lib.xla_client._xla.hlo_module_cost_analysis(client, m)
+    return analysis['flops']
+
 
 
 def _std_basis(pytree: PyTree) -> PyTree:
