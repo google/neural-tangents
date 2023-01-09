@@ -181,7 +181,7 @@ def _resnet(x, blocks_per_layer, classes, filters):
 
 def _MiniResNet(classes, input_shape, weights):
   inputs = tf.keras.Input(shape=input_shape)
-  outputs = _resnet(inputs, [1, 1, 1, 1], classes=classes, filters=4)
+  outputs = _resnet(inputs, [1, 1, 1, 1], classes=classes, filters=2)
   return tf.keras.Model(inputs=inputs, outputs=outputs)
 
 
@@ -262,7 +262,7 @@ class EmpiricalTfTest(parameterized.TestCase):
           # tf.keras.applications.MobileNet,
       ],
       input_shape=[
-          (64, 64, 3)
+          (32, 32, 3)
       ],
       trace_axes=[
           (),
@@ -291,7 +291,7 @@ class EmpiricalTfTest(parameterized.TestCase):
 
   @parameterized.product(
       input_shape=[
-          (32, 32, 3)
+          (16, 16, 3)
       ],
       trace_axes=[
           (),

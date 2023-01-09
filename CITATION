@@ -37,3 +37,13 @@
     pdf={https://arxiv.org/abs/2001.07301},
     url={https://github.com/google/neural-tangents}
 }
+
+# Elementwise nonlinearities and sketching:
+@inproceedings{han2022fast,
+    title={Fast Neural Kernel Embeddings for General Activations},
+    author={Insu Han and Amir Zandieh and Jaehoon Lee and Roman Novak and Lechao Xiao and Amin Karbasi},
+    booktitle = {Advances in Neural Information Processing Systems},
+    year={2022},
+    pdf={https://arxiv.org/abs/2209.04121},
+    url={https://github.com/google/neural-tangents}
+}

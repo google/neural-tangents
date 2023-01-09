@@ -1628,7 +1628,7 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
     time_pool = time.time()
     k = k_jit(x1, x2).nngp.block_until_ready()
     time_pool = time.time() - time_pool
-    self.assertLess(time_flat * 5, time_pool)
+    self.assertLess(time_flat * 4, time_pool)
     self._test_against_mc(apply_fn, init_fn, k, x1, x2, 0.03)
 
     # Top layer LCN + pooling

@@ -1254,7 +1254,7 @@ class _ResNet(nn.Module):
     return x
 
 
-_ResNet18 = partial(_ResNet, stage_sizes=[2, 2, 2, 2],
+_ResNet18 = partial(_ResNet, stage_sizes=[1, 1, 1, 1],
                     block_cls=_ResNetBlock)
 
 
@@ -1440,8 +1440,8 @@ class FlaxOtherTest(test_utils.NeuralTangentsTestCase):
 
     model = _ResNet18(num_classes=1)
     k1, k2, ki = random.split(random.PRNGKey(1), 3)
-    x1 = random.normal(k1, (1, 224, 224, 1), dtype)
-    x2 = None if same_inputs else random.normal(k2, (1, 224, 224, 1), dtype)
+    x1 = random.normal(k1, (1, 128, 128, 1), dtype)
+    x2 = None if same_inputs else random.normal(k2, (1, 128, 128, 1), dtype)
     p = model.init(ki, x1)
 
     def apply_fn(params, x):
@@ -1456,8 +1456,8 @@ class FlaxOtherTest(test_utils.NeuralTangentsTestCase):
 
     model = _MlpMixer(num_classes=1, **_get_mixer_b16_config())
     k1, k2, ki = random.split(random.PRNGKey(1), 3)
-    x1 = random.normal(k1, (1, 224, 224, 1), dtype)
-    x2 = None if same_inputs else random.normal(k2, (1, 224, 224, 1), dtype)
+    x1 = random.normal(k1, (1, 128, 128, 1), dtype)
+    x2 = None if same_inputs else random.normal(k2, (1, 128, 128, 1), dtype)
     p = model.init(ki, x1, train=True)
 
     def apply_fn(params, x):

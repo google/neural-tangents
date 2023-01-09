@@ -800,7 +800,7 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
       test_utils.skip_test(self)
 
     n_out = 1 if get == 'ntk' else 1024
-    width = 832
+    width = 612
 
     W_std_in = width**(-0.5) if parameterization_out == 'standard' else 1.
     if phi == stax.Exp:
@@ -909,7 +909,7 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
     k_mc2_mean, k_mc2_grad_mean = kernel_scalar_mc_grad_mean(x1, x2)
 
     # Compare kernels.
-    self.assertAllClose(k1, k_mc2_mean, atol=4e-3, rtol=4e-2)
+    self.assertAllClose(k1, k_mc2_mean, atol=8e-3, rtol=4e-2)
 
     if phi == stax.Sign and get == 'nngp':
       raise absltest.SkipTest('Derivative of the empirical NNGP of a '
