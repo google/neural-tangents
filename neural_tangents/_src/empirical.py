@@ -1991,7 +1991,7 @@ def _backprop_step(
   """Adapted from `jax.interpreters.ad`."""
   invals = map(functools.partial(_read_primal, primal_env), eqn.invars)
   cts_in = map(read_cotangent, eqn.outvars)
-  if not eqn.primitive.multiple_results:
+  if len(cts_in) == 1:
     cts_in = cts_in[0]
   else:
     raise NotImplementedError(
