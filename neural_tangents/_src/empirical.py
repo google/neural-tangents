@@ -700,8 +700,6 @@ def _structured_derivatives_ntk_fn(
 
       for df_dy_1, dy_dw_1_ in zip(df_dys_1, dy_dws_1):
         for df_dy_2, dy_dw_2_ in zip(df_dys_2, dy_dws_2):
-          if isinstance(dy_dw_1_, Zero) or isinstance(dy_dw_2_, Zero):
-            continue
 
           dy_dw_1: np.ndarray
           s1: rules.Structure
@@ -710,6 +708,9 @@ def _structured_derivatives_ntk_fn(
           dy_dw_2: np.ndarray
           s2: rules.Structure
           dy_dw_2, s2 = dy_dw_2_
+
+          if isinstance(dy_dw_1, Zero) or isinstance(dy_dw_2, Zero):
+            continue
 
           df_dy_dims_1, df_dy_dims_2, out_dims = _get_dims(df_dy_1,
                                                            df_dy_2,
@@ -1824,89 +1825,91 @@ def _backward_pass(
   map(functools.partial(_write_primal, primal_env), jaxpr.invars, primals_in)
 
   ct_env: Dict[Var, np.ndarray] = {}
-  map(functools.partial(_write_cotangent, 'outvars', ct_env),
-      jaxpr.outvars, cotangents_in)
+  ctx = ad.source_info_util.transform_name_stack('transpose')
+  with ctx:
+    map(functools.partial(_write_cotangent, 'outvars', ct_env),
+        jaxpr.outvars, cotangents_in)
 
-  # List of `df_dy`s or `dy_dw`s for each variable in `jaxpr.invars`.
-  outs = [[] for _ in jaxpr.invars]
+    # List of `df_dy`s or `dy_dw`s for each variable in `jaxpr.invars`.
+    outs = [[] for _ in jaxpr.invars]
 
-  if mode == _MODE.DY_DW:
-    invar_to_structure = rules.get_structure_cache(jaxpr, _s_rules=_s_rules)
-    vars_needing_cts_in = set()
-  elif mode == _MODE.DF_DY:
-    vars_needing_cts_in = _get_vars_needing_cts_in(jaxpr)
-  else:
-    raise ValueError(f'Unrecognized mode {mode}.')
+    if mode == _MODE.DY_DW:
+      invar_to_structure = rules.get_structure_cache(jaxpr, _s_rules=_s_rules)
+      vars_needing_cts_in = set()
+    elif mode == _MODE.DF_DY:
+      vars_needing_cts_in = _get_vars_needing_cts_in(jaxpr)
+    else:
+      raise ValueError(f'Unrecognized mode {mode}.')
 
-  for eqn in jaxpr.eqns[::-1]:
-    # Do regular backprop.
-    cts_in, invals = _backprop_step(
-        eqn=eqn,
-        primal_env=primal_env,
-        ct_env=ct_env,
-        read_cotangent=read_cotangent,
-        do_write_cotangents=any(
-            not isinstance(i, Literal) and i in vars_needing_cts_in
-            for i in eqn.invars
-        )
-    )
-
-    # Compute `df_dy`s or `dy_dw`s.
-    for i_eqn, eq_invar in enumerate(eqn.invars):
-      if eq_invar in jaxpr.invars:
-        i_jaxpr = jaxpr.invars.index(eq_invar)
-        inval = invals[i_eqn].aval
-
-        if mode == _MODE.DF_DY:
-          if not isinstance(cts_in, Zero):
-            if eqn.primitive == lax.reshape_p:
-              cts_in = cts_in.reshape(inval.shape)
-            cts_in = cts_in.astype(inval.dtype)
-          outs[i_jaxpr] += [cts_in]
-
-        elif mode == _MODE.DY_DW:
-          structure = rules.get_structure(
-              eqn=eqn,
-              invals=[v.aval for v in eqn.invars],
-              idx=i_eqn,
-              _s_rules=_s_rules
+    for eqn in jaxpr.eqns[::-1]:
+      # Do regular backprop.
+      cts_in, invals = _backprop_step(
+          eqn=eqn,
+          primal_env=primal_env,
+          ct_env=ct_env,
+          read_cotangent=read_cotangent,
+          do_write_cotangents=any(
+              not isinstance(i, Literal) and i in vars_needing_cts_in
+              for i in eqn.invars
           )
-          structure &= invar_to_structure[eq_invar]
+      )
 
-          if eqn.primitive == lax.reshape_p:
-            cts_in = ShapedArray(inval.shape, inval.dtype)
-          elif hasattr(cts_in, 'aval'):
-            cts_in = cts_in.aval
+      # Compute `df_dy`s or `dy_dw`s.
+      for i_eqn, eq_invar in enumerate(eqn.invars):
+        if eq_invar in jaxpr.invars:
+          i_jaxpr = jaxpr.invars.index(eq_invar)
+          inval = invals[i_eqn].aval
 
-          trimmed_invals = _trim_invals(invals, structure)
-          if not isinstance(cts_in, ShapedArray):
-            raise TypeError(cts_in)
-          trimmed_cts_in = _trim_cotangents(cts_in, structure)
+          if mode == _MODE.DF_DY:
+            if not isinstance(cts_in, Zero):
+              if eqn.primitive == lax.reshape_p:
+                cts_in = cts_in.reshape(inval.shape)
+              cts_in = cts_in.astype(inval.dtype)
+            outs[i_jaxpr] += [cts_in]
 
-          if _s_rules:
-            eqn = _trim_eqn(eqn, i_eqn, trimmed_invals, trimmed_cts_in)
+          elif mode == _MODE.DY_DW:
+            structure = rules.get_structure(
+                eqn=eqn,
+                invals=[v.aval for v in eqn.invars],
+                idx=i_eqn,
+                _s_rules=_s_rules
+            )
+            structure &= invar_to_structure[eq_invar]
 
-          def j_fn(invals):
-            return _get_jacobian(eqn=eqn,
-                                 cts_in=trimmed_cts_in,
-                                 invals=invals,
-                                 idx=i_eqn,
-                                 _fwd=_fwd,
-                                 _j_rules=_j_rules)
+            if eqn.primitive == lax.reshape_p:
+              cts_in = ShapedArray(inval.shape, inval.dtype)
+            elif hasattr(cts_in, 'aval'):
+              cts_in = cts_in.aval
 
-          for in_d, out_d in zip(structure.in_diagonal, structure.out_diagonal):
-            in_axes = [
-                None
-                if isinstance(invals[ix], UndefinedPrimal)
-                else i
-                for ix, i in enumerate(in_d)]
-            j_fn = _vmap(j_fn, in_axes=(in_axes,), out_axes=out_d)
+            trimmed_invals = _trim_invals(invals, structure)
+            if not isinstance(cts_in, ShapedArray):
+              raise TypeError(cts_in)
+            trimmed_cts_in = _trim_cotangents(cts_in, structure)
 
-          dy_dw = j_fn(trimmed_invals)
-          outs[i_jaxpr] += [(dy_dw, structure)]
+            if _s_rules:
+              eqn = _trim_eqn(eqn, i_eqn, trimmed_invals, trimmed_cts_in)
 
-        else:
-          raise ValueError(f'Unrecognized mode {mode}.')
+            def j_fn(invals):
+              return _get_jacobian(eqn=eqn,
+                                   cts_in=trimmed_cts_in,
+                                   invals=invals,
+                                   idx=i_eqn,
+                                   _fwd=_fwd,
+                                   _j_rules=_j_rules)
+
+            for in_d, out_d in zip(structure.in_diagonal, structure.out_diagonal):
+              in_axes = [
+                  None
+                  if isinstance(invals[ix], UndefinedPrimal)
+                  else i
+                  for ix, i in enumerate(in_d)]
+              j_fn = _vmap(j_fn, in_axes=(in_axes,), out_axes=out_d)
+
+            dy_dw = j_fn(trimmed_invals)
+            outs[i_jaxpr] += [(dy_dw, structure)]
+
+          else:
+            raise ValueError(f'Unrecognized mode {mode}.')
 
   # If output contains any of `primals_in`, this "identity" primitive is not
   # present in `jaxpr.eqns`. Below we treat this case by passing `cotangents_in`
@@ -2115,7 +2118,12 @@ def _eqn_jvp_fn(
     new_tangents.append(tangent)
 
   jvp_fn = ad.primitive_jvps[eqn.primitive]
-  return jvp_fn(new_invals, new_tangents, **eqn.params)[1]
+  out = jvp_fn(new_invals, new_tangents, **eqn.params)[1]
+  if isinstance(out, list) and len(out) == 1:
+    return out[0]
+  elif isinstance(out, jax.Array):
+    return out
+  raise TypeError(out, type(out))
 
 
 def _eqn_vjp_fn(
@@ -2128,16 +2136,19 @@ def _eqn_vjp_fn(
     # Identity function
     return cts_in,
 
-  traceback = eqn.source_info.traceback
-  with ad.source_info_util.user_context(traceback):
+  name_stack = (ad.source_info_util.current_name_stack() +
+                eqn.source_info.name_stack)
+  with ad.source_info_util.user_context(eqn.source_info.traceback,
+                                        name_stack=name_stack):
     if eqn.primitive.call_primitive or eqn.primitive.map_primitive:
       cts_in_avals = [v.aval for v in eqn.outvars]
-      call_jaxpr, params = core.extract_call_jaxpr(eqn.primitive, eqn.params)
+      params = dict(eqn.params)
+      call_jaxpr = params.pop('call_jaxpr')
       cts_out = ad.get_primitive_transpose(eqn.primitive)(
           params, call_jaxpr, invals, cts_in, cts_in_avals, ())
     elif eqn.primitive in ad.reducing_transposes:
       cts_out = ad.reducing_transposes[eqn.primitive](
-          (), cts_in, *invals, **eqn.params)
+          (), (cts_in,), *invals, **eqn.params)
     else:
       cts_out = ad.get_primitive_transpose(eqn.primitive)(cts_in, *invals,
                                                           **eqn.params)
@@ -2160,6 +2171,7 @@ def _get_jacobian(
 
   inval_shape = invals[idx].aval.shape
   cts_in_shape = cts_in.shape
+  dy_dw_shape = cts_in_shape + inval_shape
 
   if primitive == xla.xla_call_p:
     raise NotImplementedError(
@@ -2193,11 +2205,14 @@ def _get_jacobian(
 
     eye = _std_basis(inputs)
     dy_dw = vmap(jac_fn, out_axes=out_axes)(eye)
-    dy_dw = dy_dw.reshape(cts_in_shape + inval_shape)
 
-  assert dy_dw.shape == cts_in_shape + inval_shape, (
-      dy_dw.shape, cts_in_shape, inval_shape)
+    if isinstance(dy_dw, Zero):
+      dy_dw = Zero(ShapedArray(dy_dw_shape, cts_in.dtype))
+    else:
+      dy_dw = dy_dw.reshape(dy_dw_shape)
 
+  dy_dw_shape_ = dy_dw.aval.shape if isinstance(dy_dw, Zero) else dy_dw.shape  # pytype:disable=attribute-error
+  assert dy_dw_shape_ == dy_dw_shape, (dy_dw_shape_, dy_dw_shape)
   return dy_dw
 
 
@@ -2227,20 +2242,15 @@ def _write_cotangent(
 def _read_primal(
     env: Dict[Var, np.ndarray],
     v: Union[Var, Literal],
-    str_match: bool = False
 ) -> Union[np.ndarray, UndefinedPrimal]:
   if type(v) is Literal:
     return v.val
 
-  if v in env:
-    return env[v]
-
-  if str_match:
-    for v_ in env:
-      if str(v) == str(v_):
-        return env[v_]
-
-  return UndefinedPrimal(v.aval)
+  a = v.aval
+  if type(a) is core.DShapedArray:
+    shape = [env[d] if type(d) is core.Var else d for d in a.shape]
+    a = a.update(shape=tuple(shape))
+  return env.get(v, UndefinedPrimal(a))
 
 
 def _write_primal(
