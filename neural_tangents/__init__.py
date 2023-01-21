@@ -18,7 +18,7 @@
 
 __version__ = '0.6.2'
 
-from . import experimental
+# from . import experimental
 from . import predict
 from . import stax
 from ._src.batching import batch
