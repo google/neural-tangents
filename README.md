@@ -22,7 +22,7 @@ Freedom of thought is fundamental to all of science. Right now, our freedom is b
 
 ## Overview
 
-Neural Tangents is a high-level neural network API for specifying complex, hierarchical, neural networks of both finite and _infinite_ width. Neural Tangents allows researchers to define, train, and evaluate infinite networks as easily as finite ones.
+Neural Tangents is a high-level neural network API for specifying complex, hierarchical, neural networks of both finite and _infinite_ width. Neural Tangents allows researchers to define, train, and evaluate infinite networks as easily as finite ones. The library has been used in [>100 papers](https://scholar.google.com/scholar?oi=bibs&hl=en&cites=4030630874639258770,4161931758707925692,2891750348147928089,8612471018033907356,10117604240015578443,4178323439418493877).
 
 Infinite (in width or channel count) neural networks are Gaussian Processes (GPs) with a kernel function determined by their architecture. See [References](#references) for details and nuances of this correspondence. Also see [this listing](https://github.com/google/neural-tangents/wiki/Overparameterized-Neural-Networks:-Theory-and-Empirics) of papers written by the creators of Neural Tangents which study the infinite width limit of neural networks.
 
@@ -44,8 +44,6 @@ We happily welcome contributions!
 * [Technical gotchas](#technical-gotchas)
 * [Training dynamics of wide but finite networks](#training-dynamics-of-wide-but-finite-networks)
 * [Performance](#performance)
-* [Papers](#papers)
-* [Citation](#citation)
 * [References](#references)
 
 ## Colab Notebooks
@@ -56,7 +54,7 @@ An easy way to get started with Neural Tangents is by playing around with the fo
 - [Weight Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/weight_space_linearization.ipynb)
 - [Function Space Linearization](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/function_space_linearization.ipynb)
 - [Neural Network Phase Diagram](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/phase_diagram.ipynb)
-- [Performance Benchmark](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/myrtle_kernel_with_neural_tangents.ipynb): simple benchmark for Myrtle kernels used in [[16]](#16-neural-kernels-without-tangents). Also see [Performance](#myrtle-network)
+- [Performance Benchmark](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/myrtle_kernel_with_neural_tangents.ipynb): simple benchmark for [Myrtle kernels](https://arxiv.org/abs/2003.02237). See also [Performance](#myrtle-network)
 - [**New**] Empirical NTK:
   - [Fully-connected network](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/empirical_ntk_fcn.ipynb)
   - [FLAX ResNet18](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/empirical_ntk_resnet.ipynb)
@@ -135,7 +133,7 @@ x2 = random.normal(key2, (20, 100))
 kernel = kernel_fn(x1, x2, 'nngp')
 ```
 
-Note that `kernel_fn` can compute _two_ covariance matrices corresponding to the Neural Network Gaussian Process (NNGP) and Neural Tangent (NT) kernels respectively. The NNGP kernel corresponds to the _Bayesian_ infinite neural network [[1-5]](#5-deep-neural-networks-as-gaussian-processes). The NTK corresponds to the _(continuous) gradient descent trained_ infinite network [[10]](#10-neural-tangent-kernel-convergence-and-generalization-in-neural-networks). In the above example, we compute the NNGP kernel, but we could compute the NTK or both:
+Note that `kernel_fn` can compute _two_ covariance matrices corresponding to the [Neural Network Gaussian Process (NNGP)](https://en.wikipedia.org/wiki/Neural_network_Gaussian_process) and [Neural Tangent (NT)](https://en.wikipedia.org/wiki/Neural_tangent_kernel) kernels respectively. The NNGP kernel corresponds to the _Bayesian_ infinite neural network. The NTK corresponds to the _(continuous) gradient descent trained_ infinite network. In the above example, we compute the NNGP kernel, but we could compute the NTK or both:
 
 ```python
 # Get kernel of a single type
@@ -189,7 +187,7 @@ y_test_nngp, y_test_ntk = predict_fn(x_test=x_test, get=('nngp', 'ntk'))
 
 ### Infinitely WideResnet
 
-We can define a more complex, (infinitely) Wide Residual Network [[14]](#14-wide-residual-networks) using the same `nt.stax` building blocks:
+We can define a more complex, (infinitely) [Wide Residual Network](https://arxiv.org/abs/1605.07146) using the same `nt.stax` building blocks:
 
 ```python
 from neural_tangents import stax
@@ -243,7 +241,7 @@ The `neural_tangents` (`nt`) package contains the following modules and function
 
 * `monte_carlo_kernel_fn` - compute a Monte Carlo kernel estimate  of _any_ `(init_fn, apply_fn)`, not necessarily specified via `nt.stax`, enabling the kernel computation of infinite networks without closed-form expressions.
 
-* Tools to investigate training dynamics of _wide but finite_ neural networks, like `linearize`, `taylor_expand`, `empirical.kernel_fn` and more. See [Training dynamics of wide but finite networks](#training-dynamics-of-wide-but-finite-networks) for details.
+* Tools to investigate training dynamics of _wide but finite_ neural networks, like `linearize`, `taylor_expand`, `empirical_kernel_fn` and more. See [Training dynamics of wide but finite networks](#training-dynamics-of-wide-but-finite-networks) for details.
 
 
 ## Technical gotchas
@@ -253,7 +251,7 @@ The `neural_tangents` (`nt`) package contains the following modules and function
 We remark the following differences between our library and the JAX one.
 
 * All `nt.stax` layers are instantiated with a function call, i.e. `nt.stax.Relu()` vs `jax.example_libraries.stax.Relu`.
-* All layers with trainable parameters use the _NTK parameterization_ by default (see [[10]](#10-neural-tangent-kernel-convergence-and-generalization-in-neural-networks), Remark 1). However, Dense and Conv layers also support the _standard parameterization_ via a `parameterization` keyword argument (see [[15]](#15-on-the-infinite-width-limit-of-neural-networks-with-a-standard-parameterization)).
+* All layers with trainable parameters use the [_NTK parameterization_](https://arxiv.org/1806.07572) by default. However, `Dense` and `Conv` layers also support the [_standard parameterization_](https://arxiv.org/2001.07301) via a `parameterization` keyword argument.
 * `nt.stax` and `jax.example_libraries.stax` may have different layers and options available (for example `nt.stax` layers support `CIRCULAR` padding, have `LayerNorm`, but no `BatchNorm`.).
 
 
@@ -271,7 +269,7 @@ The kernel of an infinite network `kernel_fn(x1, x2).ntk` combined with  `nt.pre
 
 ### Weight space
 
-Continuous gradient descent in an infinite network has been shown in [[11]](#11-wide-neural-networks-of-any-depth-evolve-as-linear-models-under-gradient-descent) to correspond to training a _linear_ (in trainable parameters) model, which makes linearized neural networks an important subject of study for understanding the behavior of parameters in wide models.
+Continuous gradient descent in an infinite network [has been shown in](https://arxiv.org/abs/1902.06720) to correspond to training a _linear_ (in trainable parameters) model, which makes linearized neural networks an important subject of study for understanding the behavior of parameters in wide models.
 
 For this, we provide two convenient functions:
 
@@ -310,7 +308,7 @@ logits = apply_fn_lin((W, b), x)  # (3, 2) np.ndarray
 
 ### Function space:
 
-Outputs of a linearized model evolve identically to those of an infinite one [[11]](#11-wide-neural-networks-of-any-depth-evolve-as-linear-models-under-gradient-descent) but with a different kernel - specifically, the Neural Tangent Kernel [[10]](#10-neural-tangent-kernel-convergence-and-generalization-in-neural-networks) evaluated on the specific `apply_fn` of the finite network given specific `params_0` that the network is initialized with. For this we provide the `nt.empirical_kernel_fn` function that accepts any `apply_fn` and returns a `kernel_fn(x1, x2, get, params)` that allows to compute the empirical NTK and/or NNGP (based on `get`) kernels on specific `params`.
+Outputs of a linearized model [evolve identically to those of an infinite one](https://arxiv.org/abs/1902.06720) but with a different kernel - precisely, the [Neural Tangent Kernel](https://arxiv.org/1806.07572) evaluated on the specific `apply_fn` of the finite network given specific `params_0` that the network is initialized with. For this we provide the `nt.empirical_kernel_fn` function that accepts any `apply_fn` and returns a `kernel_fn(x1, x2, get, params)` that allows to compute the empirical NTK and/or NNGP (based on `get`) kernels on specific `params`.
 
 #### Example:
 
@@ -363,8 +361,7 @@ dependent. However, some rules of thumb that we've observed are:
 
 2. Convergence at small learning rates.
 
-With a new model it is therefore advisable to start with a very large model on
-a small dataset using a small learning rate.
+With a new model it is therefore advisable to start with large width on a small dataset using a small learning rate.
 
 
 ## Performance
@@ -432,123 +429,8 @@ please [file a bug](https://github.com/google/neural-tangents/issues/new)!
 
 Colab notebook [Performance Benchmark](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/myrtle_kernel_with_neural_tangents.ipynb)
 demonstrates how one would construct and benchmark kernels. To demonstrate
-flexibility, we took architecture from [[16]](#16-neural-kernels-without-tangents)
+flexibility, we took the [Myrtle architecture](https://arxiv.org/2003.02237)
 as an example. With `NVIDIA V100` 64-bit precision, `nt` took 316/330/508 GPU-hours on full 60k CIFAR-10 dataset for Myrtle-5/7/10 kernels.
-
-## Papers
-
-Neural Tangents has been used in the following papers (newest first):
-
-1. [The Onset of Variance-Limited Behavior for Networks in the Lazy and Rich Regimes](https://arxiv.org/abs/2212.12147)
-2. [Second-order regression models exhibit progressive sharpening to the edge of stability](https://arxiv.org/abs/2210.04860)
-3. [Multiple Imputation with Neural Network Gaussian Process for High-dimensional Incomplete Data](https://arxiv.org/abs/2211.13297)
-4. [A Kernel-Based View of Language Model Fine-Tuning](https://arxiv.org/abs/2210.05643)
-5. [Characterizing the Spectrum of the NTK via a Power Series Expansion](https://arxiv.org/abs/2211.07844)
-6. [Evolution of Neural Tangent Kernels under Benign and Adversarial Training](https://arxiv.org/abs/2210.12030)
-7. [Efficient Dataset Distillation Using Random Feature Approximation](https://arxiv.org/abs/2210.12067)
-8. [Bidirectional Learning for Offline Infinite-width Model-based Optimization](https://arxiv.org/abs/2209.07507)
-9. [Joint Embedding Self-Supervised Learning in the Kernel Regime](https://arxiv.org/abs/2209.14884)
-10. [What Can the Neural Tangent Kernel Tell Us About Adversarial Robustness?](https://arxiv.org/abs/2210.05577)
-11. [Few-shot Backdoor Attacks via Neural Tangent Kernels](https://arxiv.org/abs/2210.05929)
-12. [Fast Neural Kernel Embeddings for General Activations](https://arxiv.org/abs/2209.04121)
-13. [Neural Tangent Kernel: A Survey](https://arxiv.org/abs/2208.13614)
-14. [Cognitive analyses of machine learning systems](https://www2.eecs.berkeley.edu/Pubs/TechRpts/2022/EECS-2022-209.pdf)
-15. [Gaussian process surrogate models for neural networks](https://arxiv.org/abs/2208.06028)
-16. [Can we achieve robustness from data alone?](https://arxiv.org/abs/2207.11727)
-17. [Synergy and Symmetry in Deep Learning: Interactions between the Data, Model, and Inference Algorithm](https://arxiv.org/abs/2207.04612)
-18. [Bounding generalization error with input compression: An empirical study with infinite-width networks](https://arxiv.org/abs/2207.09408)
-19. [Graph Neural Network Bandits](https://arxiv.org/abs/2207.06456)
-20. [Making Look-Ahead Active Learning Strategies Feasible with Neural Tangent Kernels](https://arxiv.org/abs/2206.12569)
-21. [A Fast, Well-Founded Approximation to the Empirical Neural Tangent Kernel](https://arxiv.org/abs/2206.12543)
-22. [Limitations of the NTK for Understanding Generalization in Deep Learning](https://arxiv.org/abs/2206.10012)
-23. [Wide Bayesian neural networks have a simple weight posterior: theory and accelerated sampling](https://arxiv.org/abs/2206.07673)
-24. [Faster and easier: cross-validation and model robustness checks](https://dspace.mit.edu/handle/1721.1/143247)
-25. [Lightweight and Accurate Cardinality Estimation by Neural Network Gaussian Process](https://dl.acm.org/doi/abs/10.1145/3514221.3526156)
-26. [Infinite Recommendation Networks: A Data-Centric Approach
-    ](https://arxiv.org/abs/2206.02626)
-27. [Why So Pessimistic? Estimating Uncertainties for Offline RL through Ensembles, and Why Their Independence Matters](https://arxiv.org/abs/2205.13703)
-28. [On the Interpretability of Regularisation for Neural Networks Through Model Gradient Similarity](https://arxiv.org/abs/2205.12642)
-29. [Generative Adversarial Method Based on Neural Tangent Kernels](https://arxiv.org/abs/2204.04090)
-30. [Generalization Through The Lens Of Leave-One-Out Error](https://arxiv.org/abs/2203.03443)
-31. [Fast rates for noisy interpolation require rethinking the effects of inductive bias](https://arxiv.org/abs/2203.03597)
-32. [A duality connecting neural network and cosmological dynamics](https://arxiv.org/abs/2202.11104)
-33. [Representation Learning and Deep Generative Modeling in Dynamical Systems](https://tel.archives-ouvertes.fr/tel-03591720/document)
-34. [Do autoencoders need a bottleneck for anomaly detection?](https://www.researchgate.net/profile/Bang-Xiang-Yong/publication/358445830_Do_autoencoders_need_a_bottleneck_for_anomaly_detection/links/6202e7d96adc0779cd52574a/Do-autoencoders-need-a-bottleneck-for-anomaly-detection.pdf)
-35. [Finding Dynamics Preserving Adversarial Winning Tickets](https://arxiv.org/abs/2202.06488)
-36. [Learning Representation from Neural Fisher Kernel with Low-rank Approximation](https://arxiv.org/abs/2202.01944)
-37. [MIT 6.S088 Modern Machine Learning: Simple Methods that Work](https://web.mit.edu/modernml/course/)
-38. [A Neural Tangent Kernel Perspective on Function-Space Regularization in Neural Networks](https://hudsonchen.github.io/papers/A_Neural_Tangent_Kernel_Perspective_on_Function_Space_Regularization_in_Neural_Networks.pdf)
-39. [Eigenspace Restructuring: a Principle of Space and Frequency in Neural Networks](https://arxiv.org/abs/2112.05611)
-40. [Functional Regularization for Reinforcement Learning via Learned Fourier Features](https://arxiv.org/abs/2112.03257)
-41. [A Structured Dictionary Perspective on Implicit Neural Representations](https://arxiv.org/abs/2112.01917)
-42. [Critical initialization of wide and deep neural networks through partial Jacobians: general theory and applications to LayerNorm](https://arxiv.org/abs/2111.12143)
-43. [Asymptotics of representation learning in finite Bayesian neural networks](https://arxiv.org/abs/2106.00651)
-44. [On the Equivalence between Neural Network and Support Vector Machine](https://arxiv.org/abs/2111.06063)
-45. [An Empirical Study of Neural Kernel Bandits](https://arxiv.org/abs/2111.03543)
-46. [Neural Networks as Kernel Learners: The Silent Alignment Effect](https://arxiv.org/abs/2111.00034)
-47. [Understanding Deep Learning via Analyzing Dynamics of Gradient Descent](https://dataspace.princeton.edu/handle/88435/dsp01xp68kk34b)
-48. [Neural Scene Representations for View Synthesis](https://digitalassets.lib.berkeley.edu/techreports/ucb/incoming/EECS-2020-223.pdf)
-49. [Neural Tangent Kernel Eigenvalues Accurately Predict Generalization](https://arxiv.org/abs/2110.03922)
-50. [Uniform Generalization Bounds for Overparameterized Neural Networks](https://arxiv.org/abs/2109.06099)
-51. [Data Summarization via Bilevel Optimization](https://arxiv.org/abs/2109.12534)
-52. [Neural Tangent Generalization Attacks](http://proceedings.mlr.press/v139/yuan21b.html)
-53. [Dataset Distillation with Infinitely Wide Convolutional Networks](https://arxiv.org/abs/2107.13034)
-54. [Neural Contextual Bandits without Regret](https://arxiv.org/abs/2107.03144)
-55. [Epistemic Neural Networks](https://arxiv.org/abs/2107.08924)
-56. [Uncertainty-aware Cardinality Estimation by Neural Network Gaussian Process](https://arxiv.org/abs/2107.08706)
-57. [Scale Mixtures of Neural Network Gaussian Processes](https://arxiv.org/abs/2107.01408)
-58. [Provably efficient machine learning for quantum many-body problems](https://arxiv.org/abs/2106.12627)
-59. [Wide Mean-Field Variational Bayesian Neural Networks Ignore the Data](https://arxiv.org/abs/2106.07052)
-60. [Spectral bias and task-model alignment explain generalization in kernel regression and infinitely wide neural networks](https://www.nature.com/articles/s41467-021-23103-1)
-61. [Bridging Multi-Task Learning and Meta-Learning: Towards Efficient Training and Effective Adaptation](https://arxiv.org/abs/2106.09017)
-62. [Wide Mean-Field Variational Bayesian Neural Networks Ignore the Data](https://arxiv.org/abs/2106.07052)
-63. [What can linearized neural networks actually say about generalization?](https://arxiv.org/abs/2106.06770)
-64. [Measuring the sensitivity of Gaussian processes to kernel choice](https://arxiv.org/abs/2106.06510)
-65. [A Neural Tangent Kernel Perspective of GANs](https://arxiv.org/abs/2106.05566)
-66. [On the Power of Shallow Learning](https://arxiv.org/abs/2106.03186)
-67. [Learning Curves for SGD on Structured Features](https://arxiv.org/abs/2106.02713)
-68. [Out-of-Distribution Generalization in Kernel Regression](https://arxiv.org/abs/2106.02261)
-69. [Rapid Feature Evolution Accelerates Learning in Neural Networks](https://arxiv.org/abs/2105.14301)
-70. [Scalable and Flexible Deep Bayesian Optimization with Auxiliary Information for Scientific Problems](https://arxiv.org/abs/2104.11667)
-71. [Random Features for the Neural Tangent Kernel](https://arxiv.org/abs/2104.01351)
-72. [Multi-Level Fine-Tuning: Closing Generalization Gaps in Approximation of Solution Maps under a Limited Budget for Training Data](https://arxiv.org/abs/2102.07169)
-73. [Explaining Neural Scaling Laws](https://arxiv.org/abs/2102.06701)
-74. [Correlated Weights in Infinite Limits of Deep Convolutional Neural Networks](https://arxiv.org/abs/2101.04097)
-75. [Dataset Meta-Learning from Kernel Ridge-Regression](https://arxiv.org/abs/2011.00050)
-76. [Deep learning versus kernel learning: an empirical study of loss landscape geometry and the time evolution of the Neural Tangent Kernel](https://arxiv.org/abs/2010.15110)
-77. [Stable ResNet](https://arxiv.org/abs/2010.12859)
-78. [Label-Aware Neural Tangent Kernel: Toward Better Generalization and Local Elasticity](https://arxiv.org/abs/2010.11775)
-79. [Semi-supervised Batch Active Learning via Bilevel Optimization](https://arxiv.org/abs/2010.09654)
-80. [Temperature check: theory and practice for training models with softmax-cross-entropy losses](https://arxiv.org/abs/2010.07344)
-81. [Experimental Design for Overparameterized Learning with Application to Single Shot Deep Active Learning](https://arxiv.org/abs/2009.12820)
-82. [How Neural Networks Extrapolate: From Feedforward to Graph Neural Networks](https://arxiv.org/abs/2009.11848)
-83. [Exploring the Uncertainty Properties of Neural Networks’ Implicit Priors in the Infinite-Width Limit](http://www.gatsby.ucl.ac.uk/~balaji/udl2020/accepted-papers/UDL2020-paper-115.pdf)
-84. [Cold Posteriors and Aleatoric Uncertainty](https://arxiv.org/abs/2008.00029)
-85. [Asymptotics of Wide Convolutional Neural Networks](https://arxiv.org/abs/2008.08675)
-86. [Finite Versus Infinite Neural Networks: an Empirical Study](https://arxiv.org/abs/2007.15801)
-87. [Bayesian Deep Ensembles via the Neural Tangent Kernel](https://arxiv.org/abs/2007.05864)
-88. [The Surprising Simplicity of the Early-Time Learning Dynamics of Neural Networks](https://arxiv.org/abs/2006.14599)
-89. [When Do Neural Networks Outperform Kernel Methods?](https://arxiv.org/abs/2006.13409)
-90. [Statistical Mechanics of Generalization in Kernel Regression](https://arxiv.org/abs/2006.13198)
-91. [Exact posterior distributions of wide Bayesian neural networks](https://arxiv.org/abs/2006.10541)
-92. [Infinite attention: NNGP and NTK for deep attention networks](https://arxiv.org/abs/2006.10540)
-93. [Fourier Features Let Networks Learn High Frequency Functions in Low Dimensional Domains](https://arxiv.org/abs/2006.10739)
-94. [Finding trainable sparse networks through Neural Tangent Transfer](https://arxiv.org/abs/2006.08228)
-95. [Coresets via Bilevel Optimization for Continual Learning and Streaming](https://arxiv.org/abs/2006.03875)
-96. [On the Neural Tangent Kernel of Deep Networks with Orthogonal Initialization](https://arxiv.org/abs/2004.05867)
-97. [The large learning rate phase of deep learning: the catapult mechanism](https://arxiv.org/abs/2003.02218)
-98. [Spectrum Dependent Learning Curves in Kernel Regression and Wide Neural Networks](https://arxiv.org/abs/2002.02561)
-99. [Taylorized Training: Towards Better Approximation of Neural Network Training at Finite Width](https://arxiv.org/abs/2002.04010)
-100. [On the Infinite Width Limit of Neural Networks with a Standard Parameterization](https://arxiv.org/abs/2001.07301)
-101. [Disentangling Trainability and Generalization in Deep Learning](https://arxiv.org/abs/1912.13053)
-102. [Information in Infinite Ensembles of Infinitely-Wide Neural Networks](https://arxiv.org/abs/1911.09189)
-103. [Training Dynamics of Deep Networks using Stochastic Gradient Descent via Neural Tangent Kernel](https://arxiv.org/abs/1905.13654)
-104. [Wide Neural Networks of Any Depth Evolve as Linear Models Under Gradient Descent](https://arxiv.org/abs/1902.06720)
-105. [Bayesian Deep Convolutional Networks with Many Channels are Gaussian Processes](https://arxiv.org/abs/1810.05148)
-
-
-Please let us know if you make use of the code in a publication, and we'll add it
-to the list!
 
 
 ## Citation
@@ -606,24 +488,3 @@ If you use the code in a publication, please cite our papers:
     url={https://github.com/google/neural-tangents}
 }
 ```
-
-
-
-## References
-
-###### [1] [Priors for Infinite Networks](https://www.cs.toronto.edu/~radford/pin.abstract.html)
-###### [2] [Exponential expressivity in deep neural networks through transient chaos](https://arxiv.org/abs/1606.05340)
-###### [3] [Toward deeper understanding of neural networks: The power of initialization and a dual view on expressivity](http://papers.nips.cc/paper/6427-toward-deeper-understanding-of-neural-networks-the-power-of-initialization-and-a-dual-view-on-expressivity)
-###### [4] [Deep Information Propagation](https://arxiv.org/abs/1611.01232)
-###### [5] [Deep Neural Networks as Gaussian Processes](https://arxiv.org/abs/1711.00165)
-###### [6] [Gaussian Process Behaviour in Wide Deep Neural Networks](https://arxiv.org/abs/1804.11271)
-###### [7] [Dynamical Isometry and a Mean Field Theory of CNNs: How to Train 10,000-Layer Vanilla Convolutional Neural Networks.](https://arxiv.org/abs/1806.05393)
-###### [8] [Bayesian Deep Convolutional Networks with Many Channels are Gaussian Processes](https://arxiv.org/abs/1810.05148)
-###### [9] [Deep Convolutional Networks as shallow Gaussian Processes](https://arxiv.org/abs/1808.05587)
-###### [10] [Neural Tangent Kernel: Convergence and Generalization in Neural Networks](https://arxiv.org/abs/1806.07572)
-###### [11] [Wide Neural Networks of Any Depth Evolve as Linear Models Under Gradient Descent](https://arxiv.org/abs/1902.06720)
-###### [12] [Scaling Limits of Wide Neural Networks with Weight Sharing: Gaussian Process Behavior, Gradient Independence, and Neural Tangent Kernel Derivation](https://arxiv.org/abs/1902.04760)
-###### [13] [Mean Field Residual Networks: On the Edge of Chaos](https://arxiv.org/abs/1712.08969)
-###### [14] [Wide Residual Networks](https://arxiv.org/abs/1605.07146)
-###### [15] [On the Infinite Width Limit of Neural Networks with a Standard Parameterization](https://arxiv.org/abs/2001.07301)
-###### [16] [Neural Kernels Without Tangents](https://arxiv.org/abs/2003.02237)
