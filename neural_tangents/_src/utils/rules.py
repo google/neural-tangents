@@ -503,22 +503,16 @@ def _conv_general_dilated_e(
     trimmed_invals: List[ShapedArray],
     trimmed_cts_in: ShapedArray
 ) -> Dict[str, Any]:
-  # `conv_general_dilated` has `lhs_shape` and `rhs_shape` arguments that are
-  # for some reason not inferred from the `lhs` and `rhs` themselves.
-  # TODO(romann): ask JAX why these are there.
+  lhs, rhs = trimmed_invals
   dn = params['dimension_numbers']
 
-  if (params['feature_group_count'] == params['lhs_shape'][dn[0][1]] and
-      params['feature_group_count'] == params['rhs_shape'][dn[1][0]]):
+  if (params['feature_group_count'] > lhs.shape[dn[0][1]] or
+      params['feature_group_count'] > rhs.shape[dn[1][0]]):
     params['feature_group_count'] = 1
 
-  if (params['batch_group_count'] == params['rhs_shape'][dn[1][0]] and
-      params['batch_group_count'] == params['lhs_shape'][dn[0][0]]):
+  if (params['batch_group_count'] > rhs.shape[dn[1][0]] or
+      params['batch_group_count'] > lhs.shape[dn[0][0]]):
     params['batch_group_count'] = 1
-
-  lhs, rhs = trimmed_invals
-  params['lhs_shape'] = lhs.shape
-  params['rhs_shape'] = rhs.shape
 
   return params
 
