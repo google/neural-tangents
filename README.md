@@ -24,7 +24,7 @@ Freedom of thought is fundamental to all of science. Right now, our freedom is b
 
 Neural Tangents is a high-level neural network API for specifying complex, hierarchical, neural networks of both finite and _infinite_ width. Neural Tangents allows researchers to define, train, and evaluate infinite networks as easily as finite ones. The library has been used in [>100 papers](https://scholar.google.com/scholar?oi=bibs&hl=en&cites=4030630874639258770,4161931758707925692,2891750348147928089,8612471018033907356,10117604240015578443,4178323439418493877).
 
-Infinite (in width or channel count) neural networks are Gaussian Processes (GPs) with a kernel function determined by their architecture. See [References](#references) for details and nuances of this correspondence. Also see [this listing](https://github.com/google/neural-tangents/wiki/Overparameterized-Neural-Networks:-Theory-and-Empirics) of papers written by the creators of Neural Tangents which study the infinite width limit of neural networks.
+Infinite (in width or channel count) neural networks are Gaussian Processes (GPs) with a kernel function determined by their architecture. See [this listing](https://github.com/google/neural-tangents/wiki/Overparameterized-Neural-Networks:-Theory-and-Empirics) of papers written by the creators of Neural Tangents which study the infinite width limit of neural networks.
 
 Neural Tangents allows you to construct a neural network model from common building blocks like convolutions, pooling, residual connections, nonlinearities, and more, and obtain not only the finite model, but also the kernel function of the respective GP.
 
@@ -44,7 +44,7 @@ We happily welcome contributions!
 * [Technical gotchas](#technical-gotchas)
 * [Training dynamics of wide but finite networks](#training-dynamics-of-wide-but-finite-networks)
 * [Performance](#performance)
-* [References](#references)
+* [Citation](#citation)
 
 ## Colab Notebooks
 
