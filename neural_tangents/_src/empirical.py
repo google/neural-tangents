@@ -2275,15 +2275,12 @@ def _get_fwd(
 
 
 def _get_flops(f: Callable, optimize: bool, *a, **kw) -> float:
+  e = jax.jit(f).lower(*a, **kw)
   if optimize:
-    e = jax.jit(f).lower(*a, **kw).compile()
-    return e.cost_analysis()[0]['flops']
+    analysis = e.compile().cost_analysis()[0]
   else:
-    m = jax.xla_computation(f)(*a, **kw)
-    client = jax.lib.xla_bridge.get_backend()
-    m = m.as_hlo_module()
-    analysis = jax.lib.xla_client._xla.hlo_module_cost_analysis(client, m)
-    return analysis['flops']
+    analysis = e.cost_analysis()
+  return analysis['flops']
 
 
 
