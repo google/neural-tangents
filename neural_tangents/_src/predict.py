@@ -857,7 +857,7 @@ def gradient_descent_mse_ensemble(
       if not any(g in k_dd_cache for g in get):
         k_dd_cache.update(
             kernel_fn(x_train, None, get,
-                      **kernel_fn_train_train_kwargs)._asdict())
+                      **kernel_fn_train_train_kwargs)._asdict())  # pytype: disable=attribute-error  # jax-ndarray
       else:
         for g in get:
           if g not in k_dd_cache:
@@ -1130,12 +1130,12 @@ def max_learning_rate(
     The maximal feasible learning rate for infinite width NNs.
   """
   ntk_train_train = utils.make_2d(ntk_train_train)
-  factor = ntk_train_train.shape[0] if y_train_size is None else y_train_size
+  factor = ntk_train_train.shape[0] if y_train_size is None else y_train_size  # pytype: disable=attribute-error  # jax-ndarray
 
   if _is_on_cpu(ntk_train_train):
     max_eva = osp.linalg.eigvalsh(ntk_train_train,
-                                  eigvals=(ntk_train_train.shape[0] - 1,
-                                           ntk_train_train.shape[0] - 1))[-1]
+                                  eigvals=(ntk_train_train.shape[0] - 1,  # pytype: disable=attribute-error  # jax-ndarray
+                                           ntk_train_train.shape[0] - 1))[-1]  # pytype: disable=attribute-error  # jax-ndarray
   else:
     max_eva = np.linalg.eigvalsh(ntk_train_train)[-1]
   lr = 2 * (1 + momentum) * factor / (max_eva + eps)

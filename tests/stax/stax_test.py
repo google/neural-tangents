@@ -95,7 +95,7 @@ def _get_inputs(
   batch_axis = shape.index(BATCH_SIZE)
   shape = shape[:batch_axis] + (2 * BATCH_SIZE,) + shape[batch_axis + 1:]
   x2 = None if same_inputs else fn(random.normal(split, shape)) * 2
-  return x1, x2
+  return x1, x2  # pytype: disable=bad-return-type  # jax-ndarray
 
 
 def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,

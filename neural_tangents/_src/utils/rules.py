@@ -661,7 +661,7 @@ def _mul_j(
     other = np.ones((), other.dtype) / other
 
   if inval.ndim == 0:
-    return other
+    return other  # pytype: disable=bad-return-type  # jax-ndarray
 
   if other.ndim == 0:
     other = np.broadcast_to(other, inval.shape)

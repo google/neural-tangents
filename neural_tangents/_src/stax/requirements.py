@@ -271,7 +271,7 @@ def unmask_fn(fn: ApplyFn) -> ApplyFn:
   def unmask(x: Union[MaskedArray, np.ndarray]) -> np.ndarray:
     if isinstance(x, MaskedArray):
       x = utils.mask(x.masked_value, x.mask)
-    return x
+    return x  # pytype: disable=bad-return-type  # jax-ndarray
 
   def is_leaf(x) -> bool:
     return isinstance(x, (np.ndarray, MaskedArray))

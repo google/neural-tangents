@@ -288,7 +288,7 @@ _ArrayOrKernel = TypeVar('_ArrayOrKernel', np.ndarray, Kernel)
 @utils.nt_tree_fn()
 def _set_cov2_to_none(k: _ArrayOrKernel) -> _ArrayOrKernel:
   if isinstance(k, Kernel):
-    k = k.replace(cov2=None)
+    k = k.replace(cov2=None)  # pytype: disable=attribute-error  # jax-ndarray
   return k
 
 

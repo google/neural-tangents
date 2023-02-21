@@ -915,7 +915,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
               p_train_mse, p_test_mse = predict_fn_mse(
                   ts, fx_train_0, fx_test_0, ntk_test_train)
               self.assertAllClose(y_test_shape, p_test_mse.shape)
-            self.assertAllClose(y_train_shape, p_train_mse.shape)
+            self.assertAllClose(y_train_shape, p_train_mse.shape)  # pytype: disable=attribute-error  # jax-ndarray
 
             p_nngp_mse_ens, p_ntk_mse_ens = predict_fn_mse_ensemble(
                 ts, x, ('nngp', 'ntk'), compute_cov=True)

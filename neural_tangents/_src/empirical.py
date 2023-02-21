@@ -2047,7 +2047,7 @@ def _trim_invals(
       if isinstance(trimmed_invals[i], UndefinedPrimal):
         trimmed_invals[i] = _trim_axis(trimmed_invals[i], in_d)
 
-  return trimmed_invals
+  return trimmed_invals  # pytype: disable=bad-return-type  # jax-ndarray
 
 
 def _trim_eqn(
@@ -2259,7 +2259,7 @@ def _write_primal(
     val: Union[np.ndarray, UndefinedPrimal]
 ):
   if not ad.is_undefined_primal(val):
-    env[v] = val
+    env[v] = val  # pytype: disable=container-type-mismatch  # jax-ndarray
 
 
 def _get_fwd(

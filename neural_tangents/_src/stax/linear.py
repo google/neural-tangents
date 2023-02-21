@@ -3758,7 +3758,7 @@ def _pos_emb_pdist(shape: Sequence[int],
     R += np.abs(pd) ** pos_emb_p_norm
 
   R = pos_emb_decay_fn(R)
-  return R
+  return R  # pytype: disable=bad-return-type  # jax-ndarray
 
 
 def _get_all_pos_emb(k: Kernel,
