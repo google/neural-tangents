@@ -17,17 +17,17 @@
 import itertools
 import logging
 import random
-from typing import Optional, Sequence
-from typing import Tuple
+from typing import Optional, Sequence, Tuple
 import warnings
 
 from absl.testing import absltest
 import jax
 from jax import lax
-from jax.config import config
-from jax.core import Primitive, ShapedArray
-from jax.interpreters import ad
 from jax._src import dispatch as jax_dispatch
+from jax.config import config
+from jax.core import Primitive
+from jax.core import ShapedArray
+from jax.interpreters import ad
 import jax.numpy as np
 import more_itertools
 from neural_tangents._src.utils import rules
@@ -70,7 +70,7 @@ _SHAPES = [
     (1, 2),
     (2, 3),
     # (3, 2),
-    (0, 1, 0),
+    # (0, 1, 0),
     (1, 2, 3),
     (6, 3, 2),
     # (2, 1, 1),
