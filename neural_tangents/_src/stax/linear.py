@@ -3732,7 +3732,7 @@ def _pooling_layer(reducer, init_val, rescaler=None):
 
 
 def _pos_emb_identity(shape: Sequence[int]) -> np.ndarray:
-  size = utils.size_at(shape)
+  size = utils.size_at(shape)  # pytype: disable=wrong-arg-types  # jax-ndarray
   R = np.eye(size).reshape(tuple(shape) * 2)
   R = utils.zip_axes(R)
   return R
