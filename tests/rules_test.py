@@ -23,7 +23,6 @@ import warnings
 from absl.testing import absltest
 import jax
 from jax import lax
-from jax._src import dispatch as jax_dispatch
 from jax.config import config
 from jax.core import Primitive
 from jax.core import ShapedArray
@@ -334,7 +333,7 @@ _UNARY_PRIMITIVES = {
             'dimensions': d
         } for d in more_itertools.powerset(range(len(s)))],
 
-    jax_dispatch.device_put_p:
+    lax.device_put_p:
         lambda s, _: [{}],  # Test cases generated elsewhere.
 
     lax.pad_p:
@@ -580,7 +579,7 @@ class JacobianRulesTest(test_utils.NeuralTangentsTestCase):
       for params in _UNARY_PRIMITIVES[primitive](shape, dtype)
   )
   def test_unary(self, primitive: Optional[Primitive], shape, dtype, params):
-    if primitive == jax_dispatch.device_put_p:
+    if primitive == lax.device_put_p:
       # Can't instantiate devices at test generation time; using subtests.
       for device in [None] + jax.devices() + jax.devices('cpu'):
         with self.subTest(device=device):
