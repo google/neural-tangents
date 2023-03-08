@@ -578,7 +578,10 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
       self.assertAllClose(ntk_ref, ntk, err_msg=f'{i} vmapped impl. fails.')
 
 
-_functions = {
+PyTree = Any
+
+
+_functions: Dict[str, Callable[[PyTree, PyTree], PyTree]] = {
     '[p[0]**(p[1] + x), p[2] * x + p[0]]':
         lambda p, x: [np.abs(p[0])**(p[1] + x), p[2] * x + p[0]],
     '[p[0]**(p[1] + x), p[2] / x + p[0]]':
