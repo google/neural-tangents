@@ -256,7 +256,7 @@ def get_id_structure(
 def _eye_like(out_shaped: ShapedArray, in_shaped: ShapedArray) -> np.ndarray:
   assert out_shaped.size == in_shaped.size, (out_shaped, in_shaped)
   eye = np.eye(out_shaped.size, dtype=out_shaped.dtype)
-  eye = eye.reshape(out_shaped.shape + in_shaped.shape)
+  eye = eye.reshape(out_shaped.shape + in_shaped.shape)  # pytype: disable=unsupported-operands  # always-use-return-annotations
   return eye
 
 
@@ -578,8 +578,8 @@ def _add_j(
     is_sub: bool
 ) -> np.ndarray:
   j = np.eye(utils.size_at(invals[idx]), dtype=invals[idx].dtype)
-  j = j.reshape(invals[idx].shape * 2)
-  j = np.broadcast_to(j, cts_in.shape + invals[idx].shape)
+  j = j.reshape(invals[idx].shape * 2)  # pytype: disable=unsupported-operands  # always-use-return-annotations
+  j = np.broadcast_to(j, cts_in.shape + invals[idx].shape)  # pytype: disable=unsupported-operands  # always-use-return-annotations
   if is_sub and idx == 1:
     j = -j
   return j
@@ -653,7 +653,7 @@ def _mul_j(
 
   inval = invals[idx]
   if inval.size == 0:
-    return np.zeros(cts_in.shape + inval.shape, inval.dtype)
+    return np.zeros(cts_in.shape + inval.shape, inval.dtype)  # pytype: disable=unsupported-operands  # always-use-return-annotations
 
   other = invals[1 if idx == 0 else 0]
   if is_div:
@@ -669,7 +669,7 @@ def _mul_j(
 
   j = np.broadcast_to(other, cts_in.shape).reshape((-1,))
   j = np.diag(j)
-  j = j.reshape(cts_in.shape * 2)
+  j = j.reshape(cts_in.shape * 2)  # pytype: disable=unsupported-operands  # always-use-return-annotations
 
   sum_axes = ()
   for i in range(inval.ndim):
@@ -727,11 +727,11 @@ def _concatenate_j(
       inval_i_size = onp.prod(inval_i_shape)
       j = np.zeros((inval_i_size, inval.size), inval.dtype)
 
-    j = j.reshape(inval_i_shape + inval.shape)
+    j = j.reshape(inval_i_shape + inval.shape)  # pytype: disable=unsupported-operands  # always-use-return-annotations
     js.append(j)
 
   j = lax.concatenate(js, dimension)
-  j = j.reshape(cts_in.shape + inval.shape)
+  j = j.reshape(cts_in.shape + inval.shape)  # pytype: disable=unsupported-operands  # always-use-return-annotations
   return j
 
 STRUCTURE_RULES[lax.concatenate_p] = _concatenate_s
@@ -805,10 +805,10 @@ def _broadcast_in_dim_j(
 ) -> np.ndarray:
   inval = invals[idx]
   j = np.eye(inval.size, dtype=inval.dtype)
-  j = j.reshape(inval.shape * 2)
+  j = j.reshape(inval.shape * 2)  # pytype: disable=unsupported-operands  # always-use-return-annotations
   j = lax.broadcast_in_dim(
       j,
-      cts_in.shape + inval.shape,
+      cts_in.shape + inval.shape,  # pytype: disable=unsupported-operands  # always-use-return-annotations
       broadcast_dimensions=eqn.params['broadcast_dimensions'] +
       tuple(range(cts_in.ndim, cts_in.ndim + inval.ndim)))
   return j
@@ -857,9 +857,9 @@ def _reduce_sum_j(
 ) -> np.ndarray:
   inval = invals[idx]
   j = np.eye(cts_in.size, dtype=inval.dtype)
-  j = j.reshape(cts_in.shape * 2)
+  j = j.reshape(cts_in.shape * 2)  # pytype: disable=unsupported-operands  # always-use-return-annotations
   j = np.expand_dims(j, tuple(a + cts_in.ndim for a in  eqn.params['axes']))
-  j = np.broadcast_to(j, cts_in.shape + inval.shape)
+  j = np.broadcast_to(j, cts_in.shape + inval.shape)  # pytype: disable=unsupported-operands  # always-use-return-annotations
   return j
 
 STRUCTURE_RULES[lax.reduce_sum_p] = _reduce_sum_s
@@ -921,7 +921,7 @@ def _pad_j(
 
   inval = invals[idx]
   j = np.eye(inval.size, dtype=inval.dtype)
-  j = j.reshape(inval.shape * 2)
+  j = j.reshape(inval.shape * 2)  # pytype: disable=unsupported-operands  # always-use-return-annotations
   for _ in range(inval.ndim):
     padding_config += ((0, 0, 0),)
 
@@ -960,12 +960,12 @@ def _reshape_j(
 ) -> np.ndarray:
   inval = invals[idx]
   j = _eye_like(inval, inval)
-  j = j.reshape(inval.shape * 2)
+  j = j.reshape(inval.shape * 2)  # pytype: disable=unsupported-operands  # always-use-return-annotations
 
   inval_dims = tuple(i + inval.ndim for i in range(inval.ndim))
   if eqn.params['dimensions'] is not None:
     j = lax.transpose(j, eqn.params['dimensions'] + inval_dims)
-  j = j.reshape(inval.shape + inval.shape)
+  j = j.reshape(inval.shape + inval.shape)  # pytype: disable=unsupported-operands  # always-use-return-annotations
   return j
 
 def _reshape_e(
@@ -1043,7 +1043,7 @@ def _zeros_like_j(
     invals: List[ShapedArray],
     cts_in: ShapedArray
 ) -> np.ndarray:
-  return np.zeros(cts_in.shape + invals[idx].shape, cts_in.dtype)
+  return np.zeros(cts_in.shape + invals[idx].shape, cts_in.dtype)  # pytype: disable=unsupported-operands  # always-use-return-annotations
 
 STRUCTURE_RULES[jax.ad.zeros_like_p] = _eye_s
 JACOBIAN_RULES[jax.ad.zeros_like_p] = _zeros_like_j
@@ -1074,11 +1074,11 @@ def _transpose_j(
 ) -> np.ndarray:
   j = _eye_like(cts_in, invals[idx])
   inval = invals[idx]
-  j = j.reshape(inval.shape * 2)
+  j = j.reshape(inval.shape * 2)  # pytype: disable=unsupported-operands  # always-use-return-annotations
 
   inval_dims = tuple(i + cts_in.ndim for i in range(cts_in.ndim))
   j = lax.transpose(j, eqn.params['permutation'] + inval_dims)
-  j = j.reshape(cts_in.shape + invals[idx].shape)
+  j = j.reshape(cts_in.shape + invals[idx].shape)  # pytype: disable=unsupported-operands  # always-use-return-annotations
   return j
 
 STRUCTURE_RULES[lax.transpose_p] = _transpose_s

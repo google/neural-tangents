@@ -2189,7 +2189,7 @@ def _get_jacobian(
 
   else:
     # Vanilla Jacobian evaluation.
-    if _get_fwd(_fwd, cts_in_shape, inval_shape):
+    if _get_fwd(_fwd, cts_in_shape, inval_shape):  # pytype: disable=wrong-arg-types  # always-use-return-annotations
       # Forward mode.
       out_axes = -1
       inputs = invals[idx].aval
