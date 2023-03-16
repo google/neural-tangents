@@ -49,7 +49,6 @@ import jax
 from jax import device_put, devices
 from jax import jit
 from jax import pmap
-from jax.interpreters.pxla import ShardedDeviceArray
 from jax import random
 import jax.numpy as np
 from jax.tree_util import tree_all
@@ -705,9 +704,6 @@ def _get_jit_or_pmap_broadcast():
     # TODO(romann): adapt this when JAX allows `axis_in` for `pmap`.
     def broadcast(arg: np.ndarray) -> np.ndarray:
       if device_count == 0:
-        return arg
-      # If the argument has already been sharded, no need to broadcast it.
-      if isinstance(arg, ShardedDeviceArray) and arg.shape[0] == device_count:
         return arg
       return np.broadcast_to(arg, (device_count,) + arg.shape)
 
