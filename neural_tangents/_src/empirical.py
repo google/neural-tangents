@@ -2173,12 +2173,6 @@ def _get_jacobian(
   cts_in_shape = cts_in.shape
   dy_dw_shape = cts_in_shape + inval_shape
 
-  if primitive == xla.xla_call_p:
-    raise NotImplementedError(
-        f'Call primitives {eqn} not supported. Please file a bug at '
-        f'https://github.com/google/neural-tangents/issues.'
-    )
-
   if primitive not in rules.JACOBIAN_RULES:
     warnings.warn(f'No Jacobian rule found for {primitive}.')
 
