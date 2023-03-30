@@ -2162,7 +2162,7 @@ def _get_jacobian(
     idx: int,
     _j_rules: bool,
     _fwd: Optional[bool],
-) -> np.ndarray:
+) -> Union[np.ndarray, Zero]:
   """Get the (structured) `eqn` output Jacobian wrt `eqn.invars[idx]`."""
   if eqn is None:
     primitive = None
