@@ -26,6 +26,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Size
 import warnings
 
 import jax
+from jax import core
 from jax import random
 import jax.numpy as np
 from jax.tree_util import tree_all, tree_map
@@ -470,7 +471,7 @@ def mask(
 
 
 def size_at(
-    x: Union[_ArrayOrShape, jax.ShapedArray],
+    x: Union[_ArrayOrShape, core.ShapedArray],
     axes: Optional[Iterable[int]] = None
 ) -> int:
   if hasattr(x, 'shape'):
