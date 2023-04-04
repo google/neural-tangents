@@ -26,7 +26,8 @@ from jax import lax
 from jax import numpy as np
 from jax import ops
 from jax import random
-from jax import ShapeDtypeStruct, ShapedArray, eval_shape, vmap
+from jax import ShapeDtypeStruct, eval_shape, vmap
+from jax.core import ShapedArray
 import jax.example_libraries.stax as ostax
 import numpy as onp
 from .requirements import Bool, Diagonal, get_diagonal_outer_prods, layer, mean_and_var, requires, supports_masking

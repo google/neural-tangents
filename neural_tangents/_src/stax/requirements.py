@@ -22,7 +22,8 @@ import frozendict
 import jax
 from jax import lax
 from jax import numpy as np
-from jax import eval_shape, ShapedArray
+from jax import eval_shape
+from jax.core import ShapedArray
 from jax.tree_util import tree_map, tree_all
 from ..utils import utils
 import dataclasses
