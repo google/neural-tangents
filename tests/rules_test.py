@@ -482,6 +482,7 @@ class JacobianRulesTest(test_utils.NeuralTangentsTestCase):
     else:
       if primitive == lax.reshape_p:
         # Reshape Jacobian is special-case defined as identity.
+        j_rule: np.ndarray
         j_rule = j_rule.reshape(j_fwd.shape)
 
       self.assertAllClose(j_fwd, j_rev)
@@ -581,10 +582,12 @@ class JacobianRulesTest(test_utils.NeuralTangentsTestCase):
   def test_unary(self, primitive: Optional[Primitive], shape, dtype, params):
     if primitive == lax.device_put_p:
       # Can't instantiate devices at test generation time; using subtests.
-      for device in [None] + jax.devices() + jax.devices('cpu'):
-        with self.subTest(device=device):
-          params = {'device': device}
-          self._test_primitive(primitive, [shape], dtype, params)
+      devices = [None] + jax.devices() + jax.devices('cpu')
+      for device in devices:
+        for src in devices:
+          with self.subTest(device=device, src=src):
+            params = {'device': device, 'src': src}
+            self._test_primitive(primitive, [shape], dtype, params)
 
     else:
       self._test_primitive(primitive, [shape], dtype, params)
