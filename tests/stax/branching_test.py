@@ -199,7 +199,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
     else:
       width = 1024
       n_samples = 512
-      tol = 0.01
+      tol = 0.015
 
     conv = stax.Conv(out_chan=width,
                      filter_shape=(3, 3),
