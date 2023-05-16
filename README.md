@@ -251,7 +251,7 @@ The `neural_tangents` (`nt`) package contains the following modules and function
 We remark the following differences between our library and the JAX one.
 
 * All `nt.stax` layers are instantiated with a function call, i.e. `nt.stax.Relu()` vs `jax.example_libraries.stax.Relu`.
-* All layers with trainable parameters use the [_NTK parameterization_](https://arxiv.org/abs/1806.07572) by default. However, `Dense` and `Conv` layers also support the [_standard parameterization_](https://arxiv.org/abs/2001.07301) via a `parameterization` keyword argument.
+* All layers with trainable parameters use the [_NTK parameterization_](https://arxiv.org/1806.07572) by default. However, `Dense` and `Conv` layers also support the [_standard parameterization_](https://arxiv.org/2001.07301) via a `parameterization` keyword argument.
 * `nt.stax` and `jax.example_libraries.stax` may have different layers and options available (for example `nt.stax` layers support `CIRCULAR` padding, have `LayerNorm`, but no `BatchNorm`.).
 
 

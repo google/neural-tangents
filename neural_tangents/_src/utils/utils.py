@@ -270,7 +270,13 @@ def x1_is_x2(x1: np.ndarray,
   if jax.default_backend() == 'tpu':
     eps = 1e-4
 
-  return np.all(np.abs(x1 - x2) < eps)
+  try:
+    diff = x1 - x2
+  except TypeError:
+    # inputs are e.g. custom PRNGKeys which don't define subtraction.
+    return np.all(x1 == x2)
+  else:
+    return np.all(np.abs(diff) < eps)
 
 
 def _get_ndim(x: Union[int, Sized, np.ndarray]) -> int:
