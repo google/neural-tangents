@@ -228,7 +228,7 @@ class EmpiricalTfTest(parameterized.TestCase):
 
     x1_jax = np.array(x1)
     x2_jax = np.array(x2)
-    params_jax = jax.tree_map(lambda x: np.array(x), params)
+    params_jax = jax.tree_map(np.array, params)
 
     jax_ntks = [ntk_fn_i(x1_jax, x2_jax, params_jax)
                 for ntk_fn_i in jax_ntk_fns]
