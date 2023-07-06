@@ -1768,7 +1768,8 @@ def _get_primals_out_and_pullback(
   cotangents), but collects and returns other quantities.
   """
   primals_in_flat, in_tree = tree_flatten(primals_in)
-  fn_flat, out_tree = jax.flatten_fun_nokwargs(lu.wrap_init(fn), in_tree)
+  fn_flat, out_tree = jax.api_util.flatten_fun_nokwargs(
+      lu.wrap_init(fn), in_tree)
 
   # TODO(romann): handle call primitives more gracefully.
   with jax.disable_jit():

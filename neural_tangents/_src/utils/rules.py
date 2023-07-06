@@ -1045,8 +1045,8 @@ def _zeros_like_j(
 ) -> np.ndarray:
   return np.zeros(cts_in.shape + invals[idx].shape, cts_in.dtype)  # pytype: disable=unsupported-operands  # always-use-return-annotations
 
-STRUCTURE_RULES[jax.ad.zeros_like_p] = _eye_s
-JACOBIAN_RULES[jax.ad.zeros_like_p] = _zeros_like_j
+STRUCTURE_RULES[jax.interpreters.ad.zeros_like_p] = _eye_s
+JACOBIAN_RULES[jax.interpreters.ad.zeros_like_p] = _zeros_like_j
 
 
 def _transpose_s(
