@@ -891,6 +891,7 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
     kernel_fn_emp_g = jit(value_and_grad(kernel_fn_emp), static_argnames='get')
 
     def kernel_scalar_mc_grad_mean(x1, x2):
+      x1: np.ndarray
       key = random.PRNGKey(4)
       n_samples = 2**9
       k, k_grad = 0., 0.
