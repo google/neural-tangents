@@ -22,7 +22,7 @@ import functools
 import inspect
 import operator
 import types
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Sized, Tuple, Type, TypeVar, Union
+from typing import Any, Callable, Iterable, Optional, Sequence, Sized, TypeVar
 import warnings
 
 import jax
@@ -36,7 +36,7 @@ import numpy as onp
 PyTree = Any
 
 
-Axes = Union[int, Sequence[int]]
+Axes = int | Sequence[int]
 
 
 def is_list_or_tuple(x) -> bool:
@@ -45,7 +45,7 @@ def is_list_or_tuple(x) -> bool:
   return type(x) == list or type(x) == tuple
 
 
-def is_nt_tree_of(x, dtype: Union[Type, Tuple[Type, ...]]) -> bool:
+def is_nt_tree_of(x, dtype: type | tuple[type, ...]) -> bool:
   if isinstance(x, dtype):
     return True
   if not is_list_or_tuple(x):
@@ -154,7 +154,7 @@ def canonicalize_get(get):
   return get_is_not_tuple, get
 
 
-_KERNEL_NAMED_TUPLE_CACHE: Dict[Any, Any] = {}
+_KERNEL_NAMED_TUPLE_CACHE: dict[Any, Any] = {}
 
 
 def _named_tuple_factory(name, get):
@@ -254,7 +254,7 @@ def get_namedtuple(name):
 @nt_tree_fn(nargs=2, reduce=lambda x: np.all(np.array(x)))
 def x1_is_x2(x1: np.ndarray,
              x2: Optional[np.ndarray] = None,
-             eps: float = 1e-12) -> Union[bool, np.ndarray]:
+             eps: float = 1e-12) -> bool | np.ndarray:
   if not isinstance(x1, (onp.ndarray, np.ndarray)):
     raise TypeError('`x1` must be an ndarray. A {} is found.'.format(type(x1)))
 
@@ -279,7 +279,7 @@ def x1_is_x2(x1: np.ndarray,
     return np.all(np.abs(diff) < eps)
 
 
-def _get_ndim(x: Union[int, Sized, np.ndarray]) -> int:
+def _get_ndim(x: int | Sized | np.ndarray) -> int:
   """Get number of dimensions given number of dimensions / shape / array."""
   if hasattr(x, 'ndim'):
     n = x.ndim
@@ -292,7 +292,7 @@ def _get_ndim(x: Union[int, Sized, np.ndarray]) -> int:
   return n
 
 
-def mod(axis: Axes, x: Union[int, Sized, np.ndarray]) -> List[int]:
+def mod(axis: Axes, x: int | Sized | np.ndarray) -> list[int]:
   """Makes `axis` non-negative given number of dimensions / shape / array."""
   n = _get_ndim(x)
   if isinstance(axis, int):
@@ -300,8 +300,7 @@ def mod(axis: Axes, x: Union[int, Sized, np.ndarray]) -> List[int]:
   return [(i % n) if n > 0 else i for i in axis]
 
 
-def canonicalize_axis(axis: Axes,
-                      x: Union[int, Sized, np.ndarray]) -> List[int]:
+def canonicalize_axis(axis: Axes, x: int | Sized | np.ndarray) -> list[int]:
   """Converts axis into a sorted non-negative list.
 
   Args:
@@ -445,8 +444,8 @@ def outer_prod(x, y, start_axis, end_axis, prod_op):
 _ArrayOrShape = TypeVar('_ArrayOrShape',
                         onp.ndarray,
                         np.ndarray,
-                        List[int],
-                        Tuple[int, ...])
+                        list[int],
+                        tuple[int, ...])
 
 
 def reverse_zipped(
@@ -477,7 +476,7 @@ def mask(
 
 
 def size_at(
-    x: Union[_ArrayOrShape, core.ShapedArray],
+    x: _ArrayOrShape | core.ShapedArray,
     axes: Optional[Iterable[int]] = None
 ) -> int:
   if hasattr(x, 'shape'):
@@ -592,10 +591,10 @@ def split_kwargs(kwargs, x1=None, x2=None):
   return kwargs1, kwargs2
 
 
-_SingleSlice = Union[int, slice, type(Ellipsis)]
+_SingleSlice = int | slice | type(Ellipsis)
 
 
-SliceType = Union[_SingleSlice, Tuple[_SingleSlice, ...]]
+SliceType = _SingleSlice | tuple[_SingleSlice, ...]
 """A type to specify a slice of an array.
 
 For instance, when indexing `x[1, :, 2:8:3]` a slice tuple
@@ -609,7 +608,7 @@ slice, such as `nt.stax.Slice[1, :, 2:8:3]`.
 def canonicalize_idx(
     idx: SliceType,
     ndim: int
-) -> Tuple[Union[int, slice], ...]:
+) -> tuple[int | slice, ...]:
   if idx is Ellipsis or isinstance(idx, (int, slice)):
     idx = (idx,) + (slice(None),) * (ndim - 1)
 
@@ -621,7 +620,7 @@ def canonicalize_idx(
   return idx
 
 
-def slice_shape(shape: Tuple[int, ...], idx: SliceType) -> Tuple[int, ...]:
+def slice_shape(shape: tuple[int, ...], idx: SliceType) -> tuple[int, ...]:
   # Keep `None` or negative-sized axes if they aren't indexed into.
   canonical_idx = canonicalize_idx(idx, len(shape))
 
@@ -653,5 +652,5 @@ def slice_shape(shape: Tuple[int, ...], idx: SliceType) -> Tuple[int, ...]:
 _T = TypeVar('_T')
 
 
-def double_tuple(x: Iterable[_T]) -> Tuple[_T, ...]:
+def double_tuple(x: Iterable[_T]) -> tuple[_T, ...]:
   return tuple(v for v in x for _ in range(2))

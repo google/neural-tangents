@@ -104,7 +104,7 @@ Example:
 import enum
 import functools
 import operator
-from typing import Callable, Dict, KeysView, List, Optional, Set, Tuple, TypeVar, Union, Iterable
+from typing import Callable, KeysView, Optional, TypeVar, Iterable
 import warnings
 
 import jax
@@ -683,10 +683,10 @@ def _structured_derivatives_ntk_fn(
       fx1: np.ndarray,
       fx2: np.ndarray,
       fx_axis,
-      df_dys_1: List[Union[np.ndarray, Zero]],
-      df_dys_2: List[Union[np.ndarray, Zero]],
-      dy_dws_1: List[Tuple[np.ndarray, rules.Structure]],
-      dy_dws_2: List[Tuple[np.ndarray, rules.Structure]],
+      df_dys_1: list[np.ndarray | Zero],
+      df_dys_2: list[np.ndarray | Zero],
+      dy_dws_1: list[tuple[np.ndarray, rules.Structure]],
+      dy_dws_2: list[tuple[np.ndarray, rules.Structure]],
       dtype: np.dtype
   ):
     ndim = fx1.ndim
@@ -890,7 +890,7 @@ def empirical_ntk_fn(
     trace_axes: Axes = (-1,),
     diagonal_axes: Axes = (),
     vmap_axes: VMapAxes = None,
-    implementation: Union[NtkImplementation, int] = DEFAULT_NTK_IMPLEMENTATION,
+    implementation: NtkImplementation | int = DEFAULT_NTK_IMPLEMENTATION,
     _j_rules: bool = _DEFAULT_NTK_J_RULES,
     _s_rules: bool = _DEFAULT_NTK_S_RULES,
     _fwd: Optional[bool] = _DEFAULT_NTK_FWD,
@@ -1041,7 +1041,7 @@ def empirical_kernel_fn(
     trace_axes: Axes = (-1,),
     diagonal_axes: Axes = (),
     vmap_axes: VMapAxes = None,
-    implementation: Union[NtkImplementation, int] = DEFAULT_NTK_IMPLEMENTATION,
+    implementation: NtkImplementation | int = DEFAULT_NTK_IMPLEMENTATION,
     _j_rules: bool = _DEFAULT_NTK_J_RULES,
     _s_rules: bool = _DEFAULT_NTK_S_RULES,
     _fwd: Optional[bool] = _DEFAULT_NTK_FWD,
@@ -1190,7 +1190,7 @@ def empirical_kernel_fn(
   def kernel_fn(
       x1: PyTree,
       x2: Optional[PyTree],
-      get: Union[None, str, Tuple[str, ...]],
+      get: None | str | tuple[str, ...],
       params: PyTree,
       **apply_fn_kwargs
   ) -> PyTree:
@@ -1405,8 +1405,8 @@ def _trace_and_diagonal(
 
 
 def _dict_of_tree_to_tree_of_dict(
-    out_dict: Dict[str, PyTree],
-    get: Tuple[str, ...]
+    out_dict: dict[str, PyTree],
+    get: tuple[str, ...]
 ) -> PyTree:
   # If the elements of an output dict are tuples then change the representation
   # to be a tuple of dicts instead. This occurs when the output of a network is
@@ -1420,7 +1420,7 @@ def _get_f_params(
     x: PyTree,
     x_axis: PyTree,
     fx_axis: PyTree,
-    kw_axes: Dict[str, PyTree],
+    kw_axes: dict[str, PyTree],
     **apply_fn_kwargs
 ) -> Callable[[PyTree], PyTree]:
   x = _expand_dims(x, x_axis)
@@ -1439,7 +1439,7 @@ def _get_f_params(
 
 def _get_args(
     f: Callable,
-    apply_fn_kwargs: Dict[str, PyTree],
+    apply_fn_kwargs: dict[str, PyTree],
     params: PyTree,
     vmap_axes: VMapAxes,
     x1: PyTree,
@@ -1463,11 +1463,11 @@ def _get_f1_f2(
     keys: KeysView[str],
     x_axis: PyTree,
     fx_axis: PyTree,
-    kw_axes: Dict[str, PyTree],
-    args: Tuple,
+    kw_axes: dict[str, PyTree],
+    args: tuple,
     x1: PyTree,
     x2: Optional[PyTree]
-) -> Tuple[Callable[[PyTree], PyTree], Callable[[PyTree], PyTree]]:
+) -> tuple[Callable[[PyTree], PyTree], Callable[[PyTree], PyTree]]:
   args1, args2 = args[:len(args) // 2], args[len(args) // 2:]
   _kwargs1 = {k: v for k, v in zip(keys, args1)}
   _kwargs2 = {k: v for k, v in zip(keys, args2)}
@@ -1480,7 +1480,7 @@ def _get_f1_f2(
 _ArrayOrShape = TypeVar('_ArrayOrShape', np.ndarray, ShapedArray)
 
 
-def _check_einsum_no_broadcast(arrays: List[np.ndarray], dims: List[List[int]]):
+def _check_einsum_no_broadcast(arrays: list[np.ndarray], dims: list[list[int]]):
   """Check that all matching einsum contracting axis sizes are equal.
 
   Einsum allows silent broadcasting, and this function helps ensure it doesn't
@@ -1517,7 +1517,7 @@ def _expand_dims_array(x: _ArrayOrShape, axis: int) -> _ArrayOrShape:
 
 
 def _expand_dims(
-    x: Union[Optional[PyTree], UndefinedPrimal],
+    x: Optional[PyTree] | UndefinedPrimal,
     axis: Optional[PyTree]
 ) -> Optional[PyTree]:
   if axis is None or x is None or isinstance(x, UndefinedPrimal):
@@ -1545,7 +1545,7 @@ def _squeeze(x: PyTree, axis: Optional[PyTree]) -> PyTree:
 
   def squeeze(
       x: np.ndarray,
-      axis: Union[None, int, Tuple[int, ...]]
+      axis: None | int | tuple[int, ...]
   ) -> np.ndarray:
     """`np.squeeze` analog working with 0-sized axes."""
     if isinstance(axis, int):
@@ -1618,7 +1618,7 @@ def _canonicalize_axes(
   return x_axis, fx_axis, kw_axes
 
 
-def _to_tuple_tree(x: PyTree) -> Tuple:
+def _to_tuple_tree(x: PyTree) -> tuple:
   """Replace all lists and dictionaries with tuples in a PyTree for hashing."""
   if isinstance(x, (tuple, list)):
     return tuple(_to_tuple_tree(x_i) for x_i in x)
@@ -1653,7 +1653,7 @@ def _get_dims(
     ndim: int,
     trace_axes: Axes,
     diagonal_axes: Axes
-) -> Tuple[List[int], List[int], List[int]]:
+) -> tuple[list[int], list[int], list[int]]:
   df_dy_dims_1 = list(range(df_dy_1.ndim))
   df_dy_dims_2 = list(range(df_dy_1.ndim, df_dy_1.ndim + df_dy_2.ndim))
 
@@ -1736,7 +1736,7 @@ def _get_df_dys_and_dy_dws(
     _j_rules: bool,
     _s_rules: bool,
     _fwd: Optional[bool]
-) -> Tuple[PyTree, PyTree]:
+) -> tuple[PyTree, PyTree]:
   """Computes primitive output cotangents (`df/dy`) and Jacobians (`dy/dw`)."""
   def primals_out_and_pullback(mode: _MODE) -> PyTree:
     return _get_primals_out_and_pullback(fn, mode, _j_rules, _s_rules, _fwd,
@@ -1760,7 +1760,7 @@ def _get_primals_out_and_pullback(
     _s_rules: bool,
     _fwd: Optional[bool],
     *primals_in: PyTree
-) -> Tuple[PyTree, Callable]:
+) -> tuple[PyTree, Callable]:
   """Adapted from `jax.interpreters.ad`.
 
   Returns outputs of `fn` and the "pullback" function, which is similar to the
@@ -1793,14 +1793,14 @@ def _get_primals_out_and_pullback(
 def _backward_pass(
     jaxpr: Jaxpr,
     mode: _MODE,
-    consts: List[Value],
-    primals_in: List[UndefinedPrimal],
-    cotangents_in: Tuple[np.ndarray, ...],
+    consts: list[Value],
+    primals_in: list[UndefinedPrimal],
+    cotangents_in: tuple[np.ndarray, ...],
     _j_rules: bool,
     _s_rules: bool,
     _fwd: Optional[bool]
-) -> Union[List[List[Union[np.ndarray, Zero]]],
-           List[List[Tuple[np.ndarray, rules.Structure]]]]:
+) -> (list[list[np.ndarray | Zero]] |
+      list[list[tuple[np.ndarray, rules.Structure]]]):
   """Similar to and adapted from `jax.interpreters.ad.backward_pass`.
 
   Traverses the computational graph in the same order as the above, but collects
@@ -1818,14 +1818,14 @@ def _backward_pass(
   the NTK.
   """
 
-  def read_cotangent(v: Var) -> Union[np.ndarray, Zero]:
+  def read_cotangent(v: Var) -> np.ndarray | Zero:
     return ct_env.pop(v, Zero(v.aval))
 
-  primal_env: Dict[Var, np.ndarray] = {}
+  primal_env: dict[Var, np.ndarray] = {}
   map(functools.partial(_write_primal, primal_env), jaxpr.constvars, consts)
   map(functools.partial(_write_primal, primal_env), jaxpr.invars, primals_in)
 
-  ct_env: Dict[Var, np.ndarray] = {}
+  ct_env: dict[Var, np.ndarray] = {}
   ctx = ad.source_info_util.transform_name_stack('transpose')
   with ctx:
     map(functools.partial(_write_cotangent, 'outvars', ct_env),
@@ -1953,16 +1953,16 @@ def _backward_pass(
   return outs
 
 
-def _get_vars_needing_cts_in(jaxpr: Jaxpr) -> Set[Var]:
+def _get_vars_needing_cts_in(jaxpr: Jaxpr) -> set[Var]:
   """Get a set of variables that need cotangents for structured derivatives.
 
   Specifically, returns variables which are outputs of equations to which
   `jaxpr.invars` are inputs. Cotangents `df/dy` to these variables are needed
   elsewhere to compute the NTK.
   """
-  need_cts: Set[Var] = set()
+  need_cts: set[Var] = set()
 
-  def visit(vs: Set[Var]):
+  def visit(vs: set[Var]):
     if len(vs) == 0:
       return
 
@@ -1986,12 +1986,11 @@ def _get_vars_needing_cts_in(jaxpr: Jaxpr) -> Set[Var]:
 
 def _backprop_step(
     eqn: JaxprEqn,
-    primal_env: Dict[Var, np.ndarray],
-    ct_env: Dict[Var, np.ndarray],
-    read_cotangent: Callable[[Var], Union[np.ndarray, Zero]],
+    primal_env: dict[Var, np.ndarray],
+    ct_env: dict[Var, np.ndarray],
+    read_cotangent: Callable[[Var], np.ndarray | Zero],
     do_write_cotangents: bool = True
-) -> Tuple[Union[np.ndarray, Zero],
-           List[Union[np.ndarray, UndefinedPrimal]]]:
+) -> tuple[np.ndarray | Zero, list[np.ndarray | UndefinedPrimal]]:
   """Adapted from `jax.interpreters.ad`."""
   invals = map(functools.partial(_read_primal, primal_env), eqn.invars)
   cts_in = map(read_cotangent, eqn.outvars)
@@ -2025,9 +2024,9 @@ def _trim_cotangents(
 
 
 def _trim_invals(
-    invals: List[Union[np.ndarray, UndefinedPrimal]],
+    invals: list[np.ndarray | UndefinedPrimal],
     structure: rules.Structure,
-) -> List[Union[np.ndarray, UndefinedPrimal]]:
+) -> list[np.ndarray | UndefinedPrimal]:
   trimmed_invals = list(invals)
 
   for i in structure.in_trace_idxs:
@@ -2054,7 +2053,7 @@ def _trim_invals(
 def _trim_eqn(
     eqn: JaxprEqn,
     idx: int,
-    trimmed_invals: List[Union[np.ndarray, UndefinedPrimal]],
+    trimmed_invals: list[np.ndarray | UndefinedPrimal],
     trimmed_cts_in: ShapedArray
 ) -> JaxprEqn:
   if eqn.primitive in rules.EQN_PARAMS_RULES:
@@ -2073,9 +2072,9 @@ def _trim_eqn(
 
 
 def _trim_axis(
-    x: Union[UndefinedPrimal, ShapedArray, np.ndarray],
-    axis: Union[int, Tuple[int, ...]],
-) -> Union[UndefinedPrimal, ShapedArray]:
+    x: UndefinedPrimal | ShapedArray | np.ndarray,
+    axis: int | tuple[int, ...],
+) -> UndefinedPrimal | ShapedArray:
   """Trim `axis` of `x` to be of length `1`. `x` is only used for shape."""
   if isinstance(axis, int):
     axis = (axis,)
@@ -2131,7 +2130,7 @@ def _eqn_vjp_fn(
     eqn: Optional[JaxprEqn],
     cts_in: np.ndarray,
     *invals
-) -> Tuple[np.ndarray, ...]:
+) -> tuple[np.ndarray, ...]:
   """Perform a VJP for `eqn`. Adapted from `jax.interpreters.ad`."""
   if eqn is None:
     # Identity function
@@ -2159,11 +2158,11 @@ def _eqn_vjp_fn(
 def _get_jacobian(
     eqn: Optional[JaxprEqn],
     cts_in: ShapedArray,
-    invals: List[Union[np.ndarray, UndefinedPrimal]],
+    invals: list[np.ndarray | UndefinedPrimal],
     idx: int,
     _j_rules: bool,
     _fwd: Optional[bool],
-) -> Union[np.ndarray, Zero]:
+) -> np.ndarray | Zero:
   """Get the (structured) `eqn` output Jacobian wrt `eqn.invars[idx]`."""
   if eqn is None:
     primitive = None
@@ -2213,9 +2212,9 @@ def _get_jacobian(
 
 def _write_cotangent(
     prim: core.Primitive,
-    ct_env: Dict[Var, np.ndarray],
+    ct_env: dict[Var, np.ndarray],
     v: Var,
-    ct: Union[np.ndarray, Zero]
+    ct: np.ndarray | Zero
 ):
   """Adapted from `jax.interpreters.ad`."""
   assert ct is not Zero, (prim, v.aval)
@@ -2235,9 +2234,9 @@ def _write_cotangent(
 
 
 def _read_primal(
-    env: Dict[Var, np.ndarray],
-    v: Union[Var, Literal],
-) -> Union[np.ndarray, UndefinedPrimal]:
+    env: dict[Var, np.ndarray],
+    v: Var | Literal,
+) -> np.ndarray | UndefinedPrimal:
   if type(v) is Literal:
     return v.val
 
@@ -2249,9 +2248,9 @@ def _read_primal(
 
 
 def _write_primal(
-    env: Dict[Var, np.ndarray],
+    env: dict[Var, np.ndarray],
     v: Var,
-    val: Union[np.ndarray, UndefinedPrimal]
+    val: np.ndarray | UndefinedPrimal
 ):
   if not ad.is_undefined_primal(val):
     env[v] = val  # pytype: disable=container-type-mismatch  # jax-ndarray
@@ -2259,8 +2258,8 @@ def _write_primal(
 
 def _get_fwd(
     _fwd: Optional[bool],
-    cts_in_shape: Tuple[int, ...],
-    inval_shape: Tuple[int, ...]
+    cts_in_shape: tuple[int, ...],
+    inval_shape: tuple[int, ...]
 ) -> bool:
   if _fwd is None:
     out_size = onp.prod(cts_in_shape)
@@ -2306,7 +2305,7 @@ def _unravel_array_into_pytree(
 def _get_res_batch_dims(
     contracting_dims: Iterable[int],
     batch_dims: Iterable[int]
-) -> List[int]:
+) -> list[int]:
   res_batch_dims = [2 * b - i for i, b in enumerate(batch_dims)]
   for i, b in enumerate(batch_dims):
     for c in contracting_dims:

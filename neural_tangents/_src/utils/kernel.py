@@ -15,7 +15,7 @@
 """Class with infinite-width NTK and NNGP :class:`jax.numpy.ndarray` fields."""
 
 import operator as op
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Optional, Sequence
 
 from . import dataclasses
 from . import utils
@@ -134,8 +134,8 @@ class Kernel:
   diagonal_batch: bool = dataclasses.field(pytree_node=False)
   diagonal_spatial: bool = dataclasses.field(pytree_node=False)
 
-  shape1: Tuple[int, ...] = dataclasses.field(pytree_node=False)
-  shape2: Tuple[int, ...] = dataclasses.field(pytree_node=False)
+  shape1: tuple[int, ...] = dataclasses.field(pytree_node=False)
+  shape2: tuple[int, ...] = dataclasses.field(pytree_node=False)
 
   batch_axis: int = dataclasses.field(pytree_node=False)
   channel_axis: int = dataclasses.field(pytree_node=False)
@@ -144,8 +144,8 @@ class Kernel:
   mask2: Optional[np.ndarray] = None
 
   replace = ...  # type: Callable[..., 'Kernel']
-  asdict = ...  # type: Callable[[], Dict[str, Any]]
-  astuple = ...  # type: Callable[[], Tuple[Any, ...]]
+  asdict = ...  # type: Callable[[], dict[str, Any]]
+  astuple = ...  # type: Callable[[], tuple[Any, ...]]
 
   def slice(self, n1_slice: slice, n2_slice: slice) -> 'Kernel':
     cov1 = self.cov1[n1_slice]
@@ -242,7 +242,7 @@ class Kernel:
       self,
       mask1: Optional[np.ndarray],
       mask2: Optional[np.ndarray]
-  ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+  ) -> tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
     """Gets outer products of `mask1, mask1`, `mask1, mask2`, `mask2, mask2`."""
     def get_mask_prod(m1, m2, batch_ndim):
       if m1 is None and m2 is None:
@@ -328,14 +328,14 @@ class Kernel:
         i += not is_left and not self.diagonal_spatial
       return i
 
-    def get_other_dims(batch_ndim: int, is_left: bool) -> List[int]:
+    def get_other_dims(batch_ndim: int, is_left: bool) -> list[int]:
       dims = [-i - 1 - (0 if is_left or self.diagonal_spatial else n_other)
               for i in range(n_other)]
       for i_inputs, i_other in zip(input_dims, other_dims):
         dims[i_other] = to_kernel_dim(i_inputs, batch_ndim, is_left)
       return dims
 
-    def get_mat_non_c_dims(batch_ndim: int) -> List[int]:
+    def get_mat_non_c_dims(batch_ndim: int) -> list[int]:
       input_non_c_dims = input_bs + [
           i for i in range(n_input)
           if i not in input_cs + input_bs + [self.channel_axis]
@@ -353,7 +353,7 @@ class Kernel:
         mat_non_c_dims += [left] if left == right else [left, right]
       return mat_non_c_dims
 
-    def get_other_non_c_dims() -> List[int]:
+    def get_other_non_c_dims() -> list[int]:
       other_non_c_dims = [-i - 1 for i in range(n_other) if i not in other_dims]
       if not self.diagonal_spatial:
         other_non_c_dims = list(utils.zip_flat(
@@ -361,7 +361,7 @@ class Kernel:
             [-i - 1 - n_other for i in range(n_other) if i not in other_dims]))
       return other_non_c_dims
 
-    def get_out_dims(batch_ndim: int) -> List[int]:
+    def get_out_dims(batch_ndim: int) -> list[int]:
       mat_non_c_dims = get_mat_non_c_dims(batch_ndim)
       other_non_c_dims = get_other_non_c_dims()
 

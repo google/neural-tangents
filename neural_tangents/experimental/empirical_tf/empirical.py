@@ -90,7 +90,7 @@ Example:
   >>> ntk_train_train_diag = ntk_fn(x_train, None, params)
 """
 
-from typing import Callable, Optional, Union
+from typing import Callable, Optional
 import warnings
 
 from jax.experimental import jax2tf
@@ -101,11 +101,11 @@ import tf2jax
 
 
 def empirical_ntk_fn_tf(
-    f: Union[tf.Module, tf.types.experimental.GenericFunction],
+    f: tf.Module | tf.types.experimental.GenericFunction,
     trace_axes: Axes = (-1,),
     diagonal_axes: Axes = (),
     vmap_axes: VMapAxes = None,
-    implementation: Union[NtkImplementation, int] = DEFAULT_NTK_IMPLEMENTATION,
+    implementation: NtkImplementation | int = DEFAULT_NTK_IMPLEMENTATION,
     _j_rules: bool = _DEFAULT_NTK_J_RULES,
     _s_rules: bool = _DEFAULT_NTK_S_RULES,
     _fwd: Optional[bool] = _DEFAULT_NTK_FWD,

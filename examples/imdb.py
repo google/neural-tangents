@@ -12,7 +12,6 @@ networks <https://arxiv.org/abs/2006.10540>`_".
 """
 
 import time
-from typing import Tuple
 
 from absl import app
 from jax import random
@@ -100,7 +99,7 @@ def main(*args, use_dummy_data: bool = False, **kwargs) -> None:
 
 
 def _get_dummy_data(mask_constant: float
-                    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+                    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
   """Return dummy data for when downloading embeddings is not feasible."""
   n_train, n_test = 6, 6
 

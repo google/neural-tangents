@@ -20,7 +20,7 @@ several branches into one.
 
 
 import functools
-from typing import Callable, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Iterable, Optional, Sequence
 import warnings
 
 from jax import numpy as np
@@ -293,11 +293,11 @@ def FanInConcat(axis: int = -1) -> InternalLayerMasked:
 # INTERNAL UTILITIES
 
 
-def _map_tuples(fn: Callable, tuples: Iterable[Tuple]) -> Tuple:
+def _map_tuples(fn: Callable, tuples: Iterable[tuple]) -> tuple:
   return tuple(map(fn, zip(*(t for t in tuples))))
 
 
-def _sum_masks(masks: List[Optional[np.ndarray]]) -> Optional[np.ndarray]:
+def _sum_masks(masks: list[Optional[np.ndarray]]) -> Optional[np.ndarray]:
   def add_two_masks(mask1, mask2):
     if mask1 is None:
       return mask2
@@ -312,7 +312,7 @@ def _sum_masks(masks: List[Optional[np.ndarray]]) -> Optional[np.ndarray]:
 
 
 def _concat_masks(
-    masks: List[Optional[np.ndarray]],
+    masks: list[Optional[np.ndarray]],
     input_shapes: Sequence[Sequence[int]],
     axis: int) -> Optional[np.ndarray]:
   """Returns a mask which is a concatenation of `masks`.
@@ -365,7 +365,7 @@ def _concat_masks(
   return np.concatenate(masks, axis)
 
 
-def _preprocess_kernels_for_fan_in(ks: Kernels) -> Tuple[List[Kernel], bool]:
+def _preprocess_kernels_for_fan_in(ks: Kernels) -> tuple[list[Kernel], bool]:
   # Check diagonal requirements.
   if not all(k.diagonal_batch == ks[0].diagonal_batch and
              k.diagonal_spatial == ks[0].diagonal_spatial and

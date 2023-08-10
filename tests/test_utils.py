@@ -19,7 +19,7 @@ import itertools
 import logging
 import os
 from types import ModuleType
-from typing import Callable, Dict, Optional, Sequence, Tuple
+from typing import Callable,  Optional, Sequence
 
 from absl import flags
 from absl.testing import parameterized
@@ -50,7 +50,7 @@ FLAGS = flags.FLAGS
 # Utility functions forked from :obj:`jax._src.public_test_util`.
 
 
-_python_scalar_dtypes: Dict[type, onp.dtype] = {
+_python_scalar_dtypes: dict[type, onp.dtype] = {
     bool: onp.dtype('bool'),
     int: onp.dtype('int64'),
     float: onp.dtype('float64'),
@@ -80,7 +80,7 @@ def device_under_test() -> str:
   return getattr(FLAGS, 'nt_test_dut', None) or jax.default_backend()
 
 
-_DEFAULT_TOLERANCE: Dict[onp.dtype, float] = {
+_DEFAULT_TOLERANCE: dict[onp.dtype, float] = {
     onp.dtype(onp.bool_): 0,
     onp.dtype(onp.int32): 0,
     onp.dtype(onp.int64): 0,
@@ -91,7 +91,7 @@ _DEFAULT_TOLERANCE: Dict[onp.dtype, float] = {
 }
 
 
-def _default_tolerance() -> Dict[onp.dtype, float]:
+def _default_tolerance() -> dict[onp.dtype, float]:
   if device_under_test() != 'tpu':
     return _DEFAULT_TOLERANCE
   tol = _DEFAULT_TOLERANCE.copy()
@@ -130,7 +130,7 @@ def _tolerance(dtype: onp.dtype, tol: Optional[float] = None) -> float:
   return tol.get(dtype, _default_tolerance()[dtype])
 
 
-_CACHED_INDICES: Dict[int, Sequence[int]] = {}
+_CACHED_INDICES: dict[int, Sequence[int]] = {}
 
 
 def _cases_from_list(xs):
@@ -418,7 +418,7 @@ def assert_close_matrices(self, expected, actual, rtol, atol=0.1):
 def skip_test(
     self,
     msg: str = 'Skipping large tests for speed.',
-    platforms: Tuple[str, ...] = ('cpu',)
+    platforms: tuple[str, ...] = ('cpu',)
 ):
   if jax.default_backend() in platforms:
     raise parameterized.TestCase.skipTest(self, msg)

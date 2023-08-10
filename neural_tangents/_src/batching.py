@@ -42,7 +42,7 @@ Example:
 """
 
 
-from typing import Callable, Tuple, Union, Dict, Any, TypeVar, Iterable, Optional
+from typing import Callable, Any, TypeVar, Iterable, Optional
 from functools import partial
 import warnings
 import jax
@@ -131,9 +131,9 @@ _Input = TypeVar('_Input')
 _Output = TypeVar('_Output')
 
 
-def _scan(f: Callable[[_Carry, _Input], Tuple[_Carry, _Output]],
+def _scan(f: Callable[[_Carry, _Input], tuple[_Carry, _Output]],
           init: _Carry,
-          xs: Iterable[_Input]) -> Tuple[_Carry, _Output]:
+          xs: Iterable[_Input]) -> tuple[_Carry, _Output]:
   """Implements an unrolled version of scan.
 
   Based on :obj:`jax.lax.scan` and has a similar API.
@@ -179,9 +179,9 @@ def _flatten_batch_dimensions(k: np.ndarray,
 
 
 @utils.nt_tree_fn(nargs=1)
-def _flatten_kernel_dict(k: Dict[str, Any],
+def _flatten_kernel_dict(k: dict[str, Any],
                          x2_is_none: bool,
-                         is_parallel: bool) -> Dict[str, Any]:
+                         is_parallel: bool) -> dict[str, Any]:
   if 'nngp' in k:
     # We only use `batch_size` to compute `shape1` and `shape2` for the batch.
     # This only happens if k_dict came from a `Kernel` in which case it must
@@ -399,7 +399,7 @@ def _serial(kernel_fn: _KernelFn,
 
   def serial_fn_kernel(k: NTTree[Kernel], *args, **kwargs) -> NTTree[Kernel]:
 
-    def get_n1_n2(k: NTTree[Kernel]) -> Tuple[int, ...]:
+    def get_n1_n2(k: NTTree[Kernel]) -> tuple[int, ...]:
       if utils.is_list_or_tuple(k):
         # TODO(schsam): We might want to check for consistency here, but I can't
         # imagine a case where we could get inconsistent kernels.
@@ -462,7 +462,7 @@ def _serial(kernel_fn: _KernelFn,
     return flatten(k, cov2_is_none)
 
   @utils.wraps(kernel_fn)
-  def serial_fn(x1_or_kernel: Union[NTTree[np.ndarray], NTTree[Kernel]],
+  def serial_fn(x1_or_kernel: NTTree[np.ndarray] | NTTree[Kernel],
                 x2: Optional[NTTree[Optional[np.ndarray]]] = None,
                 *args,
                 **kwargs) -> NTTree[Kernel]:
@@ -623,7 +623,7 @@ def _get_n_batches_and_batch_sizes(n1: int,
                                    n2: int,
                                    batch_size: int,
                                    device_count: int
-                                   ) -> Tuple[int, int, int, int]:
+                                   ) -> tuple[int, int, int, int]:
   # TODO(romann): if dropout batching works for different batch sizes, relax.
   max_serial_batch_size = onp.gcd(n1, n2) // device_count
 
@@ -708,7 +708,7 @@ def _get_jit_or_pmap_broadcast():
       return np.broadcast_to(arg, (device_count,) + arg.shape)
 
     @utils.wraps(f)
-    def f_pmapped(x_or_kernel: Union[np.ndarray, Kernel], *args, **kwargs):
+    def f_pmapped(x_or_kernel: np.ndarray | Kernel, *args, **kwargs):
       args_np, args_np_idxs = [], []
       args_other = {}
 

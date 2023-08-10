@@ -20,7 +20,7 @@ For details, please see "`Fast Neural Kernel Embeddings for General Activations
 
 import functools
 import operator as op
-from typing import Callable, Optional, Sequence, Tuple
+from typing import Callable, Optional, Sequence
 import warnings
 
 import jax
@@ -74,7 +74,7 @@ def Erf(
         nngp: np.ndarray,
         prod: np.ndarray,
         ntk: Optional[np.ndarray] = None
-    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    ) -> tuple[np.ndarray, Optional[np.ndarray]]:
       square_root = _sqrt(prod - 4 * nngp**2)
       nngp = factor * np.arctan2(2 * nngp, square_root)
 
@@ -144,7 +144,7 @@ def Gabor() -> InternalLayer:
         prod: np.ndarray,
         sum_: np.ndarray,
         ntk: Optional[np.ndarray] = None
-    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    ) -> tuple[np.ndarray, Optional[np.ndarray]]:
       diff = 4 * (prod - nngp**2)
       denom = 2 * sum_ + diff + 1
       num = sum_ + diff + 2 * nngp
@@ -221,7 +221,7 @@ def Gelu(
         prod: np.ndarray,
         prod_plus_1: np.ndarray,
         ntk: Optional[np.ndarray] = None
-    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    ) -> tuple[np.ndarray, Optional[np.ndarray]]:
       delta_squared = prod_plus_1 - nngp**2
       delta = _sqrt(delta_squared)
       angles = np.arctan2(nngp, delta)
@@ -612,7 +612,7 @@ def Gaussian(a: float = 1, b: float = -1) -> InternalLayer:
         nngp: np.ndarray,
         prod: np.ndarray,
         ntk: Optional[np.ndarray] = None
-    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    ) -> tuple[np.ndarray, Optional[np.ndarray]]:
       det = _sqrt((prod - factor * nngp**2))
 
       if ntk is not None:
@@ -772,7 +772,7 @@ def Monomial(degree: int) -> InternalLayer:
         nngp: np.ndarray,
         prod: np.ndarray,
         ntk: Optional[np.ndarray] = None
-    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    ) -> tuple[np.ndarray, Optional[np.ndarray]]:
 
       def nngp_fn(nngp: np.ndarray, degree: int) -> np.ndarray:
         if degree == -1:
@@ -878,7 +878,7 @@ def RectifiedMonomial(degree: int) -> InternalLayer:
         nngp: np.ndarray,
         prod: np.ndarray,
         ntk: Optional[np.ndarray] = None
-    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    ) -> tuple[np.ndarray, Optional[np.ndarray]]:
 
       sqrt_prod = _sqrt(prod)
       coeff = sqrt_prod**degree / (2 * np.pi)
@@ -972,7 +972,7 @@ def Polynomial(coef: Sequence[float]) -> InternalLayer:
         prod: np.ndarray,
         r_prods: Sequence[np.ndarray],
         ntk: Optional[np.ndarray] = None
-    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    ) -> tuple[np.ndarray, Optional[np.ndarray]]:
       ratio = nngp / _sqrt(prod)
 
       if ntk is not None:

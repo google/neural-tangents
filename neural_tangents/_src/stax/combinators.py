@@ -15,7 +15,7 @@
 """Layer combinators."""
 
 import operator as op
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable
 import warnings
 
 import frozendict
@@ -191,8 +191,8 @@ def parallel(*layers: Layer) -> InternalLayer:
 
 
 def _get_input_req_attr(
-    kernel_fns: List[LayerKernelFn],
-    fold: Callable[[Diagonal, Diagonal], Diagonal]) -> Dict[str, Any]:
+    kernel_fns: list[LayerKernelFn],
+    fold: Callable[[Diagonal, Diagonal], Diagonal]) -> dict[str, Any]:
   """Gets requirements of the combined layer based on individual requirements.
 
   Specifically, gets the requirements / allowances to the inputs to a `serial`

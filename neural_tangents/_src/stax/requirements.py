@@ -15,7 +15,7 @@
 """Requirement management for :obj:`~neural_tangents.stax` layers."""
 
 import enum
-from typing import Callable, Optional, Tuple, Union, Sequence, Type
+from typing import Callable, Optional, Sequence
 import warnings
 
 import frozendict
@@ -269,7 +269,7 @@ def unmask_fn(fn: ApplyFn) -> ApplyFn:
     Function of same signature as `fn`, where the output :class:`MaskedArray` is
     replaced with the :class:`jax.numpy.ndarray` with masked entries zeroed-out.
   """
-  def unmask(x: Union[MaskedArray, np.ndarray]) -> np.ndarray:
+  def unmask(x: MaskedArray | np.ndarray) -> np.ndarray:
     if isinstance(x, MaskedArray):
       x = utils.mask(x.masked_value, x.mask)
     return x  # pytype: disable=bad-return-type  # jax-ndarray
@@ -315,7 +315,7 @@ class MaskedArray:
 
 
 def _get_masked_array(
-    x: Union[None, np.ndarray, ShapedArray, MaskedArray],
+    x: None | np.ndarray | ShapedArray | MaskedArray,
     mask_constant: Optional[float] = None
 ) -> MaskedArray:
   """Return `x` with entries equal to `mask_constant` zeroed-out, and the mask.
@@ -618,7 +618,7 @@ def _inputs_to_kernel(
     x2: Optional[np.ndarray],
     *,
     diagonal_batch: bool,
-    diagonal_spatial: Union[bool, Diagonal],
+    diagonal_spatial: bool | Diagonal,
     compute_ntk: bool,
     batch_axis: int,
     channel_axis: Optional[int],
@@ -923,11 +923,11 @@ def _preprocess_kernel_fn(
     return _set_shapes(init_fn, apply_fn, kernel, out_kernel, **kwargs)
 
   @utils.get_namedtuple('AnalyticKernel')
-  def kernel_fn_any(x1_or_kernel: Union[NTTree[np.ndarray], NTTree[Kernel]],
+  def kernel_fn_any(x1_or_kernel: NTTree[np.ndarray] | NTTree[Kernel],
                     x2: Optional[NTTree[np.ndarray]] = None,
                     get: Optional[Get] = None,
                     *,
-                    pattern: Optional[Tuple[Optional[np.ndarray],
+                    pattern: Optional[tuple[Optional[np.ndarray],
                                             Optional[np.ndarray]]] = None,
                     mask_constant: Optional[float] = None,
                     diagonal_batch: Optional[bool] = None,
@@ -987,7 +987,7 @@ def _preprocess_kernel_fn(
       requested information. If `get` is `None` then a `Kernel` object is
       returned containing all the data.
     """
-    def all_of(x, cls: Type) -> bool:
+    def all_of(x, cls: type) -> bool:
 
       def is_leaf(x) -> bool:
         return isinstance(x, (Kernel, np.ndarray, onp.ndarray))
@@ -1046,7 +1046,7 @@ def get_diagonal_outer_prods(
     axis: Sequence[int] = (),
     mask1: Optional[np.ndarray] = None,
     mask2: Optional[np.ndarray] = None
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
   """Gets outer products of diagonals `cov1, cov1`, `cov1, cov2`, `cov2, cov2`.
 
   `prod11[x1, x2, h1, h2, ...]` =
@@ -1087,7 +1087,7 @@ def mean_and_var(
     keepdims: bool = False,
     mask: Optional[np.ndarray] = None,
     get_var: bool = False
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
   """`np.mean` and `np.var` taking the `mask` information into account."""
   var = None
   if x is None:

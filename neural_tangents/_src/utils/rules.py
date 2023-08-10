@@ -2,7 +2,7 @@
 
 from .dataclasses import dataclass, field
 import functools
-from typing import Callable, Optional, Tuple, Dict, List, Union, Any
+from typing import Callable, Optional, Any
 
 from . import utils
 import jax
@@ -69,18 +69,18 @@ class Structure:
       `in_broadcast` axes in order for the primitive Jacobian `dy/dw` to return
       the slice that is being tiled along `in_broadcast` in the full output.
   """
-  out_trace: Tuple[int, ...] = field(False, default_factory=tuple)
-  in_trace: Tuple[int, ...] = field(False, default_factory=tuple)
-  in_trace_idxs: Tuple[int, ...] = field(False, default_factory=tuple)
+  out_trace: tuple[int, ...] = field(False, default_factory=tuple)
+  in_trace: tuple[int, ...] = field(False, default_factory=tuple)
+  in_trace_idxs: tuple[int, ...] = field(False, default_factory=tuple)
 
-  out_diagonal: Tuple[int, ...] = field(False, default_factory=tuple)
-  in_diagonal: Tuple[Tuple[Optional[int], ...], ...] = field(
+  out_diagonal: tuple[int, ...] = field(False, default_factory=tuple)
+  in_diagonal: tuple[tuple[Optional[int], ...], ...] = field(
       False, default_factory=tuple)
 
-  out_broadcast: Tuple[int, ...] = field(False, default_factory=tuple)
-  out_broadcast_idxs: Tuple[int, ...] = field(False, default_factory=tuple)
+  out_broadcast: tuple[int, ...] = field(False, default_factory=tuple)
+  out_broadcast_idxs: tuple[int, ...] = field(False, default_factory=tuple)
 
-  in_broadcast: Tuple[int, ...] = field(False, default_factory=tuple)
+  in_broadcast: tuple[int, ...] = field(False, default_factory=tuple)
   in_broadcast_idx: int = field(False, default_factory=int)
 
   def __and__(self, other):
@@ -121,14 +121,14 @@ class Structure:
     )
 
 
-STRUCTURE_RULES: Dict[Optional[Primitive], Callable[..., Structure]] = {}
-JACOBIAN_RULES: Dict[Optional[Primitive], Callable[..., np.ndarray]] = {}
-EQN_PARAMS_RULES: Dict[Optional[Primitive], Callable[..., Dict[str, Any]]] = {}
+STRUCTURE_RULES: dict[Optional[Primitive], Callable[..., Structure]] = {}
+JACOBIAN_RULES: dict[Optional[Primitive], Callable[..., np.ndarray]] = {}
+EQN_PARAMS_RULES: dict[Optional[Primitive], Callable[..., dict[str, Any]]] = {}
 
 
 def get_structure(
     eqn: Optional[JaxprEqn],
-    invals: List[Union[ShapedArray, AbstractValue]],
+    invals: list[ShapedArray | AbstractValue],
     idx: int,
     _s_rules: bool
 ) -> Structure:
@@ -190,7 +190,7 @@ def get_structure(
 def get_structure_cache(
     jaxpr: Jaxpr,
     _s_rules: bool
-) -> Dict[Var, Structure]:
+) -> dict[Var, Structure]:
   """Associates a least common structure to each input variable of the `jaxpr`.
 
   Args:
@@ -201,7 +201,7 @@ def get_structure_cache(
     A dictionary mapping input variables to the least common structure of all
     primitives it is present in as a direct input.
   """
-  invar_to_structure: Dict[Var, Structure] = {}
+  invar_to_structure: dict[Var, Structure] = {}
 
   for var in jaxpr.invars:
     if var in jaxpr.outvars:
@@ -266,7 +266,7 @@ def _eye_like(out_shaped: ShapedArray, in_shaped: ShapedArray) -> np.ndarray:
 def _dot_general_s(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> Structure:
   contracting_dims, batch_dims = eqn.params['dimension_numbers']
@@ -295,7 +295,7 @@ def _dot_general_s(
 def _dot_general_j(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> np.ndarray:
   contracting_dims, batch_dims = eqn.params['dimension_numbers']
@@ -368,7 +368,7 @@ JACOBIAN_RULES[lax.dot_general_p] = _dot_general_j
 def _conv_general_dilated_s(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> Structure:
   if idx != 1:
@@ -414,7 +414,7 @@ def _conv_general_dilated_s(
 def _conv_general_dilated_j(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> np.ndarray:
   if idx != 1:
@@ -497,11 +497,11 @@ def _conv_general_dilated_j(
   return j
 
 def _conv_general_dilated_e(
-    params: Dict[str, Any],
+    params: dict[str, Any],
     idx: int,
-    trimmed_invals: List[ShapedArray],
+    trimmed_invals: list[ShapedArray],
     trimmed_cts_in: ShapedArray
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   lhs, rhs = trimmed_invals
   dn = params['dimension_numbers']
 
@@ -523,7 +523,7 @@ EQN_PARAMS_RULES[lax.conv_general_dilated_p] = _conv_general_dilated_e
 def _add_s(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> Structure:
   inval = invals[idx]
@@ -573,7 +573,7 @@ def _add_s(
 def _add_j(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray,
     is_sub: bool
 ) -> np.ndarray:
@@ -597,7 +597,7 @@ JACOBIAN_RULES[lax.sub_p] = functools.partial(_add_j, is_sub=True)
 def _mul_s(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> Structure:
   inval = invals[idx]
@@ -644,7 +644,7 @@ def _mul_s(
 def _mul_j(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[Union[ShapedArray, np.ndarray]],
+    invals: list[ShapedArray | np.ndarray],
     cts_in: ShapedArray,
     is_div: bool
 ) -> np.ndarray:
@@ -692,7 +692,7 @@ JACOBIAN_RULES[lax.div_p] = functools.partial(_mul_j, is_div=True)
 def _concatenate_s(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> Structure:
   dimension = eqn.params['dimension']
@@ -709,7 +709,7 @@ def _concatenate_s(
 def _concatenate_j(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> np.ndarray:
   dimension = eqn.params['dimension']
@@ -744,7 +744,7 @@ JACOBIAN_RULES[lax.concatenate_p] = _concatenate_j
 def _rev_s(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> Structure:
   dimensions = eqn.params['dimensions']
@@ -762,7 +762,7 @@ def _rev_s(
 def _rev_j(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> np.ndarray:
   inval = invals[idx]
@@ -777,7 +777,7 @@ JACOBIAN_RULES[lax.rev_p] = _rev_j
 def _broadcast_in_dim_s(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> Structure:
   broadcast_dimensions = eqn.params['broadcast_dimensions']
@@ -800,7 +800,7 @@ def _broadcast_in_dim_s(
 def _broadcast_in_dim_j(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> np.ndarray:
   inval = invals[idx]
@@ -814,11 +814,11 @@ def _broadcast_in_dim_j(
   return j
 
 def _broadcast_in_dim_e(
-    params: Dict[str, Any],
+    params: dict[str, Any],
     idx: int,
-    trimmed_invals: List[ShapedArray],
+    trimmed_invals: list[ShapedArray],
     trimmed_cts_in: ShapedArray
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   # `broadcast_in_dim` is the only primitive JVP where we need to change
   # equation parameters in response to tweaking the inputs/cotangents
   # shapes.
@@ -833,7 +833,7 @@ EQN_PARAMS_RULES[lax.broadcast_in_dim_p] = _broadcast_in_dim_e
 def _reduce_sum_s(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> Structure:
   axes = eqn.params['axes']
@@ -852,7 +852,7 @@ def _reduce_sum_s(
 def _reduce_sum_j(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> np.ndarray:
   inval = invals[idx]
@@ -869,7 +869,7 @@ JACOBIAN_RULES[lax.reduce_sum_p] = _reduce_sum_j
 def _reduce_window_sum_s(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> Structure:
   out_trace = ()
@@ -894,7 +894,7 @@ STRUCTURE_RULES[lax.reduce_window_sum_p] = _reduce_window_sum_s
 def _pad_s(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> Structure:
   padding_config = eqn.params['padding_config']
@@ -914,7 +914,7 @@ def _pad_s(
 def _pad_j(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> np.ndarray:
   padding_config = eqn.params['padding_config']
@@ -935,7 +935,7 @@ JACOBIAN_RULES[lax.pad_p] = _pad_j
 def _reshape_s(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> Structure:
   out_trace = tuple(range(invals[idx].ndim))
@@ -955,7 +955,7 @@ def _reshape_s(
 def _reshape_j(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> np.ndarray:
   inval = invals[idx]
@@ -969,11 +969,11 @@ def _reshape_j(
   return j
 
 def _reshape_e(
-    params: Dict[str, Any],
+    params: dict[str, Any],
     idx: int,
-    trimmed_invals: List[ShapedArray],
+    trimmed_invals: list[ShapedArray],
     trimmed_cts_in: ShapedArray
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   # Hack for more efficient `reshape` structure rule.
   params['new_sizes'] = trimmed_invals[idx].shape
   return params
@@ -986,7 +986,7 @@ EQN_PARAMS_RULES[lax.reshape_p] = _reshape_e
 def _eye_s(
     eqn: Optional[JaxprEqn],
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> Structure:
   """Use this for elementwise-linear in `p` primitives `y(p, x)`.
@@ -1012,7 +1012,7 @@ def _eye_s(
 def _eye_j(
     eqn: Optional[JaxprEqn],
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> np.ndarray:
   j = _eye_like(cts_in, invals[idx])
@@ -1027,7 +1027,7 @@ JACOBIAN_RULES[None] = _eye_j
 def _neg_j(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> np.ndarray:
   j = _eye_like(cts_in, invals[idx])
@@ -1040,7 +1040,7 @@ JACOBIAN_RULES[lax.neg_p] = _neg_j
 def _zeros_like_j(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> np.ndarray:
   return np.zeros(cts_in.shape + invals[idx].shape, cts_in.dtype)  # pytype: disable=unsupported-operands  # always-use-return-annotations
@@ -1052,7 +1052,7 @@ JACOBIAN_RULES[jax.interpreters.ad.zeros_like_p] = _zeros_like_j
 def _transpose_s(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> Structure:
   in_trace = tuple(range(cts_in.ndim))
@@ -1069,7 +1069,7 @@ def _transpose_s(
 def _transpose_j(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> np.ndarray:
   j = _eye_like(cts_in, invals[idx])
@@ -1088,7 +1088,7 @@ JACOBIAN_RULES[lax.transpose_p] = _transpose_j
 def _squeeze_s(
     eqn: JaxprEqn,
     idx: int,
-    invals: List[ShapedArray],
+    invals: list[ShapedArray],
     cts_in: ShapedArray
 ) -> Structure:
   out_trace = tuple(range(cts_in.ndim))

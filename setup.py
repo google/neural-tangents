@@ -26,10 +26,10 @@ with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
 
 
 INSTALL_REQUIRES = [
-    'jax>=0.4.6',
-    'frozendict>=2.3',
-    'typing_extensions>=4.0.1',
-    'tf2jax>=0.3.3',
+    'jax>=0.4.14',
+    'frozendict>=2.3.8',
+    'typing_extensions>=4.7.1',
+    'tf2jax>=0.3.5',
 ]
 
 
@@ -116,9 +116,8 @@ setuptools.setup(
     long_description=long_description,
     long_description_content_type='text/markdown',
     description='Fast and Easy Infinite Neural Networks in Python',
-    python_requires='>=3.8',
+    python_requires='>=3.9',
     classifiers=[
-        'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
         'License :: OSI Approved :: Apache Software License',

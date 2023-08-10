@@ -30,7 +30,7 @@ set / timesteps.
 
 import collections
 from functools import lru_cache
-from typing import Callable, Dict, Generator, Iterable, NamedTuple, Optional, Tuple, Union, Any
+from typing import Callable, Generator, Iterable, NamedTuple, Optional, Any
 
 import jax
 from jax import grad
@@ -48,7 +48,7 @@ from .utils.typing import Axes, Get, KernelFn
 PyTree = Any
 
 
-ArrayOrScalar = Union[None, int, float, np.ndarray]
+ArrayOrScalar = None | int | float | np.ndarray
 """Alias for optional arrays or scalars."""
 
 
@@ -61,7 +61,7 @@ class PredictFn(Protocol):
       fx_train_0: ArrayOrScalar = 0.,
       fx_test_0: Optional[ArrayOrScalar] = None,
       k_test_train: Optional[np.ndarray] = None
-  ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+  ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     ...
 
 
@@ -230,7 +230,7 @@ def gradient_descent_mse(
       fx_train_0: ArrayOrScalar = 0.,
       fx_test_0: Optional[ArrayOrScalar] = None,
       k_test_train: Optional[np.ndarray] = None
-  ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+  ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     """Return output predictions on train [and test] set[s] at time[s] `t`.
 
     Args:
@@ -304,10 +304,10 @@ class PredictFnODE(Protocol):
   def __call__(
       self,
       t: Optional[ArrayOrScalar] = None,
-      fx_train_or_state_0: Union[ArrayOrScalar, ODEState] = 0.,
+      fx_train_or_state_0: ArrayOrScalar | ODEState = 0.,
       fx_test_0: Optional[ArrayOrScalar] = None,
       k_test_train: Optional[np.ndarray] = None
-  ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray], ODEState]:
+  ) -> np.ndarray | tuple[np.ndarray, np.ndarray] | ODEState:
     ...
 
 
@@ -465,10 +465,10 @@ def gradient_descent(
 
   def predict_fn(
       t: Optional[ArrayOrScalar] = None,
-      fx_train_or_state_0: Union[ArrayOrScalar, ODEState] = 0.,
+      fx_train_or_state_0: ArrayOrScalar | ODEState = 0.,
       fx_test_0: Optional[ArrayOrScalar] = None,
       k_test_train: Optional[np.ndarray] = None
-  ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray], ODEState]:
+  ) -> np.ndarray | tuple[np.ndarray, np.ndarray] | ODEState:
     """Return output predictions on train [and test] set[s] at time[s] `t`.
 
     Args:
@@ -635,7 +635,7 @@ def gp_inference(
   def predict_fn(get: Optional[Get] = None,
                  k_test_train=None,
                  k_test_test=None
-                 ) -> Dict[str, Union[np.ndarray, Gaussian]]:
+                 ) -> dict[str, np.ndarray | Gaussian]:
     """`test`-set posterior given respective covariance matrices.
 
     Args:
@@ -846,7 +846,7 @@ def gradient_descent_mse_ensemble(
 
   k_dd_cache = {}
 
-  def get_k_train_train(get: Tuple[str, ...]) -> _Kernel:
+  def get_k_train_train(get: tuple[str, ...]) -> _Kernel:
     if len(get) == 1:
       get = get[0]
       if get not in k_dd_cache:
@@ -941,7 +941,7 @@ def gradient_descent_mse_ensemble(
                  x_test: Optional[np.ndarray] = None,
                  get: Optional[Get] = None,
                  compute_cov: bool = False,
-                 **kernel_fn_test_test_kwargs) -> Dict[str, Gaussian]:
+                 **kernel_fn_test_test_kwargs) -> dict[str, Gaussian]:
     """Return output mean and covariance on the test set at time[s] `t`.
 
     Args:
@@ -1154,7 +1154,7 @@ def _optimize() -> str:
   return 'greedy' if jax.default_backend() == 'tpu' else 'optimal'
 
 
-def _get_dependency(get: Get, compute_cov: bool) -> Tuple[str, ...]:
+def _get_dependency(get: Get, compute_cov: bool) -> tuple[str, ...]:
   """Figure out dependency for get."""
   _, get = utils.canonicalize_get(get)
   for g in get:
@@ -1249,7 +1249,7 @@ def _get_cho_solve(A: np.ndarray,
 
 def _get_fx_test_shape(y_train: np.ndarray,
                        k_test_train: np.ndarray,
-                       y_axes: Axes) -> Tuple[int, ...]:
+                       y_axes: Axes) -> tuple[int, ...]:
   if k_test_train is None:
     return y_train.shape
 
@@ -1281,7 +1281,7 @@ def _make_inv_expm1_fn(normalization: float):
   return _inv_expm1_fn
 
 
-def _check_inputs(fx_train_or_state_0: Union[ArrayOrScalar, ODEState],
+def _check_inputs(fx_train_or_state_0: ArrayOrScalar | ODEState,
                   fx_test_0: ArrayOrScalar,
                   k_test_train: Optional[np.ndarray]):
   if isinstance(fx_train_or_state_0, ODEState):

@@ -17,7 +17,7 @@
 from functools import partial
 import logging
 import operator
-from typing import Any, Callable, Sequence, Tuple, Optional, Dict, List
+from typing import Any, Callable, Sequence, Optional
 from absl.testing import absltest
 from flax import linen as nn
 import jax
@@ -581,7 +581,7 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
 PyTree = Any
 
 
-_functions: Dict[str, Callable[[PyTree, PyTree], PyTree]] = {
+_functions: dict[str, Callable[[PyTree, PyTree], PyTree]] = {
     '[p[0]**(p[1] + x), p[2] * x + p[0]]':
         lambda p, x: [np.abs(p[0])**(p[1] + x), p[2] * x + p[0]],
     '[p[0]**(p[1] + x), p[2] / x + p[0]]':
@@ -1079,7 +1079,7 @@ class _MLP(nn.Module):
 class _CNN(nn.Module):
 
   features: int
-  feature_group_counts: List[int]
+  feature_group_counts: list[int]
 
   @nn.compact
   def __call__(self, x):
@@ -1171,7 +1171,7 @@ class _ResNetBlock(nn.Module):
   conv: _ModuleDef
   norm: _ModuleDef
   act: Callable
-  strides: Tuple[int, int] = (1, 1)
+  strides: tuple[int, int] = (1, 1)
 
   @nn.compact
   def __call__(self, x,):
@@ -1196,7 +1196,7 @@ class _BottleneckResNetBlock(nn.Module):
   conv: _ModuleDef
   norm: _ModuleDef
   act: Callable
-  strides: Tuple[int, int] = (1, 1)
+  strides: tuple[int, int] = (1, 1)
 
   @nn.compact
   def __call__(self, x):
@@ -1322,7 +1322,7 @@ class _MlpMixer(nn.Module):
     return x
 
 
-def _get_mixer_b16_config() -> Dict[str, Any]:
+def _get_mixer_b16_config() -> dict[str, Any]:
   """Returns a narrow Mixer-B/16 configuration."""
   return dict(
       model_name='Mixer-B_16',

@@ -17,7 +17,6 @@
 import functools
 import itertools
 import random as prandom
-from typing import Tuple
 
 from absl.testing import absltest
 from jax import default_backend
@@ -89,7 +88,7 @@ def _get_inputs(
     same_inputs,
     shape,
     fn=np.cos
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
   key, split = random.split(key)
   x1 = fn(random.normal(key, shape))
   batch_axis = shape.index(BATCH_SIZE)

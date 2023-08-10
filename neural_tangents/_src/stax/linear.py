@@ -18,7 +18,7 @@ import enum
 import functools
 import operator as op
 import string
-from typing import Callable, Iterable, Optional, Sequence, Tuple, Union
+from typing import Callable, Iterable, Optional, Sequence
 import warnings
 
 import jax
@@ -111,8 +111,8 @@ def Identity() -> InternalLayer:
 @supports_masking(remask_kernel=False)
 def DotGeneral(
     *,
-    lhs: Optional[Union[np.ndarray, float]] = None,
-    rhs: Optional[Union[np.ndarray, float]] = None,
+    lhs: Optional[np.ndarray | float] = None,
+    rhs: Optional[np.ndarray | float] = None,
     dimension_numbers: lax.DotDimensionNumbers = (((), ()), ((), ())),
     precision: Optional[lax.Precision] = None,
     batch_axis: int = 0,
@@ -442,7 +442,7 @@ def Aggregate(
 
   init_fn = lambda rng, input_shape: (input_shape, ())
 
-  def get_agg_axes(ndim: int) -> Tuple[Tuple[int, ...], int, int]:
+  def get_agg_axes(ndim: int) -> tuple[tuple[int, ...], int, int]:
     _batch_axis, _channel_axis = utils.mod((batch_axis, channel_axis), ndim)
     if aggregate_axis is None:
       agg_axes = tuple(i for i in range(ndim)
@@ -597,7 +597,7 @@ def Aggregate(
             diagonal_spatial=Diagonal(input=Bool.NO, output=Bool.NO))
   def kernel_fn(k: Kernel,
                 *,
-                pattern: Tuple[Optional[np.ndarray],
+                pattern: tuple[Optional[np.ndarray],
                                Optional[np.ndarray]] = (None, None),
                 **kwargs):
     """Compute the transformed kernels after an aggregation kernel layer.
@@ -754,7 +754,7 @@ def Dense(
     batch_axis: int = 0,
     channel_axis: int = -1,
     parameterization: str = 'ntk',
-    s: Tuple[int, int] = (1, 1),
+    s: tuple[int, int] = (1, 1),
 ) -> InternalLayerMasked:
   r"""Dense (fully-connected, matrix product).
 
@@ -928,9 +928,9 @@ def Conv(
     padding: str = Padding.VALID.name,
     W_std: float = 1.0,
     b_std: Optional[float] = None,
-    dimension_numbers: Optional[Tuple[str, str, str]] = None,
+    dimension_numbers: Optional[tuple[str, str, str]] = None,
     parameterization: str = 'ntk',
-    s: Tuple[int, int] = (1, 1),
+    s: tuple[int, int] = (1, 1),
 ) -> InternalLayerMasked:
   """General convolution.
 
@@ -988,9 +988,9 @@ def ConvTranspose(
     padding: str = Padding.VALID.name,
     W_std: float = 1.0,
     b_std: Optional[float] = None,
-    dimension_numbers: Optional[Tuple[str, str, str]] = None,
+    dimension_numbers: Optional[tuple[str, str, str]] = None,
     parameterization: str = 'ntk',
-    s: Tuple[int, int] = (1, 1),
+    s: tuple[int, int] = (1, 1),
 ) -> InternalLayerMasked:
   """General transpose convolution.
 
@@ -1048,9 +1048,9 @@ def ConvLocal(
     padding: str = Padding.VALID.name,
     W_std: float = 1.0,
     b_std: Optional[float] = None,
-    dimension_numbers: Optional[Tuple[str, str, str]] = None,
+    dimension_numbers: Optional[tuple[str, str, str]] = None,
     parameterization: str = 'ntk',
-    s: Tuple[int, int] = (1, 1),
+    s: tuple[int, int] = (1, 1),
 ) -> InternalLayerMasked:
   """General unshared convolution.
 
@@ -1108,9 +1108,9 @@ def _Conv(
     padding: str,
     W_std: float,
     b_std: Optional[float],
-    dimension_numbers: Optional[Tuple[str, str, str]],
+    dimension_numbers: Optional[tuple[str, str, str]],
     parameterization: str,
-    s: Tuple[int, int],
+    s: tuple[int, int],
     transpose: bool,
     shared_weights: bool
 ) -> InternalLayerMasked:
@@ -2592,7 +2592,7 @@ def Dropout(rate: float, mode: str = 'train') -> InternalLayer:
 @supports_masking(remask_kernel=True)
 def ImageResize(
     shape: Sequence[int],
-    method: Union[str, jax.image.ResizeMethod],
+    method: str | jax.image.ResizeMethod,
     antialias: bool = True,
     precision: lax.Precision = lax.Precision.HIGHEST,
     batch_axis: int = 0,
@@ -3044,7 +3044,7 @@ def _pool_transpose(
 def _get_dimension_numbers(
     n: int,
     channels_first: bool = True
-) -> Tuple[str, str, str]:
+) -> tuple[str, str, str]:
   spatial_dims = ''.join(c for c in string.ascii_uppercase
                          if c not in ('N', 'C', 'I', 'O'))[:n]
   if channels_first:
@@ -3290,7 +3290,7 @@ def _conv_kernel_full_spatial_loop(
     strides: Sequence[int],
     padding: Padding,
     lax_conv: Callable[
-        [np.ndarray, np.ndarray, Tuple[int, ...], str], np.ndarray],
+        [np.ndarray, np.ndarray, tuple[int, ...], str], np.ndarray],
     get_n_channels: Callable[[int], int]
 ) -> np.ndarray:
   padding = Padding.VALID if padding == Padding.CIRCULAR else padding
@@ -3766,7 +3766,7 @@ def _get_all_pos_emb(k: Kernel,
                      pos_emb_type: PositionalEmbedding,
                      pos_emb_p_norm: float,
                      pos_emb_decay_fn: Optional[Callable[[float], float]]
-                     ) -> Tuple[Optional[np.ndarray],
+                     ) -> tuple[Optional[np.ndarray],
                                 Optional[np.ndarray],
                                 Optional[np.ndarray]]:
   if pos_emb_type == PositionalEmbedding.NONE:
@@ -3791,9 +3791,9 @@ def _get_all_pos_emb(k: Kernel,
 
 
 def _shape_and_axes(
-    x: Tuple[int, ...],
+    x: tuple[int, ...],
     ignore_axes: Iterable[int] = ()
-) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ndim = len(x)
   ignore_axes = tuple(i % ndim for i in ignore_axes)
   axes = tuple(i for i in range(ndim) if i not in ignore_axes)

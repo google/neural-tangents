@@ -17,7 +17,7 @@
 import itertools
 import logging
 import random
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Sequence
 import warnings
 
 from absl.testing import absltest
@@ -138,7 +138,7 @@ def _dot_dim_nums(s1, s2):
   yield from get_dn(pairs, (((), ()), ((), ())))
 
 
-def _conv_dim_nums(n: int, s2: Tuple[int, ...]):
+def _conv_dim_nums(n: int, s2: tuple[int, ...]):
   dims = itertools.permutations(range(n))
   dns = []
   for i in itertools.product(dims, repeat=3):

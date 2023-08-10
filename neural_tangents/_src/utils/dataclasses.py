@@ -21,7 +21,7 @@ Accessed on 03/23/2020.
 
 import dataclasses
 import functools
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import jax
 
@@ -95,7 +95,7 @@ def dataclass(clz):
   @functools.wraps(
       dataclasses.asdict,
       assigned=('__module__', '__name__', '__qualname__', '__annotations__'))
-  def asdict(self: data_clz) -> Dict[str, Any]:
+  def asdict(self: data_clz) -> dict[str, Any]:
     """Instance method alternative to `dataclasses.asdict`."""
     return {
         f.name: getattr(self, f.name)
@@ -105,7 +105,7 @@ def dataclass(clz):
   @functools.wraps(
       dataclasses.astuple,
       assigned=('__module__', '__name__', '__qualname__', '__annotations__'))
-  def astuple(self: data_clz) -> Tuple[Any, ...]:
+  def astuple(self: data_clz) -> tuple[Any, ...]:
     """Instance method alternative to `dataclasses.astuple`."""
     return tuple(
         getattr(self, f.name)
