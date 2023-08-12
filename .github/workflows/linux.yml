@@ -21,7 +21,7 @@ jobs:
 
     strategy:
       matrix:
-        python-version: [3.8, 3.9, '3.10']  # 3 == 3.11 currently.
+        python-version: [3.9, '3.10', 3.11]
         JAX_ENABLE_X64: [0, 1]
 
     runs-on: ubuntu-latest
@@ -32,10 +32,10 @@ jobs:
       uses: styfle/cancel-workflow-action@0.11.0
       with:
         access_token: ${{ github.token }}
-    - uses: actions/checkout@v3.3.0
+    - uses: actions/checkout@v3.5.3
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4.5.0
+      uses: actions/setup-python@v4.7.0
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -54,7 +54,7 @@ jobs:
         JAX_ENABLE_X64=${{ matrix.JAX_ENABLE_X64 }} PYTHONHASHSEED=0 pytest -n auto --cov=neural_tangents --cov-report=xml --cov-report=term
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3.1.1
+      uses: codecov/codecov-action@v3.1.4
       with:
         file: ./coverage.xml
 
