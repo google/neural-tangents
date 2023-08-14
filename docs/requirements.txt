@@ -1,6 +1,5 @@
 sphinx>=5.0.2
 sphinx-rtd-theme>=1.0.0
-jax>=0.3.13
-jaxlib>=0.3.10
+neural_tangents
 nbsphinx>=0.8.9
 sphinx-autodoc-typehints>=1.18.3
