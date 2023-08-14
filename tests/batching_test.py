@@ -140,7 +140,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
 
   @classmethod
   def _get_data_and_kernel_fn(
-      self,
+      cls,
       input_shape,
       kernel_type,
       network,

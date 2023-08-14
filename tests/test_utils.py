@@ -159,7 +159,7 @@ def product(*kwargs_seqs, **testgrid):
       positional parameter; these will then be merged to form an overall list
       of arguments for the test case.
     **testgrid: A mapping of parameter names and their possible values. Possible
-      values should given as either a list or a tuple.
+      values should be given as either a list or a tuple.
 
   Raises:
     NoTestsError: Raised when the decorator generates no tests.

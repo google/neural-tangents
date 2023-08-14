@@ -235,7 +235,7 @@ The `neural_tangents` (`nt`) package contains the following modules and function
 
   * `predict.gradient_descent` - inference with a single infinite width / linearized network trained on arbitrary loss with continuous (momentum) gradient descent for an arbitrary finite time. Computed using an ODE solver.
 
-  * `predict.gradient_descent_mse_ensemble` - inference with an infinite ensemble of infinite width networks, either fully Bayesian (`get='nngp'`) or inference with MSE loss using continuous gradient descent (`get='ntk'`). Finite-time Bayesian inference (e.g. `t=1., get='nngp'`) is interpreted as gradient descent on the top layer only [[11]](#11-wide-neural-networks-of-any-depth-evolve-as-linear-models-under-gradient-descent), since it converges to exact Gaussian process inference with NNGP (`t=None, get='nngp'`). Computed in closed form.
+  * `predict.gradient_descent_mse_ensemble` - inference with an infinite ensemble of infinite width networks, either fully Bayesian (`get='nngp'`) or inference with MSE loss using continuous gradient descent (`get='ntk'`). Finite-time Bayesian inference (e.g. `t=1., get='nngp'`) is interpreted as [gradient descent on the top layer only](https://arxiv.org/abs/1902.06720), since it converges to exact Gaussian process inference with NNGP (`t=None, get='nngp'`). Computed in closed form.
 
   * `predict.gp_inference` - exact closed form Gaussian process inference using NNGP (`get='nngp'`), NTK (`get='ntk'`), or both (`get=('nngp', 'ntk')`). Equivalent to `predict.gradient_descent_mse_ensemble` with `t=None` (infinite training time), but has a slightly different API (accepting precomputed kernel matrix `k_train_train` instead of `kernel_fn` and `x_train`).
 
