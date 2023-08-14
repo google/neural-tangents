@@ -15,7 +15,7 @@
 """Requirement management for :obj:`~neural_tangents.stax` layers."""
 
 import enum
-from typing import Callable, Optional, Sequence
+from typing import Callable, Optional, Sequence, Union
 import warnings
 
 import frozendict
@@ -269,7 +269,7 @@ def unmask_fn(fn: ApplyFn) -> ApplyFn:
     Function of same signature as `fn`, where the output :class:`MaskedArray` is
     replaced with the :class:`jax.numpy.ndarray` with masked entries zeroed-out.
   """
-  def unmask(x: MaskedArray | np.ndarray) -> np.ndarray:
+  def unmask(x: Union[MaskedArray, np.ndarray]) -> np.ndarray:
     if isinstance(x, MaskedArray):
       x = utils.mask(x.masked_value, x.mask)
     return x  # pytype: disable=bad-return-type  # jax-ndarray
@@ -315,7 +315,7 @@ class MaskedArray:
 
 
 def _get_masked_array(
-    x: None | np.ndarray | ShapedArray | MaskedArray,
+    x: Union[None, np.ndarray, ShapedArray, MaskedArray],
     mask_constant: Optional[float] = None
 ) -> MaskedArray:
   """Return `x` with entries equal to `mask_constant` zeroed-out, and the mask.
@@ -618,7 +618,7 @@ def _inputs_to_kernel(
     x2: Optional[np.ndarray],
     *,
     diagonal_batch: bool,
-    diagonal_spatial: bool | Diagonal,
+    diagonal_spatial: Union[bool, Diagonal],
     compute_ntk: bool,
     batch_axis: int,
     channel_axis: Optional[int],
@@ -923,7 +923,7 @@ def _preprocess_kernel_fn(
     return _set_shapes(init_fn, apply_fn, kernel, out_kernel, **kwargs)
 
   @utils.get_namedtuple('AnalyticKernel')
-  def kernel_fn_any(x1_or_kernel: NTTree[np.ndarray] | NTTree[Kernel],
+  def kernel_fn_any(x1_or_kernel: Union[NTTree[np.ndarray], NTTree[Kernel]],
                     x2: Optional[NTTree[np.ndarray]] = None,
                     get: Optional[Get] = None,
                     *,

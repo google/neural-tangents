@@ -18,7 +18,7 @@ import enum
 import functools
 import operator as op
 import string
-from typing import Callable, Iterable, Optional, Sequence
+from typing import Callable, Iterable, Optional, Sequence, Union
 import warnings
 
 import jax
@@ -111,8 +111,8 @@ def Identity() -> InternalLayer:
 @supports_masking(remask_kernel=False)
 def DotGeneral(
     *,
-    lhs: Optional[np.ndarray | float] = None,
-    rhs: Optional[np.ndarray | float] = None,
+    lhs: Optional[Union[np.ndarray, float]] = None,
+    rhs: Optional[Union[np.ndarray, float]] = None,
     dimension_numbers: lax.DotDimensionNumbers = (((), ()), ((), ())),
     precision: Optional[lax.Precision] = None,
     batch_axis: int = 0,
@@ -2592,7 +2592,7 @@ def Dropout(rate: float, mode: str = 'train') -> InternalLayer:
 @supports_masking(remask_kernel=True)
 def ImageResize(
     shape: Sequence[int],
-    method: str | jax.image.ResizeMethod,
+    method: Union[str, jax.image.ResizeMethod],
     antialias: bool = True,
     precision: lax.Precision = lax.Precision.HIGHEST,
     batch_axis: int = 0,

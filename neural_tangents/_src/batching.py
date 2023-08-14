@@ -42,7 +42,7 @@ Example:
 """
 
 
-from typing import Callable, Any, TypeVar, Iterable, Optional
+from typing import Callable, Any, TypeVar, Iterable, Optional, Union
 from functools import partial
 import warnings
 import jax
@@ -462,7 +462,7 @@ def _serial(kernel_fn: _KernelFn,
     return flatten(k, cov2_is_none)
 
   @utils.wraps(kernel_fn)
-  def serial_fn(x1_or_kernel: NTTree[np.ndarray] | NTTree[Kernel],
+  def serial_fn(x1_or_kernel: Union[NTTree[np.ndarray], NTTree[Kernel]],
                 x2: Optional[NTTree[Optional[np.ndarray]]] = None,
                 *args,
                 **kwargs) -> NTTree[Kernel]:
@@ -613,8 +613,8 @@ def _parallel(kernel_fn: _KernelFn,
       return parallel_fn_kernel(x1_or_kernel, *args, **kwargs)
     raise NotImplementedError()
 
-  # Set function attributes so that `serial` can detect whether or not it is
-  # acting on a parallel function.
+  # Set function attributes so that `serial` can detect whether it is acting on
+  # a parallel function.
   parallel_fn.device_count = device_count
   return parallel_fn
 
@@ -708,7 +708,7 @@ def _get_jit_or_pmap_broadcast():
       return np.broadcast_to(arg, (device_count,) + arg.shape)
 
     @utils.wraps(f)
-    def f_pmapped(x_or_kernel: np.ndarray | Kernel, *args, **kwargs):
+    def f_pmapped(x_or_kernel: Union[np.ndarray, Kernel], *args, **kwargs):
       args_np, args_np_idxs = [], []
       args_other = {}
 

@@ -30,7 +30,7 @@ set / timesteps.
 
 import collections
 from functools import lru_cache
-from typing import Callable, Generator, Iterable, NamedTuple, Optional, Any
+from typing import Callable, Generator, Iterable, NamedTuple, Optional, Any, Union
 
 import jax
 from jax import grad
@@ -48,7 +48,7 @@ from .utils.typing import Axes, Get, KernelFn
 PyTree = Any
 
 
-ArrayOrScalar = None | int | float | np.ndarray
+ArrayOrScalar = Union[None, int, float, np.ndarray]
 """Alias for optional arrays or scalars."""
 
 
@@ -61,7 +61,7 @@ class PredictFn(Protocol):
       fx_train_0: ArrayOrScalar = 0.,
       fx_test_0: Optional[ArrayOrScalar] = None,
       k_test_train: Optional[np.ndarray] = None
-  ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+  ) -> Union[np.ndarray, tuple[np.ndarray, np.ndarray]]:
     ...
 
 
@@ -230,7 +230,7 @@ def gradient_descent_mse(
       fx_train_0: ArrayOrScalar = 0.,
       fx_test_0: Optional[ArrayOrScalar] = None,
       k_test_train: Optional[np.ndarray] = None
-  ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+  ) -> Union[np.ndarray, tuple[np.ndarray, np.ndarray]]:
     """Return output predictions on train [and test] set[s] at time[s] `t`.
 
     Args:
@@ -304,10 +304,10 @@ class PredictFnODE(Protocol):
   def __call__(
       self,
       t: Optional[ArrayOrScalar] = None,
-      fx_train_or_state_0: ArrayOrScalar | ODEState = 0.,
+      fx_train_or_state_0: Union[ArrayOrScalar, ODEState] = 0.,
       fx_test_0: Optional[ArrayOrScalar] = None,
       k_test_train: Optional[np.ndarray] = None
-  ) -> np.ndarray | tuple[np.ndarray, np.ndarray] | ODEState:
+  ) -> Union[np.ndarray, tuple[np.ndarray, np.ndarray], ODEState]:
     ...
 
 
@@ -465,10 +465,10 @@ def gradient_descent(
 
   def predict_fn(
       t: Optional[ArrayOrScalar] = None,
-      fx_train_or_state_0: ArrayOrScalar | ODEState = 0.,
+      fx_train_or_state_0: Union[ArrayOrScalar, ODEState] = 0.,
       fx_test_0: Optional[ArrayOrScalar] = None,
       k_test_train: Optional[np.ndarray] = None
-  ) -> np.ndarray | tuple[np.ndarray, np.ndarray] | ODEState:
+  ) -> Union[np.ndarray, tuple[np.ndarray, np.ndarray], ODEState]:
     """Return output predictions on train [and test] set[s] at time[s] `t`.
 
     Args:
@@ -512,7 +512,7 @@ def gradient_descent(
     t_shape = t.shape
     t = t.reshape((-1,))
 
-    # ODE solver requires `t[0]` to be the time where `fx_train_0` [and
+    # ODE solver requires `t[0]` to be the time when `fx_train_0` [and
     # `fx_test_0`] are evaluated, but also a strictly increasing sequence of
     # timesteps, so we always temporarily append an [almost] `0` at the start.
     t0 = np.where(t[0] == 0,
@@ -635,7 +635,7 @@ def gp_inference(
   def predict_fn(get: Optional[Get] = None,
                  k_test_train=None,
                  k_test_test=None
-                 ) -> dict[str, np.ndarray | Gaussian]:
+                 ) -> dict[str, Union[np.ndarray, Gaussian]]:
     """`test`-set posterior given respective covariance matrices.
 
     Args:
@@ -1281,7 +1281,7 @@ def _make_inv_expm1_fn(normalization: float):
   return _inv_expm1_fn
 
 
-def _check_inputs(fx_train_or_state_0: ArrayOrScalar | ODEState,
+def _check_inputs(fx_train_or_state_0: Union[ArrayOrScalar, ODEState],
                   fx_test_0: ArrayOrScalar,
                   k_test_train: Optional[np.ndarray]):
   if isinstance(fx_train_or_state_0, ODEState):

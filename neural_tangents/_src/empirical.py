@@ -104,7 +104,7 @@ Example:
 import enum
 import functools
 import operator
-from typing import Callable, KeysView, Optional, TypeVar, Iterable
+from typing import Callable, KeysView, Optional, TypeVar, Iterable, Union
 import warnings
 
 import jax
@@ -683,8 +683,8 @@ def _structured_derivatives_ntk_fn(
       fx1: np.ndarray,
       fx2: np.ndarray,
       fx_axis,
-      df_dys_1: list[np.ndarray | Zero],
-      df_dys_2: list[np.ndarray | Zero],
+      df_dys_1: list[Union[np.ndarray, Zero]],
+      df_dys_2: list[Union[np.ndarray, Zero]],
       dy_dws_1: list[tuple[np.ndarray, rules.Structure]],
       dy_dws_2: list[tuple[np.ndarray, rules.Structure]],
       dtype: np.dtype
@@ -890,7 +890,7 @@ def empirical_ntk_fn(
     trace_axes: Axes = (-1,),
     diagonal_axes: Axes = (),
     vmap_axes: VMapAxes = None,
-    implementation: NtkImplementation | int = DEFAULT_NTK_IMPLEMENTATION,
+    implementation: Union[NtkImplementation, int] = DEFAULT_NTK_IMPLEMENTATION,
     _j_rules: bool = _DEFAULT_NTK_J_RULES,
     _s_rules: bool = _DEFAULT_NTK_S_RULES,
     _fwd: Optional[bool] = _DEFAULT_NTK_FWD,
@@ -1041,7 +1041,7 @@ def empirical_kernel_fn(
     trace_axes: Axes = (-1,),
     diagonal_axes: Axes = (),
     vmap_axes: VMapAxes = None,
-    implementation: NtkImplementation | int = DEFAULT_NTK_IMPLEMENTATION,
+    implementation: Union[NtkImplementation, int] = DEFAULT_NTK_IMPLEMENTATION,
     _j_rules: bool = _DEFAULT_NTK_J_RULES,
     _s_rules: bool = _DEFAULT_NTK_S_RULES,
     _fwd: Optional[bool] = _DEFAULT_NTK_FWD,
@@ -1190,7 +1190,7 @@ def empirical_kernel_fn(
   def kernel_fn(
       x1: PyTree,
       x2: Optional[PyTree],
-      get: None | str | tuple[str, ...],
+      get: Union[None, str, tuple[str, ...]],
       params: PyTree,
       **apply_fn_kwargs
   ) -> PyTree:
@@ -1517,7 +1517,7 @@ def _expand_dims_array(x: _ArrayOrShape, axis: int) -> _ArrayOrShape:
 
 
 def _expand_dims(
-    x: Optional[PyTree] | UndefinedPrimal,
+    x: Union[None, PyTree, UndefinedPrimal],
     axis: Optional[PyTree]
 ) -> Optional[PyTree]:
   if axis is None or x is None or isinstance(x, UndefinedPrimal):
@@ -1545,7 +1545,7 @@ def _squeeze(x: PyTree, axis: Optional[PyTree]) -> PyTree:
 
   def squeeze(
       x: np.ndarray,
-      axis: None | int | tuple[int, ...]
+      axis: Union[None, int, tuple[int, ...]]
   ) -> np.ndarray:
     """`np.squeeze` analog working with 0-sized axes."""
     if isinstance(axis, int):
@@ -1799,8 +1799,8 @@ def _backward_pass(
     _j_rules: bool,
     _s_rules: bool,
     _fwd: Optional[bool]
-) -> (list[list[np.ndarray | Zero]] |
-      list[list[tuple[np.ndarray, rules.Structure]]]):
+) -> Union[list[list[Union[np.ndarray, Zero]]],
+           list[list[tuple[np.ndarray, rules.Structure]]]]:
   """Similar to and adapted from `jax.interpreters.ad.backward_pass`.
 
   Traverses the computational graph in the same order as the above, but collects
@@ -1818,7 +1818,7 @@ def _backward_pass(
   the NTK.
   """
 
-  def read_cotangent(v: Var) -> np.ndarray | Zero:
+  def read_cotangent(v: Var) -> Union[np.ndarray, Zero]:
     return ct_env.pop(v, Zero(v.aval))
 
   primal_env: dict[Var, np.ndarray] = {}
@@ -1988,9 +1988,9 @@ def _backprop_step(
     eqn: JaxprEqn,
     primal_env: dict[Var, np.ndarray],
     ct_env: dict[Var, np.ndarray],
-    read_cotangent: Callable[[Var], np.ndarray | Zero],
+    read_cotangent: Callable[[Var], Union[np.ndarray, Zero]],
     do_write_cotangents: bool = True
-) -> tuple[np.ndarray | Zero, list[np.ndarray | UndefinedPrimal]]:
+) -> tuple[Union[np.ndarray, Zero], list[Union[np.ndarray, UndefinedPrimal]]]:
   """Adapted from `jax.interpreters.ad`."""
   invals = map(functools.partial(_read_primal, primal_env), eqn.invars)
   cts_in = map(read_cotangent, eqn.outvars)
@@ -2024,9 +2024,9 @@ def _trim_cotangents(
 
 
 def _trim_invals(
-    invals: list[np.ndarray | UndefinedPrimal],
+    invals: list[Union[np.ndarray, UndefinedPrimal]],
     structure: rules.Structure,
-) -> list[np.ndarray | UndefinedPrimal]:
+) -> list[Union[np.ndarray, UndefinedPrimal]]:
   trimmed_invals = list(invals)
 
   for i in structure.in_trace_idxs:
@@ -2053,7 +2053,7 @@ def _trim_invals(
 def _trim_eqn(
     eqn: JaxprEqn,
     idx: int,
-    trimmed_invals: list[np.ndarray | UndefinedPrimal],
+    trimmed_invals: list[Union[np.ndarray, UndefinedPrimal]],
     trimmed_cts_in: ShapedArray
 ) -> JaxprEqn:
   if eqn.primitive in rules.EQN_PARAMS_RULES:
@@ -2072,9 +2072,9 @@ def _trim_eqn(
 
 
 def _trim_axis(
-    x: UndefinedPrimal | ShapedArray | np.ndarray,
-    axis: int | tuple[int, ...],
-) -> UndefinedPrimal | ShapedArray:
+    x: Union[UndefinedPrimal, ShapedArray, np.ndarray],
+    axis: Union[int, tuple[int, ...]],
+) -> Union[UndefinedPrimal, ShapedArray]:
   """Trim `axis` of `x` to be of length `1`. `x` is only used for shape."""
   if isinstance(axis, int):
     axis = (axis,)
@@ -2158,11 +2158,11 @@ def _eqn_vjp_fn(
 def _get_jacobian(
     eqn: Optional[JaxprEqn],
     cts_in: ShapedArray,
-    invals: list[np.ndarray | UndefinedPrimal],
+    invals: list[Union[np.ndarray, UndefinedPrimal]],
     idx: int,
     _j_rules: bool,
     _fwd: Optional[bool],
-) -> np.ndarray | Zero:
+) -> Union[np.ndarray, Zero]:
   """Get the (structured) `eqn` output Jacobian wrt `eqn.invars[idx]`."""
   if eqn is None:
     primitive = None
@@ -2214,7 +2214,7 @@ def _write_cotangent(
     prim: core.Primitive,
     ct_env: dict[Var, np.ndarray],
     v: Var,
-    ct: np.ndarray | Zero
+    ct: Union[np.ndarray, Zero]
 ):
   """Adapted from `jax.interpreters.ad`."""
   assert ct is not Zero, (prim, v.aval)
@@ -2235,8 +2235,8 @@ def _write_cotangent(
 
 def _read_primal(
     env: dict[Var, np.ndarray],
-    v: Var | Literal,
-) -> np.ndarray | UndefinedPrimal:
+    v: Union[Var, Literal],
+) -> Union[np.ndarray, UndefinedPrimal]:
   if type(v) is Literal:
     return v.val
 
@@ -2250,7 +2250,7 @@ def _read_primal(
 def _write_primal(
     env: dict[Var, np.ndarray],
     v: Var,
-    val: np.ndarray | UndefinedPrimal
+    val: Union[np.ndarray, UndefinedPrimal]
 ):
   if not ad.is_undefined_primal(val):
     env[v] = val  # pytype: disable=container-type-mismatch  # jax-ndarray

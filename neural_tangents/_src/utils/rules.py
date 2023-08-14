@@ -2,7 +2,7 @@
 
 from .dataclasses import dataclass, field
 import functools
-from typing import Callable, Optional, Any
+from typing import Callable, Optional, Any, Union
 
 from . import utils
 import jax
@@ -128,7 +128,7 @@ EQN_PARAMS_RULES: dict[Optional[Primitive], Callable[..., dict[str, Any]]] = {}
 
 def get_structure(
     eqn: Optional[JaxprEqn],
-    invals: list[ShapedArray | AbstractValue],
+    invals: list[Union[ShapedArray, AbstractValue]],
     idx: int,
     _s_rules: bool
 ) -> Structure:
@@ -644,7 +644,7 @@ def _mul_s(
 def _mul_j(
     eqn: JaxprEqn,
     idx: int,
-    invals: list[ShapedArray | np.ndarray],
+    invals: list[Union[ShapedArray, np.ndarray]],
     cts_in: ShapedArray,
     is_div: bool
 ) -> np.ndarray:

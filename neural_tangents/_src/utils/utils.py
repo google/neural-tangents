@@ -22,7 +22,7 @@ import functools
 import inspect
 import operator
 import types
-from typing import Any, Callable, Iterable, Optional, Sequence, Sized, TypeVar
+from typing import Any, Callable, Iterable, Optional, Sequence, Sized, TypeVar, Union
 import warnings
 
 import jax
@@ -36,7 +36,7 @@ import numpy as onp
 PyTree = Any
 
 
-Axes = int | Sequence[int]
+Axes = Union[int, Sequence[int]]
 
 
 def is_list_or_tuple(x) -> bool:
@@ -45,7 +45,7 @@ def is_list_or_tuple(x) -> bool:
   return type(x) == list or type(x) == tuple
 
 
-def is_nt_tree_of(x, dtype: type | tuple[type, ...]) -> bool:
+def is_nt_tree_of(x, dtype: Union[type, tuple[type, ...]]) -> bool:
   if isinstance(x, dtype):
     return True
   if not is_list_or_tuple(x):
@@ -66,13 +66,13 @@ def nt_tree_fn(
   reduce function over the values of its children.
 
   If `tree_structure_argnum` is None then each of the NTTrees must have the same
-  structure. If `tree_structure_argnum` is an integer then then a specific tree
-  is used to infer the structure.
+  structure. If `tree_structure_argnum` is an integer then a specific tree is
+  used to infer the structure.
 
   Args:
     nargs:
       The number of arguments to be treated as NTTrees. If `nargs` is `None`
-      then all of the arguments are used. `nargs` can also be negative which
+      then all the arguments are used. `nargs` can also be negative which
       follows numpy's semantics for array indexing.
 
     tree_structure_argnum:
@@ -254,7 +254,7 @@ def get_namedtuple(name):
 @nt_tree_fn(nargs=2, reduce=lambda x: np.all(np.array(x)))
 def x1_is_x2(x1: np.ndarray,
              x2: Optional[np.ndarray] = None,
-             eps: float = 1e-12) -> bool | np.ndarray:
+             eps: float = 1e-12) -> Union[bool, np.ndarray]:
   if not isinstance(x1, (onp.ndarray, np.ndarray)):
     raise TypeError('`x1` must be an ndarray. A {} is found.'.format(type(x1)))
 
@@ -279,7 +279,7 @@ def x1_is_x2(x1: np.ndarray,
     return np.all(np.abs(diff) < eps)
 
 
-def _get_ndim(x: int | Sized | np.ndarray) -> int:
+def _get_ndim(x: Union[int, Sized, np.ndarray]) -> int:
   """Get number of dimensions given number of dimensions / shape / array."""
   if hasattr(x, 'ndim'):
     n = x.ndim
@@ -292,7 +292,7 @@ def _get_ndim(x: int | Sized | np.ndarray) -> int:
   return n
 
 
-def mod(axis: Axes, x: int | Sized | np.ndarray) -> list[int]:
+def mod(axis: Axes, x: Union[int, Sized, np.ndarray]) -> list[int]:
   """Makes `axis` non-negative given number of dimensions / shape / array."""
   n = _get_ndim(x)
   if isinstance(axis, int):
@@ -300,7 +300,7 @@ def mod(axis: Axes, x: int | Sized | np.ndarray) -> list[int]:
   return [(i % n) if n > 0 else i for i in axis]
 
 
-def canonicalize_axis(axis: Axes, x: int | Sized | np.ndarray) -> list[int]:
+def canonicalize_axis(axis: Axes, x: Union[int, Sized, np.ndarray]) -> list[int]:
   """Converts axis into a sorted non-negative list.
 
   Args:
@@ -476,7 +476,7 @@ def mask(
 
 
 def size_at(
-    x: _ArrayOrShape | core.ShapedArray,
+    x: Union[_ArrayOrShape, core.ShapedArray],
     axes: Optional[Iterable[int]] = None
 ) -> int:
   if hasattr(x, 'shape'):
@@ -569,7 +569,7 @@ def split_kwargs(kwargs, x1=None, x2=None):
   """Splitting `kwargs`.
 
      Specifically,
-       1. if kwarg is an rng key, it will be split into two keys.
+       1. if kwarg is a rng key, it will be split into two keys.
        2. else if it is a tuple of length two, the tuple will be split into two
           parts, one for kwargs1 and the other for kwargs2.
        3. else it is copied to kwargs1 and kwargs2.
@@ -591,10 +591,10 @@ def split_kwargs(kwargs, x1=None, x2=None):
   return kwargs1, kwargs2
 
 
-_SingleSlice = int | slice | type(Ellipsis)
+_SingleSlice = Union[int, slice, type(Ellipsis)]
 
 
-SliceType = _SingleSlice | tuple[_SingleSlice, ...]
+SliceType = Union[_SingleSlice, tuple[_SingleSlice, ...]]
 """A type to specify a slice of an array.
 
 For instance, when indexing `x[1, :, 2:8:3]` a slice tuple
@@ -608,7 +608,7 @@ slice, such as `nt.stax.Slice[1, :, 2:8:3]`.
 def canonicalize_idx(
     idx: SliceType,
     ndim: int
-) -> tuple[int | slice, ...]:
+) -> tuple[Union[int, slice], ...]:
   if idx is Ellipsis or isinstance(idx, (int, slice)):
     idx = (idx,) + (slice(None),) * (ndim - 1)
 

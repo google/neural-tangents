@@ -29,7 +29,7 @@ kernel function is JITted internally.
 
 from functools import partial
 import operator
-from typing import Generator, Iterable, Optional
+from typing import Generator, Iterable, Optional, Union
 
 from .batching import batch
 from .empirical import empirical_kernel_fn, NtkImplementation, DEFAULT_NTK_IMPLEMENTATION, _DEFAULT_NTK_FWD, _DEFAULT_NTK_S_RULES, _DEFAULT_NTK_J_RULES
@@ -95,7 +95,7 @@ def _sample_many_kernel_fn(
         x2: np.ndarray,
         get: Optional[Get] = None,
         **apply_fn_kwargs
-    ) -> Generator[np.ndarray | tuple[np.ndarray, ...], None, None]:
+    ) -> Generator[Union[np.ndarray, tuple[np.ndarray, ...]], None, None]:
       for n, sample in get_samples(x1, x2, get, **apply_fn_kwargs):
         if n in n_samples:
           yield normalize(sample, n)
@@ -106,7 +106,7 @@ def _sample_many_kernel_fn(
         x2: np.ndarray,
         get: Optional[Get] = None,
         **apply_fn_kwargs
-    ) -> np.ndarray | tuple[np.ndarray, ...]:
+    ) -> Union[np.ndarray, tuple[np.ndarray, ...]]:
       for n, sample in get_samples(x1, x2, get, **apply_fn_kwargs):
         pass
       return normalize(sample, n)
@@ -118,14 +118,14 @@ def monte_carlo_kernel_fn(
     init_fn: InitFn,
     apply_fn: ApplyFn,
     key: random.KeyArray,
-    n_samples: int | Iterable[int],
+    n_samples: Union[int, Iterable[int]],
     batch_size: int = 0,
     device_count: int = -1,
     store_on_device: bool = True,
     trace_axes: Axes = (-1,),
     diagonal_axes: Axes = (),
     vmap_axes: Optional[VMapAxes] = None,
-    implementation: int | NtkImplementation = DEFAULT_NTK_IMPLEMENTATION,
+    implementation: Union[int, NtkImplementation] = DEFAULT_NTK_IMPLEMENTATION,
     _j_rules: bool = _DEFAULT_NTK_J_RULES,
     _s_rules: bool = _DEFAULT_NTK_S_RULES,
     _fwd: Optional[bool] = _DEFAULT_NTK_FWD,
@@ -325,7 +325,7 @@ def monte_carlo_kernel_fn(
 
 
 def _canonicalize_n_samples(
-    n_samples: int | Iterable[int]) -> tuple[set[int], bool]:
+    n_samples: Union[int, Iterable[int]]) -> tuple[set[int], bool]:
   get_generator = True
   if isinstance(n_samples, int):
     get_generator = False
