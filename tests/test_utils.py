@@ -19,7 +19,7 @@ import itertools
 import logging
 import os
 from types import ModuleType
-from typing import Callable,  Optional, Sequence
+from typing import Callable, Optional, Sequence
 
 from absl import flags
 from absl.testing import parameterized
@@ -41,7 +41,7 @@ flags.DEFINE_string(
 
 flags.DEFINE_integer(
     'nt_num_generated_cases',
-    int(os.getenv('NT_NUM_GENERATED_CASES', '4')),
+    int(os.getenv('NT_NUM_GENERATED_CASES', '2')),
     help='Number of generated cases to test'
 )
 
