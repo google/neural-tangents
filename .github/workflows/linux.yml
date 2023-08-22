@@ -24,7 +24,7 @@ jobs:
         python-version: [3.9, '3.10', 3.11]
         JAX_ENABLE_X64: [0, 1]
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
 
     steps:
 
