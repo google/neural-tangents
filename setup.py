@@ -120,6 +120,7 @@ setuptools.setup(
     classifiers=[
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
         'License :: OSI Approved :: Apache Software License',
         'Operating System :: MacOS',
         'Operating System :: POSIX :: Linux',
