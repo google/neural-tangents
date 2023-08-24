@@ -300,7 +300,8 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
     self.assertGreater(np.min(np.linalg.eigh(cov_train_inf)[0]), -1e-8)
 
     _kernel_fn = nt.empirical_kernel_fn(f)
-    kernel_fn = jit(lambda x1, x2, params: _kernel_fn(x1, x2, 'ntk', params))
+    # TODO(romann): figure out the slow compile on Ubuntu 22.04 CPU Python 3.9
+    kernel_fn = lambda x1, x2, params: _kernel_fn(x1, x2, 'ntk', params)
 
     def predict_empirical(key):
       _, params = init_fn(key, train_shape)
