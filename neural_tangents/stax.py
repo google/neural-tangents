@@ -65,10 +65,10 @@ Example:
   >>> predict_fn = nt.predict.gradient_descent_mse_ensemble(kernel_fn, x_train,
   >>>                                                       y_train)
   >>> #
-  >>> # (5, 10) np.ndarray NNGP test prediction
+  >>> # (5, 10) jnp.ndarray NNGP test prediction
   >>> y_test_nngp = predict_fn(x_test=x_test, get='nngp')
   >>> #
-  >>> # (5, 10) np.ndarray NTK prediction
+  >>> # (5, 10) jnp.ndarray NTK prediction
   >>> y_test_ntk = predict_fn(x_test=x_test, get='ntk')
 """
 

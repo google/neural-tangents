@@ -17,21 +17,25 @@
 from functools import partial
 import logging
 import operator
-from typing import Any, Callable, Sequence, Optional
+from typing import Any, Callable, Optional, Sequence
+
 from absl.testing import absltest
 from flax import linen as nn
 import jax
-from jax import jacobian, lax, remat
-from jax import jit, tree_map
+from jax import jacobian
+from jax import jit
+from jax import lax
 from jax import random
+from jax import remat
+from jax import tree_map
 from jax.config import config
-import jax.numpy as np
+import jax.numpy as jnp
 from jax.tree_util import tree_reduce
 import neural_tangents as nt
 from neural_tangents import stax
 from neural_tangents._src.utils import utils
 from tests import test_utils
-import numpy as onp
+import numpy as np
 
 
 config.parse_flags_with_absl()
@@ -81,13 +85,15 @@ def _build_network(input_shape, network, out_logits):
     raise ValueError('Expected flat or image test input.')
 
 
-def _kernel_fns(key,
-                input_shape,
-                network,
-                out_logits,
-                diagonal_axes,
-                trace_axes,
-                vmap_axes=None):
+def _kernel_fns(
+    key,
+    input_shape,
+    network,
+    out_logits,
+    diagonal_axes,
+    trace_axes,
+    vmap_axes=None,
+):
   init_fn, f, _ = _build_network(input_shape, network, out_logits)
   _, params = init_fn(key, (-1,) + input_shape)
   kwargs = dict(
@@ -130,8 +136,9 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
       x = x * 2 + 1.
     return ({'list': [
         {
-            'quadratic': 0.5 * np.dot(np.dot(x.T, w1), x) + np.dot(w2, x) + b,
-            'linear': np.dot(w1, x)
+            'quadratic': (0.5 * jnp.dot(jnp.dot(x.T, w1), x) +
+                          jnp.dot(w2, x) + b),
+            'linear': jnp.dot(w1, x)
         },
         w2
     ]},)
@@ -153,8 +160,8 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
         f0,
         ({'list': [
             {
-                'quadratic': np.dot(np.dot(x0.T, w1) + w2, dx),
-                'linear': np.dot(w1, dx)
+                'quadratic': jnp.dot(jnp.dot(x0.T, w1) + w2, dx),
+                'linear': jnp.dot(w1, dx)
             },
             0.
         ]},)
@@ -212,7 +219,7 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
           f_lin,
           ({'list': [
               {
-                  'quadratic': 0.5 * np.dot(np.dot(dx.T, w1), dx),
+                  'quadratic': 0.5 * jnp.dot(jnp.dot(dx.T, w1), dx),
                   'linear': 0.
               },
               0.
@@ -352,8 +359,8 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
     rng = random.PRNGKey(0)
     input_key1, input_key2, net_key = random.split(rng, 3)
 
-    x1_1, x1_2 = np.split(random.normal(input_key1, (3, 21)), (10,), axis=1)
-    x2_1, x2_2 = np.split(random.normal(input_key2, (4, 21)), (10,), axis=1)
+    x1_1, x1_2 = jnp.split(random.normal(input_key1, (3, 21)), (10,), axis=1)
+    x2_1, x2_2 = jnp.split(random.normal(input_key2, (4, 21)), (10,), axis=1)
 
     x1 = (x1_1, x1_2)
     x2 = (x2_1, x2_2) if not same_inputs else None
@@ -388,7 +395,7 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
 
     nngp_fn = jit(partial(nt.empirical_nngp_fn(apply_fn), params=params))
     nngp = nngp_fn(x1, x2)
-    self.assertEqual(len(nngp), 2)
+    self.assertLen(nngp, 2)
     self.assertEqual(nngp[0].shape, (3, 3 if same_inputs else 4))
     self.assertEqual(nngp[1].shape, (3, 3 if same_inputs else 4))
     self._compare_kernels(x1, x2, ntk_fns, ntk_fns_vmapped, nngp_fn)
@@ -400,10 +407,10 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
     rng = random.PRNGKey(0)
     input_key1, input_key2, net_key = random.split(rng, 3)
 
-    x1_1, x1_2, x1_3 = np.split(random.normal(input_key1, (3, 33)),
-                                (10, 21), axis=1)
-    x2_1, x2_2, x2_3 = np.split(random.normal(input_key2, (4, 33)),
-                                (10, 21), axis=1)
+    x1_1, x1_2, x1_3 = jnp.split(random.normal(input_key1, (3, 33)),
+                                 (10, 21), axis=1)
+    x2_1, x2_2, x2_3 = jnp.split(random.normal(input_key2, (4, 33)),
+                                 (10, 21), axis=1)
 
     x1 = ([x1_1, x1_2], x1_3)
     x2 = ([x2_1, x2_2], x2_3) if not same_inputs else None
@@ -415,7 +422,7 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
 
     init_fn, apply_fn, _ = stax.serial(layer(1024), layer(1))
 
-    _, params = init_fn(net_key, tree_map(np.shape, x1))
+    _, params = init_fn(net_key, tree_map(jnp.shape, x1))
 
     ntk_fns = {
         i: jit(nt.empirical_ntk_fn(apply_fn, implementation=i))
@@ -513,7 +520,7 @@ class EmpiricalTest(test_utils.NeuralTangentsTestCase):
         )
     )
 
-    _, params = init_fn(random.PRNGKey(3), tree_map(np.shape, x1))
+    _, params = init_fn(random.PRNGKey(3), tree_map(jnp.shape, x1))
 
     in_axes = [(0, 1), 2]
     out_axes = [-2, -3]
@@ -583,9 +590,9 @@ PyTree = Any
 
 _functions: dict[str, Callable[[PyTree, PyTree], PyTree]] = {
     '[p[0]**(p[1] + x), p[2] * x + p[0]]':
-        lambda p, x: [np.abs(p[0])**(p[1] + x), p[2] * x + p[0]],
+        lambda p, x: [jnp.abs(p[0]) ** (p[1] + x), p[2] * x + p[0]],
     '[p[0]**(p[1] + x), p[2] / x + p[0]]':
-        lambda p, x: [np.abs(p[0])**(p[1] + x), p[2] / x + p[0]],
+        lambda p, x: [jnp.abs(p[0]) ** (p[1] + x), p[2] / x + p[0]],
 
     '[p[0] * p[1] * p[2] + (p[0] @ p[1].T) @ (p[2].T @ p[1]) @ x]':
         lambda p, x: [p[0] * p[1] * p[2] + (p[0] @ p[1].T) @ (p[2].T @ p[1]) @ x],
@@ -595,7 +602,7 @@ _functions: dict[str, Callable[[PyTree, PyTree], PyTree]] = {
     'x': lambda p, x: x,
     '(x, x)': lambda p, x: (x, x),
     '(x, (x, p))': lambda p, x: (x, (x, p)),
-    '[np.eye(1)]': lambda p, x: [np.eye(1)],
+    '[np.eye(1)]': lambda p, x: [jnp.eye(1)],
     'x**2': lambda p, x: x**2,
     'x @ x.T': lambda p, x: x @ x.T,
     'p': lambda p, x: p,
@@ -609,30 +616,30 @@ _functions: dict[str, Callable[[PyTree, PyTree], PyTree]] = {
     '-p[0] + 2 * p[1] - p[2] * 3': lambda p, x: -p[0] + p[1],
     '-p[0] + 2 / p[1] - p[2] / 3': lambda p, x: -p[0] + 2 / p[1] - p[2] / 3,
 
-    'np.prod(p[2])': lambda p, x: np.prod(p[2]),
-    'sum(p)': lambda p, x: tree_reduce(lambda x, y: x + np.sum(y), 0.),
-    'prod(p)': lambda p, x: tree_reduce(lambda x, y: x * np.prod(y), 1.),
-    'sum(p)_typed': lambda p, x: tree_reduce(lambda x, y: x + np.sum(y), np.zeros((), x.dtype)),
-    'prod(p)_typed': lambda p, x: tree_reduce(lambda x, y: x * np.prod(y), np.ones((), x.dtype)),
+    'np.prod(p[2])': lambda p, x: jnp.prod(p[2]),
+    'sum(p)': lambda p, x: tree_reduce(lambda x, y: x + jnp.sum(y), 0.),
+    'prod(p)': lambda p, x: tree_reduce(lambda x, y: x * jnp.prod(y), 1.),
+    'sum(p)_typed': lambda p, x: tree_reduce(lambda x, y: x + jnp.sum(y), jnp.zeros((), x.dtype)),
+    'prod(p)_typed': lambda p, x: tree_reduce(lambda x, y: x * jnp.prod(y), jnp.ones((), x.dtype)),
     'x + p[0]': lambda p, x: x + p[0],
     'x - p[1]': lambda p, x: x - p[1],
     '-p[0]': lambda p, x: -p[0],
-    'np.squeeze(np.expand_dims(p[0], 0))': lambda p, x: np.squeeze(np.expand_dims(p[0], 0)),
+    'np.squeeze(np.expand_dims(p[0], 0))': lambda p, x: jnp.squeeze(jnp.expand_dims(p[0], 0)),
     'p[1]**2': lambda p, x: p[1]**2,
     'p[1] * p[1]': lambda p, x: p[1] * p[1],
     'p[1] / p[1]': lambda p, x: p[1] / p[1],
     'p[1] * p[0]': lambda p, x: p[1] * p[0],
     'p[1] / p[0]': lambda p, x: p[1] / p[0],
 
-    'p[1] * np.expand_dims(np.arange(p[1].shape[1]))': lambda p, x: p[1] * np.expand_dims(np.arange(p[1].shape[1])),
-    'p[1] * np.expand_dims(p[0][0])': lambda p, x: p[1] * np.expand_dims(p[0][0]),
-    'p[1] / np.expand_dims(np.arange(p[1].shape[1]))': lambda p, x: p[1] / np.expand_dims(np.arange(p[1].shape[1])),
-    'p[1] / np.expand_dims(p[0][0])': lambda p, x: p[1] / np.expand_dims(p[0][0]),
+    'p[1] * np.expand_dims(np.arange(p[1].shape[1]))': lambda p, x: p[1] * jnp.expand_dims(jnp.arange(p[1].shape[1])),
+    'p[1] * np.expand_dims(p[0][0])': lambda p, x: p[1] * jnp.expand_dims(p[0][0]),
+    'p[1] / np.expand_dims(np.arange(p[1].shape[1]))': lambda p, x: p[1] / jnp.expand_dims(jnp.arange(p[1].shape[1])),
+    'p[1] / np.expand_dims(p[0][0])': lambda p, x: p[1] / jnp.expand_dims(p[0][0]),
 
     '[p[0], p[1], p[0] / p[1], 2 * p[0], -p[1] + p[0]]': lambda p, x: [p[0], p[1], p[0] / p[1], 2 * p[0], -p[1] + p[0]],
-    '[np.sum(p[0], axis=0), np.sum(p[0], axis=1)]': lambda p, x: [np.sum(p[0], axis=0), np.sum(p[0], axis=1)],
-    '[np.sum(p[0], axis=0, keepdims=True), np.sum(p[0], axis=1, keepdims=True)]': lambda p, x: [np.sum(p[0], axis=0, keepdims=True), np.sum(p[0], axis=1, keepdims=True)],
-    '[p[0], np.sum(p[0], axis=0, keepdims=True), np.sum(p[0], axis=1, keepdims=True)]': lambda p, x: [p[0], np.sum(p[0], axis=0, keepdims=True), np.sum(p[0], axis=1, keepdims=True)],
+    '[np.sum(p[0], axis=0), np.sum(p[0], axis=1)]': lambda p, x: [jnp.sum(p[0], axis=0), jnp.sum(p[0], axis=1)],
+    '[np.sum(p[0], axis=0, keepdims=True), np.sum(p[0], axis=1, keepdims=True)]': lambda p, x: [jnp.sum(p[0], axis=0, keepdims=True), jnp.sum(p[0], axis=1, keepdims=True)],
+    '[p[0], np.sum(p[0], axis=0, keepdims=True), np.sum(p[0], axis=1, keepdims=True)]': lambda p, x: [p[0], jnp.sum(p[0], axis=0, keepdims=True), jnp.sum(p[0], axis=1, keepdims=True)],
     '[p[0], p[0].T]': lambda p, x: [p[0], p[0].T],
     '[p[0], p[0]]': lambda p, x: [p[0], p[0]],
 
@@ -654,28 +661,28 @@ _functions: dict[str, Callable[[PyTree, PyTree], PyTree]] = {
     '(p[0] @ p[1], p[1].T)': lambda p, x: (p[0] @ p[1], p[1].T),
     '(p[0] @ p[1], p[0].T)': lambda p, x: (p[0] @ p[1], p[0].T),
 
-    'np.sum(p[0])': lambda p, x: np.sum(p[0]),
-    'np.sum(p[0], axis=1, keepdims=True)': lambda p, x: np.sum(p[0], axis=1, keepdims=True),
-    'np.sum(p[1], axis=0, keepdims=False)': lambda p, x: np.sum(p[1], axis=0, keepdims=False),
-    'np.sum(p[0] @ p[0])': lambda p, x: np.sum(p[0] @ p[0]),
-    'np.sum(p[2] * p[1])': lambda p, x: np.sum(p[2] * p[1]),
-    'np.sum(p[1] * p[1])': lambda p, x: np.sum(p[1] * p[1]),
-    'np.sum(p[2] / p[1])': lambda p, x: np.sum(p[2] / p[1]),
-    'np.sum(p[1] / p[1])': lambda p, x: np.sum(p[1] / p[1]),
+    'np.sum(p[0])': lambda p, x: jnp.sum(p[0]),
+    'np.sum(p[0], axis=1, keepdims=True)': lambda p, x: jnp.sum(p[0], axis=1, keepdims=True),
+    'np.sum(p[1], axis=0, keepdims=False)': lambda p, x: jnp.sum(p[1], axis=0, keepdims=False),
+    'np.sum(p[0] @ p[0])': lambda p, x: jnp.sum(p[0] @ p[0]),
+    'np.sum(p[2] * p[1])': lambda p, x: jnp.sum(p[2] * p[1]),
+    'np.sum(p[1] * p[1])': lambda p, x: jnp.sum(p[1] * p[1]),
+    'np.sum(p[2] / p[1])': lambda p, x: jnp.sum(p[2] / p[1]),
+    'np.sum(p[1] / p[1])': lambda p, x: jnp.sum(p[1] / p[1]),
 
-    'np.zeros((2, 4))': lambda p, x: np.zeros((2, 4)),
-    'np.zeros((2, 4))_typed': lambda p, x: np.zeros((2, 4), x.dtype),
-    'np.ones((1, 2))': lambda p, x: np.ones((1, 2)),
+    'np.zeros((2, 4))': lambda p, x: jnp.zeros((2, 4)),
+    'np.zeros((2, 4))_typed': lambda p, x: jnp.zeros((2, 4), x.dtype),
+    'np.ones((1, 2))': lambda p, x: jnp.ones((1, 2)),
 
     'p[2]': lambda p, x: p[2],
     '[p[1], p[0], p[2]]': lambda p, x: [p[1], p[0], p[2]],
 
-    'np.real(p[2])': lambda p, x: np.real(p[2]),
-    'np.real(x)': lambda p, x: np.real(x),
-    'np.imag(p[2])': lambda p, x: np.imag(p[2]),
-    'np.imag(x)': lambda p, x: np.imag(x),
-    'np.abs(np.real(p[2]) + np.imag(p[2])) @ np.imag(p[0])': lambda p, x: np.abs(np.real(p[2]) + np.imag(p[2])) @ np.imag(p[0]),
-    '[np.real(p[1]), np.imag(p[0]), np.abs(-p[2])],': lambda p, x: [np.real(p[1]), np.imag(p[0]), np.abs(-p[2])],
+    'np.real(p[2])': lambda p, x: jnp.real(p[2]),
+    'np.real(x)': lambda p, x: jnp.real(x),
+    'np.imag(p[2])': lambda p, x: jnp.imag(p[2]),
+    'np.imag(x)': lambda p, x: jnp.imag(x),
+    'np.abs(np.real(p[2]) + np.imag(p[2])) @ np.imag(p[0])': lambda p, x: jnp.abs(jnp.real(p[2]) + jnp.imag(p[2])) @ jnp.imag(p[0]),
+    '[np.real(p[1]), np.imag(p[0]), np.abs(-p[2])],': lambda p, x: [jnp.real(p[1]), jnp.imag(p[0]), jnp.abs(-p[2])],
     'lax.complex(p[0], p[1])': lambda p, x: lax.complex(p[0], p[1]),
     'lax.conj(p[0])': lambda p, x: lax.conj(p[0]),
     'lax.conj(p[0]) @ lax.conj(p[1])': lambda p, x: lax.conj(p[0]) @ lax.conj(p[1]),
@@ -686,17 +693,17 @@ _functions: dict[str, Callable[[PyTree, PyTree], PyTree]] = {
         (p[2], x[1]),
         x[1:2, :] * (x - 1.),
         x[1] * p[2][:1, 0],
-        np.array(1., dtype=x.dtype)
+        jnp.array(1., dtype=x.dtype)
     ],
 
     'reshape': lambda p, x: [p[0].reshape((1, -1,)) @ p[1].reshape((-1, 1)),
                              p[2][:2, :3].reshape((3, 2))],
     'p[0].reshape((-1,)).reshape((3, 3)).T': lambda p, x: p[0].reshape((-1,)).reshape((3, 3)).T,
     'lax_reshape_all': lambda p, x: [
-        lax.reshape(p[0], (1, onp.prod(p[0].shape, dtype=int)), tuple(reversed(range(p[0].ndim)))),
-        lax.reshape(p[0], (onp.prod(p[0].shape, dtype=int), 1, 1)),
-        lax.reshape(p[1], (onp.prod(p[1].shape, dtype=int),), tuple(range(p[1].ndim))),
-        lax.reshape(p[1], (1, onp.prod(p[1].shape, dtype=int), 1), tuple(reversed(range(p[1].ndim)))),
+        lax.reshape(p[0], (1, np.prod(p[0].shape, dtype=int)), tuple(reversed(range(p[0].ndim)))),
+        lax.reshape(p[0], (np.prod(p[0].shape, dtype=int), 1, 1)),
+        lax.reshape(p[1], (np.prod(p[1].shape, dtype=int),), tuple(range(p[1].ndim))),
+        lax.reshape(p[1], (1, np.prod(p[1].shape, dtype=int), 1), tuple(reversed(range(p[1].ndim)))),
         lax.reshape(p[2], tuple(reversed(p[2].shape)), tuple(range(p[2].ndim))),
         lax.reshape(p[2], tuple(reversed(p[2].shape)), tuple(reversed(range(p[2].ndim)))),
         lax.reshape(p[2], utils.zip_flat(reversed(p[2].shape), [1] * p[2].ndim), tuple(range(p[2].ndim))),
@@ -708,24 +715,24 @@ _functions: dict[str, Callable[[PyTree, PyTree], PyTree]] = {
         lax.reshape(p[2], p[2].shape),
     ],
     'lax_reshape_1_2': lambda p, x: [
-        lax.reshape(p[0], (1, onp.prod(p[0].shape, dtype=int)), tuple(reversed(range(p[0].ndim)))) * np.prod(p[0]),
-        lax.reshape(p[0], (onp.prod(p[0].shape, dtype=int), 1, 1)) * np.sum(p[0]),
+        lax.reshape(p[0], (1, np.prod(p[0].shape, dtype=int)), tuple(reversed(range(p[0].ndim)))) * jnp.prod(p[0]),
+        lax.reshape(p[0], (np.prod(p[0].shape, dtype=int), 1, 1)) * jnp.sum(p[0]),
     ],
     'lax_reshape_3_4': lambda p, x: [
-        lax.reshape(p[1], (onp.prod(p[1].shape, dtype=int),), tuple(range(p[1].ndim))) + np.sum(p[1]),
-        lax.reshape(p[1], (1, onp.prod(p[1].shape, dtype=int), 1), tuple(reversed(range(p[1].ndim)))) - np.sum(p[1]),
+        lax.reshape(p[1], (np.prod(p[1].shape, dtype=int),), tuple(range(p[1].ndim))) + jnp.sum(p[1]),
+        lax.reshape(p[1], (1, np.prod(p[1].shape, dtype=int), 1), tuple(reversed(range(p[1].ndim)))) - jnp.sum(p[1]),
     ],
     'lax_reshape_12_13': lambda p, x: [
-        lax.reshape(p[2], (1, 1) + p[2].shape, tuple(range(p[2].ndim))) * np.sum(p[1]) - 3,
-        lax.reshape(p[2], p[2].shape) + np.sum(p[0]) + 1,
+        lax.reshape(p[2], (1, 1) + p[2].shape, tuple(range(p[2].ndim))) * jnp.sum(p[1]) - 3,
+        lax.reshape(p[2], p[2].shape) + jnp.sum(p[0]) + 1,
     ],
     'lax_reshape_1_10_11': lambda p, x: [
-        lax.reshape(p[0], (1, onp.prod(p[0].shape, dtype=int)), tuple(reversed(range(p[0].ndim)))) + np.sum(p[2]),
-        lax.reshape(p[2], p[2].shape, tuple(range(p[2].ndim))) * np.sum(p[0]),
-        lax.reshape(p[2], p[2].shape + (1,), tuple(range(p[2].ndim))) + np.sum(p[1]) - 1,
+        lax.reshape(p[0], (1, np.prod(p[0].shape, dtype=int)), tuple(reversed(range(p[0].ndim)))) + jnp.sum(p[2]),
+        lax.reshape(p[2], p[2].shape, tuple(range(p[2].ndim))) * jnp.sum(p[0]),
+        lax.reshape(p[2], p[2].shape + (1,), tuple(range(p[2].ndim))) + jnp.sum(p[1]) - 1,
     ],
     'lax_reshape_4_5_6': lambda p, x: [
-        lax.reshape(p[1], (1, onp.prod(p[1].shape, dtype=int), 1), tuple(reversed(range(p[1].ndim)))),
+        lax.reshape(p[1], (1, np.prod(p[1].shape, dtype=int), 1), tuple(reversed(range(p[1].ndim)))),
         lax.reshape(p[2], tuple(reversed(p[2].shape)), tuple(range(p[2].ndim))),
         lax.reshape(p[2], tuple(reversed(p[2].shape)), tuple(reversed(range(p[2].ndim)))),
     ],
@@ -733,10 +740,10 @@ _functions: dict[str, Callable[[PyTree, PyTree], PyTree]] = {
         lax.reshape(p[2], tuple(reversed(p[2].shape)), tuple(range(p[2].ndim))),
         lax.reshape(p[2], tuple(reversed(p[2].shape)), tuple(reversed(range(p[2].ndim)))),
     ],
-    'lax_reshape_1': lambda p, x: lax.reshape(p[0], (1, onp.prod(p[0].shape, dtype=int)), tuple(reversed(range(p[0].ndim)))),
-    'lax_reshape_2': lambda p, x: lax.reshape(p[0], (onp.prod(p[0].shape, dtype=int), 1, 1)),
-    'lax_reshape_3': lambda p, x: lax.reshape(p[1], (onp.prod(p[1].shape, dtype=int),), tuple(range(p[1].ndim))),
-    'lax_reshape_4': lambda p, x: lax.reshape(p[1], (1, onp.prod(p[1].shape, dtype=int), 1), tuple(reversed(range(p[1].ndim)))),
+    'lax_reshape_1': lambda p, x: lax.reshape(p[0], (1, np.prod(p[0].shape, dtype=int)), tuple(reversed(range(p[0].ndim)))),
+    'lax_reshape_2': lambda p, x: lax.reshape(p[0], (np.prod(p[0].shape, dtype=int), 1, 1)),
+    'lax_reshape_3': lambda p, x: lax.reshape(p[1], (np.prod(p[1].shape, dtype=int),), tuple(range(p[1].ndim))),
+    'lax_reshape_4': lambda p, x: lax.reshape(p[1], (1, np.prod(p[1].shape, dtype=int), 1), tuple(reversed(range(p[1].ndim)))),
     'lax_reshape_5': lambda p, x: lax.reshape(p[2], tuple(reversed(p[2].shape)), tuple(range(p[2].ndim))),
     'lax_reshape_6': lambda p, x: lax.reshape(p[2], tuple(reversed(p[2].shape)), tuple(reversed(range(p[2].ndim)))),
     'lax_reshape_7': lambda p, x: lax.reshape(p[2], utils.zip_flat(reversed(p[2].shape), [1] * p[2].ndim), tuple(range(p[2].ndim))),
@@ -750,15 +757,15 @@ _functions: dict[str, Callable[[PyTree, PyTree], PyTree]] = {
     'rev': lambda p, x: (lax.rev(p[0], (0,)), lax.rev(p[1], (1,)), lax.rev(p[2], [0, 1])),
     'rev2': lambda p, x: lax.rev(p[0], (0,)) * lax.rev(p[1], (1,)) - lax.rev(p[2], [0, 1])**2,
 
-    'np.squeeze(p[0]) * np.squeeze(p[1])': lambda p, x: np.squeeze(p[0]) * np.squeeze(p[1]),
+    'np.squeeze(p[0]) * np.squeeze(p[1])': lambda p, x: jnp.squeeze(p[0]) * jnp.squeeze(p[1]),
 
-    'pad_1': lambda p, x: lax.pad(p[0], np.ones((), p[0].dtype), [(0, 0, 0), (0, 1, 2)]),
-    'pad_np_const': lambda p, x: np.pad(p[0], [(0, 0), (1, 2)]),
-    'pad_np_wrap': lambda p, x: np.pad(p[0], [(2, 3), (0, 0)], 'wrap'),
-    'pad_np_max': lambda p, x: np.pad(p[0], [(0, 0), (1, 0)], 'maximum'),
-    'pad_2': lambda p, x: lax.pad(p[1], np.ones((), p[1].dtype), [(0, 0, 0), (0, 0, 0)]),
-    'pad_3': lambda p, x: lax.pad(p[2], np.ones((), p[2].dtype), [(1, 0, 2), (0, 1, 0)]),
-    'pad_4': lambda p, x: lax.pad(p[0], np.ones((), p[0].dtype), [(0, 0, 0), (0, 1, 2)]) + lax.pad(p[0], np.ones((), p[0].dtype), [(0, 1, 2), (0, 0, 0)]).T,
+    'pad_1': lambda p, x: lax.pad(p[0], jnp.ones((), p[0].dtype), [(0, 0, 0), (0, 1, 2)]),
+    'pad_np_const': lambda p, x: jnp.pad(p[0], [(0, 0), (1, 2)]),
+    'pad_np_wrap': lambda p, x: jnp.pad(p[0], [(2, 3), (0, 0)], 'wrap'),
+    'pad_np_max': lambda p, x: jnp.pad(p[0], [(0, 0), (1, 0)], 'maximum'),
+    'pad_2': lambda p, x: lax.pad(p[1], jnp.ones((), p[1].dtype), [(0, 0, 0), (0, 0, 0)]),
+    'pad_3': lambda p, x: lax.pad(p[2], jnp.ones((), p[2].dtype), [(1, 0, 2), (0, 1, 0)]),
+    'pad_4': lambda p, x: lax.pad(p[0], jnp.ones((), p[0].dtype), [(0, 0, 0), (0, 1, 2)]) + lax.pad(p[0], jnp.ones((), p[0].dtype), [(0, 1, 2), (0, 0, 0)]).T,
 
     'lax.concatenate([p[0], p[0]], 0)': lambda p, x: lax.concatenate([p[0], p[0]], 0),
     'lax.concatenate([p[0], p[0]], 1)': lambda p, x: lax.concatenate([p[0], p[0]], 1),
@@ -772,17 +779,17 @@ _functions: dict[str, Callable[[PyTree, PyTree], PyTree]] = {
     'lax.concatenate(p, 1)': lambda p, x: lax.concatenate(p, 1),
     '(lax.concatenate([p[0], x], 1) @ lax.concatenate([p[1], p[2]], 0))**2': lambda p, x: (lax.concatenate([p[0], x], 1) @ lax.concatenate([p[1], p[2]], 0))**2,
 
-    'np.transpose(np.stack(p), (0, 1, 2))': lambda p, x: np.transpose(np.stack(p), (0, 1, 2)),
-    'np.transpose(np.stack(p), (0, 2, 1))': lambda p, x: np.transpose(np.stack(p), (0, 2, 1)),
-    'np.transpose(np.stack(p), (1, 0, 2))': lambda p, x: np.transpose(np.stack(p), (1, 0, 2)),
-    'np.transpose(np.stack(p), (1, 2, 0))': lambda p, x: np.transpose(np.stack(p), (1, 2, 0)),
-    'np.transpose(np.stack(p), (2, 1, 0))': lambda p, x: np.transpose(np.stack(p), (2, 1, 0)),
-    'np.transpose(np.stack(p), (2, 0, 1))': lambda p, x: np.transpose(np.stack(p), (2, 0, 1)),
+    'np.transpose(np.stack(p), (0, 1, 2))': lambda p, x: jnp.transpose(jnp.stack(p), (0, 1, 2)),
+    'np.transpose(np.stack(p), (0, 2, 1))': lambda p, x: jnp.transpose(jnp.stack(p), (0, 2, 1)),
+    'np.transpose(np.stack(p), (1, 0, 2))': lambda p, x: jnp.transpose(jnp.stack(p), (1, 0, 2)),
+    'np.transpose(np.stack(p), (1, 2, 0))': lambda p, x: jnp.transpose(jnp.stack(p), (1, 2, 0)),
+    'np.transpose(np.stack(p), (2, 1, 0))': lambda p, x: jnp.transpose(jnp.stack(p), (2, 1, 0)),
+    'np.transpose(np.stack(p), (2, 0, 1))': lambda p, x: jnp.transpose(jnp.stack(p), (2, 0, 1)),
 
-    'transpose_3': lambda p, x: np.transpose(np.expand_dims(np.stack(p, 1), 0), (2, 0, 3, 1)),
-    'transpose_4': lambda p, x: np.transpose(np.expand_dims(np.stack(p, 1), 1), (0, 2, 1, 3)),
-    'transpose_5': lambda p, x: np.transpose(np.expand_dims(np.stack(p, 2), 2), (0, 1, 2, 3)),
-    'transpose_6': lambda p, x: np.transpose(np.expand_dims(np.stack(p, 2), 0), (1, 0, 3, 2)),
+    'transpose_3': lambda p, x: jnp.transpose(jnp.expand_dims(jnp.stack(p, 1), 0), (2, 0, 3, 1)),
+    'transpose_4': lambda p, x: jnp.transpose(jnp.expand_dims(jnp.stack(p, 1), 1), (0, 2, 1, 3)),
+    'transpose_5': lambda p, x: jnp.transpose(jnp.expand_dims(jnp.stack(p, 2), 2), (0, 1, 2, 3)),
+    'transpose_6': lambda p, x: jnp.transpose(jnp.expand_dims(jnp.stack(p, 2), 0), (1, 0, 3, 2)),
 
     # pytype: disable=module-attr
     'lax._reduce_window_sum_1': lambda p, x: lax._reduce_window_sum(p[0], (1, 2), (1, 1), [(0, 0), (0, 1)]),
@@ -823,9 +830,9 @@ _functions: dict[str, Callable[[PyTree, PyTree], PyTree]] = {
     'p[1] / p[0][0, -1]': lambda p, x: p[1] / p[0][1, -1],
 
     # TODO(romann): investigate full support for compiled loops.
-    'lax.map_1': lambda p, x: lax.map(lambda s: 2 * s, p[0]) * np.sum(p[1]),
-    'lax.map_2': lambda p, x: lax.map(lambda s: 2 * s + 1, p[0]) * np.sum(p[0]),
-    'lax.map_3': lambda p, x: np.sum(lax.map(lambda s: -s / 2., p[0])) * p[0],
+    'lax.map_1': lambda p, x: lax.map(lambda s: 2 * s, p[0]) * jnp.sum(p[1]),
+    'lax.map_2': lambda p, x: lax.map(lambda s: 2 * s + 1, p[0]) * jnp.sum(p[0]),
+    'lax.map_3': lambda p, x: jnp.sum(lax.map(lambda s: -s / 2., p[0])) * p[0],
     'lax.map_4': lambda p, x: lax.map(lambda s: -s / 2., p[0]) * lax.map(lambda s: 2 * s, p[0]),
     'lax.map_5': lambda p, x: (lax.map(lambda s: lax.map(lambda p: 2 * p, s) + 1., p[0]), p[1]),
     'lax.map_6': lambda p, x: [lax.map(lambda s: lax.map(lambda p: 2 * p, s) + 1., p[0]), p[0]],
@@ -987,7 +994,7 @@ class StructuredDerivativesTest(test_utils.NeuralTangentsTestCase):
           False
       ],
       dtype=[
-          np.float32,
+          jnp.float32,
           # np.float64,
           # np.float16,
       ],
@@ -1038,7 +1045,7 @@ class StructuredDerivativesTest(test_utils.NeuralTangentsTestCase):
       x1 = [x1]
       x2 = [x2]
 
-    if dtype == np.float16:
+    if dtype == jnp.float16:
       atol = 0.1
       rtol = 0.01
     else:
@@ -1105,7 +1112,7 @@ class _AutoEncoder(nn.Module):
   input_shape: Sequence[int]
 
   def setup(self):
-    input_dim = onp.prod(self.input_shape)
+    input_dim = np.prod(self.input_shape)
     self.encoder = _MLP(self.encoder_widths)
     self.decoder = _MLP(tuple(self.decoder_widths) + (input_dim,))
 
@@ -1114,12 +1121,12 @@ class _AutoEncoder(nn.Module):
 
   def encode(self, x):
     assert x.shape[1:] == self.input_shape
-    return self.encoder(np.reshape(x, (x.shape[0], -1)))
+    return self.encoder(jnp.reshape(x, (x.shape[0], -1)))
 
   def decode(self, z):
     z = self.decoder(z)
     x = nn.sigmoid(z)
-    x = np.reshape(x, (x.shape[0],) + tuple(self.input_shape))
+    x = jnp.reshape(x, (x.shape[0],) + tuple(self.input_shape))
     return x
 
 
@@ -1224,7 +1231,7 @@ class _ResNet(nn.Module):
   block_cls: _ModuleDef
   num_classes: int
   num_filters: int = 4
-  dtype: Any = np.float32
+  dtype: Any = jnp.float32
   act: Callable = nn.relu
   conv: _ModuleDef = nn.Conv
 
@@ -1251,9 +1258,9 @@ class _ResNet(nn.Module):
                            conv=conv,
                            norm=norm,
                            act=self.act)(x)
-    x = np.mean(x, axis=(1, 2))
+    x = jnp.mean(x, axis=(1, 2))
     x = nn.Dense(self.num_classes, dtype=self.dtype)(x)
-    x = np.asarray(x, self.dtype)
+    x = jnp.asarray(x, self.dtype)
     return x
 
 
@@ -1262,7 +1269,7 @@ _ResNet18 = partial(_ResNet, stage_sizes=[1, 1, 1, 1],
 
 
 def _reparameterize(rng, mean, logvar):
-  std = np.exp(0.5 * logvar)
+  std = jnp.exp(0.5 * logvar)
   eps = random.normal(rng, logvar.shape)
   return mean + eps * std
 
@@ -1288,9 +1295,9 @@ class _MixerBlock(nn.Module):
   @nn.compact
   def __call__(self, x):
     y = nn.LayerNorm()(x)
-    y = np.swapaxes(y, 1, 2)
+    y = jnp.swapaxes(y, 1, 2)
     y = _MlpBlock(self.tokens_mlp_dim, name='token_mixing')(y)
-    y = np.swapaxes(y, 1, 2)
+    y = jnp.swapaxes(y, 1, 2)
     x = x + y
     y = nn.LayerNorm()(x)
     return x + _MlpBlock(self.channels_mlp_dim, name='channel_mixing')(y)
@@ -1315,7 +1322,7 @@ class _MlpMixer(nn.Module):
     for _ in range(self.num_blocks):
       x = _MixerBlock(self.tokens_mlp_dim, self.channels_mlp_dim)(x)
     x = nn.LayerNorm(name='pre_head_layer_norm')(x)
-    x = np.mean(x, axis=1)
+    x = jnp.mean(x, axis=1)
     if self.num_classes:
       x = nn.Dense(self.num_classes, kernel_init=nn.initializers.zeros,
                    name='head')(x)
@@ -1361,7 +1368,7 @@ def _get_mixer_b16_config() -> dict[str, Any]:
         False
     ],
     dtype=[
-        jax.dtypes.canonicalize_dtype(np.float64),
+        jax.dtypes.canonicalize_dtype(jnp.float64),
     ]
 )
 class FlaxOtherTest(test_utils.NeuralTangentsTestCase):
@@ -1497,7 +1504,7 @@ class FlaxOtherTest(test_utils.NeuralTangentsTestCase):
         False
     ],
     dtype=[
-        jax.dtypes.canonicalize_dtype(np.float64),
+        jax.dtypes.canonicalize_dtype(jnp.float64),
     ],
     feature_group_counts=[
         [1, 1],
@@ -1549,7 +1556,7 @@ class FlaxCnnTest(test_utils.NeuralTangentsTestCase):
         False
     ],
     dtype=[
-        jax.dtypes.canonicalize_dtype(np.float64),
+        jax.dtypes.canonicalize_dtype(jnp.float64),
     ],
     n_chan_in=[
         1,
@@ -1665,22 +1672,22 @@ class EmpiricalNtkVpTest(test_utils.NeuralTangentsTestCase):
     _, params = init_fn(k3, x1.shape)
 
     ntk_ref = nt.empirical_ntk_fn(f, (), vmap_axes=0)(x1, x2, params)
-    ntk_ref = np.moveaxis(ntk_ref, 1, 2)
+    ntk_ref = jnp.moveaxis(ntk_ref, 1, 2)
 
     # Compute an NTK via NTK-vps and compare to the reference
     ntk_vp_fn = nt.empirical_ntk_vp_fn(f, x1, x2, params)
     if do_jit:
       ntk_vp_fn = jit(ntk_vp_fn)
 
-    eye = np.eye(N2 * O).reshape((N2 * O, N2, O))
+    eye = jnp.eye(N2 * O).reshape((N2 * O, N2, O))
     ntk_vps = jit(jax.vmap(ntk_vp_fn))(eye)
-    ntk_vps = np.moveaxis(ntk_vps, (0,), (2,))
+    ntk_vps = jnp.moveaxis(ntk_vps, (0,), (2,))
     ntk_vps = ntk_vps.reshape((N1, O, N2, O))
     self.assertAllClose(ntk_ref, ntk_vps)
 
     # Compute a single NTK-vp via reference NTK, and compare to the NTK-vp.
     cotangents = random.normal(k4, f(params, x1 if same_inputs else x2).shape)
-    ntk_vp_ref = np.tensordot(ntk_ref, cotangents, ((2, 3), (0, 1)))
+    ntk_vp_ref = jnp.tensordot(ntk_ref, cotangents, ((2, 3), (0, 1)))
     ntk_vp = ntk_vp_fn(cotangents)
     self.assertAllClose(ntk_vp_ref, ntk_vp)
 

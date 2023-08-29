@@ -24,7 +24,7 @@ from jax import vmap
 from jax.config import config
 from jax.example_libraries import optimizers
 from jax.flatten_util import ravel_pytree
-import jax.numpy as np
+import jax.numpy as jnp
 import jax.tree_util
 import neural_tangents as nt
 from neural_tangents import predict, stax
@@ -126,15 +126,15 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
 
   def _test_inf_time(self, predictor, fx_train_0, fx_test_0, g_td, y_train):
     # Test infinite-time prediction
-    pr_inf = predictor(np.inf, fx_train_0)
+    pr_inf = predictor(jnp.inf, fx_train_0)
     self.assertAllClose(pr_inf, y_train, check_dtypes=False)
     self.assertAllClose(pr_inf, predictor(None, fx_train_0))
-    self.assertAllClose(predictor(np.inf, fx_train_0, fx_test_0, g_td),
+    self.assertAllClose(predictor(jnp.inf, fx_train_0, fx_test_0, g_td),
                         predictor(None, fx_train_0, fx_test_0, g_td))
 
   def _test_multi_step(self, predictor, fx_train_0, fx_test_0, g_td, momentum):
     # Test multi-time prediction
-    ts = np.arange(6).reshape((2, 1, 3))
+    ts = jnp.arange(6).reshape((2, 1, 3))
 
     fx_train_single, fx_test_single = predictor(ts, fx_train_0, fx_test_0, g_td)
 
@@ -144,9 +144,9 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
                                                       g_td)
       fx_train_concat += [fx_train_concat_t]
       fx_test_concat += [fx_test_concat_t]
-    fx_train_concat = np.stack(fx_train_concat).reshape(
+    fx_train_concat = jnp.stack(fx_train_concat).reshape(
         ts.shape + fx_train_single.shape[ts.ndim:])
-    fx_test_concat = np.stack(fx_test_concat).reshape(
+    fx_test_concat = jnp.stack(fx_test_concat).reshape(
         ts.shape + fx_test_single.shape[ts.ndim:])
 
     self.assertAllClose(fx_train_concat, fx_train_single)
@@ -170,8 +170,9 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
     key, split = random.split(key)
     x_train = random.normal(split, train_shape)
     key, split = random.split(key)
-    y_train = np.array(
-        random.bernoulli(split, shape=(train_shape[0], out_logits)), np.float32)
+    y_train = jnp.array(
+        random.bernoulli(split, shape=(train_shape[0], out_logits)),
+        jnp.float32)
     key, split = random.split(key)
     x_test = random.normal(split, test_shape)
     return key, x_test, x_train, y_train
@@ -213,7 +214,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
     g_td = ntk(x_test, x_train, 'ntk')
 
     # Regress to an MSE loss.
-    loss_fn = lambda y, y_hat: 0.5 * np.mean((y - y_hat)**2)
+    loss_fn = lambda y, y_hat: 0.5 * jnp.mean((y - y_hat) ** 2)
     grad_loss = jit(grad(lambda params, x: loss_fn(f(params, x), y_train)))
 
     trace_axes = () if g_dd.ndim == 4 else (-1,)
@@ -262,8 +263,8 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
 
   @classmethod
   def _cov_empirical(cls, x):
-    return np.einsum('itjk,itlk->tjl', x, x, optimize=True) / (x.shape[0] *
-                                                               x.shape[-1])
+    return jnp.einsum('itjk,itlk->tjl', x, x, optimize=True) / (x.shape[0] *
+                                                                x.shape[-1])
 
   @test_utils.product(
       train_size=TRAIN_SIZES[:1],
@@ -289,15 +290,15 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
     reg = 1e-6
     predictor = predict.gradient_descent_mse_ensemble(kernel_fn, x_train,
                                                       y_train, diag_reg=reg)
-    ts = np.array([1., 5., 10.])
+    ts = jnp.array([1., 5., 10.])
 
     fx_test_inf, cov_test_inf = predictor(ts, x_test, 'ntk', True)
     self.assertEqual(cov_test_inf.shape[1], x_test.shape[0])
-    self.assertGreater(np.min(np.linalg.eigh(cov_test_inf)[0]), -1e-8)
+    self.assertGreater(jnp.min(jnp.linalg.eigh(cov_test_inf)[0]), -1e-8)
 
     fx_train_inf, cov_train_inf = predictor(ts, None, 'ntk', True)
     self.assertEqual(cov_train_inf.shape[1], x_train.shape[0])
-    self.assertGreater(np.min(np.linalg.eigh(cov_train_inf)[0]), -1e-8)
+    self.assertGreater(jnp.min(jnp.linalg.eigh(cov_train_inf)[0]), -1e-8)
 
     _kernel_fn = nt.empirical_kernel_fn(f)
     # TODO(romann): figure out the slow compile on Ubuntu 22.04 CPU Python 3.9
@@ -315,8 +316,8 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
     def predict_mc(count, key):
       key = random.split(key, count)
       fx_train, fx_test = vmap(predict_empirical)(key)
-      fx_train_mean = np.mean(fx_train, axis=0, keepdims=True)
-      fx_test_mean = np.mean(fx_test, axis=0, keepdims=True)
+      fx_train_mean = jnp.mean(fx_train, axis=0, keepdims=True)
+      fx_test_mean = jnp.mean(fx_test, axis=0, keepdims=True)
 
       fx_train_centered = fx_train - fx_train_mean
       fx_test_centered = fx_test - fx_test_mean
@@ -373,7 +374,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
         out = predictor(1., x, 'nngp', compute_cov=True)
         assert isinstance(out, predict.Gaussian)
 
-        out = predictor(np.array([0., 1.]), x, ('ntk',), compute_cov=True)
+        out = predictor(jnp.array([0., 1.]), x, ('ntk',), compute_cov=True)
         assert len(out) == 1 and isinstance(out[0], predict.Gaussian)
 
         out = predictor(2., x, ('ntk', 'nngp'), compute_cov=True)
@@ -416,11 +417,12 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
     for x in (None, 'x_test'):
       with self.subTest(x=x):
         x = x if x is None else x_test
-        fin = predictor(t=np.inf, x_test=x, get=get, compute_cov=True)
+        fin = predictor(t=jnp.inf, x_test=x, get=get, compute_cov=True)
         inf = predictor(t=None, x_test=x, get=get, compute_cov=True)
         self.assertAllClose(inf, fin)
         if x is None:
-          fin_x = predictor(t=np.inf, x_test=x_train, get=get, compute_cov=True)
+          fin_x = predictor(t=jnp.inf, x_test=x_train, get=get,
+                            compute_cov=True)
           inf_x = predictor(t=None, x_test=x_train, get=get, compute_cov=True)
           self.assertAllClose(inf, inf_x)
           self.assertAllClose(inf_x, fin_x)
@@ -460,9 +462,9 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
         zero = predictor(t=0.0, x_test=x, get=('NTK', 'NNGP'), compute_cov=True)
         if x is None:
           k = ker_fun(x_train, None, get='nngp')
-          ref = (np.zeros_like(y_train, k.dtype), k)
+          ref = (jnp.zeros_like(y_train, k.dtype), k)
         else:
-          ref = (np.zeros((test_shape[0], out_logits)),
+          ref = (jnp.zeros((test_shape[0], out_logits)),
                  ker_fun(x_test, None, get='nngp'))
 
         self.assertAllClose((ref,) * 2, zero, check_dtypes=False)
@@ -508,7 +510,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
                                                       y_train,
                                                       diag_reg=reg)
 
-    ts = np.logspace(-2, 8, 10).reshape((5, 2))
+    ts = jnp.logspace(-2, 8, 10).reshape((5, 2))
 
     for t in (None, 'ts'):
       for x in (None, 'x_test'):
@@ -520,9 +522,9 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
 
           # Test time broadcasting
           if t is not None:
-            ntk_ind = np.array([predictor(t=t, get='ntk', x_test=x)
-                                for t in t.ravel()]).reshape(
-                                    t.shape + ntk.shape[2:])
+            ntk_ind = jnp.array([predictor(t=t, get='ntk', x_test=x)
+                                 for t in t.ravel()]).reshape(
+                                     t.shape + ntk.shape[2:])
             self.assertAllClose(ntk_ind, ntk)
 
           always_ntk = self._always_ntk(ker_fun)
@@ -562,7 +564,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
                                         x_test=x,
                                         compute_cov=True).covariance
           if t is not None:
-            nngp_ntk_cov_ind = np.array(
+            nngp_ntk_cov_ind = jnp.array(
                 [predictor_nngp(t=t,
                                 get='ntk',
                                 x_test=x,
@@ -595,7 +597,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
                                                    train_shape)
     _, _, ker_fun = _build_network(train_shape[1:], network, out_logits)
 
-    ts = np.logspace(-3, 3, 10)
+    ts = jnp.logspace(-3, 3, 10)
     predict_fn_mse_ens = predict.gradient_descent_mse_ensemble(
         ker_fun, x_train, y_train)
 
@@ -608,8 +610,8 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
                                      x_test=x if x is None else x_test,
                                      compute_cov=True).covariance
 
-            self.assertAllClose(cov, np.moveaxis(cov, -1, -2))
-            self.assertGreater(np.min(np.linalg.eigh(cov)[0]), -1e-4)
+            self.assertAllClose(cov, jnp.moveaxis(cov, -1, -2))
+            self.assertGreater(jnp.min(jnp.linalg.eigh(cov)[0]), -1e-4)
 
   @test_utils.product(
       train_size=TRAIN_SIZES[:1],
@@ -650,7 +652,9 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
     train = (x_train, y_train)
     ensemble_key = random.split(key, ensemble_size)
 
-    loss = jit(lambda params, x, y: 0.5 * np.mean((apply_fn(params, x) - y)**2))
+    loss = jit(
+        lambda params, x, y: 0.5 * jnp.mean((apply_fn(params, x) - y) ** 2)
+    )
     grad_loss = jit(lambda state, x, y: grad(loss)(get_params(state), x, y))
 
     def train_network(key):
@@ -670,9 +674,9 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
         x_fin = x_train if x is None else x_test
         ensemble_fx = vmap(apply_fn, (0, None))(params, x_fin)
 
-        mean_emp = np.mean(ensemble_fx, axis=0, keepdims=True)
+        mean_emp = jnp.mean(ensemble_fx, axis=0, keepdims=True)
         mean_subtracted = ensemble_fx - mean_emp
-        cov_emp = np.einsum(
+        cov_emp = jnp.einsum(
             'ijk,ilk->jl', mean_subtracted, mean_subtracted, optimize=True) / (
                 mean_subtracted.shape[0] * mean_subtracted.shape[-1])
 
@@ -691,7 +695,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
     predictor = predict.gradient_descent_mse_ensemble(kernel_fn, x, y,
                                                       diagonal_spatial=False)
 
-    for t in [None, np.array([0., 1., 10.])]:
+    for t in [None, jnp.array([0., 1., 10.])]:
       with self.subTest(t=t):
         y_none = predictor(t, None, None, compute_cov=True)
         y_x = predictor(t, x, None, compute_cov=True)
@@ -742,7 +746,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
                 nngp_tt = None
 
               out_ens = gd_ensemble(None, x_test, get, compute_cov)
-              out_ens_inf = gd_ensemble(np.inf, x_test, get, compute_cov)
+              out_ens_inf = gd_ensemble(jnp.inf, x_test, get, compute_cov)
               tol = 0.35 if jax.default_backend() == 'tpu' else 0.08
               self.assertAllClose(out_ens_inf, out_ens, rtol=tol, atol=tol)
 
@@ -844,7 +848,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
 
               x = x if x is None else x_test
               predict_none = predictor(None, x, get, compute_cov=True)
-              predict_inf = predictor(np.inf, x, get, compute_cov=True)
+              predict_inf = predictor(jnp.inf, x, get, compute_cov=True)
               self.assertAllClose(predict_none, predict_inf)
 
               if x is not None:
@@ -884,7 +888,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
                        (0, 0, -3),
                        (0, 1, 2, 3),
                        (0, 1, -1, 2)]:
-      for ts in [None, np.arange(6).reshape((2, 3))]:
+      for ts in [None, jnp.arange(6).reshape((2, 3))]:
         for x in [None, 'x_test']:
           with self.subTest(trace_axes=trace_axes, ts=ts, x=x):
             t_shape = ts.shape if ts is not None else ()
@@ -900,7 +904,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
             if x is not None:
               ntk_test_train = kernel_fn(x, x_train, 'ntk', params)
 
-            loss = lambda x, y: 0.5 * np.mean(x - y)**2
+            loss = lambda x, y: 0.5 * jnp.mean(x - y) ** 2
             predict_fn_mse = predict.gradient_descent_mse(ntk_train_train,
                                                           y_train,
                                                           trace_axes=trace_axes)
@@ -966,11 +970,12 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
     x_train = random.normal(split, train_shape)
 
     key, split = random.split(key)
-    y_train = np.array(
-        random.bernoulli(split, shape=(train_shape[0], out_logits)), np.float32)
+    y_train = jnp.array(
+        random.bernoulli(split, shape=(train_shape[0], out_logits)),
+        jnp.float32)
 
     # Regress to an MSE loss.
-    loss = lambda params, x: 0.5 * np.mean((f(params, x) - y_train) ** 2)
+    loss = lambda params, x: 0.5 * jnp.mean((f(params, x) - y_train) ** 2)
     grad_loss = jit(grad(loss))
 
     def get_loss(opt_state):
@@ -1154,9 +1159,9 @@ class PredictKwargsTest(test_utils.NeuralTangentsTestCase):
 class IsOnCpuTest(test_utils.NeuralTangentsTestCase):
 
   def test_is_on_cpu(self):
-    dtypes = [np.float16, np.float32]
-    float64 = jax.dtypes.canonicalize_dtype(np.float64)
-    if float64 != np.float32:
+    dtypes = [jnp.float16, jnp.float32]
+    float64 = jax.dtypes.canonicalize_dtype(jnp.float64)
+    if float64 != jnp.float32:
       dtypes += [float64]
 
     for dtype in dtypes:

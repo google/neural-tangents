@@ -25,11 +25,11 @@ import warnings
 
 import jax
 from jax import custom_jvp, grad, vmap
-from jax import numpy as np
+from jax import numpy as jnp
 from jax.scipy.special import erf
-import numpy as onp
+import numpy as np
 from .requirements import Diagonal, get_diagonal, get_diagonal_outer_prods, layer, requires, supports_masking
-import scipy as osp
+import scipy as sp
 from ..utils import utils
 from ..utils.kernel import Kernel
 from ..utils.typing import InternalLayer, LayerKernelFn
@@ -40,7 +40,8 @@ from ..utils.typing import InternalLayer, LayerKernelFn
 def Erf(
     a: float = 1.,
     b: float = 1.,
-    c: float = 0.) -> InternalLayer:
+    c: float = 0.
+) -> InternalLayer:
   """Affine transform of `Erf` nonlinearity, i.e. `a * Erf(b * x) + c`.
 
   Args:
@@ -68,15 +69,15 @@ def Erf(
                                                       k.diagonal_spatial,
                                                       op.mul)
 
-    factor = 2 / np.pi
+    factor = 2 / jnp.pi
 
     def nngp_ntk_fn(
-        nngp: np.ndarray,
-        prod: np.ndarray,
-        ntk: Optional[np.ndarray] = None
-    ) -> tuple[np.ndarray, Optional[np.ndarray]]:
+        nngp: jnp.ndarray,
+        prod: jnp.ndarray,
+        ntk: Optional[jnp.ndarray] = None
+    ) -> tuple[jnp.ndarray, Optional[jnp.ndarray]]:
       square_root = _sqrt(prod - 4 * nngp**2)
-      nngp = factor * np.arctan2(2 * nngp, square_root)
+      nngp = factor * jnp.arctan2(2 * nngp, square_root)
 
       if ntk is not None:
         dot_sigma = 2 * factor / square_root
@@ -84,8 +85,8 @@ def Erf(
 
       return nngp, ntk
 
-    def nngp_fn_diag(nngp: np.ndarray) -> np.ndarray:
-      return factor * np.arctan2(nngp, np.sqrt(nngp + 1. / 4))
+    def nngp_fn_diag(nngp: jnp.ndarray) -> jnp.ndarray:
+      return factor * jnp.arctan2(nngp, jnp.sqrt(nngp + 1. / 4))
 
     nngp, ntk = nngp_ntk_fn(nngp, prod12, ntk)
 
@@ -128,7 +129,7 @@ def Gabor() -> InternalLayer:
   """
 
   def fn(x):
-    return np.exp(-x**2) * np.sin(x)
+    return jnp.exp(-x ** 2) * jnp.sin(x)
 
   def kernel_fn(k: Kernel) -> Kernel:
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -140,16 +141,16 @@ def Gabor() -> InternalLayer:
         cov1, cov2, k.diagonal_batch, k.diagonal_spatial, op.add)
 
     def nngp_ntk_fn(
-        nngp: np.ndarray,
-        prod: np.ndarray,
-        sum_: np.ndarray,
-        ntk: Optional[np.ndarray] = None
-    ) -> tuple[np.ndarray, Optional[np.ndarray]]:
+        nngp: jnp.ndarray,
+        prod: jnp.ndarray,
+        sum_: jnp.ndarray,
+        ntk: Optional[jnp.ndarray] = None
+    ) -> tuple[jnp.ndarray, Optional[jnp.ndarray]]:
       diff = 4 * (prod - nngp**2)
       denom = 2 * sum_ + diff + 1
       num = sum_ + diff + 2 * nngp
-      exp_left = np.exp(-num / (2 * denom))
-      exp_right = np.exp(2 * nngp / denom)
+      exp_left = jnp.exp(-num / (2 * denom))
+      exp_right = jnp.exp(2 * nngp / denom)
 
       if ntk is not None:
         shared_term = 1 + 2 * sum_ + 4 * (nngp**2 + prod)
@@ -162,9 +163,9 @@ def Gabor() -> InternalLayer:
       nngp = exp_left * (exp_right - 1) / (2 * _sqrt(denom))
       return nngp, ntk
 
-    def nngp_fn_diag(nngp: np.ndarray) -> np.ndarray:
+    def nngp_fn_diag(nngp: jnp.ndarray) -> jnp.ndarray:
       denom = 1 + 4 * nngp
-      return (1 - np.exp(-2 * nngp / denom)) / (2 * _sqrt(denom))
+      return (1 - jnp.exp(-2 * nngp / denom)) / (2 * _sqrt(denom))
 
     nngp, ntk = nngp_ntk_fn(nngp, prod12, sum12, ntk)
 
@@ -184,8 +185,7 @@ def Gabor() -> InternalLayer:
 
 @layer
 @supports_masking(remask_kernel=False)
-def Gelu(
-    approximate: bool = False) -> InternalLayer:
+def Gelu(approximate: bool = False) -> InternalLayer:
   """Gelu function.
 
   Args:
@@ -217,32 +217,32 @@ def Gelu(
         cov1, cov2, k.diagonal_batch, k.diagonal_spatial, op.mul)
 
     def nngp_ntk_fn(
-        nngp: np.ndarray,
-        prod: np.ndarray,
-        prod_plus_1: np.ndarray,
-        ntk: Optional[np.ndarray] = None
-    ) -> tuple[np.ndarray, Optional[np.ndarray]]:
+        nngp: jnp.ndarray,
+        prod: jnp.ndarray,
+        prod_plus_1: jnp.ndarray,
+        ntk: Optional[jnp.ndarray] = None
+    ) -> tuple[jnp.ndarray, Optional[jnp.ndarray]]:
       delta_squared = prod_plus_1 - nngp**2
       delta = _sqrt(delta_squared)
-      angles = np.arctan2(nngp, delta)
+      angles = jnp.arctan2(nngp, delta)
       new_nngp = (nngp**2 + prod * delta_squared) / (prod_plus_1 * delta)
       new_nngp += nngp * angles
-      new_nngp /= 2 * np.pi
+      new_nngp /= 2 * jnp.pi
       new_nngp += 0.25 * nngp
 
       if ntk is not None:
-        second_term = 0.25 + angles / (2 * np.pi)
+        second_term = 0.25 + angles / (2 * jnp.pi)
         first_term = 1 / delta_squared + (1 - prod) / prod_plus_1 + 1
-        first_term *= nngp / delta / (2. * np.pi)
+        first_term *= nngp / delta / (2. * jnp.pi)
         dot_sigma = first_term + second_term
         ntk *= dot_sigma
       return new_nngp, ntk
 
-    def nngp_fn_diag(nngp: np.ndarray) -> np.ndarray:
-      square_root = np.sqrt(1. + 2. * nngp)
-      new_nngp = nngp / ((nngp + 1.) * np.sqrt(1. + 2. * nngp))
-      new_nngp += np.arctan2(nngp, square_root) / 2
-      new_nngp /= np.pi
+    def nngp_fn_diag(nngp: jnp.ndarray) -> jnp.ndarray:
+      square_root = jnp.sqrt(1. + 2. * nngp)
+      new_nngp = nngp / ((nngp + 1.) * jnp.sqrt(1. + 2. * nngp))
+      new_nngp += jnp.arctan2(nngp, square_root) / 2
+      new_nngp /= jnp.pi
       new_nngp += 0.25
       new_nngp *= nngp
       return new_nngp
@@ -268,7 +268,8 @@ def Gelu(
 def Sin(
     a: float = 1.,
     b: float = 1.,
-    c: float = 0.) -> InternalLayer:
+    c: float = 0.
+) -> InternalLayer:
   """Affine transform of `Sin` nonlinearity, i.e. `a sin(b*x + c)`.
 
   Args:
@@ -279,7 +280,7 @@ def Sin(
     `(init_fn, apply_fn, kernel_fn)`.
   """
   def fn(x):
-    return a * np.sin(b * x + c)
+    return a * jnp.sin(b * x + c)
 
   def kernel_fn(k: Kernel) -> Kernel:
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -292,15 +293,15 @@ def Sin(
     half_a_square = a**2 / 2.
 
     def nngp_ntk_fn(nngp, sum_, ntk=None):
-      s1 = np.exp(b ** 2 * (-0.5 * sum_ + nngp))
-      s2 = np.exp(b ** 2 * (-0.5 * sum_ - nngp)) * np.cos(2 * c)
+      s1 = jnp.exp(b ** 2 * (-0.5 * sum_ + nngp))
+      s2 = jnp.exp(b ** 2 * (-0.5 * sum_ - nngp)) * jnp.cos(2 * c)
       nngp = half_a_square * (s1 - s2)
       if ntk is not None:
         ntk *= half_a_square * b**2 * (s1 + s2)
       return nngp, ntk
 
     def nngp_fn_diag(nngp):
-      return half_a_square * (1. - np.exp(-2 * b**2 * nngp) * np.cos(2 * c))
+      return half_a_square * (1. - jnp.exp(-2 * b ** 2 * nngp) * jnp.cos(2 * c))
 
     nngp, ntk = nngp_ntk_fn(nngp, sum12, ntk)
 
@@ -321,7 +322,8 @@ def Sin(
 def Cos(
     a: float = 1.,
     b: float = 1.,
-    c: float = 0.) -> InternalLayer:
+    c: float = 0.
+) -> InternalLayer:
   """Affine transform of `Cos` nonlinearity, i.e. `a cos(b*x + c)`.
 
   Args:
@@ -331,13 +333,12 @@ def Cos(
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
-  return Sin(a=a, b=b, c=c + np.pi / 2)
+  return Sin(a=a, b=b, c=c + jnp.pi / 2)
 
 
 @layer
 @supports_masking(remask_kernel=True)
-def Rbf(
-    gamma: float = 1.0) -> InternalLayer:
+def Rbf(gamma: float = 1.0) -> InternalLayer:
   """Dual activation function for normalized RBF or squared exponential kernel.
 
   Dual activation function is `f(x) = sqrt(2)*sin(sqrt(2*gamma) x + pi/4)`.
@@ -353,7 +354,7 @@ def Rbf(
     `(init_fn, apply_fn, kernel_fn)`.
   """
   def fn(x):
-    return np.sqrt(2) * np.sin(np.sqrt(2 * gamma) * x + np.pi/4)
+    return jnp.sqrt(2) * jnp.sin(jnp.sqrt(2 * gamma) * x + jnp.pi / 4)
 
   def kernel_fn(k: Kernel) -> Kernel:
     """Compute new kernels after an `Rbf` layer."""
@@ -366,13 +367,13 @@ def Rbf(
                                                    op.add)
 
     def nngp_ntk_fn(nngp, sum_, ntk):
-      nngp = np.exp(gamma * (-sum_ + 2 * nngp))
+      nngp = jnp.exp(gamma * (-sum_ + 2 * nngp))
       if ntk is not None:
         ntk *= 2 * gamma * nngp
       return nngp, ntk
 
     def nngp_fn_diag(nngp):
-      return np.ones_like(nngp)
+      return jnp.ones_like(nngp)
 
     nngp, ntk = nngp_ntk_fn(nngp, sum12, ntk)
 
@@ -395,7 +396,8 @@ def Rbf(
 def ABRelu(
     a: float,
     b: float,
-    do_stabilize: bool = False) -> InternalLayer:
+    do_stabilize: bool = False
+) -> InternalLayer:
   """ABReLU nonlinearity, i.e. `a * min(x, 0) + b * max(x, 0)`.
 
   Args:
@@ -407,7 +409,7 @@ def ABRelu(
     `(init_fn, apply_fn, kernel_fn)`.
   """
   def fn(x):
-    return a * np.minimum(x, 0) + b * np.maximum(x, 0)
+    return a * jnp.minimum(x, 0) + b * jnp.maximum(x, 0)
 
   def kernel_fn(k: Kernel) -> Kernel:
     """Compute new kernels after an `ABRelu` layer.
@@ -418,7 +420,7 @@ def ABRelu(
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
     if do_stabilize:
-      factor = np.maximum(np.max(np.abs(nngp)), 1e-12)
+      factor = jnp.maximum(jnp.max(jnp.abs(nngp)), 1e-12)
       nngp /= factor
       cov1 /= factor
       if cov2 is not None:
@@ -432,9 +434,9 @@ def ABRelu(
 
     def nngp_ntk_fn(nngp, prod, ntk=None):
       square_root = _sqrt(prod - nngp**2)
-      angles = _arctan2(square_root, nngp, fill_zero=np.pi / 2)
+      angles = _arctan2(square_root, nngp, fill_zero=jnp.pi / 2)
 
-      factor = (a - b)**2 / (2 * np.pi)
+      factor = (a - b)**2 / (2 * jnp.pi)
       dot_sigma = (a**2 + b**2) / 2 - factor * angles
       nngp = factor * square_root + dot_sigma * nngp
 
@@ -468,8 +470,7 @@ def ABRelu(
   return _elementwise(fn, f'ABReLU({a}, {b})', kernel_fn)
 
 
-def Relu(
-    do_stabilize: bool = False) -> InternalLayer:
+def Relu(do_stabilize: bool = False) -> InternalLayer:
   """ReLU nonlinearity.
 
   Args:
@@ -481,9 +482,7 @@ def Relu(
   return ABRelu(0, 1, do_stabilize)
 
 
-def LeakyRelu(
-    alpha: float,
-    do_stabilize: bool = False) -> InternalLayer:
+def LeakyRelu(alpha: float, do_stabilize: bool = False) -> InternalLayer:
   """Leaky ReLU nonlinearity, i.e. `alpha * min(x, 0) + max(x, 0)`.
 
   Args:
@@ -496,8 +495,7 @@ def LeakyRelu(
   return ABRelu(alpha, 1, do_stabilize)
 
 
-def Abs(
-    do_stabilize: bool = False) -> InternalLayer:
+def Abs(do_stabilize: bool = False) -> InternalLayer:
   """Absolute value nonlinearity.
 
   Args:
@@ -518,21 +516,21 @@ def Sign() -> InternalLayer:
     `(init_fn, apply_fn, kernel_fn)`.
   """
   def fn(x):
-    return np.sign(x)
+    return jnp.sign(x)
 
   def kernel_fn(k: Kernel) -> Kernel:
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
     if ntk is not None:
-      ntk = np.zeros_like(ntk)
+      ntk = jnp.zeros_like(ntk)
     _, prod12, _ = get_diagonal_outer_prods(cov1,
                                             cov2,
                                             k.diagonal_batch,
                                             k.diagonal_spatial,
                                             op.mul)
-    angles = _arctan2(_sqrt(prod12 - nngp**2), nngp, fill_zero=np.pi / 2)
-    nngp = 1 -  angles * 2 / np.pi
-    cov1 = np.where(cov1 == 0., 0., 1.)
-    cov2 = cov2 if cov2 is None else np.where(cov2 == 0, 0., 1.)
+    angles = _arctan2(_sqrt(prod12 - nngp**2), nngp, fill_zero=jnp.pi / 2)
+    nngp = 1 - angles * 2 / jnp.pi
+    cov1 = jnp.where(cov1 == 0., 0., 1.)
+    cov2 = cov2 if cov2 is None else jnp.where(cov2 == 0, 0., 1.)
     k = k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
     return k
 
@@ -542,14 +540,14 @@ def Sign() -> InternalLayer:
 @layer
 @supports_masking(remask_kernel=True)
 def Exp(a: float = 1, b: float = 1) -> InternalLayer:
-  """Elementwise natural exponent function `a * np.exp(b * x)`.
+  """Elementwise natural exponent function `a * jnp.exp(b * x)`.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
 
   def fn(x):
-    return a * np.exp(b * x)
+    return a * jnp.exp(b * x)
 
   def kernel_fn(k: Kernel) -> Kernel:
     """Compute new kernels after an `Exp` layer."""
@@ -559,13 +557,13 @@ def Exp(a: float = 1, b: float = 1) -> InternalLayer:
         cov1, cov2, k.diagonal_batch, k.diagonal_spatial, op.add)
 
     def nngp_ntk_fn(nngp, sum_, ntk):
-      nngp = np.exp(b**2 * (sum_ / 2 + nngp))
+      nngp = jnp.exp(b ** 2 * (sum_ / 2 + nngp))
       if ntk is not None:
         ntk *= b**2 * nngp
       return nngp, ntk
 
     def nngp_fn_diag(nngp):
-      return np.exp(2 * b**2 * nngp)
+      return jnp.exp(2 * b ** 2 * nngp)
 
     nngp, ntk = nngp_ntk_fn(nngp, sum12, ntk)
 
@@ -586,13 +584,13 @@ def Exp(a: float = 1, b: float = 1) -> InternalLayer:
 @layer
 @supports_masking(remask_kernel=True)
 def Gaussian(a: float = 1, b: float = -1) -> InternalLayer:
-  """Elementwise Gaussian function `a * np.exp(b * x**2)`.
+  """Elementwise Gaussian function `a * jnp.exp(b * x**2)`.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
   def fn(x):
-    return a * np.exp(b * x**2)
+    return a * jnp.exp(b * x ** 2)
 
   def kernel_fn(k: Kernel) -> Kernel:
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -609,10 +607,10 @@ def Gaussian(a: float = 1, b: float = -1) -> InternalLayer:
     factor = 4 * b**2
 
     def nngp_ntk_fn(
-        nngp: np.ndarray,
-        prod: np.ndarray,
-        ntk: Optional[np.ndarray] = None
-    ) -> tuple[np.ndarray, Optional[np.ndarray]]:
+        nngp: jnp.ndarray,
+        prod: jnp.ndarray,
+        ntk: Optional[jnp.ndarray] = None
+    ) -> tuple[jnp.ndarray, Optional[jnp.ndarray]]:
       det = _sqrt((prod - factor * nngp**2))
 
       if ntk is not None:
@@ -621,7 +619,7 @@ def Gaussian(a: float = 1, b: float = -1) -> InternalLayer:
       nngp = 1 / det
       return nngp, ntk
 
-    def nngp_fn_diag(nngp: np.ndarray) -> np.ndarray:
+    def nngp_fn_diag(nngp: jnp.ndarray) -> jnp.ndarray:
       return 1 / _sqrt(1 - 4 * b * nngp)
 
     nngp, ntk = nngp_ntk_fn(nngp, prod12, ntk)
@@ -645,7 +643,8 @@ def Gaussian(a: float = 1, b: float = -1) -> InternalLayer:
 def ExpNormalized(
     gamma: float = 1,
     shift: float = -1,
-    do_clip: bool = False) -> InternalLayer:
+    do_clip: bool = False
+) -> InternalLayer:
   """Simulates the "Gaussian normalized kernel".
 
   See page 6 in
@@ -679,8 +678,8 @@ def ExpNormalized(
       if cov is not None:
         cov /= prod
         if do_clip:
-          cov = np.clip(cov, -1, 1)
-        cov = np.exp(gamma * (cov + shift))
+          cov = jnp.clip(cov, -1, 1)
+        cov = jnp.exp(gamma * (cov + shift))
       return cov
 
     exp12 = exp(nngp, prod12)
@@ -700,7 +699,7 @@ def Hermite(degree: int) -> InternalLayer:
   """Hermite polynomials.
 
   Inputs to this layer are assumed to have unit norm, i.e.
-  `np.std(x, axis=channel_axis) == 1`. The Hermite polynomials are normalized
+  `jnp.std(x, axis=channel_axis) == 1`. The Hermite polynomials are normalized
   so that the L2 norm w.r.t. standard Gaussian is 1.
 
   Args:
@@ -712,22 +711,22 @@ def Hermite(degree: int) -> InternalLayer:
   if degree < 0:
     raise NotImplementedError('`degree` must be a non-negative integer.')
 
-  p = onp.polynomial.hermite_e.herme2poly([0] * degree + [1])[::-1]
+  p = np.polynomial.hermite_e.herme2poly([0] * degree + [1])[::-1]
   coeff = functools.reduce(op.mul, range(1, degree + 1), 1)**0.5
 
   def fn(x):
-    return np.polyval(p, x) / coeff
+    return jnp.polyval(p, x) / coeff
 
   def kernel_fn(k: Kernel) -> Kernel:
     warnings.warn(
         'Inputs to this layer are assumed to have unit norm across '
-        ' channels/features, i.e. np.std(x, axis=channel_axis) == 1.')
+        ' channels/features, i.e. jnp.std(x, axis=channel_axis) == 1.')
 
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
     if ntk is not None:
       if degree == 0:
-        ntk = np.zeros_like(ntk)
+        ntk = jnp.zeros_like(ntk)
       else:
         ntk = degree * nngp**(degree - 1) * ntk
 
@@ -769,17 +768,17 @@ def Monomial(degree: int) -> InternalLayer:
                                                       op.mul)
 
     def nngp_ntk_fn(
-        nngp: np.ndarray,
-        prod: np.ndarray,
-        ntk: Optional[np.ndarray] = None
-    ) -> tuple[np.ndarray, Optional[np.ndarray]]:
+        nngp: jnp.ndarray,
+        prod: jnp.ndarray,
+        ntk: Optional[jnp.ndarray] = None
+    ) -> tuple[jnp.ndarray, Optional[jnp.ndarray]]:
 
-      def nngp_fn(nngp: np.ndarray, degree: int) -> np.ndarray:
+      def nngp_fn(nngp: jnp.ndarray, degree: int) -> jnp.ndarray:
         if degree == -1:
-          nngp = np.zeros_like(nngp)
+          nngp = jnp.zeros_like(nngp)
 
         elif degree == 0:
-          nngp = np.ones_like(nngp)
+          nngp = jnp.ones_like(nngp)
 
         elif degree == 1:
           pass
@@ -808,7 +807,7 @@ def Monomial(degree: int) -> InternalLayer:
       nngp = nngp_fn(nngp, degree)
       return nngp, ntk
 
-    def nngp_fn_diag(nngp: np.ndarray) -> np.ndarray:
+    def nngp_fn_diag(nngp: jnp.ndarray) -> jnp.ndarray:
       return _double_factorial(2 * degree - 1) * nngp**degree
 
     nngp, ntk = nngp_ntk_fn(nngp, prod12, ntk)
@@ -854,17 +853,17 @@ def RectifiedMonomial(degree: int) -> InternalLayer:
                                                       k.diagonal_spatial,
                                                       op.mul)
 
-    def j(nngp: np.ndarray, sqrt_prod: np.ndarray) -> np.ndarray:
-      theta = np.arccos(nngp / sqrt_prod)
+    def j(nngp: jnp.ndarray, sqrt_prod: jnp.ndarray) -> jnp.ndarray:
+      theta = jnp.arccos(nngp / sqrt_prod)
 
-      def f0(theta: np.ndarray) -> np.ndarray:
-        return (np.pi - theta) / np.sin(theta)
+      def f0(theta: jnp.ndarray) -> jnp.ndarray:
+        return (jnp.pi - theta) / jnp.sin(theta)
 
-      def diff(f: Callable[[np.ndarray], np.ndarray]
-               ) -> Callable[[np.ndarray], np.ndarray]:
+      def diff(f: Callable[[jnp.ndarray], jnp.ndarray]
+               ) -> Callable[[jnp.ndarray], jnp.ndarray]:
 
-        def df(theta: np.ndarray) -> np.ndarray:
-          return np.vectorize(grad(f))(theta) / np.sin(theta)
+        def df(theta: jnp.ndarray) -> jnp.ndarray:
+          return jnp.vectorize(grad(f))(theta) / jnp.sin(theta)
 
         return df
 
@@ -872,28 +871,28 @@ def RectifiedMonomial(degree: int) -> InternalLayer:
       for _ in range(degree):
         f = diff(f)
 
-      return (-1)**degree * (np.sin(theta))**(2 * degree + 1) * f(theta)
+      return (-1)**degree * (jnp.sin(theta))**(2 * degree + 1) * f(theta)
 
     def nngp_ntk_fn(
-        nngp: np.ndarray,
-        prod: np.ndarray,
-        ntk: Optional[np.ndarray] = None
-    ) -> tuple[np.ndarray, Optional[np.ndarray]]:
+        nngp: jnp.ndarray,
+        prod: jnp.ndarray,
+        ntk: Optional[jnp.ndarray] = None
+    ) -> tuple[jnp.ndarray, Optional[jnp.ndarray]]:
 
       sqrt_prod = _sqrt(prod)
-      coeff = sqrt_prod**degree / (2 * np.pi)
+      coeff = sqrt_prod**degree / (2 * jnp.pi)
 
       if ntk is not None:
         if degree == 0:
-          ntk = np.zeros_like(ntk)
+          ntk = jnp.zeros_like(ntk)
         else:
-          j_dot = np.vectorize(grad(j))(nngp, sqrt_prod)
+          j_dot = jnp.vectorize(grad(j))(nngp, sqrt_prod)
           ntk *= coeff * j_dot
 
       nngp = coeff * j(nngp, sqrt_prod)
       return nngp, ntk
 
-    def nngp_fn_diag(nngp: np.ndarray) -> np.ndarray:
+    def nngp_fn_diag(nngp: jnp.ndarray) -> jnp.ndarray:
       return _double_factorial(2 * degree - 1) * nngp**degree / 2
 
     nngp, ntk = nngp_ntk_fn(nngp, prod12, ntk)
@@ -926,17 +925,17 @@ def Polynomial(coef: Sequence[float]) -> InternalLayer:
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
   """
-  coef = onp.array(coef)
+  coef = np.array(coef)
 
   def fn(x):
-    return np.polyval(coef[::-1], x)
+    return jnp.polyval(coef[::-1], x)
 
   degree = len(coef)
 
   def kernel_fn(k: Kernel) -> Kernel:
     cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
 
-    def r(n: Optional[np.ndarray], l: int) -> Optional[np.ndarray]:
+    def r(n: Optional[jnp.ndarray], l: int) -> Optional[jnp.ndarray]:
       if n is None:
         return None
 
@@ -945,9 +944,9 @@ def Polynomial(coef: Sequence[float]) -> InternalLayer:
               2**i * _factorial(i) * _factorial(l)**0.5)
           for i in range(0, (degree - 1 - l) // 2 + 1)
       }
-      coef_l = onp.array(
+      coef_l = np.array(
           [coef_dict[i] if i in coef_dict else 0 for i in range(degree)])
-      return np.polyval(coef_l[::-1], n**0.5)
+      return jnp.polyval(coef_l[::-1], n ** 0.5)
 
     if degree == 0:
       rs11, rs12, rs22 = [], [], []
@@ -968,28 +967,28 @@ def Polynomial(coef: Sequence[float]) -> InternalLayer:
                                                       op.mul)
 
     def nngp_ntk_fn(
-        nngp: np.ndarray,
-        prod: np.ndarray,
-        r_prods: Sequence[np.ndarray],
-        ntk: Optional[np.ndarray] = None
-    ) -> tuple[np.ndarray, Optional[np.ndarray]]:
+        nngp: jnp.ndarray,
+        prod: jnp.ndarray,
+        r_prods: Sequence[jnp.ndarray],
+        ntk: Optional[jnp.ndarray] = None
+    ) -> tuple[jnp.ndarray, Optional[jnp.ndarray]]:
       ratio = nngp / _sqrt(prod)
 
       if ntk is not None:
-        t_dot = np.zeros_like(ntk)
+        t_dot = jnp.zeros_like(ntk)
         for l in range(1, degree):
           t_dot += l * r_prods[l] * ratio**(l - 1)
         ntk *= t_dot / _sqrt(prod)
 
-      nngp = np.zeros_like(nngp)
+      nngp = jnp.zeros_like(nngp)
       for l in range(degree):
         nngp += r_prods[l] * ratio ** l
 
       return nngp, ntk
 
-    def nngp_fn_diag(nngp: np.ndarray,
-                     r_prods: Sequence[np.ndarray]) -> np.ndarray:
-      out = np.zeros_like(nngp)
+    def nngp_fn_diag(nngp: jnp.ndarray,
+                     r_prods: Sequence[jnp.ndarray]) -> jnp.ndarray:
+      out = jnp.zeros_like(nngp)
       for l in range(degree):
         out += r_prods[l]
       return out
@@ -1043,7 +1042,7 @@ def Elementwise(
     >>> #
     >>> def nngp_fn(cov12: float, var1: float, var2: float) -> float:
     >>>   prod = (1 + 2 * var1) * (1 + 2 * var2)
-    >>>   return np.arcsin(2 * cov12 / np.sqrt(prod)) * 2 / np.pi
+    >>>   return jnp.arcsin(2 * cov12 / np.sqrt(prod)) * 2 / np.pi
     >>> #
     >>> # Use autodiff and vectorization to construct the layer:
     >>> _, _, kernel_fn_auto = stax.Elementwise(fn, nngp_fn)
@@ -1099,7 +1098,7 @@ def Elementwise(
       warnings.warn(
           f'Using JAX autodiff to compute the `fn` derivative for NTK. Beware '
           f'of {url}.')
-      d_nngp_fn = np.vectorize(grad(nngp_fn))
+      d_nngp_fn = jnp.vectorize(grad(nngp_fn))
 
     def kernel_fn(k: Kernel) -> Kernel:
       cov1, nngp, cov2, ntk = k.cov1, k.nngp, k.cov2, k.ntk
@@ -1126,7 +1125,8 @@ def Elementwise(
 def ElementwiseNumerical(
     fn: Callable[[float], float],
     deg: int,
-    df: Optional[Callable[[float], float]] = None) -> InternalLayer:
+    df: Optional[Callable[[float], float]] = None
+) -> InternalLayer:
   """Activation function using numerical integration.
 
   Supports general activation functions using Gauss-Hermite quadrature.
@@ -1165,14 +1165,14 @@ def ElementwiseNumerical(
       'tolerance level, required `deg` will highly be dependent on the choice'
       'of `fn`.')
 
-  quad_points = osp.special.roots_hermite(deg)
+  quad_points = sp.special.roots_hermite(deg)
 
   if df is None:
     url = 'https://jax.readthedocs.io/en/latest/faq.html#gradients-contain-nan-where-using-where'
     warnings.warn(
         f'Using JAX autodiff to compute the `fn` derivative for NTK. Beware of '
         f'{url}.')
-    df = np.vectorize(grad(fn))
+    df = jnp.vectorize(grad(fn))
 
   def kernel_fn(k: Kernel) -> Kernel:
     """Kernel transformation of activation function using quadrature."""
@@ -1188,19 +1188,19 @@ def ElementwiseNumerical(
     def nngp_ntk_fn(nngp, q11, q22, ntk=None):
       """Simple Gauss-Hermite quadrature routine."""
       xs, ws = quad_points
-      grid = np.outer(ws, ws)
+      grid = jnp.outer(ws, ws)
       x = xs.reshape((xs.shape[0],) + (1,) * (nngp.ndim + 1))
       y = xs.reshape((1, xs.shape[0]) + (1,) * nngp.ndim)
       xy_axes = (0, 1)
 
-      nngp = np.expand_dims(nngp, xy_axes)
-      q11, q22 = np.expand_dims(q11, xy_axes), np.expand_dims(q22, xy_axes)
+      nngp = jnp.expand_dims(nngp, xy_axes)
+      q11, q22 = jnp.expand_dims(q11, xy_axes), jnp.expand_dims(q22, xy_axes)
 
       def integrate(f):
         fvals = f(_sqrt(2 * q11) * x) * f(
             nngp / _sqrt(q11 / 2, 1e-30) * x + _sqrt(
                 2*(q22 - nngp**2/q11)) * y)
-        return np.tensordot(grid, fvals, (xy_axes, xy_axes)) / np.pi
+        return jnp.tensordot(grid, fvals, (xy_axes, xy_axes)) / jnp.pi
 
       if ntk is not None:
         ntk *= integrate(df)
@@ -1211,9 +1211,9 @@ def ElementwiseNumerical(
       xs, ws = quad_points
       x = xs.reshape((xs.shape[0],) + (1,) * nngp.ndim)
       x_axes = (0,)
-      nngp = np.expand_dims(nngp, x_axes)
+      nngp = jnp.expand_dims(nngp, x_axes)
       fval = fn(_sqrt(2 * nngp) * x) ** 2
-      return np.tensordot(ws, fval, (x_axes, x_axes)) / np.sqrt(np.pi)
+      return jnp.tensordot(ws, fval, (x_axes, x_axes)) / jnp.sqrt(jnp.pi)
 
     nngp, ntk = nngp_ntk_fn(nngp, q11, q22, ntk)
 
@@ -1268,7 +1268,7 @@ def _elementwise(
 
 @functools.partial(custom_jvp, nondiff_argnums=(1,))
 def _sqrt(x, tol=0.):
-  return np.sqrt(np.maximum(x, tol))
+  return jnp.sqrt(jnp.maximum(x, tol))
 
 
 @getattr(_sqrt, 'defjvp', lambda f: f)  # ReadTheDocs-friendly `@_sqrt.defjvp`.
@@ -1278,16 +1278,16 @@ def _sqrt_jvp(tol, primals, tangents):
   safe_tol = max(tol, 1e-30)
   square_root = _sqrt(x, safe_tol)
   square_root_out = _sqrt(x, tol)
-  return square_root_out, np.where(x > safe_tol, x_dot / (2 * square_root), 0.)
+  return square_root_out, jnp.where(x > safe_tol, x_dot / (2 * square_root), 0.)
 
 
 @functools.partial(custom_jvp, nondiff_argnums=(2,))
 def _arctan2(x, y, fill_zero: Optional[float] = None):
   if fill_zero is not None:
-    return np.where(np.bitwise_and(x == 0., y == 0.),
-                    fill_zero,
-                    np.arctan2(x, y))
-  return np.arctan2(x, y)
+    return jnp.where(jnp.bitwise_and(x == 0., y == 0.),
+                     fill_zero,
+                     jnp.arctan2(x, y))
+  return jnp.arctan2(x, y)
 
 
 @getattr(_arctan2, 'defjvp', lambda f: f)  # Equivalent to `@_arctan2.defjvp`.
@@ -1296,17 +1296,19 @@ def _arctan2_jvp(fill_zero, primals, tangents):
   x_dot, y_dot = tangents
   primal_out = _arctan2(x, y, fill_zero)
   safe_tol = 1e-30
-  denom = np.maximum(x**2 + y**2, safe_tol)
+  denom = jnp.maximum(x ** 2 + y ** 2, safe_tol)
   tangent_out = x_dot * (y / denom) - y_dot * (x / denom)
   return primal_out, tangent_out
 
 
-def _vmap_2d(fn: Callable[[float, float, float], float],
-             cov12: np.ndarray,
-             var1: np.ndarray,
-             var2: Optional[np.ndarray],
-             diagonal_batch: bool,
-             diagonal_spatial: bool) -> np.ndarray:
+def _vmap_2d(
+    fn: Callable[[float, float, float], float],
+    cov12: jnp.ndarray,
+    var1: jnp.ndarray,
+    var2: Optional[jnp.ndarray],
+    diagonal_batch: bool,
+    diagonal_spatial: bool
+) -> jnp.ndarray:
   """Effectively a "2D vmap" of `fn(cov12, var1, var2)`.
 
   Applicable for all possible kernel layouts.
@@ -1349,14 +1351,14 @@ def _vmap_2d(fn: Callable[[float, float, float], float],
 
   fn = vmap(
       vmap(
-          np.vectorize(fn),
+          jnp.vectorize(fn),
           in_axes=(start, None, start),
           out_axes=start
       ),
       in_axes=(start, start, None),
       out_axes=start
   )
-  out = fn(_cov12, var1, var2)  # type: np.ndarray
+  out = fn(_cov12, var1, var2)  # type: jnp.ndarray
   out_shape = (cov12.shape[:start] +
                cov12.shape[start:cov_end:2] +
                cov12.shape[start + 1:cov_end:2] +

@@ -9,8 +9,8 @@ import jax
 from jax import lax
 from jax.core import JaxprEqn, ShapedArray, Primitive, Jaxpr, Var, AbstractValue, Literal
 from jax.interpreters import ad
-import jax.numpy as np
-import numpy as onp
+import jax.numpy as jnp
+import numpy as np
 
 
 # pytype: disable=wrong-keyword-args
@@ -122,7 +122,7 @@ class Structure:
 
 
 STRUCTURE_RULES: dict[Optional[Primitive], Callable[..., Structure]] = {}
-JACOBIAN_RULES: dict[Optional[Primitive], Callable[..., np.ndarray]] = {}
+JACOBIAN_RULES: dict[Optional[Primitive], Callable[..., jnp.ndarray]] = {}
 EQN_PARAMS_RULES: dict[Optional[Primitive], Callable[..., dict[str, Any]]] = {}
 
 
@@ -253,9 +253,9 @@ def get_id_structure(
 # UTILS
 
 
-def _eye_like(out_shaped: ShapedArray, in_shaped: ShapedArray) -> np.ndarray:
+def _eye_like(out_shaped: ShapedArray, in_shaped: ShapedArray) -> jnp.ndarray:
   assert out_shaped.size == in_shaped.size, (out_shaped, in_shaped)
-  eye = np.eye(out_shaped.size, dtype=out_shaped.dtype)
+  eye = jnp.eye(out_shaped.size, dtype=out_shaped.dtype)
   eye = eye.reshape(out_shaped.shape + in_shaped.shape)  # pytype: disable=unsupported-operands  # always-use-return-annotations
   return eye
 
@@ -297,7 +297,7 @@ def _dot_general_j(
     idx: int,
     invals: list[ShapedArray],
     cts_in: ShapedArray
-) -> np.ndarray:
+) -> jnp.ndarray:
   contracting_dims, batch_dims = eqn.params['dimension_numbers']
 
   lhs_c_dims, rhs_c_dims = contracting_dims
@@ -324,7 +324,7 @@ def _dot_general_j(
   self_nc_dims = tuple(i for i in range(self.ndim)
                        if i not in self_c_dims)
 
-  j = np.moveaxis(
+  j = jnp.moveaxis(
       other,
       other_b_dims + tuple(d[1]
                            for d in sorted(zip(self_c_dims, other_c_dims))),
@@ -339,7 +339,7 @@ def _dot_general_j(
   ) for i in self_ncb_dims)
 
   self_nc_in = tuple(cts_in.ndim + i for i in self_nc_dims)
-  j = np.expand_dims(j, self_ncb_out + self_nc_in)
+  j = jnp.expand_dims(j, self_ncb_out + self_nc_in)
 
   self_ncb_size = utils.size_at(self, self_ncb_dims)
   self_ncb_in = tuple(i + cts_in.ndim for i in self_ncb_dims)
@@ -347,17 +347,17 @@ def _dot_general_j(
   for i_out, i_in in zip(self_ncb_out, self_ncb_in):
     shape[i_out] = shape[i_in] = self.shape[i_in - cts_in.ndim]
 
-  eye = np.eye(self_ncb_size, dtype=np.bool_)
+  eye = jnp.eye(self_ncb_size, dtype=jnp.bool_)
   eye = eye.reshape(shape)
-  j = np.where(eye, j, np.zeros((), j.dtype))
+  j = jnp.where(eye, j, jnp.zeros((), j.dtype))
 
   for out_b, (self_b, other_b) in enumerate(zip(self_b_dims, other_b_dims)):
     b_size = other.shape[other_b]
-    eye = np.eye(b_size, dtype=np.bool_)
+    eye = jnp.eye(b_size, dtype=jnp.bool_)
     shape = [1 for _ in range(j.ndim)]
     shape[out_b] = shape[cts_in.ndim + self_b] = b_size
     eye = eye.reshape(shape)
-    j = np.where(eye, j, np.zeros((), j.dtype))
+    j = jnp.where(eye, j, jnp.zeros((), j.dtype))
 
   return j
 
@@ -416,7 +416,7 @@ def _conv_general_dilated_j(
     idx: int,
     invals: list[ShapedArray],
     cts_in: ShapedArray
-) -> np.ndarray:
+) -> jnp.ndarray:
   if idx != 1:
     raise NotImplementedError(eqn, idx)
 
@@ -457,22 +457,22 @@ def _conv_general_dilated_j(
   )
 
   if n_groups_b > 1:
-    j = np.moveaxis(j, (out_spec[0], out_spec[1]), (-1, -2))
+    j = jnp.moveaxis(j, (out_spec[0], out_spec[1]), (-1, -2))
     j = j.reshape(j.shape[:-2] +
                   (n_channels_in, *filter_shape, n_groups_b, batch_size_in))
-    j = np.moveaxis(j, (-1, -2), (-2, -1))
+    j = jnp.moveaxis(j, (-1, -2), (-2, -1))
 
   else:
-    j = np.moveaxis(j, out_spec[1], -1)
+    j = jnp.moveaxis(j, out_spec[1], -1)
     rhs_shape = (n_groups_f, group_size_in) + filter_shape
 
     j = j.reshape(j.shape[:ndim - 1] + rhs_shape)
-    j = np.moveaxis(j, (ndim - 1, ndim), (-1, -2))
+    j = jnp.moveaxis(j, (ndim - 1, ndim), (-1, -2))
 
-  j = np.vectorize(np.diag, signature='(k)->(k,k)')(j)
+  j = jnp.vectorize(jnp.diag, signature='(k)->(k,k)')(j)
 
   if n_groups_b > 1:
-    j = np.moveaxis(
+    j = jnp.moveaxis(
         j,
         tuple(range(ndim - 2, j.ndim)),
         [ndim + rhs_spec[1]] +
@@ -481,19 +481,19 @@ def _conv_general_dilated_j(
     )
 
   else:
-    j = np.moveaxis(
+    j = jnp.moveaxis(
         j,
         tuple(range(ndim - 1, j.ndim)),
         [ndim + i for i in sorted(rhs_spec[2:])] +
         [ndim + rhs_spec[1], out_spec[1], ndim + rhs_spec[0]]
     )
 
-  eye = np.eye(group_size_out, dtype=lhs.dtype)
-  eye = np.expand_dims(
+  eye = jnp.eye(group_size_out, dtype=lhs.dtype)
+  eye = jnp.expand_dims(
       eye,
       [i for i in range(j.ndim) if i not in (out_spec[1], ndim + rhs_spec[0])]
   )
-  j = np.kron(j, eye)
+  j = jnp.kron(j, eye)
   return j
 
 def _conv_general_dilated_e(
@@ -576,10 +576,10 @@ def _add_j(
     invals: list[ShapedArray],
     cts_in: ShapedArray,
     is_sub: bool
-) -> np.ndarray:
-  j = np.eye(utils.size_at(invals[idx]), dtype=invals[idx].dtype)
+) -> jnp.ndarray:
+  j = jnp.eye(utils.size_at(invals[idx]), dtype=invals[idx].dtype)
   j = j.reshape(invals[idx].shape * 2)  # pytype: disable=unsupported-operands  # always-use-return-annotations
-  j = np.broadcast_to(j, cts_in.shape + invals[idx].shape)  # pytype: disable=unsupported-operands  # always-use-return-annotations
+  j = jnp.broadcast_to(j, cts_in.shape + invals[idx].shape)  # pytype: disable=unsupported-operands  # always-use-return-annotations
   if is_sub and idx == 1:
     j = -j
   return j
@@ -644,31 +644,31 @@ def _mul_s(
 def _mul_j(
     eqn: JaxprEqn,
     idx: int,
-    invals: list[Union[ShapedArray, np.ndarray]],
+    invals: list[Union[ShapedArray, jnp.ndarray]],
     cts_in: ShapedArray,
     is_div: bool
-) -> np.ndarray:
+) -> jnp.ndarray:
   if is_div and idx != 0:
     raise ValueError(eqn, idx)
 
   inval = invals[idx]
   if inval.size == 0:
-    return np.zeros(cts_in.shape + inval.shape, inval.dtype)  # pytype: disable=unsupported-operands  # always-use-return-annotations
+    return jnp.zeros(cts_in.shape + inval.shape, inval.dtype)  # pytype: disable=unsupported-operands  # always-use-return-annotations
 
   other = invals[1 if idx == 0 else 0]
   if is_div:
-    other = np.ones((), other.dtype) / other
+    other = jnp.ones((), other.dtype) / other
 
   if inval.ndim == 0:
     return other  # pytype: disable=bad-return-type  # jax-ndarray
 
   if other.ndim == 0:
-    other = np.broadcast_to(other, inval.shape)
+    other = jnp.broadcast_to(other, inval.shape)
 
   assert other.ndim == inval.ndim == cts_in.ndim
 
-  j = np.broadcast_to(other, cts_in.shape).reshape((-1,))
-  j = np.diag(j)
+  j = jnp.broadcast_to(other, cts_in.shape).reshape((-1,))
+  j = jnp.diag(j)
   j = j.reshape(cts_in.shape * 2)  # pytype: disable=unsupported-operands  # always-use-return-annotations
 
   sum_axes = ()
@@ -676,7 +676,7 @@ def _mul_j(
     if inval.shape[i] == 1:
       sum_axes += (cts_in.ndim + i,)
 
-  j = np.sum(j, axis=sum_axes, keepdims=True)
+  j = jnp.sum(j, axis=sum_axes, keepdims=True)
   return j
 
 STRUCTURE_RULES[lax.mul_p] = _mul_s
@@ -711,7 +711,7 @@ def _concatenate_j(
     idx: int,
     invals: list[ShapedArray],
     cts_in: ShapedArray
-) -> np.ndarray:
+) -> jnp.ndarray:
   dimension = eqn.params['dimension']
 
   js = []
@@ -722,10 +722,10 @@ def _concatenate_j(
                           inval.shape[k] for k in range(inval.ndim))
 
     if i == idx:
-      j = np.eye(inval.size, dtype=inval.dtype)
+      j = jnp.eye(inval.size, dtype=inval.dtype)
     else:
-      inval_i_size = onp.prod(inval_i_shape)
-      j = np.zeros((inval_i_size, inval.size), inval.dtype)
+      inval_i_size = np.prod(inval_i_shape)
+      j = jnp.zeros((inval_i_size, inval.size), inval.dtype)
 
     j = j.reshape(inval_i_shape + inval.shape)  # pytype: disable=unsupported-operands  # always-use-return-annotations
     js.append(j)
@@ -764,7 +764,7 @@ def _rev_j(
     idx: int,
     invals: list[ShapedArray],
     cts_in: ShapedArray
-) -> np.ndarray:
+) -> jnp.ndarray:
   inval = invals[idx]
   j = _eye_like(cts_in, inval)
   j = lax.rev(j, eqn.params['dimensions'])
@@ -802,9 +802,9 @@ def _broadcast_in_dim_j(
     idx: int,
     invals: list[ShapedArray],
     cts_in: ShapedArray
-) -> np.ndarray:
+) -> jnp.ndarray:
   inval = invals[idx]
-  j = np.eye(inval.size, dtype=inval.dtype)
+  j = jnp.eye(inval.size, dtype=inval.dtype)
   j = j.reshape(inval.shape * 2)  # pytype: disable=unsupported-operands  # always-use-return-annotations
   j = lax.broadcast_in_dim(
       j,
@@ -854,12 +854,12 @@ def _reduce_sum_j(
     idx: int,
     invals: list[ShapedArray],
     cts_in: ShapedArray
-) -> np.ndarray:
+) -> jnp.ndarray:
   inval = invals[idx]
-  j = np.eye(cts_in.size, dtype=inval.dtype)
+  j = jnp.eye(cts_in.size, dtype=inval.dtype)
   j = j.reshape(cts_in.shape * 2)  # pytype: disable=unsupported-operands  # always-use-return-annotations
-  j = np.expand_dims(j, tuple(a + cts_in.ndim for a in  eqn.params['axes']))
-  j = np.broadcast_to(j, cts_in.shape + inval.shape)  # pytype: disable=unsupported-operands  # always-use-return-annotations
+  j = jnp.expand_dims(j, tuple(a + cts_in.ndim for a in eqn.params['axes']))
+  j = jnp.broadcast_to(j, cts_in.shape + inval.shape)  # pytype: disable=unsupported-operands  # always-use-return-annotations
   return j
 
 STRUCTURE_RULES[lax.reduce_sum_p] = _reduce_sum_s
@@ -916,16 +916,16 @@ def _pad_j(
     idx: int,
     invals: list[ShapedArray],
     cts_in: ShapedArray
-) -> np.ndarray:
+) -> jnp.ndarray:
   padding_config = eqn.params['padding_config']
 
   inval = invals[idx]
-  j = np.eye(inval.size, dtype=inval.dtype)
+  j = jnp.eye(inval.size, dtype=inval.dtype)
   j = j.reshape(inval.shape * 2)  # pytype: disable=unsupported-operands  # always-use-return-annotations
   for _ in range(inval.ndim):
     padding_config += ((0, 0, 0),)
 
-  j = lax.pad(j, np.zeros((), j.dtype), padding_config)
+  j = lax.pad(j, jnp.zeros((), j.dtype), padding_config)
   return j
 
 STRUCTURE_RULES[lax.pad_p] = _pad_s
@@ -957,7 +957,7 @@ def _reshape_j(
     idx: int,
     invals: list[ShapedArray],
     cts_in: ShapedArray
-) -> np.ndarray:
+) -> jnp.ndarray:
   inval = invals[idx]
   j = _eye_like(inval, inval)
   j = j.reshape(inval.shape * 2)  # pytype: disable=unsupported-operands  # always-use-return-annotations
@@ -1014,7 +1014,7 @@ def _eye_j(
     idx: int,
     invals: list[ShapedArray],
     cts_in: ShapedArray
-) -> np.ndarray:
+) -> jnp.ndarray:
   j = _eye_like(cts_in, invals[idx])
   return j
 
@@ -1029,7 +1029,7 @@ def _neg_j(
     idx: int,
     invals: list[ShapedArray],
     cts_in: ShapedArray
-) -> np.ndarray:
+) -> jnp.ndarray:
   j = _eye_like(cts_in, invals[idx])
   return -j
 
@@ -1042,8 +1042,8 @@ def _zeros_like_j(
     idx: int,
     invals: list[ShapedArray],
     cts_in: ShapedArray
-) -> np.ndarray:
-  return np.zeros(cts_in.shape + invals[idx].shape, cts_in.dtype)  # pytype: disable=unsupported-operands  # always-use-return-annotations
+) -> jnp.ndarray:
+  return jnp.zeros(cts_in.shape + invals[idx].shape, cts_in.dtype)  # pytype: disable=unsupported-operands  # always-use-return-annotations
 
 STRUCTURE_RULES[jax.interpreters.ad.zeros_like_p] = _eye_s
 JACOBIAN_RULES[jax.interpreters.ad.zeros_like_p] = _zeros_like_j
@@ -1071,7 +1071,7 @@ def _transpose_j(
     idx: int,
     invals: list[ShapedArray],
     cts_in: ShapedArray
-) -> np.ndarray:
+) -> jnp.ndarray:
   j = _eye_like(cts_in, invals[idx])
   inval = invals[idx]
   j = j.reshape(inval.shape * 2)  # pytype: disable=unsupported-operands  # always-use-return-annotations

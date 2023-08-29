@@ -19,7 +19,7 @@ By default, this example does inference on a small CIFAR10 subset.
 
 import time
 from absl import app
-import jax.numpy as np
+import jax.numpy as jnp
 import neural_tangents as nt
 from neural_tangents import stax
 from examples import datasets
@@ -62,7 +62,7 @@ def main(unused_argv):
   print('Kernel construction and inference done in %s seconds.' % duration)
 
   # Print out accuracy and loss for infinite network predictions.
-  loss = lambda fx, y_hat: 0.5 * np.mean((fx - y_hat) ** 2)
+  loss = lambda fx, y_hat: 0.5 * jnp.mean((fx - y_hat) ** 2)
   util.print_summary('NNGP test', y_test, fx_test_nngp, None, loss)
   util.print_summary('NTK test', y_test, fx_test_ntk, None, loss)
 

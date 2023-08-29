@@ -15,7 +15,7 @@ import time
 
 from absl import app
 from jax import random
-import jax.numpy as np
+import jax.numpy as jnp
 import neural_tangents as nt
 from neural_tangents import stax
 from examples import datasets
@@ -93,13 +93,14 @@ def main(*args, use_dummy_data: bool = False, **kwargs) -> None:
   print(f'Kernel construction and inference done in {duration} seconds.')
 
   # Print out accuracy and loss for infinite network predictions.
-  loss = lambda fx, y_hat: 0.5 * np.mean((fx - y_hat) ** 2)
+  loss = lambda fx, y_hat: 0.5 * jnp.mean((fx - y_hat) ** 2)
   util.print_summary('NNGP test', y_test, fx_test_nngp, None, loss)
   util.print_summary('NTK test', y_test, fx_test_ntk, None, loss)
 
 
-def _get_dummy_data(mask_constant: float
-                    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def _get_dummy_data(
+    mask_constant: float
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
   """Return dummy data for when downloading embeddings is not feasible."""
   n_train, n_test = 6, 6
 
@@ -107,21 +108,21 @@ def _get_dummy_data(mask_constant: float
     key_x, key_mask = random.split(key)
     x = random.normal(key_x, shape)
     mask = random.bernoulli(key_mask, 0.6, shape)
-    x = np.where(mask, mask_constant, x)
+    x = jnp.where(mask, mask_constant, x)
     return x
 
   def get_y(x):
-    x = np.where(x == mask_constant, 0., x)
+    x = jnp.where(x == mask_constant, 0., x)
 
     def weighted_sum(x, start, end):
-      return np.sum(x[..., start:end] *
-                    np.arange(x.shape[1])[None, ..., None],
-                    axis=(1, 2))
+      return jnp.sum(x[..., start:end] *
+                     jnp.arange(x.shape[1])[None, ..., None],
+                     axis=(1, 2))
 
-    y_label = np.stack([weighted_sum(x, 0, x.shape[-1] // 2),
-                        weighted_sum(x, x.shape[-1] // 2, x.shape[-1])],
-                       axis=-1) > 0
-    y = np.where(y_label, 0.5, -0.5)
+    y_label = jnp.stack([weighted_sum(x, 0, x.shape[-1] // 2),
+                         weighted_sum(x, x.shape[-1] // 2, x.shape[-1])],
+                        axis=-1) > 0
+    y = jnp.where(y_label, 0.5, -0.5)
     return y
 
   rng_train, rng_test = random.split(random.PRNGKey(1), 2)

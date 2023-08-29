@@ -35,18 +35,18 @@ def dataclass(clz):
   passed safely to Jax.
 
   Example:
-    >>> from jax import jit, numpy as np
+    >>> from jax import jit, numpy as jnp
     >>> from neural_tangents._src.utils import dataclasses
     >>> #
     >>> @dataclasses.dataclass
     >>> class Data:
-    >>>   array: np.ndarray
+    >>>   array: jnp.ndarray
     >>>   a_boolean: bool = dataclasses.field(pytree_node=False)
     >>> #
-    >>> data = Data(np.array([1.0]), True)
+    >>> data = Data(jnp.array([1.0]), True)
     >>> #
-    >>> data.array = np.array([2.0])  # Data is immutable. Will raise an error.
-    >>> data = data.replace(array=np.array([2.0]))  # Use the replace method.
+    >>> data.array = jnp.array([2.0])  # Data is immutable. Will raise an error.
+    >>> data = data.replace(array=jnp.array([2.0]))  # Use the replace method.
     >>> #
     >>> # This class can now be used safely in Jax.
     >>> jit(lambda data: data.array if data.a_boolean else 0)(data)

@@ -19,7 +19,7 @@ Kernel Embeddings for General Activations <https://arxiv.org/abs/2209.04121>`_".
 """
 
 from absl import app
-from jax import numpy as np
+from jax import numpy as jnp
 from jax import random
 from neural_tangents import stax
 
@@ -28,8 +28,8 @@ def main(unused_argv):
   # Consider the normalized exponential kernel from
   # https://arxiv.org/abs/2003.02237 (page 6).
   def nngp_fn(cov12, var1, var2):
-    prod = np.sqrt(var1 * var2)
-    return prod * np.exp(cov12 / prod - 1)
+    prod = jnp.sqrt(var1 * var2)
+    return prod * jnp.exp(cov12 / prod - 1)
 
   # This kernel has no known corresponding elementwise nonlinearity.
   # `stax.Elementwise` derives the NTK kernel automatically under the hood using
@@ -50,7 +50,7 @@ def main(unused_argv):
   k_manual = kernel_fn_manual(x1, x2, 'ntk')
 
   # The two kernels match!
-  assert np.max(np.abs(k_manual - k_auto)) < 1e-6
+  assert jnp.max(jnp.abs(k_manual - k_auto)) < 1e-6
   print('NTK derived via autodiff matches the hand-derived NTK!')
 
 

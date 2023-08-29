@@ -23,7 +23,7 @@ from jax import default_backend
 from jax import jit
 from jax import random
 from jax.config import config
-import jax.numpy as np
+import jax.numpy as jnp
 import neural_tangents as nt
 from neural_tangents import stax
 from neural_tangents._src.empirical import _DEFAULT_TESTING_NTK_IMPLEMENTATION
@@ -108,7 +108,7 @@ class DiagonalTest(test_utils.NeuralTangentsTestCase):
       else:
         self.assertEqual(K_diag.nngp.shape, batch_shape + x1.shape[1:-1])
         self.assertAllClose(K_full, K)
-        self.assertAllClose(K_diag.nngp, np.einsum('...iijj->...ij', K.nngp))
+        self.assertAllClose(K_diag.nngp, jnp.einsum('...iijj->...ij', K.nngp))
 
 
 class DiagonalClassTest(test_utils.NeuralTangentsTestCase):
@@ -359,21 +359,21 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
                          'OI' + spatial_spec,
                          'N' + spatial_spec + 'C')
 
-    x1 = np.cos(random.normal(key, (2,) + spatial_shape + (2,)))
+    x1 = jnp.cos(random.normal(key, (2,) + spatial_shape + (2,)))
     x1 = test_utils.mask(x1, mask_constant, mask_axis, key, p)
 
     if same_inputs:
       x2 = None
     else:
-      x2 = np.cos(random.normal(key, (4,) + spatial_shape + (2,)))
+      x2 = jnp.cos(random.normal(key, (4,) + spatial_shape + (2,)))
       x2 = test_utils.mask(x2, mask_constant, mask_axis, key, p)
 
     def get_attn():
       return stax.GlobalSelfAttention(
           n_chan_out=width,
           n_chan_key=width,
-          n_chan_val=int(np.round(float(width) / int(np.sqrt(width)))),
-          n_heads=int(np.sqrt(width)),
+          n_chan_val=int(jnp.round(float(width) / int(jnp.sqrt(width)))),
+          n_heads=int(jnp.sqrt(width)),
       ) if proj == 'avg' else stax.Identity()
 
     conv = stax.ConvTranspose if transpose else stax.Conv

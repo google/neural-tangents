@@ -18,7 +18,7 @@ from absl.testing import absltest
 import jax
 from jax import random
 from jax.config import config
-import jax.numpy as np
+import jax.numpy as jnp
 import neural_tangents as nt
 from neural_tangents import stax
 from neural_tangents._src import batching
@@ -53,8 +53,8 @@ def _get_inputs_and_model(width=1, n_classes=2, use_conv=True):
   x2 = random.normal(split, (4, 4, 3, 2))
 
   if not use_conv:
-    x1 = np.reshape(x1, (x1.shape[0], -1))
-    x2 = np.reshape(x2, (x2.shape[0], -1))
+    x1 = jnp.reshape(x1, (x1.shape[0], -1))
+    x2 = jnp.reshape(x2, (x2.shape[0], -1))
 
   init_fn, apply_fn, kernel_fn = stax.serial(
       stax.Conv(width, (3, 3)) if use_conv else stax.Dense(width),

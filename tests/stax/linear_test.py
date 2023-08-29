@@ -18,20 +18,22 @@ import itertools
 import random as prandom
 import string
 import time
+
 from absl.testing import absltest
-from jax import lax
-from jax import jit, vjp
-from jax.config import config
 from jax import default_backend
-import jax.numpy as np
+from jax import jit
+from jax import lax
 from jax import random
+from jax import vjp
+from jax.config import config
+import jax.numpy as jnp
 import more_itertools
 import neural_tangents as nt
 from neural_tangents import stax
-from tests import test_utils
-from neural_tangents._src.utils import utils
-import numpy as onp
 from neural_tangents._src.empirical import _DEFAULT_TESTING_NTK_IMPLEMENTATION
+from neural_tangents._src.utils import utils
+from tests import test_utils
+import numpy as np
 
 
 config.parse_flags_with_absl()
@@ -53,8 +55,8 @@ class FlattenTest(test_utils.NeuralTangentsTestCase):
     X0_1 = random.normal(key, (4, 4, 3, 2))
     X0_2 = None if same_inputs else random.normal(key, (2, 4, 3, 2))
 
-    X0_1_flat = np.reshape(X0_1, (X0_1.shape[0], -1))
-    X0_2_flat = None if X0_2 is None else np.reshape(X0_2, (X0_2.shape[0], -1))
+    X0_1_flat = jnp.reshape(X0_1, (X0_1.shape[0], -1))
+    X0_2_flat = None if X0_2 is None else jnp.reshape(X0_2, (X0_2.shape[0], -1))
 
     dense = stax.Dense(512, 1.7, 0.1)
     init_fc, apply_fc, kernel_fc = stax.serial(dense,
@@ -211,8 +213,8 @@ class ConvNDTest(test_utils.NeuralTangentsTestCase):
       raise ValueError(proj)
 
     if use_attn:
-      n_heads = int(np.sqrt(width))
-      n_chan_val = int(np.round(float(width) / n_heads))
+      n_heads = int(jnp.sqrt(width))
+      n_chan_val = int(jnp.round(float(width) / n_heads))
       proj = stax.serial(stax.GlobalSelfAttention(
           n_chan_out=width,
           n_chan_key=width,
@@ -358,8 +360,8 @@ class AttentionTest(test_utils.NeuralTangentsTestCase):
           linear_scaling=linear_scaling,
           n_chan_out=width,
           n_chan_key=width,
-          n_chan_val=int(np.round(float(width) / int(np.sqrt(width)))),
-          n_heads=int(np.sqrt(width)),
+          n_chan_val=int(jnp.round(float(width) / int(jnp.sqrt(width)))),
+          n_heads=int(jnp.sqrt(width)),
           n_chan_pos_emb=n_chan_pos_emb,
           attention_mechanism='SOFTMAX' if linear_scaling else 'IDENTITY',
           pos_emb_type=pos_emb_type,
@@ -500,13 +502,13 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
     key, split1, split2 = random.split(key, 3)
 
     x1 = random.normal(split1, (batch1,) + shape + (num_channels,))
-    x1 = np.moveaxis(x1, (0, -1), (batch_axis, channel_axis))
+    x1 = jnp.moveaxis(x1, (0, -1), (batch_axis, channel_axis))
 
     if same_input:
       x2 = None
     else:
       x2 = random.normal(split2, (batch2,) + shape + (num_channels,))
-      x2 = np.moveaxis(x2, (0, -1), (batch_axis, channel_axis))
+      x2 = jnp.moveaxis(x2, (0, -1), (batch_axis, channel_axis))
 
     if mask_constant is not None:
       key, split1, split2 = random.split(key, 3)
@@ -514,13 +516,13 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
       shape1 = list(x1.shape)
       shape1[channel_axis] = 1
       mask1 = random.bernoulli(split1, p=0.3, shape=shape1)
-      x1 = np.where(mask1, mask_constant, x1)
+      x1 = jnp.where(mask1, mask_constant, x1)
 
       if x2 is not None:
         shape2 = list(x2.shape)
         shape2[channel_axis] = 1
         mask2 = random.bernoulli(split2, p=0.2, shape=shape2)
-        x2 = np.where(mask2, mask_constant, x2)
+        x2 = jnp.where(mask2, mask_constant, x2)
 
     key, split1, split2 = random.split(key, 3)
 
@@ -535,21 +537,21 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
       pattern = pattern.reshape(pattern.shape[:2] + (pattern.shape[2] * 2,))
 
       bsz, n_edges, n_dims = pattern.shape
-      batch_range = np.broadcast_to(
-          np.arange(bsz).reshape((bsz, 1, 1)),
+      batch_range = jnp.broadcast_to(
+          jnp.arange(bsz).reshape((bsz, 1, 1)),
           (bsz, n_edges, 1))
-      pattern = np.concatenate([batch_range, pattern], 2)
+      pattern = jnp.concatenate([batch_range, pattern], 2)
       pattern = pattern.reshape((bsz * n_edges, n_dims + 1))
-      out = np.zeros((bsz,) + tuple(a for a in agg_shape for _ in (0, 1)))
+      out = jnp.zeros((bsz,) + tuple(a for a in agg_shape for _ in (0, 1)))
       out = out.at[tuple(pattern.T)].add(1.)
       out = utils.unzip_axes(out, 1)
       return out
 
     if to_dense == 'sparse_to_dense' or implementation == 'SPARSE':
       def get_sparse_pattern(batch_size, rng):
-        n_edges_max = onp.prod((1,) + agg_shape)**2
+        n_edges_max = np.prod((1,) + agg_shape) ** 2
         n_edges = prandom.randint(0, n_edges_max)
-        pattern = [np.zeros((batch_size, n_edges, 0, 2), np.int32)]
+        pattern = [jnp.zeros((batch_size, n_edges, 0, 2), jnp.int32)]
 
         for d in range(agg_ndim):
           rng, _ = random.split(rng)
@@ -557,7 +559,7 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
           edges = random.randint(rng, (batch_size, n_edges, 1, 2), 0, n_nodes)
           pattern += [edges]
 
-        pattern = np.concatenate(pattern, 2)
+        pattern = jnp.concatenate(pattern, 2)
 
         mask = random.bernoulli(rng, p=0.2, shape=pattern.shape[:2])
         # Make sure the receivers are masked to large negative number.
@@ -668,7 +670,7 @@ class AggregateTest(test_utils.NeuralTangentsTestCase):
                                  mask_constant=mask_constant,
                                  pattern=(pattern2, pattern2))
 
-      empirical = np.moveaxis(np.diagonal(empirical), -1, 0)
+      empirical = jnp.moveaxis(jnp.diagonal(empirical), -1, 0)
 
     else:
       raise ValueError(get)
@@ -750,21 +752,21 @@ class ConvTransposeTest(test_utils.NeuralTangentsTestCase):
     Adapted from `jax.tests.lax_test`.
     """
     rhs = params[0]
-    rhs = np.swapaxes(rhs, dimension_numbers[1].index('O'),
-                      dimension_numbers[1].index('I'))
-    rhs = np.flip(rhs, dimension_numbers[1].index('H'))
+    rhs = jnp.swapaxes(rhs, dimension_numbers[1].index('O'),
+                       dimension_numbers[1].index('I'))
+    rhs = jnp.flip(rhs, dimension_numbers[1].index('H'))
     assert len(lhs.shape) == len(rhs.shape)
     nspatial = len(lhs.shape) - 2
     dn = lax.conv_dimension_numbers(lhs.shape, rhs.shape, dimension_numbers)
-    in_shape = onp.take(lhs.shape, dn.lhs_spec)
+    in_shape = np.take(lhs.shape, dn.lhs_spec)
     in_sdims = in_shape[2:]
-    k_shape = onp.take(rhs.shape, dn.rhs_spec)
+    k_shape = np.take(rhs.shape, dn.rhs_spec)
     o_sdims = [in_sdims[i]*strides[i] for i in range(nspatial)]
     o_shape = [in_shape[0], k_shape[1]] + o_sdims
     out_spec_inv = [x[0] for x in
                     sorted(enumerate(dn.out_spec), key=lambda x: x[1])]
-    o_layout = onp.take(onp.array(o_shape), out_spec_inv)
-    placeholder = np.ones(o_layout, lhs.dtype)
+    o_layout = np.take(np.array(o_shape), out_spec_inv)
+    placeholder = jnp.ones(o_layout, lhs.dtype)
 
     _, apply_fn, _ = stax.Conv(
         out_chan=rhs.shape[dimension_numbers[1].index('I')],
@@ -890,9 +892,9 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
 
     mask_constant = 10.
 
-    x1 = np.cos(random.normal(key1, x_shape))
+    x1 = jnp.cos(random.normal(key1, x_shape))
     mask1 = random.bernoulli(key1, p=0.8, shape=x1.shape)
-    x1 = np.where(mask1, mask_constant, x1)
+    x1 = jnp.where(mask1, mask_constant, x1)
 
     if same_inputs:
       x2 = None
@@ -901,17 +903,17 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
                   [4 if (batch_axis not in contracting_dims + batch_dims)
                    else x_shape[batch_axis]] +
                   x_shape[batch_axis + 1:])
-      x2 = np.cos(random.normal(key2, x2_shape))
+      x2 = jnp.cos(random.normal(key2, x2_shape))
       mask2 = random.bernoulli(key2, p=0.4, shape=x2.shape)
-      x2 = np.where(mask2, mask_constant, x2)
+      x2 = jnp.where(mask2, mask_constant, x2)
 
     other_shape = [1, 3, 5, 7, 9, 11, 13, 15][:n]
     for i in contracting_dims + batch_dims:
       other_shape[i] = x_shape[i]
     other = random.normal(key3, other_shape)
-    other = np.arange(np.size(other)).reshape(other_shape)
+    other = jnp.arange(jnp.size(other)).reshape(other_shape)
 
-    other_t = np.transpose(other, r_permutation)
+    other_t = jnp.transpose(other, r_permutation)
     r_c_dims = tuple(r_permutation.index(c) for c in c_dims)
     r_b_dims = tuple(r_permutation.index(b) for b in b_dims)
 
@@ -1000,7 +1002,7 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
                                  batch_axis=batch_axis,
                                  channel_axis=channel_axis,
                                  mask_constant=mask_constant)
-        empirical = np.moveaxis(empirical, *batch_axes())
+        empirical = jnp.moveaxis(empirical, *batch_axes())
         return empirical
 
       for get in ('nngp', 'cov1', 'cov2'):
@@ -1039,16 +1041,16 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
     mask_constant = 10.
 
     x_shape = [6, 3, 4, 5][:n - 1] + [1]
-    x1 = np.cos(random.normal(key1, x_shape))
+    x1 = jnp.cos(random.normal(key1, x_shape))
     mask1 = random.bernoulli(key1, p=0.8, shape=x1.shape)
-    x1 = np.where(mask1, mask_constant, x1)
+    x1 = jnp.where(mask1, mask_constant, x1)
 
     if same_inputs:
       x2 = None
     else:
-      x2 = np.cos(random.normal(key2, x_shape))
+      x2 = jnp.cos(random.normal(key2, x_shape))
       mask2 = random.bernoulli(key2, p=0.4, shape=x2.shape)
-      x2 = np.where(mask2, mask_constant, x2)
+      x2 = jnp.where(mask2, mask_constant, x2)
 
     other = random.normal(key3, [3, 4, 6, 2])
 
@@ -1099,36 +1101,37 @@ class DotGeneralTest(test_utils.NeuralTangentsTestCase):
     test_utils.assert_close_matrices(self, empirical, exact, tol)
 
   def test_dot_general_mask(self):
-    x1, x2 = np.ones((4, 2, 3, 1)), np.ones((4, 2, 3, 1))
+    x1, x2 = jnp.ones((4, 2, 3, 1)), jnp.ones((4, 2, 3, 1))
 
     mask_constant = 10.
 
     def get_k(x1, x2, m1, m2):
-      x1, x2 = np.where(m1, mask_constant, x1), np.where(m2, mask_constant, x2)
+      x1 = jnp.where(m1, mask_constant, x1)
+      x2 = jnp.where(m2, mask_constant, x2)
       k_fn = stax.DotGeneral(
-          rhs=np.ones(x1.shape[:-1]),
+          rhs=jnp.ones(x1.shape[:-1]),
           dimension_numbers=(((1,), (1,)), ((2,), (2,))))[2]
       k = k_fn(x1, x2, 'nngp', mask_constant=mask_constant)
       return k
 
-    m1, m2 = np.zeros_like(x1, np.bool_), np.zeros_like(x2, np.bool_)
+    m1, m2 = jnp.zeros_like(x1, jnp.bool_), jnp.zeros_like(x2, jnp.bool_)
     k = get_k(x1, x2, m1, m2)
-    self.assertAllClose(np.ones_like(k) * 4, k)
+    self.assertAllClose(jnp.ones_like(k) * 4, k)
 
-    m1, m2 = np.ones_like(x1, np.bool_), np.zeros_like(x2, np.bool_)
+    m1, m2 = jnp.ones_like(x1, jnp.bool_), jnp.zeros_like(x2, jnp.bool_)
     k = get_k(x1, x2, m1, m2)
-    self.assertAllClose(np.zeros_like(k), k)
+    self.assertAllClose(jnp.zeros_like(k), k)
 
-    m1, m2 = np.ones_like(x1, np.bool_), np.ones_like(x2, np.bool_)
+    m1, m2 = jnp.ones_like(x1, jnp.bool_), jnp.ones_like(x2, jnp.bool_)
     k = get_k(x1, x2, m1, m2)
-    self.assertAllClose(np.zeros_like(k), k)
+    self.assertAllClose(jnp.zeros_like(k), k)
 
-    m1 = np.concatenate([np.ones_like(x1[:2], np.bool_),
-                         np.zeros_like(x1[2:], np.bool_)])
-    m2 = np.zeros_like(x2, np.bool_)
+    m1 = jnp.concatenate([jnp.ones_like(x1[:2], jnp.bool_),
+                          jnp.zeros_like(x1[2:], jnp.bool_)])
+    m2 = jnp.zeros_like(x2, jnp.bool_)
     k = get_k(x1, x2, m1, m2)
-    self.assertAllClose(np.zeros_like(k[:2]), k[:2])
-    self.assertAllClose(np.full_like(k[2:], 4.), k[2:])
+    self.assertAllClose(jnp.zeros_like(k[:2]), k[:2])
+    self.assertAllClose(jnp.full_like(k[2:], 4.), k[2:])
 
 
 class ImageResizeTest(test_utils.NeuralTangentsTestCase):
@@ -1213,9 +1216,9 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
 
     mask_constant = 10.
 
-    x1 = np.cos(random.normal(key1, x_shape))
+    x1 = jnp.cos(random.normal(key1, x_shape))
     mask1 = random.bernoulli(key1, p=0.3, shape=x1.shape)
-    x1 = np.where(mask1, mask_constant, x1)
+    x1 = jnp.where(mask1, mask_constant, x1)
 
     if same_inputs:
       x2 = None
@@ -1223,9 +1226,9 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
       x2_shape = (x_shape[:batch_axis] +
                   [n_b2] +
                   x_shape[batch_axis + 1:])
-      x2 = np.cos(random.normal(key2, x2_shape))
+      x2 = jnp.cos(random.normal(key2, x2_shape))
       mask2 = random.bernoulli(key2, p=0.2, shape=x2.shape)
-      x2 = np.where(mask2, mask_constant, x2)
+      x2 = jnp.where(mask2, mask_constant, x2)
 
     init_fn, apply_fn, kernel_fn = stax.ImageResize(method=method,
                                                     antialias=antialias,
@@ -1295,7 +1298,7 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
             return (axis,), (0,)
           return (axis, axis + 1), (0, 1)
 
-        empirical = np.moveaxis(empirical, *batch_axes())
+        empirical = jnp.moveaxis(empirical, *batch_axes())
         return empirical
 
       for get in ('nngp', 'cov1', 'cov2'):
@@ -1346,16 +1349,16 @@ class ImageResizeTest(test_utils.NeuralTangentsTestCase):
     mask_constant = 10.
 
     x_shape = [6, 3, 4, 5][:n - 1] + [1]
-    x1 = np.cos(random.normal(key1, x_shape))
+    x1 = jnp.cos(random.normal(key1, x_shape))
     mask1 = random.bernoulli(key1, p=0.2, shape=x1.shape)
-    x1 = np.where(mask1, mask_constant, x1)
+    x1 = jnp.where(mask1, mask_constant, x1)
 
     if same_inputs:
       x2 = None
     else:
-      x2 = np.cos(random.normal(key2, x_shape))
+      x2 = jnp.cos(random.normal(key2, x_shape))
       mask2 = random.bernoulli(key2, p=0.1, shape=x2.shape)
-      x2 = np.where(mask2, mask_constant, x2)
+      x2 = jnp.where(mask2, mask_constant, x2)
 
     bottom = {'conv': stax.Conv(width, (3,) * (n - 2), padding='SAME'),
               'relu': stax.serial(
@@ -1403,12 +1406,12 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
   def test_whitened_inputs(self, diagonal_spatial):
     test_utils.skip_test(self)
 
-    x = np.cos(random.normal(random.PRNGKey(1), (4 * 8 * 8, 512)))
+    x = jnp.cos(random.normal(random.PRNGKey(1), (4 * 8 * 8, 512)))
     cov = x @ x.T
-    whiten = np.linalg.cholesky(np.linalg.inv(cov))
+    whiten = jnp.linalg.cholesky(jnp.linalg.inv(cov))
     x_white = whiten.T @ x
     cov_white = x_white @ x_white.T
-    self.assertAllClose(np.eye(x.shape[0]), cov_white)
+    self.assertAllClose(jnp.eye(x.shape[0]), cov_white)
 
     width = 256
 
@@ -1508,7 +1511,7 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
     if not diagonal_spatial:
       def get_diag(k):
         k = getattr(k, get)
-        k = np.diagonal(k, axis1=-1, axis2=-2)
+        k = jnp.diagonal(k, axis1=-1, axis2=-2)
         return k
       k_conv = get_diag(k_conv)
       k = get_diag(k)
@@ -1591,8 +1594,8 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
     test_utils.skip_test(self, platforms=('cpu', 'tpu'))
 
     key1, key2 = random.split(random.PRNGKey(1), 2)
-    x1 = np.cos(random.normal(key1, (5, 32, 32, 1)))
-    x2 = np.sin(random.normal(key2, (5, 32, 32, 1)))
+    x1 = jnp.cos(random.normal(key1, (5, 32, 32, 1)))
+    x2 = jnp.sin(random.normal(key2, (5, 32, 32, 1)))
 
     width = 128
     local_conv = stax.serial(stax.ConvLocal(width, (3, 2)),
@@ -1648,8 +1651,8 @@ class ConvLocalTest(test_utils.NeuralTangentsTestCase):
     test_utils.skip_test(self)
 
     key1, key2 = random.split(random.PRNGKey(1), 2)
-    x1 = np.cos(random.normal(key1, (2, 4, 6, 3)))
-    x2 = np.sin(random.normal(key2, (3, 4, 6, 3)))
+    x1 = jnp.cos(random.normal(key1, (2, 4, 6, 3)))
+    x2 = jnp.sin(random.normal(key2, (3, 4, 6, 3)))
 
     width = 256
     single_pool = stax.serial(stax.ConvLocal(width, (2, 3),
@@ -1751,18 +1754,18 @@ class IndexTest(test_utils.NeuralTangentsTestCase):
     tol = 0.05
     key1, key2, key_mc = random.split(random.PRNGKey(1), 3)
 
-    x1 = np.cos(random.normal(key1, [6, 3, 4, 5]))
+    x1 = jnp.cos(random.normal(key1, [6, 3, 4, 5]))
     if mask_constant is not None:
       mask1 = random.bernoulli(key1, p=0.2, shape=x1.shape)
-      x1 = np.where(mask1, mask_constant, x1)
+      x1 = jnp.where(mask1, mask_constant, x1)
 
     if same_inputs:
       x2 = None
     else:
-      x2 = np.cos(random.normal(key2, [7, 3, 4, 5]))
+      x2 = jnp.cos(random.normal(key2, [7, 3, 4, 5]))
       if mask_constant is not None:
         mask2 = random.bernoulli(key2, p=0.1, shape=x2.shape)
-        x2 = np.where(mask2, mask_constant, x2)
+        x2 = jnp.where(mask2, mask_constant, x2)
 
     canonical_idx = utils.canonicalize_idx(
         idx=idx,

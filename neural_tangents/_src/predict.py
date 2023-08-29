@@ -35,11 +35,11 @@ from typing import Callable, Generator, Iterable, NamedTuple, Optional, Any, Uni
 import jax
 from jax import grad
 from jax.experimental import ode
-import jax.numpy as np
-import jax.scipy as sp
+import jax.numpy as jnp
+import jax.scipy as jsp
 from jax.tree_util import tree_all, tree_map
-import numpy as onp
-import scipy as osp
+import numpy as np
+import scipy as sp
 from typing_extensions import Protocol
 from .utils import dataclasses, utils
 from .utils.typing import Axes, Get, KernelFn
@@ -48,7 +48,7 @@ from .utils.typing import Axes, Get, KernelFn
 PyTree = Any
 
 
-ArrayOrScalar = Union[None, int, float, np.ndarray]
+ArrayOrScalar = Union[None, int, float, jnp.ndarray]
 """Alias for optional arrays or scalars."""
 
 
@@ -60,14 +60,14 @@ class PredictFn(Protocol):
       t: Optional[ArrayOrScalar] = None,
       fx_train_0: ArrayOrScalar = 0.,
       fx_test_0: Optional[ArrayOrScalar] = None,
-      k_test_train: Optional[np.ndarray] = None
-  ) -> Union[np.ndarray, tuple[np.ndarray, np.ndarray]]:
+      k_test_train: Optional[jnp.ndarray] = None
+  ) -> Union[jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray]]:
     ...
 
 
 def gradient_descent_mse(
-    k_train_train: np.ndarray,
-    y_train: np.ndarray,
+    k_train_train: jnp.ndarray,
+    y_train: jnp.ndarray,
     learning_rate: float = 1.,
     diag_reg: float = 0.,
     diag_reg_absolute_scale: bool = False,
@@ -132,7 +132,7 @@ def gradient_descent_mse(
 
     diag_reg_absolute_scale:
       `True` for `diag_reg` to represent regularization in absolute units,
-      `False` to be `diag_reg * np.mean(np.trace(k_train_train))`.
+      `False` to be `diag_reg * jnp.mean(jnp.trace(k_train_train))`.
 
     trace_axes:
       `f(x_train)` axes such that `k_train_train` lacks these pairs of
@@ -168,9 +168,9 @@ def gradient_descent_mse(
         return fx_train_t
 
       rhs = y_train if fx_train_0 is None else y_train - fx_train_0
-      dfx_test = np.tensordot(k_test_train, solve(rhs, trace_axes),
-                              (odd, first))
-      dfx_test = np.moveaxis(dfx_test, last_t_axes, trace_axes)
+      dfx_test = jnp.tensordot(k_test_train, solve(rhs, trace_axes),
+                               (odd, first))
+      dfx_test = jnp.moveaxis(dfx_test, last_t_axes, trace_axes)
       fx_test_t = fx_test_0 + dfx_test
 
       if fx_train_0 is None:
@@ -193,29 +193,29 @@ def gradient_descent_mse(
     rhs_shape = tuple(y_train.shape[a] for a in trace_axes)
 
     def predict_fn_finite(t, fx_train_0, fx_test_0, k_test_train):
-      t = np.array(t) * learning_rate
+      t = jnp.array(t) * learning_rate
       t_shape, t_ndim = t.shape, t.ndim
       first_t_axes = tuple(range(t_ndim))
       t = t.reshape((-1, 1))
 
       rhs = -y_train if fx_train_0 is None else fx_train_0 - y_train
-      rhs = np.moveaxis(rhs, trace_axes, last_t_axes).reshape(
+      rhs = jnp.moveaxis(rhs, trace_axes, last_t_axes).reshape(
           (-1,) + rhs_shape)
       shape = t_shape + k_train_train.shape[1::2] + rhs_shape
 
       if fx_train_0 is not None:
         dfx_train = expm1_fn(rhs, t).reshape(shape)
-        dfx_train = np.moveaxis(dfx_train, last_t_axes, trace_axes)
-        fx_train_t = np.expand_dims(fx_train_0, first_t_axes) + dfx_train
+        dfx_train = jnp.moveaxis(dfx_train, last_t_axes, trace_axes)
+        fx_train_t = jnp.expand_dims(fx_train_0, first_t_axes) + dfx_train
 
       if fx_test_0 is not None:
         dfx_test = inv_expm1_fn(rhs, t).reshape(shape)
-        dfx_test = np.tensordot(k_test_train, dfx_test, (odd, non_t_axes))
-        dfx_test = np.moveaxis(
+        dfx_test = jnp.tensordot(k_test_train, dfx_test, (odd, non_t_axes))
+        dfx_test = jnp.moveaxis(
             dfx_test,
             tuple(range(n_non_t_axes, n_non_t_axes + t_ndim)) + last_t_axes,
             tuple(range(t_ndim)) + trace_axes)
-        fx_test_t = np.expand_dims(fx_test_0, first_t_axes) + dfx_test
+        fx_test_t = jnp.expand_dims(fx_test_0, first_t_axes) + dfx_test
 
       if fx_train_0 is not None and fx_test_0 is not None:
         return fx_train_t, fx_test_t
@@ -229,14 +229,14 @@ def gradient_descent_mse(
       t: Optional[ArrayOrScalar] = None,
       fx_train_0: ArrayOrScalar = 0.,
       fx_test_0: Optional[ArrayOrScalar] = None,
-      k_test_train: Optional[np.ndarray] = None
-  ) -> Union[np.ndarray, tuple[np.ndarray, np.ndarray]]:
+      k_test_train: Optional[jnp.ndarray] = None
+  ) -> Union[jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray]]:
     """Return output predictions on train [and test] set[s] at time[s] `t`.
 
     Args:
       t:
         a scalar of array of scalars of any shape. `t=None` is treated as
-        infinity and returns the same result as `t=np.inf`, but is computed
+        infinity and returns the same result as `t=jnp.inf`, but is computed
         using identity or linear solve for train and test predictions
         respectively instead of eigendecomposition, saving time and precision.
         Equivalent of training steps (but can be fractional).
@@ -292,10 +292,10 @@ class ODEState:
     qx_test:
       test set auxiliary state variable (e.g. momentum).
   """
-  fx_train: Optional[np.ndarray] = None
-  fx_test: Optional[np.ndarray] = None
-  qx_train: Optional[np.ndarray] = None
-  qx_test: Optional[np.ndarray] = None
+  fx_train: Optional[jnp.ndarray] = None
+  fx_test: Optional[jnp.ndarray] = None
+  qx_train: Optional[jnp.ndarray] = None
+  qx_test: Optional[jnp.ndarray] = None
 
 
 class PredictFnODE(Protocol):
@@ -306,15 +306,15 @@ class PredictFnODE(Protocol):
       t: Optional[ArrayOrScalar] = None,
       fx_train_or_state_0: Union[ArrayOrScalar, ODEState] = 0.,
       fx_test_0: Optional[ArrayOrScalar] = None,
-      k_test_train: Optional[np.ndarray] = None
-  ) -> Union[np.ndarray, tuple[np.ndarray, np.ndarray], ODEState]:
+      k_test_train: Optional[jnp.ndarray] = None
+  ) -> Union[jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray], ODEState]:
     ...
 
 
 def gradient_descent(
-    loss: Callable[[np.ndarray, np.ndarray], float],
-    k_train_train: np.ndarray,
-    y_train: np.ndarray,
+    loss: Callable[[jnp.ndarray, jnp.ndarray], float],
+    k_train_train: jnp.ndarray,
+    y_train: jnp.ndarray,
     learning_rate: float = 1.,
     momentum: Optional[float] = None,
     trace_axes: Axes = (-1,)
@@ -349,7 +349,7 @@ def gradient_descent(
     >>> k_test_train = kernel_fn(x_test, x_train, params)
     >>> #
     >>> from jax.nn import log_softmax
-    >>> cross_entropy = lambda fx, y_hat: -np.mean(log_softmax(fx) * y_hat)
+    >>> cross_entropy = lambda fx, y_hat: -jnp.mean(log_softmax(fx) * y_hat)
     >>> predict_fn = nt.redict.gradient_descent(
     >>>     cross_entropy, k_train_train, y_train, learning_rate, momentum)
     >>> #
@@ -416,23 +416,23 @@ def gradient_descent(
       qx_train_0 = qx_test_0 = None
 
     if fx_train_0 is None:
-      fx_train_0 = np.zeros_like(y_train, dtype)
+      fx_train_0 = jnp.zeros_like(y_train, dtype)
     else:
-      fx_train_0 = np.broadcast_to(fx_train_0, y_train.shape)
+      fx_train_0 = jnp.broadcast_to(fx_train_0, y_train.shape)
 
     if fx_test_0 is not None:
-      fx_test_0 = np.broadcast_to(fx_test_0, fx_test_shape)
+      fx_test_0 = jnp.broadcast_to(fx_test_0, fx_test_shape)
 
     if momentum is None:
       if qx_train_0 is not None or qx_test_0 is not None:
         raise ValueError('Got passed momentum state variables, while '
                          '`momentum is None`.')
     else:
-      qx_train_0 = (np.zeros_like(y_train, dtype) if qx_train_0 is None else
-                    np.broadcast_to(qx_train_0, y_train.shape))
+      qx_train_0 = (jnp.zeros_like(y_train, dtype) if qx_train_0 is None else
+                    jnp.broadcast_to(qx_train_0, y_train.shape))
       qx_test_0 = (None if fx_test_0 is None else
-                   (np.zeros(fx_test_shape, dtype) if qx_test_0 is None
-                    else np.broadcast_to(qx_test_0, fx_test_shape)))
+                   (jnp.zeros(fx_test_shape, dtype) if qx_test_0 is None
+                    else jnp.broadcast_to(qx_test_0, fx_test_shape)))
 
     return ODEState(fx_train_0, fx_test_0, qx_train_0, qx_test_0)  # pytype: disable=wrong-arg-count
 
@@ -443,13 +443,13 @@ def gradient_descent(
 
       dy_df_t = grad_loss(fx_train_t)
 
-      fx_train_t = -np.moveaxis(
-          np.tensordot(k_train_train, dy_df_t, (odd, non_t_axes)),
+      fx_train_t = -jnp.moveaxis(
+          jnp.tensordot(k_train_train, dy_df_t, (odd, non_t_axes)),
           last_t_axes, trace_axes
       )
       if fx_test_t is not None:
-        fx_test_t = -np.moveaxis(
-            np.tensordot(k_test_train, dy_df_t, (odd, non_t_axes)),
+        fx_test_t = -jnp.moveaxis(
+            jnp.tensordot(k_test_train, dy_df_t, (odd, non_t_axes)),
             last_t_axes, trace_axes
         )
 
@@ -467,22 +467,22 @@ def gradient_descent(
       t: Optional[ArrayOrScalar] = None,
       fx_train_or_state_0: Union[ArrayOrScalar, ODEState] = 0.,
       fx_test_0: Optional[ArrayOrScalar] = None,
-      k_test_train: Optional[np.ndarray] = None
-  ) -> Union[np.ndarray, tuple[np.ndarray, np.ndarray], ODEState]:
+      k_test_train: Optional[jnp.ndarray] = None
+  ) -> Union[jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray], ODEState]:
     """Return output predictions on train [and test] set[s] at time[s] `t`.
 
     Args:
       t:
         a scalar or array of scalars of any shape in strictly increasing order.
-        `t=None` is equivalent to `t=np.inf` and may not converge. Equivalent of
-        training steps (but can be fractional).
+        `t=None` is equivalent to `t=jnp.inf` and may not converge. Equivalent
+        of training steps (but can be fractional).
 
       fx_train_or_state_0:
         either (a) output of the network at `t == 0` on the training set or (b)
         complete ODE state (`predict.ODEState`). Pass an ODE state if you want
         to operate on the full ODE state instead of output variables only
         (useful for inspecting auxiliary variables or resuming an optimizer with
-        auxiliary variables from a specific state. Note that only
+        auxiliary variables from a specific state). Note that only
         `momentum != None` optimizer currently has auxiliary variables. To
         initialize an ODE state from scratch, call
         `predict.ODEState(fx_train_0, fx_test_0)`. If an ODE state is passed, an
@@ -508,17 +508,17 @@ def gradient_descent(
     """
     _check_inputs(fx_train_or_state_0, fx_test_0, k_test_train)
 
-    t = np.array(t if t is not None else np.inf, dtype) * learning_rate
+    t = jnp.array(t if t is not None else jnp.inf, dtype) * learning_rate
     t_shape = t.shape
     t = t.reshape((-1,))
 
     # ODE solver requires `t[0]` to be the time when `fx_train_0` [and
     # `fx_test_0`] are evaluated, but also a strictly increasing sequence of
     # timesteps, so we always temporarily append an [almost] `0` at the start.
-    t0 = np.where(t[0] == 0,
-                  np.full((1,), -1e-24, t.dtype),
-                  np.zeros((1,), t.dtype))
-    t = np.concatenate([t0, t])
+    t0 = jnp.where(t[0] == 0,
+                   jnp.full((1,), -1e-24, t.dtype),
+                   jnp.zeros((1,), t.dtype))
+    t = jnp.concatenate([t0, t])
 
     # Solve the ODE.
     fx_test_shape = _get_fx_test_shape(y_train, k_test_train, trace_axes)
@@ -534,7 +534,7 @@ def gradient_descent(
     if isinstance(fx_train_or_state_0, ODEState):
       return state_t
 
-    # `np.ndarray` -> `np.ndarray`
+    # `jnp.ndarray` -> `jnp.ndarray`
     fx_train_t, fx_test_t = state_t.fx_train, state_t.fx_test
 
     if fx_train_or_state_0 is not None and fx_test_0 is None:
@@ -556,13 +556,13 @@ class Gaussian(NamedTuple):
     covariance:
       Covariance of shape equal to the shape of the respective NTK/NNGP kernel.
   """
-  mean: np.ndarray
-  covariance: np.ndarray
+  mean: jnp.ndarray
+  covariance: jnp.ndarray
 
 
 def gp_inference(
     k_train_train,
-    y_train: np.ndarray,
+    y_train: jnp.ndarray,
     diag_reg: float = 0.,
     diag_reg_absolute_scale: bool = False,
     trace_axes: Axes = (-1,)):
@@ -601,7 +601,7 @@ def gp_inference(
 
     diag_reg_absolute_scale:
       `True` for `diag_reg` to represent regularization in absolute units,
-      `False` to be `diag_reg * np.mean(np.trace(k_train_train))`.
+      `False` to be `diag_reg * jnp.mean(jnp.trace(k_train_train))`.
 
     trace_axes:
       `f(x_train)` axes such that `k_train_train`,
@@ -632,10 +632,11 @@ def gp_inference(
     return solve(g)(y_train, trace_axes)
 
   @utils.get_namedtuple('Gaussians')
-  def predict_fn(get: Optional[Get] = None,
-                 k_test_train=None,
-                 k_test_test=None
-                 ) -> dict[str, Union[np.ndarray, Gaussian]]:
+  def predict_fn(
+      get: Optional[Get] = None,
+      k_test_train=None,
+      k_test_test=None
+  ) -> dict[str, Union[jnp.ndarray, Gaussian]]:
     """`test`-set posterior given respective covariance matrices.
 
     Args:
@@ -689,12 +690,12 @@ def gp_inference(
         y = y_train.astype(k_dd.dtype)
       else:
         # Test set predictions.
-        y = np.tensordot(k_td, k_inv_y(k), (odd, first))
-        y = np.moveaxis(y, range(-len(trace_axes), 0), trace_axes)
+        y = jnp.tensordot(k_td, k_inv_y(k), (odd, first))
+        y = jnp.moveaxis(y, range(-len(trace_axes), 0), trace_axes)
 
       if k_test_test is not None:
         if k_td is None:
-          out[g] = Gaussian(y, np.zeros_like(k_dd, k_dd.dtype))
+          out[g] = Gaussian(y, jnp.zeros_like(k_dd, k_dd.dtype))
         else:
           if (g == 'ntk' and
               (not hasattr(k_train_train, 'nngp') or
@@ -715,18 +716,18 @@ def gp_inference(
           k_tt = _get_attr(k_test_test, g_init)
 
           if g == 'nngp' or g == 'ntkgp':
-            cov = np.tensordot(k_td, k_td_g_inv_y, (odd, first))
+            cov = jnp.tensordot(k_td, k_td_g_inv_y, (odd, first))
             cov = k_tt - utils.zip_axes(cov)
             out[g] = Gaussian(y, cov)
 
           elif g == 'ntk':
             term_1 = solve(g)(k_td, even)
-            cov = np.tensordot(_get_attr(k_train_train, 'nngp'), term_1,
-                               (odd, first))
-            cov = np.tensordot(term_1, cov, (first, first))
+            cov = jnp.tensordot(_get_attr(k_train_train, 'nngp'), term_1,
+                                (odd, first))
+            cov = jnp.tensordot(term_1, cov, (first, first))
 
-            term_2 = np.tensordot(k_td, k_td_g_inv_y, (odd, first))
-            term_2 += np.moveaxis(term_2, first, last)
+            term_2 = jnp.tensordot(k_td, k_td_g_inv_y, (odd, first))
+            term_2 += jnp.moveaxis(term_2, first, last)
             cov = utils.zip_axes(cov - term_2) + k_tt
             out[g] = Gaussian(y, cov)
 
@@ -748,13 +749,14 @@ _Kernel.__new__.__defaults__ = (None,) * len(_Kernel._fields)
 
 def gradient_descent_mse_ensemble(
     kernel_fn: KernelFn,
-    x_train: np.ndarray,
-    y_train: np.ndarray,
+    x_train: jnp.ndarray,
+    y_train: jnp.ndarray,
     learning_rate: float = 1.,
     diag_reg: float = 0.0,
     diag_reg_absolute_scale: bool = False,
     trace_axes: Axes = (-1,),
-    **kernel_fn_train_train_kwargs):
+    **kernel_fn_train_train_kwargs
+):
   r"""Predicts the gaussian embedding induced by gradient descent on MSE loss.
 
   This is equivalent to an infinite ensemble of infinite-width networks after
@@ -801,7 +803,7 @@ def gradient_descent_mse_ensemble(
     diag_reg_absolute_scale:
       `True` for `diag_reg` to represent regularization in absolute units,
       `False` to be
-      `diag_reg * np.mean(np.trace(kernel_fn(x_train, None, get)))`.
+      `diag_reg * jnp.mean(jnp.trace(kernel_fn(x_train, None, get)))`.
 
     trace_axes:
       `f(x_train)` axes such that `kernel_fn(x_train, None, get)`,
@@ -841,7 +843,7 @@ def gradient_descent_mse_ensemble(
   last_t_axes = range(-n_trace_axes, 0)
   trace_shape = tuple(y_train.shape[a] for a in trace_axes)
 
-  y_train_flat = np.moveaxis(y_train, trace_axes, last_t_axes).reshape(
+  y_train_flat = jnp.moveaxis(y_train, trace_axes, last_t_axes).reshape(
       (-1,) + trace_shape)
 
   k_dd_cache = {}
@@ -873,8 +875,8 @@ def gradient_descent_mse_ensemble(
     k_dd = getattr(get_k_train_train((get,)), get)
     k_dd = _add_diagonal_regularizer(utils.make_2d(k_dd), diag_reg,
                                      diag_reg_absolute_scale)
-    evals, evecs = np.linalg.eigh(k_dd)
-    evals = np.expand_dims(evals, 0)
+    evals, evecs = jnp.linalg.eigh(k_dd)
+    evals = jnp.expand_dims(evals, 0)
     return evals, evecs
 
   @lru_cache(4)
@@ -884,7 +886,7 @@ def gradient_descent_mse_ensemble(
     return gp_inference(k_dd, y_train, diag_reg, diag_reg_absolute_scale,
                         trace_axes)
 
-  def get_kernels(get: Get, x_test: Optional[np.ndarray],
+  def get_kernels(get: Get, x_test: Optional[jnp.ndarray],
                   compute_cov: bool,
                   **kernel_fn_test_test_kwargs):
     get = _get_dependency(get, compute_cov)
@@ -898,7 +900,7 @@ def gradient_descent_mse_ensemble(
 
       def is_array(x):
         return tree_all(tree_map(
-            lambda x: isinstance(x, (onp.ndarray, np.ndarray)), x))
+            lambda x: isinstance(x, (np.ndarray, jnp.ndarray)), x))
 
       kwargs_td = dict(kernel_fn_train_train_kwargs)
       kwargs_tt = dict(kernel_fn_train_train_kwargs)
@@ -937,17 +939,19 @@ def gradient_descent_mse_ensemble(
     return k_dd, k_td, nngp_tt
 
   @utils.get_namedtuple('Gaussians')
-  def predict_fn(t: Optional[ArrayOrScalar] = None,
-                 x_test: Optional[np.ndarray] = None,
-                 get: Optional[Get] = None,
-                 compute_cov: bool = False,
-                 **kernel_fn_test_test_kwargs) -> dict[str, Gaussian]:
+  def predict_fn(
+      t: Optional[ArrayOrScalar] = None,
+      x_test: Optional[jnp.ndarray] = None,
+      get: Optional[Get] = None,
+      compute_cov: bool = False,
+      **kernel_fn_test_test_kwargs
+  ) -> dict[str, Gaussian]:
     """Return output mean and covariance on the test set at time[s] `t`.
 
     Args:
       t:
         a scalar of array of scalars of any shape. `t=None` is treated as
-        infinity and returns the same result as `t=np.inf`, but is computed
+        infinity and returns the same result as `t=jnp.inf`, but is computed
         using linear solve for test predictions instead of eigendecomposition,
         saving time and precision.
 
@@ -985,14 +989,14 @@ def gradient_descent_mse_ensemble(
                               k_test_test=nngp_tt)
 
     # Finite time.
-    t = np.array(t) * learning_rate
+    t = jnp.array(t) * learning_rate
     t_shape = t.shape
     t = t.reshape((-1, 1))
 
     def reshape_mean(mean):
       k = _get_first(k_dd if k_td is None else k_td)
       mean = mean.reshape(t_shape + k.shape[::2] + trace_shape)
-      mean = np.moveaxis(mean, last_t_axes, trace_axes)
+      mean = jnp.moveaxis(mean, last_t_axes, trace_axes)
       return mean
 
     def reshape_cov(cov):
@@ -1007,7 +1011,7 @@ def gradient_descent_mse_ensemble(
 
       # Training set.
       if k_td is None:
-        mean = np.einsum(
+        mean = jnp.einsum(
             'ji,ti,ki,k...->tj...',
             evecs, -expm1(evals, t), evecs, y_train_flat,
             optimize=_optimize())
@@ -1016,7 +1020,7 @@ def gradient_descent_mse_ensemble(
       else:
         neg_inv_expm1 = -inv_expm1(evals, t)
         ktd_g = utils.make_2d(getattr(k_td, g))
-        mean = np.einsum(
+        mean = jnp.einsum(
             'lj,ji,ti,ki,k...->tl...',
             ktd_g, evecs, neg_inv_expm1, evecs, y_train_flat,
             optimize=_optimize())
@@ -1029,22 +1033,22 @@ def gradient_descent_mse_ensemble(
         # Training set.
         if k_td is None:
           if g == 'nngp':
-            cov = np.einsum(
+            cov = jnp.einsum(
                 'ji,ti,ki->tjk',
                 evecs,
-                (np.maximum(evals, 0.) *
-                 np.exp(- 2 * np.maximum(evals, 0.) * t / y_train.size)),
+                (jnp.maximum(evals, 0.) *
+                 jnp.exp(- 2 * jnp.maximum(evals, 0.) * t / y_train.size)),
                 evecs,
                 optimize=_optimize())
 
           elif g == 'ntk':
-            exp = np.einsum(
+            exp = jnp.einsum(
                 'mi,ti,ki->tmk',
                 evecs,
-                np.exp(-np.maximum(evals, 0.) * t / y_train.size),
+                jnp.exp(-jnp.maximum(evals, 0.) * t / y_train.size),
                 evecs,
                 optimize=_optimize())
-            cov = np.einsum(
+            cov = jnp.einsum(
                 'tmk,kl,tnl->tmn',
                 exp,
                 nngp_dd,
@@ -1056,25 +1060,25 @@ def gradient_descent_mse_ensemble(
 
         # Test set.
         else:
-          _nngp_tt = np.expand_dims(utils.make_2d(nngp_tt), 0)
+          _nngp_tt = jnp.expand_dims(utils.make_2d(nngp_tt), 0)
 
           if g == 'nngp':
-            cov = _nngp_tt - np.einsum(
+            cov = _nngp_tt - jnp.einsum(
                 'mj,ji,ti,ki,lk->tml',
                 ktd_g, evecs, -inv_expm1(evals, 2 * t), evecs, ktd_g,
                 optimize=_optimize())
 
           elif g == 'ntk':
-            term_1 = np.einsum(
+            term_1 = jnp.einsum(
                 'mi,ti,ki,lk->tml',
                 evecs, neg_inv_expm1, evecs, ktd_g,
                 optimize=_optimize())
-            term_2 = np.einsum(
+            term_2 = jnp.einsum(
                 'mj,ji,ti,ki,lk->tml',
                 ktd_g, evecs, neg_inv_expm1, evecs, utils.make_2d(k_td.nngp),
                 optimize=_optimize())
-            term_2 += np.moveaxis(term_2, 1, 2)
-            cov = np.einsum(
+            term_2 += jnp.moveaxis(term_2, 1, 2)
+            cov = jnp.einsum(
                 'tji,jk,tkl->til',
                 term_1, nngp_dd, term_1,
                 optimize=_optimize())
@@ -1094,10 +1098,11 @@ def gradient_descent_mse_ensemble(
 
 
 def max_learning_rate(
-    ntk_train_train: np.ndarray,
+    ntk_train_train: jnp.ndarray,
     y_train_size: Optional[int] = None,
     momentum=0.,
-    eps: float = 1e-12) -> float:
+    eps: float = 1e-12
+) -> float:
   r"""Computes the maximal feasible learning rate for infinite width NNs.
 
   The network is assumed to be trained using mini-/full-batch GD + momentum
@@ -1133,11 +1138,11 @@ def max_learning_rate(
   factor = ntk_train_train.shape[0] if y_train_size is None else y_train_size  # pytype: disable=attribute-error  # jax-ndarray
 
   if _is_on_cpu(ntk_train_train):
-    max_eva = osp.linalg.eigvalsh(ntk_train_train,
-                                  eigvals=(ntk_train_train.shape[0] - 1,  # pytype: disable=attribute-error  # jax-ndarray
-                                           ntk_train_train.shape[0] - 1))[-1]  # pytype: disable=attribute-error  # jax-ndarray
+    max_eva = sp.linalg.eigvalsh(ntk_train_train,
+                                 eigvals=(ntk_train_train.shape[0] - 1,  # pytype: disable=attribute-error  # jax-ndarray
+                                          ntk_train_train.shape[0] - 1))[-1]  # pytype: disable=attribute-error  # jax-ndarray
   else:
-    max_eva = np.linalg.eigvalsh(ntk_train_train)[-1]
+    max_eva = jnp.linalg.eigvalsh(ntk_train_train)[-1]
   lr = 2 * (1 + momentum) * factor / (max_eva + eps)
   return lr
 
@@ -1170,11 +1175,11 @@ def _get_dependency(get: Get, compute_cov: bool) -> tuple[str, ...]:
 
 
 def _get_fns_in_eigenbasis(
-    k_train_train: np.ndarray,
+    k_train_train: jnp.ndarray,
     diag_reg: float,
     diag_reg_absolute_scale: bool,
-    fns: Iterable[Callable[[np.ndarray, np.ndarray], np.ndarray]]
-) -> Generator[Callable[[np.ndarray, np.ndarray], np.ndarray], None, None]:
+    fns: Iterable[Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]]
+) -> Generator[Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray], None, None]:
   """Build functions of a matrix in its eigenbasis.
 
   Args:
@@ -1185,10 +1190,10 @@ def _get_fns_in_eigenbasis(
       diagonal regularizer strength.
 
     diag_reg_absolute_scale:
-      `True` to use absolute (vs relative to mean trace) regulatization.
+      `True` to use absolute (vs relative to mean trace) regularization.
 
     fns:
-      a sequence of functions that add on the eigenvalues (evals, dt) ->
+      a sequence of functions that act on the eigenvalues (evals, dt) ->
       modified_evals.
 
   Returns:
@@ -1198,58 +1203,63 @@ def _get_fns_in_eigenbasis(
   k_train_train = utils.make_2d(k_train_train)
   k_train_train = _add_diagonal_regularizer(k_train_train, diag_reg,
                                             diag_reg_absolute_scale)
-  evals, evecs = np.linalg.eigh(k_train_train)
-  evals = np.expand_dims(evals, 0)
+  evals, evecs = jnp.linalg.eigh(k_train_train)
+  evals = jnp.expand_dims(evals, 0)
 
   def to_eigenbasis(fn):
     """Generates a transform given a function on the eigenvalues."""
     def new_fn(y_train, t):
-      return np.einsum('ji,ti,ki,k...->tj...',
-                       evecs, fn(evals, t), evecs, y_train,
-                       optimize=_optimize())
+      return jnp.einsum('ji,ti,ki,k...->tj...',
+                        evecs, fn(evals, t), evecs, y_train,
+                        optimize=_optimize())
 
     return new_fn
 
   return (to_eigenbasis(fn) for fn in fns)
 
 
-def _add_diagonal_regularizer(A: np.ndarray,
-                              diag_reg: float,
-                              diag_reg_absolute_scale: bool) -> np.ndarray:
+def _add_diagonal_regularizer(
+    A: jnp.ndarray,
+    diag_reg: float,
+    diag_reg_absolute_scale: bool
+) -> jnp.ndarray:
   dimension = A.shape[0]
   if not diag_reg_absolute_scale:
-    diag_reg *= np.trace(A) / dimension
-  return A + diag_reg * np.eye(dimension)
+    diag_reg *= jnp.trace(A) / dimension
+  return A + diag_reg * jnp.eye(dimension)
 
 
-def _get_cho_solve(A: np.ndarray,
-                   diag_reg: float,
-                   diag_reg_absolute_scale: bool,
-                   lower: bool = False) -> Callable[[np.ndarray, Axes],
-                                                    np.ndarray]:
+def _get_cho_solve(
+    A: jnp.ndarray,
+    diag_reg: float,
+    diag_reg_absolute_scale: bool,
+    lower: bool = False
+) -> Callable[[jnp.ndarray, Axes], jnp.ndarray]:
   x_non_channel_shape = A.shape[1::2]
   A = utils.make_2d(A)
   A = _add_diagonal_regularizer(A, diag_reg, diag_reg_absolute_scale)
-  C = sp.linalg.cho_factor(A, lower)
+  C = jsp.linalg.cho_factor(A, lower)
 
-  def cho_solve(b: np.ndarray, b_axes: Axes) -> np.ndarray:
+  def cho_solve(b: jnp.ndarray, b_axes: Axes) -> jnp.ndarray:
     b_axes = utils.canonicalize_axis(b_axes, b)
     last_b_axes = range(-len(b_axes), 0)
     x_shape = x_non_channel_shape + tuple(b.shape[a] for a in b_axes)
 
-    b = np.moveaxis(b, b_axes, last_b_axes)
+    b = jnp.moveaxis(b, b_axes, last_b_axes)
     b = b.reshape((A.shape[1], -1))
 
-    x = sp.linalg.cho_solve(C, b)
+    x = jsp.linalg.cho_solve(C, b)
     x = x.reshape(x_shape)
     return x
 
   return cho_solve
 
 
-def _get_fx_test_shape(y_train: np.ndarray,
-                       k_test_train: np.ndarray,
-                       y_axes: Axes) -> tuple[int, ...]:
+def _get_fx_test_shape(
+    y_train: jnp.ndarray,
+    k_test_train: jnp.ndarray,
+    y_axes: Axes
+) -> tuple[int, ...]:
   if k_test_train is None:
     return y_train.shape
 
@@ -1263,11 +1273,11 @@ def _get_fx_test_shape(y_train: np.ndarray,
 
 def _make_expm1_fn(normalization: float):
 
-  def expm1_fn(evals: np.ndarray, t: np.ndarray):
+  def expm1_fn(evals: jnp.ndarray, t: jnp.ndarray):
     # Since our matrix really should be positive semidefinite,
     # we can threshold the eigenvalues to squash ones that are negative
     # for numerical reasons.
-    return np.expm1(-np.maximum(evals, 0.) * t / normalization)
+    return jnp.expm1(-jnp.maximum(evals, 0.) * t / normalization)
 
   return expm1_fn
 
@@ -1275,15 +1285,17 @@ def _make_expm1_fn(normalization: float):
 def _make_inv_expm1_fn(normalization: float):
   expm1_fn = _make_expm1_fn(normalization)
 
-  def _inv_expm1_fn(evals: np.ndarray, t: np.ndarray):
-    return expm1_fn(evals, t) / np.abs(evals)
+  def _inv_expm1_fn(evals: jnp.ndarray, t: jnp.ndarray):
+    return expm1_fn(evals, t) / jnp.abs(evals)
 
   return _inv_expm1_fn
 
 
-def _check_inputs(fx_train_or_state_0: Union[ArrayOrScalar, ODEState],
-                  fx_test_0: ArrayOrScalar,
-                  k_test_train: Optional[np.ndarray]):
+def _check_inputs(
+    fx_train_or_state_0: Union[ArrayOrScalar, ODEState],
+    fx_test_0: ArrayOrScalar,
+    k_test_train: Optional[jnp.ndarray]
+):
   if isinstance(fx_train_or_state_0, ODEState):
     if fx_test_0 is not None:
       raise ValueError('`fx_test_0` is included in `ODEState` and must be set '
@@ -1303,7 +1315,7 @@ def _check_inputs(fx_train_or_state_0: Union[ArrayOrScalar, ODEState],
                      '`k_test_train` kernel to the parent function.')
 
 
-def _get_axes(x: np.ndarray):
+def _get_axes(x: jnp.ndarray):
   n = x.ndim
   return (
       tuple(range(0, n, 2)),
@@ -1313,8 +1325,8 @@ def _get_axes(x: np.ndarray):
   )
 
 
-def _get_first(k) -> np.ndarray:
-  if isinstance(k, (onp.ndarray, np.ndarray)):
+def _get_first(k) -> jnp.ndarray:
+  if isinstance(k, (np.ndarray, jnp.ndarray)):
     return k
 
   for g in ('nngp', 'ntk'):
@@ -1326,20 +1338,20 @@ def _get_first(k) -> np.ndarray:
   raise ValueError(k)
 
 
-def _get_attr(k, g: str) -> np.ndarray:
-  if isinstance(k, (onp.ndarray, np.ndarray)):
+def _get_attr(k, g: str) -> jnp.ndarray:
+  if isinstance(k, (np.ndarray, jnp.ndarray)):
     return k
   return getattr(k, g)
 
 
 def _is_on_cpu(x: PyTree) -> bool:
-  def _arr_is_on_cpu(x: np.ndarray) -> bool:
+  def _arr_is_on_cpu(x: jnp.ndarray) -> bool:
     # TODO(romann): revisit when https://github.com/google/jax/issues/1431 and
     # https://github.com/google/jax/issues/1432 are fixed.
     if hasattr(x, 'device_buffer'):
       return 'cpu' in str(x.device_buffer.device()).lower()
 
-    if isinstance(x, (onp.ndarray, np.ndarray)):
+    if isinstance(x, (np.ndarray, jnp.ndarray)):
       return True
 
     raise NotImplementedError(type(x))

@@ -23,7 +23,7 @@ For details about the empirical (finite width) NTK computation, please see
 
 from absl import app
 import jax
-from jax import numpy as np
+from jax import numpy as jnp
 from jax import random
 import neural_tangents as nt
 from neural_tangents import stax
@@ -57,7 +57,7 @@ def main(unused_argv):
       **kwargs,
       implementation=nt.NtkImplementation.JACOBIAN_CONTRACTION)
 
-  # (6, 3, 10, 10) full `np.ndarray` test-train NTK
+  # (6, 3, 10, 10) full `jnp.ndarray` test-train NTK
   ntk_jc = jacobian_contraction(x2, x1, params)
 
   # NTK-vector products-based implementation.
@@ -84,7 +84,7 @@ def main(unused_argv):
   # Check that implementations match
   for ntk1 in [ntk_jc, ntk_vp, ntk_sd, ntk_auto]:
     for ntk2 in [ntk_jc, ntk_vp, ntk_sd, ntk_auto]:
-      diff = np.max(np.abs(ntk1 - ntk2))
+      diff = jnp.max(jnp.abs(ntk1 - ntk2))
       print(f'NTK implementation diff {diff}.')
       assert diff < (1e-4 if jax.default_backend() != 'tpu' else 0.1), diff
 

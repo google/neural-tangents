@@ -16,12 +16,12 @@
 """
 
 
-import jax.numpy as np
+import jax.numpy as jnp
 
 
 def _accuracy(y, y_hat):
   """Compute the accuracy of the predictions with respect to one-hot labels."""
-  return np.mean(np.argmax(y, axis=1) == np.argmax(y_hat, axis=1))
+  return jnp.mean(jnp.argmax(y, axis=1) == jnp.argmax(y_hat, axis=1))
 
 
 def print_summary(name, labels, net_p, lin_p, loss):
@@ -34,5 +34,5 @@ def print_summary(name, labels, net_p, lin_p, loss):
     print('Linearization Accuracy = {}'.format(_accuracy(lin_p, labels)))
     print('Linearization Loss = {}'.format(loss(lin_p, labels)))
     print('RMSE of predictions: {}'.format(
-        np.sqrt(np.mean((net_p - lin_p) ** 2))))
+        jnp.sqrt(jnp.mean((net_p - lin_p) ** 2))))
   print('---------------------------------------')

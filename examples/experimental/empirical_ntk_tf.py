@@ -42,7 +42,7 @@ def _get_ntks(f, x1, x2, params, vmap_axes):
   jacobian_contraction = nt.experimental.empirical_ntk_fn_tf(
       **kwargs,
       implementation=nt.NtkImplementation.JACOBIAN_CONTRACTION)
-  # (6, 3, 10, 10) full `np.ndarray` test-train NTK
+  # (6, 3, 10, 10) full `jnp.ndarray` test-train NTK
   ntk_jc = jacobian_contraction(x2, x1, params)
 
   # NTK-vector products-based implementation.

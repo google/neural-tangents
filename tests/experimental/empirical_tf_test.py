@@ -17,10 +17,10 @@
 from absl.testing import absltest
 from absl.testing import parameterized
 import jax
-from jax import numpy as np
+from jax import numpy as jnp
 import neural_tangents as nt
 from neural_tangents import experimental
-import numpy as onp
+import numpy as np
 import tensorflow as tf
 
 
@@ -73,7 +73,7 @@ def _f1(params, x):
 
 
 def _f1_jax(params, x):
-  return x * np.mean(params**2) + 1.
+  return x * jnp.mean(params ** 2) + 1.
 
 
 def _f2(params, x):
@@ -81,7 +81,7 @@ def _f2(params, x):
 
 
 def _f2_jax(params, x):
-  return np.mean(x) * params**2 + 1.
+  return jnp.mean(x) * params**2 + 1.
 
 
 def _f3(params, x):
@@ -89,7 +89,7 @@ def _f3(params, x):
 
 
 def _f3_jax(params, x):
-  return _f1_jax(params, _f1_jax(params, x)) + np.mean(_f2_jax(params, x))
+  return _f1_jax(params, _f1_jax(params, x)) + jnp.mean(_f2_jax(params, x))
 
 
 def _f4(params, x):
@@ -97,7 +97,7 @@ def _f4(params, x):
 
 
 def _f4_jax(params, x):
-  return _f1_jax(params, x) + np.mean(_f2_jax(params, _f3_jax(params, x)))
+  return _f1_jax(params, x) + jnp.mean(_f2_jax(params, _f3_jax(params, x)))
 
 
 # ResNet18 adapted from
@@ -223,12 +223,12 @@ class EmpiricalTfTest(parameterized.TestCase):
     x_shape = (f.input_shape[1:] if isinstance(f, tf.Module) else
                f.input_signature[1].shape[1:])
 
-    x1 = tf.random.normal((2,) + x_shape, seed=2) / onp.prod(x_shape)**0.5
-    x2 = tf.random.normal((3,) + x_shape, seed=3) / onp.prod(x_shape)**0.5
+    x1 = tf.random.normal((2,) + x_shape, seed=2) / np.prod(x_shape) ** 0.5
+    x2 = tf.random.normal((3,) + x_shape, seed=3) / np.prod(x_shape) ** 0.5
 
-    x1_jax = np.array(x1)
-    x2_jax = np.array(x2)
-    params_jax = jax.tree_map(np.array, params)
+    x1_jax = jnp.array(x1)
+    x2_jax = jnp.array(x2)
+    params_jax = jax.tree_map(jnp.array, params)
 
     jax_ntks = [ntk_fn_i(x1_jax, x2_jax, params_jax)
                 for ntk_fn_i in jax_ntk_fns]
@@ -250,10 +250,10 @@ class EmpiricalTfTest(parameterized.TestCase):
     for i1, ntk1 in ntks:
       for i2, ntk2 in ntks[i1 + 1:]:
         # Compare different implementation
-        onp.testing.assert_allclose(ntk1, ntk2, rtol=rtol, atol=atol)
+        np.testing.assert_allclose(ntk1, ntk2, rtol=rtol, atol=atol)
         # Compare against the JAX version (without calling `jax2tf`).
-        onp.testing.assert_allclose(ntk1, jax_ntks[i1], rtol=rtol_jax,
-                                    atol=atol_jax)
+        np.testing.assert_allclose(ntk1, jax_ntks[i1], rtol=rtol_jax,
+                                   atol=atol_jax)
 
   @parameterized.product(
       f=[

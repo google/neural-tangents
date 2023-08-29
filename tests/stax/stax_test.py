@@ -24,12 +24,12 @@ from jax import jit
 from jax import random
 from jax.config import config
 from jax.example_libraries import stax as ostax
-import jax.numpy as np
+import jax.numpy as jnp
 import neural_tangents as nt
 from neural_tangents import stax
 from neural_tangents._src.empirical import _DEFAULT_TESTING_NTK_IMPLEMENTATION
 from tests import test_utils
-import numpy as onp
+import numpy as np
 
 
 config.parse_flags_with_absl()
@@ -87,8 +87,8 @@ def _get_inputs(
     key,
     same_inputs,
     shape,
-    fn=np.cos
-) -> tuple[np.ndarray, np.ndarray]:
+    fn=jnp.cos
+) -> tuple[jnp.ndarray, jnp.ndarray]:
   key, split = random.split(key)
   x1 = fn(random.normal(key, shape))
   batch_axis = shape.index(BATCH_SIZE)
@@ -122,7 +122,7 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
     input_shape = tuple(INPUT_SHAPE[default_spec.index(c)] for c in spec)
 
   else:
-    input_shape = (INPUT_SHAPE[0], onp.prod(INPUT_SHAPE[1:]))
+    input_shape = (INPUT_SHAPE[0], np.prod(INPUT_SHAPE[1:]))
     if default_backend() == 'tpu':
       spec = 'NC'
     else:
@@ -172,7 +172,7 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
   affine = conv(width, (s, s)) if is_conv else fc(width, (s, s))
   affine_bottom = conv(width, (1, s)) if is_conv else fc(width, (1, s))
 
-  rate = onp.random.uniform(0.5, 0.9)
+  rate = np.random.uniform(0.5, 0.9)
   dropout = stax.Dropout(rate, mode='train')
 
   if pool_type == 'AVG':
@@ -219,8 +219,8 @@ def _get_net(W_std, b_std, filter_shape, is_conv, use_pooling, is_res, padding,
   elif proj_into_2d == 'POOL':
     proj_layer = global_pool_fn(batch_axis, channel_axis)
   elif proj_into_2d.startswith('ATTN'):
-    n_heads = int(np.sqrt(width))
-    n_chan_val = int(np.round(float(width) / n_heads))
+    n_heads = int(jnp.sqrt(width))
+    n_chan_val = int(jnp.round(float(width) / n_heads))
     proj_layer = stax.serial(
         stax.GlobalSelfAttention(
             n_chan_out=width,
@@ -265,7 +265,7 @@ def _get_net_pool(width, is_ntk, pool_type, padding,
       filter_shape=filter_shape,
       strides=None,
       padding='SAME',
-      W_std=W_std / onp.prod(filter_shape) if pool_type == 'SUM' else W_std,
+      W_std=W_std / np.prod(filter_shape) if pool_type == 'SUM' else W_std,
       b_std=b_std,
       parameterization=parameterization)
 
@@ -492,8 +492,8 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
     _check_agreement_with_empirical(self, net, same_inputs, use_dropout, is_ntk)
 
   def test_avg_pool(self):
-    X1 = np.ones((4, 2, 3, 2))
-    X2 = np.ones((3, 2, 3, 2))
+    X1 = jnp.ones((4, 2, 3, 2))
+    X2 = jnp.ones((3, 2, 3, 2))
 
     _, apply_fn, kernel_fn = stax.AvgPool((2, 2), (1, 1), 'SAME',
                                           normalize_edges=False)
@@ -512,30 +512,30 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
 
     self.assertAllClose((out1_stax, out2_stax), (out1_norm, out2_norm))
 
-    out_unnorm = np.array([[1., 1., 0.5], [0.5, 0.5, 0.25]]).reshape(
+    out_unnorm = jnp.array([[1., 1., 0.5], [0.5, 0.5, 0.25]]).reshape(
         (1, 2, 3, 1))
-    out1_unnormalized = np.broadcast_to(out_unnorm, X1.shape)
-    out2_unnormalized = np.broadcast_to(out_unnorm, X2.shape)
+    out1_unnormalized = jnp.broadcast_to(out_unnorm, X1.shape)
+    out2_unnormalized = jnp.broadcast_to(out_unnorm, X2.shape)
 
     self.assertAllClose((out1_unnormalized, out2_unnormalized), (out1, out2))
 
     ker = kernel_fn(X1, X2)
     ker_norm = kernel_fn_norm(X1, X2)
 
-    self.assertAllClose(np.ones_like(ker_norm.nngp), ker_norm.nngp)
-    self.assertAllClose(np.ones_like(ker_norm.cov1), ker_norm.cov1)
-    self.assertAllClose(np.ones_like(ker_norm.cov2), ker_norm.cov2)
+    self.assertAllClose(jnp.ones_like(ker_norm.nngp), ker_norm.nngp)
+    self.assertAllClose(jnp.ones_like(ker_norm.cov1), ker_norm.cov1)
+    self.assertAllClose(jnp.ones_like(ker_norm.cov2), ker_norm.cov2)
 
     self.assertEqual(ker_norm.nngp.shape, ker.nngp.shape)
     self.assertEqual(ker_norm.cov1.shape, ker.cov1.shape)
     self.assertEqual(ker_norm.cov2.shape, ker.cov2.shape)
 
-    ker_unnorm = np.outer(out_unnorm, out_unnorm).reshape((2, 3, 2, 3))
-    ker_unnorm = np.transpose(ker_unnorm, axes=(0, 2, 1, 3))
-    nngp = np.broadcast_to(
+    ker_unnorm = jnp.outer(out_unnorm, out_unnorm).reshape((2, 3, 2, 3))
+    ker_unnorm = jnp.transpose(ker_unnorm, axes=(0, 2, 1, 3))
+    nngp = jnp.broadcast_to(
         ker_unnorm.reshape((1, 1) + ker_unnorm.shape), ker.nngp.shape)
-    cov1 = np.broadcast_to(np.expand_dims(ker_unnorm, 0), ker.cov1.shape)
-    cov2 = np.broadcast_to(np.expand_dims(ker_unnorm, 0), ker.cov2.shape)
+    cov1 = jnp.broadcast_to(jnp.expand_dims(ker_unnorm, 0), ker.cov1.shape)
+    cov2 = jnp.broadcast_to(jnp.expand_dims(ker_unnorm, 0), ker.cov2.shape)
     self.assertAllClose((nngp, cov1, cov2), (ker.nngp, ker.cov1, ker.cov2))
 
   @test_utils.product(
@@ -602,7 +602,7 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
       tol = 5e-4
       samples = 100 * N_SAMPLES
     else:
-      tol = {onp.dtype(onp.float32): 5e-2, onp.dtype(onp.float64): 5e-3}
+      tol = {np.dtype(np.float32): 5e-2, np.dtype(np.float64): 5e-3}
 
     # a batch of dense inputs
     x_dense = random.normal(key, (input_count, input_size))
@@ -626,9 +626,9 @@ class StaxTest(test_utils.NeuralTangentsTestCase):
         device_count=-1,
         implementation=_DEFAULT_TESTING_NTK_IMPLEMENTATION
     )(x_sparse, None, kernel)
-    mc = np.reshape(mc, exact.shape)
+    mc = jnp.reshape(mc, exact.shape)
 
-    assert not np.any(np.isnan(exact))
+    assert not jnp.any(jnp.isnan(exact))
     self.assertAllClose(exact[sparse_count:, sparse_count:],
                         mc[sparse_count:, sparse_count:],
                         rtol=tol, atol=tol)

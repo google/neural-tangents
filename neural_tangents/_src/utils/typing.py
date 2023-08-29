@@ -15,11 +15,12 @@
 """Common Type Definitions."""
 
 from typing import Any, Generator, Optional, Sequence, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import Protocol
 
 from jax import random
-import jax.numpy as np
+import jax.numpy as jnp
+
 from .kernel import Kernel
-from typing_extensions import Protocol
 
 
 PyTree = Any
@@ -95,10 +96,10 @@ class ApplyFn(Protocol):
   def __call__(
       self,
       params: PyTree,
-      inputs: NTTree[np.ndarray],
+      inputs: NTTree[jnp.ndarray],
       *args,
       **kwargs
-  ) -> NTTree[np.ndarray]:
+  ) -> NTTree[jnp.ndarray]:
     ...
 
 
@@ -110,13 +111,13 @@ class MaskFn(Protocol):
 
   def __call__(
       self,
-      mask: Union[np.ndarray, Sequence[np.ndarray]],
+      mask: Union[jnp.ndarray, Sequence[jnp.ndarray]],
       input_shape: Shapes,
-  ) -> Union[np.ndarray, Sequence[np.ndarray]]:
+  ) -> Union[jnp.ndarray, Sequence[jnp.ndarray]]:
     ...
 
 
-KernelOrInput = Union[NTTree[Kernel], NTTree[np.ndarray]]
+KernelOrInput = Union[NTTree[Kernel], NTTree[jnp.ndarray]]
 
 
 Get = Union[None, str, tuple[str, ...]]
@@ -150,10 +151,10 @@ class AnalyticKernelFn(Protocol):
   def __call__(
       self,
       x1: KernelOrInput,
-      x2: Optional[NTTree[np.ndarray]] = None,
+      x2: Optional[NTTree[jnp.ndarray]] = None,
       get: Get = None,
       **kwargs
-  ) -> Union[NTTree[Kernel], NTTree[np.ndarray]]:
+  ) -> Union[NTTree[Kernel], NTTree[jnp.ndarray]]:
     ...
 
 
@@ -169,12 +170,12 @@ class EmpiricalGetKernelFn(Protocol):
 
   def __call__(
       self,
-      x1: NTTree[np.ndarray],
-      x2: Optional[NTTree[np.ndarray]],
+      x1: NTTree[jnp.ndarray],
+      x2: Optional[NTTree[jnp.ndarray]],
       get: Get,
       params: PyTree,
       **kwargs
-  ) -> NTTree[np.ndarray]:
+  ) -> NTTree[jnp.ndarray]:
     ...
 
 
@@ -189,11 +190,11 @@ class EmpiricalKernelFn(Protocol):
 
   def __call__(
       self,
-      x1: NTTree[np.ndarray],
-      x2: Optional[NTTree[np.ndarray]],
+      x1: NTTree[jnp.ndarray],
+      x2: Optional[NTTree[jnp.ndarray]],
       params: PyTree,
       **kwargs
-  ) -> NTTree[np.ndarray]:
+  ) -> NTTree[jnp.ndarray]:
     ...
 
 
@@ -206,11 +207,11 @@ class MonteCarloKernelFn(Protocol):
 
   def __call__(
       self,
-      x1: NTTree[np.ndarray],
-      x2: Optional[NTTree[np.ndarray]],
+      x1: NTTree[jnp.ndarray],
+      x2: Optional[NTTree[jnp.ndarray]],
       get: Get = None,
       **kwargs
-  ) -> Union[NTTree[np.ndarray], Generator[NTTree[np.ndarray], None, None]]:
+  ) -> Union[NTTree[jnp.ndarray], Generator[NTTree[jnp.ndarray], None, None]]:
     ...
 
 

@@ -17,10 +17,11 @@
 import operator as op
 from typing import Any, Callable, Optional, Sequence
 
+from jax import lax
+import jax.numpy as jnp
+
 from . import dataclasses
 from . import utils
-from jax import lax
-import jax.numpy as np
 
 
 @dataclasses.dataclass
@@ -29,21 +30,21 @@ class Kernel:
 
   Attributes:
     nngp:
-      covariance between the first and second batches (NNGP). A `np.ndarray` of
+      covariance between the first and second batches (NNGP). A `jnp.ndarray` of
       shape
       `(batch_size_1, batch_size_2, height, [height,], width, [width,], ...))`,
       where exact shape depends on `diagonal_spatial`.
 
     ntk:
-      the neural tangent kernel (NTK). `np.ndarray` of same shape as `nngp`.
+      the neural tangent kernel (NTK). `jnp.ndarray` of same shape as `nngp`.
 
     cov1:
-      covariance of the first batch of inputs. A `np.ndarray` with shape
+      covariance of the first batch of inputs. A `jnp.ndarray` with shape
       `(batch_size_1, [batch_size_1,] height, [height,], width, [width,], ...)`
       where exact shape depends on `diagonal_batch` and `diagonal_spatial`.
 
     cov2:
-      optional covariance of the second batch of inputs. A `np.ndarray` with
+      optional covariance of the second batch of inputs. A `jnp.ndarray` with
       shape
       `(batch_size_2, [batch_size_2,] height, [height,], width, [width,], ...)`
       where the exact shape depends on `diagonal_batch` and `diagonal_spatial`.
@@ -68,7 +69,7 @@ class Kernel:
       order of kernel spatial dimensions.
 
     is_input:
-      a boolean specifying whether the current layer is the input layer and it
+      a boolean specifying whether the current layer is the input layer, and it
       is used to avoid applying dropout to the input layer.
 
     diagonal_batch:
@@ -108,7 +109,7 @@ class Kernel:
       channel axis of the activations (taken to infinity).
 
     mask1:
-      an optional boolean `np.ndarray` with a shape broadcastable to `shape1`
+      an optional boolean `jnp.ndarray` with a shape broadcastable to `shape1`
       (and the same number of dimensions). `True` stands for the input being
       masked at that position, while `False` means the input is visible. For
       example, if `shape1 == (5, 32, 32, 3)` (a batch of 5 `NHWC` CIFAR10
@@ -120,12 +121,12 @@ class Kernel:
       same as `mask1`, but for the second batch of inputs.
   """
 
-  nngp: np.ndarray
-  ntk: Optional[np.ndarray]
+  nngp: jnp.ndarray
+  ntk: Optional[jnp.ndarray]
 
-  cov1: np.ndarray
-  cov2: Optional[np.ndarray]
-  x1_is_x2: np.ndarray
+  cov1: jnp.ndarray
+  cov2: Optional[jnp.ndarray]
+  x1_is_x2: jnp.ndarray
 
   is_gaussian: bool = dataclasses.field(pytree_node=False)
   is_reversed: bool = dataclasses.field(pytree_node=False)
@@ -140,8 +141,8 @@ class Kernel:
   batch_axis: int = dataclasses.field(pytree_node=False)
   channel_axis: int = dataclasses.field(pytree_node=False)
 
-  mask1: Optional[np.ndarray] = None
-  mask2: Optional[np.ndarray] = None
+  mask1: Optional[jnp.ndarray] = None
+  mask2: Optional[jnp.ndarray] = None
 
   replace = ...  # type: Callable[..., 'Kernel']
   asdict = ...  # type: Callable[[], dict[str, Any]]
@@ -202,8 +203,8 @@ class Kernel:
     if axes is None:
       axes = tuple(range(len(self.shape1) - 2))
 
-    def permute(mat: Optional[np.ndarray],
-                batch_ndim: int) -> Optional[np.ndarray]:
+    def permute(mat: Optional[jnp.ndarray],
+                batch_ndim: int) -> Optional[jnp.ndarray]:
       if mat is not None:
         _axes = tuple(batch_ndim + a for a in axes)
         if not self.diagonal_spatial:
@@ -211,7 +212,7 @@ class Kernel:
                         for j in (2 * a - batch_ndim,
                                   2 * a - batch_ndim + 1))
         _axes = tuple(range(batch_ndim)) + _axes
-        return np.transpose(mat, _axes)
+        return jnp.transpose(mat, _axes)
       return mat
 
     cov1 = permute(self.cov1, 1 if self.diagonal_batch else 2)
@@ -220,9 +221,11 @@ class Kernel:
     ntk = permute(self.ntk, 2)
     return self.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
 
-  def mask(self,
-           mask1: Optional[np.ndarray],
-           mask2: Optional[np.ndarray]) -> 'Kernel':
+  def mask(
+      self,
+      mask1: Optional[jnp.ndarray],
+      mask2: Optional[jnp.ndarray]
+  ) -> 'Kernel':
     """Mask all covariance matrices according to `mask1`, `mask2`."""
     mask11, mask12, mask22 = self._get_mask_prods(mask1, mask2)
 
@@ -231,18 +234,22 @@ class Kernel:
     nngp = utils.mask(self.nngp, mask12)
     ntk = utils.mask(self.ntk, mask12)
 
-    return self.replace(cov1=cov1,
-                        nngp=nngp,
-                        cov2=cov2,
-                        ntk=ntk,
-                        mask1=mask1,
-                        mask2=mask2)
+    return self.replace(
+        cov1=cov1,
+        nngp=nngp,
+        cov2=cov2,
+        ntk=ntk,
+        mask1=mask1,
+        mask2=mask2,
+    )
 
   def _get_mask_prods(
       self,
-      mask1: Optional[np.ndarray],
-      mask2: Optional[np.ndarray]
-  ) -> tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+      mask1: Optional[jnp.ndarray],
+      mask2: Optional[jnp.ndarray]
+  ) -> tuple[Optional[jnp.ndarray],
+             Optional[jnp.ndarray],
+             Optional[jnp.ndarray]]:
     """Gets outer products of `mask1, mask1`, `mask1, mask2`, `mask2, mask2`."""
     def get_mask_prod(m1, m2, batch_ndim):
       if m1 is None and m2 is None:
@@ -257,10 +264,10 @@ class Kernel:
                 f'Please describe your use case at '
                 f'https://github.com/google/neural-tangents/issues/new')
 
-          m = np.squeeze(np.moveaxis(m, (self.batch_axis, self.channel_axis),
-                                     (0, -1)), -1)
+          m = jnp.squeeze(jnp.moveaxis(m, (self.batch_axis, self.channel_axis),
+                                       (0, -1)), -1)
           if self.is_reversed:
-            m = np.moveaxis(m, range(1, m.ndim), range(m.ndim - 1, 0, -1))
+            m = jnp.moveaxis(m, range(1, m.ndim), range(m.ndim - 1, 0, -1))
         return m
 
       m1, m2 = reshape(m1), reshape(m2)
@@ -279,8 +286,8 @@ class Kernel:
 
   def dot_general(
       self,
-      other1: Optional[np.ndarray],
-      other2: Optional[np.ndarray],
+      other1: Optional[jnp.ndarray],
+      other2: Optional[jnp.ndarray],
       is_lhs: bool,
       dimension_numbers: lax.DotDimensionNumbers
   ) -> 'Kernel':
@@ -372,10 +379,12 @@ class Kernel:
 
       return mat_non_c_dims[:n_b] + other_non_c_dims + mat_non_c_dims[n_b:]
 
-    def dot(mat: Optional[np.ndarray],
-            batch_ndim: int,
-            other1: Optional[np.ndarray] = None,
-            other2: Optional[np.ndarray] = None) -> Optional[np.ndarray]:
+    def dot(
+        mat: Optional[jnp.ndarray],
+        batch_ndim: int,
+        other1: Optional[jnp.ndarray] = None,
+        other2: Optional[jnp.ndarray] = None,
+    ) -> Optional[jnp.ndarray]:
       if mat is None or mat.ndim == 0 or other1 is None and other2 is None:
         return mat
 
@@ -394,7 +403,7 @@ class Kernel:
         other2_dims = get_other_dims(batch_ndim, False)
         operands += (other2, other2_dims)
 
-      return np.einsum(*operands, get_out_dims(batch_ndim), optimize=True)
+      return jnp.einsum(*operands, get_out_dims(batch_ndim), optimize=True)
 
     cov1 = dot(self.cov1, 1 if self.diagonal_batch else 2, other1, other1)
     cov2 = dot(self.cov2, 1 if self.diagonal_batch else 2, other2, other2)

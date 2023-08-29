@@ -28,9 +28,9 @@ import warnings
 import jax
 from jax import core
 from jax import random
-import jax.numpy as np
+import jax.numpy as jnp
 from jax.tree_util import tree_all, tree_map
-import numpy as onp
+import numpy as np
 
 
 PyTree = Any
@@ -251,11 +251,13 @@ def get_namedtuple(name):
   return getter_decorator
 
 
-@nt_tree_fn(nargs=2, reduce=lambda x: np.all(np.array(x)))
-def x1_is_x2(x1: np.ndarray,
-             x2: Optional[np.ndarray] = None,
-             eps: float = 1e-12) -> Union[bool, np.ndarray]:
-  if not isinstance(x1, (onp.ndarray, np.ndarray)):
+@nt_tree_fn(nargs=2, reduce=lambda x: jnp.all(jnp.array(x)))
+def x1_is_x2(
+    x1: jnp.ndarray,
+    x2: Optional[jnp.ndarray] = None,
+    eps: float = 1e-12
+) -> Union[bool, jnp.ndarray]:
+  if not isinstance(x1, (np.ndarray, jnp.ndarray)):
     raise TypeError('`x1` must be an ndarray. A {} is found.'.format(type(x1)))
 
   if x2 is None:
@@ -274,12 +276,12 @@ def x1_is_x2(x1: np.ndarray,
     diff = x1 - x2
   except TypeError:
     # inputs are e.g. custom PRNGKeys which don't define subtraction.
-    return np.all(x1 == x2)
+    return jnp.all(x1 == x2)
   else:
-    return np.all(np.abs(diff) < eps)
+    return jnp.all(jnp.abs(diff) < eps)
 
 
-def _get_ndim(x: Union[int, Sized, np.ndarray]) -> int:
+def _get_ndim(x: Union[int, Sized, jnp.ndarray]) -> int:
   """Get number of dimensions given number of dimensions / shape / array."""
   if hasattr(x, 'ndim'):
     n = x.ndim
@@ -292,7 +294,7 @@ def _get_ndim(x: Union[int, Sized, np.ndarray]) -> int:
   return n
 
 
-def mod(axis: Axes, x: Union[int, Sized, np.ndarray]) -> list[int]:
+def mod(axis: Axes, x: Union[int, Sized, jnp.ndarray]) -> list[int]:
   """Makes `axis` non-negative given number of dimensions / shape / array."""
   n = _get_ndim(x)
   if isinstance(axis, int):
@@ -300,7 +302,10 @@ def mod(axis: Axes, x: Union[int, Sized, np.ndarray]) -> list[int]:
   return [(i % n) if n > 0 else i for i in axis]
 
 
-def canonicalize_axis(axis: Axes, x: Union[int, Sized, np.ndarray]) -> list[int]:
+def canonicalize_axis(
+    axis: Axes,
+    x: Union[int, Sized, jnp.ndarray]
+) -> list[int]:
   """Converts axis into a sorted non-negative list.
 
   Args:
@@ -312,51 +317,55 @@ def canonicalize_axis(axis: Axes, x: Union[int, Sized, np.ndarray]) -> list[int]
   """
   axis = [axis] if isinstance(axis, int) else list(axis)
   n = _get_ndim(x)
-  return list(set(onp.arange(n)[axis]))
+  return list(set(np.arange(n)[axis]))
 
 
-def zip_axes(x: np.ndarray,
-             start_axis: int = 0,
-             end_axis: Optional[int] = None) -> np.ndarray:
+def zip_axes(
+    x: jnp.ndarray,
+    start_axis: int = 0,
+    end_axis: Optional[int] = None
+) -> jnp.ndarray:
   """Zip (interleave) axes starting from `start_axis`.
 
   Changes the shape as follows:
   `[..., X, Y, Z, ..., X, Y, Z, ...] -> [..., X, X, ..., Y, Y, ..., Z, Z, ...]`
 
   Args:
-    x: `np.ndarray` with an even number of dimensions following `start_axis`.
+    x: `jnp.ndarray` with an even number of dimensions following `start_axis`.
     start_axis: `int`, number of axis from which to zip (interleave).
     end_axis: `int`, number of axis until which to zip (interleave).
 
   Returns:
-    A `np.ndarray` with a new shape.
+    A `jnp.ndarray` with a new shape.
   """
   return _zip_axes(x, start_axis, end_axis, unzip=False)
 
 
-def unzip_axes(x: np.ndarray,
+def unzip_axes(x: jnp.ndarray,
                start_axis: int = 0,
-               end_axis: Optional[int] = None) -> np.ndarray:
+               end_axis: Optional[int] = None) -> jnp.ndarray:
   """Unzip (de-interleave) axes starting from `start_axis`.
 
   Changes the shape as follows:
   `[..., X, X, ..., Y, Y, ..., Z, Z, ...] -> [..., X, Y, Z, ..., X, Y, Z, ...]`
 
   Args:
-    x: `np.ndarray` with an even number of dimensions following `start_axis`.
+    x: `jnp.ndarray` with an even number of dimensions following `start_axis`.
     start_axis: `int`, number of axis from which to unzip (de-interleave).
     end_axis: `int`, number of axis until which to unzip (de-interleave).
 
   Returns:
-    A `np.ndarray` with a new shape.
+    A `jnp.ndarray` with a new shape.
   """
   return _zip_axes(x, start_axis, end_axis, unzip=True)
 
 
-def _zip_axes(x: np.ndarray,
-              start_axis: int = 0,
-              end_axis: Optional[int] = None,
-              unzip: bool = False) -> np.ndarray:
+def _zip_axes(
+    x: jnp.ndarray,
+    start_axis: int = 0,
+    end_axis: Optional[int] = None,
+    unzip: bool = False
+) -> jnp.ndarray:
   """Zip/unzip (interleave/de-interleave) axes starting from `start_axis`.
 
   Changes the shape as follows:
@@ -366,13 +375,13 @@ def _zip_axes(x: np.ndarray,
     `[..., X, Y, Z, ..., X, Y, Z, ...] -> [..., X, X, ..., Y, Y, ..., Z, Z, ..]`
 
   Args:
-    x: `np.ndarray` with an even number of dimensions following `start_axis`.
+    x: `jnp.ndarray` with an even number of dimensions following `start_axis`.
     start_axis: `int`, number of axis from which to zip/unzip.
     end_axis: `int`, number of axis until which to zip/unzip.
     unzip: `bool`, set to `True` to unzip instead of zip.
 
   Returns:
-    A `np.ndarray` with a new shape.
+    A `jnp.ndarray` with a new shape.
   """
   if end_axis is None:
     end_axis = x.ndim
@@ -386,15 +395,17 @@ def _zip_axes(x: np.ndarray,
   last_axes = range(end_axis - half_ndim, end_axis)
 
   if unzip:
-    x = np.moveaxis(x, odd_axes, last_axes)
+    x = jnp.moveaxis(x, odd_axes, last_axes)
   else:
-    x = np.moveaxis(x, last_axes, odd_axes)
+    x = jnp.moveaxis(x, last_axes, odd_axes)
   return x
 
 
-def diagonal_between(x: np.ndarray,
-                     start_axis: int = 0,
-                     end_axis: Optional[int] = None) -> np.ndarray:
+def diagonal_between(
+    x: jnp.ndarray,
+    start_axis: int = 0,
+    end_axis: Optional[int] = None
+) -> jnp.ndarray:
   """Returns the diagonal along all dimensions between start and end axes."""
   if end_axis is None:
     end_axis = x.ndim
@@ -412,8 +423,8 @@ def diagonal_between(x: np.ndarray,
   shape_2d = x.shape[:start_axis] + (side_size, side_size) + x.shape[end_axis:]
   shape_result = x.shape[:start_axis] + side_shape + x.shape[end_axis:]
 
-  x = np.diagonal(x.reshape(shape_2d), axis1=start_axis, axis2=start_axis+1)
-  x = np.moveaxis(x, -1, start_axis)
+  x = jnp.diagonal(x.reshape(shape_2d), axis1=start_axis, axis2=start_axis + 1)
+  x = jnp.moveaxis(x, -1, start_axis)
   return x.reshape(shape_result)
 
 
@@ -441,11 +452,13 @@ def outer_prod(x, y, start_axis, end_axis, prod_op):
   return prod_op(x, y)
 
 
-_ArrayOrShape = TypeVar('_ArrayOrShape',
-                        onp.ndarray,
-                        np.ndarray,
-                        list[int],
-                        tuple[int, ...])
+_ArrayOrShape = TypeVar(
+    '_ArrayOrShape',
+    np.ndarray,
+    jnp.ndarray,
+    list[int],
+    tuple[int, ...],
+)
 
 
 def reverse_zipped(
@@ -458,21 +471,21 @@ def reverse_zipped(
                         for i in range(ndim - 2, start_axis - 1, -2)
                         for j in (i, i + 1))
 
-    if isinstance(x, (onp.ndarray, np.ndarray)):
+    if isinstance(x, (np.ndarray, jnp.ndarray)):
       target_axes = range(start_axis, ndim)
-      x = np.moveaxis(x, source_axes, target_axes)
+      x = jnp.moveaxis(x, source_axes, target_axes)
     else:
       x = x[:start_axis] + type(x)(x[i] for i in source_axes)
   return x
 
 
 def mask(
-    x: Optional[np.ndarray],
-    mask_mat: Optional[np.ndarray]
-) -> Optional[np.ndarray]:
+    x: Optional[jnp.ndarray],
+    mask_mat: Optional[jnp.ndarray]
+) -> Optional[jnp.ndarray]:
   if x is None or mask_mat is None:
     return x
-  return np.where(mask_mat, np.zeros((), x.dtype), x)
+  return jnp.where(mask_mat, jnp.zeros((), x.dtype), x)
 
 
 def size_at(
@@ -507,10 +520,10 @@ def axis_after_dot(
 
 
 def make_2d(
-    x: Optional[np.ndarray],
+    x: Optional[jnp.ndarray],
     start_axis: int = 0,
     end_axis: Optional[int] = None
-) -> Optional[np.ndarray]:
+) -> Optional[jnp.ndarray]:
   """Makes `x` 2D from `start_axis` to `end_axis`, preserving other axes.
 
   `x` is assumed to follow the (`X, X, Y, Y, Z, Z`) axes layout.
@@ -551,15 +564,15 @@ def _read_keys(key, x1, x2):
     key1 = key2 = key
   elif isinstance(key, tuple) and len(key) == 2:
     key1, key2 = key
-    new_key = np.where(x1_is_x2(key1, key2),
-                       random.fold_in(key2, 1), key2)
-    key2 = np.where(x1_is_x2(x1, x2), key1, new_key)
+    new_key = jnp.where(x1_is_x2(key1, key2),
+                        random.fold_in(key2, 1), key2)
+    key2 = jnp.where(x1_is_x2(x1, x2), key1, new_key)
     warnings.warn('The value of `key[1]` might be replaced by a new value if '
                   'key[0] == key[1] and x1 != x2 or key[0] != key[1] and '
                   'x1 == x2.')
-  elif isinstance(key, np.ndarray):
+  elif isinstance(key, jnp.ndarray):
     key1 = key
-    key2 = np.where(x1_is_x2(x1, x2), key1, random.fold_in(key, 1))
+    key2 = jnp.where(x1_is_x2(x1, x2), key1, random.fold_in(key, 1))
   else:
     raise TypeError(type(key))
   return key1, key2
@@ -642,7 +655,7 @@ def slice_shape(shape: tuple[int, ...], idx: SliceType) -> tuple[int, ...]:
     if isinstance(i, int):
       n_ints += 1
 
-  out_shape = list(onp.empty(np_shape)[idx].shape)
+  out_shape = list(np.empty(np_shape)[idx].shape)
   for a, v in unknown_axes.items():
     out_shape[a] = v
 

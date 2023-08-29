@@ -21,7 +21,7 @@ import warnings
 import frozendict
 import jax
 from jax import lax
-from jax import numpy as np
+from jax import numpy as jnp
 from jax import eval_shape
 from jax.core import ShapedArray
 from jax.tree_util import tree_map, tree_all
@@ -30,7 +30,7 @@ import dataclasses
 from ..utils import dataclasses as nt_dataclasses
 from ..utils.kernel import Kernel
 from ..utils.typing import AnalyticKernelFn, Axes, Get, InitFn, ApplyFn, InternalLayer, Layer, LayerKernelFn, NTTree, PyTree
-import numpy as onp
+import numpy as np
 
 
 # Public decorators
@@ -193,7 +193,7 @@ def supports_masking(remask_kernel: bool):
         masked_inputs = tree_map(
             lambda x: _get_masked_array(x, mask_constant),
             inputs,
-            is_leaf=lambda x: isinstance(x, (np.ndarray, MaskedArray)))
+            is_leaf=lambda x: isinstance(x, (jnp.ndarray, MaskedArray)))
 
         is_leaf = lambda x: isinstance(x, MaskedArray)
         inputs = tree_map(
@@ -207,7 +207,7 @@ def supports_masking(remask_kernel: bool):
 
         outputs = apply_fn(params, inputs, mask=mask, **kwargs)
         outputs_mask = mask_fn(mask,
-                               inputs.shape if isinstance(inputs, np.ndarray)
+                               inputs.shape if isinstance(inputs, jnp.ndarray)
                                else [i.shape for i in inputs])
         if outputs_mask is None:
           return outputs
@@ -243,13 +243,13 @@ def supports_masking(remask_kernel: bool):
 
 
 def unmask_fn(fn: ApplyFn) -> ApplyFn:
-  """Make a function returning a `MaskedArray` return a `np.ndarray`.
+  """Make a function returning a `MaskedArray` return a `jnp.ndarray`.
 
   Useful if you pass `masked_constant` to your `apply_fn` in order to have
   variable-length inputs. In this case `apply_fn` returns a `MaskedArray`
   that stores the information about which entries are masked (for convenient
   chaining with further functions operating on masked inputs). This decorator
-  replaces the output `MaskedArray` with an `np.ndarray` where masked
+  replaces the output `MaskedArray` with an `jnp.ndarray` where masked
   entries are zeroed-out, which is convenient to pass to functions operating on
   arrays, such as :obj:`~neural_tangents.monte_carlo_kernel_fn` or
   :obj:`~neural_tangents.empirical_kernel_fn`.
@@ -269,13 +269,13 @@ def unmask_fn(fn: ApplyFn) -> ApplyFn:
     Function of same signature as `fn`, where the output :class:`MaskedArray` is
     replaced with the :class:`jax.numpy.ndarray` with masked entries zeroed-out.
   """
-  def unmask(x: Union[MaskedArray, np.ndarray]) -> np.ndarray:
+  def unmask(x: Union[MaskedArray, jnp.ndarray]) -> jnp.ndarray:
     if isinstance(x, MaskedArray):
       x = utils.mask(x.masked_value, x.mask)
     return x  # pytype: disable=bad-return-type  # jax-ndarray
 
   def is_leaf(x) -> bool:
-    return isinstance(x, (np.ndarray, MaskedArray))
+    return isinstance(x, (jnp.ndarray, MaskedArray))
 
   @utils.wraps(fn)
   def fn_no_mask(*args, **kwargs):
@@ -315,21 +315,22 @@ class MaskedArray:
 
 
 def _get_masked_array(
-    x: Union[None, np.ndarray, ShapedArray, MaskedArray],
+    x: Union[None, jnp.ndarray, ShapedArray, MaskedArray],
     mask_constant: Optional[float] = None
 ) -> MaskedArray:
   """Return `x` with entries equal to `mask_constant` zeroed-out, and the mask.
 
-  The mask returned is a boolean `np.ndarray` with masked indices having `True`.
+  The mask returned is a boolean `jnp.ndarray` with masked indices being `True`.
 
   Args:
     x:
-      `np.ndarray` to mask. If `x` is a :class:`MaskedArray`, treat it as
+      `jnp.ndarray` to mask. If `x` is a :class:`MaskedArray`, treat it as
       `(masked_x, mask)` and pass it through.
 
-    mask_constant: an optional `float`, the value in inputs to be considered as
-      masked (e.g. padding in a batch of sentences). `None` means no masking.
-      Can also be `np.nan`, `np.inf` etc.
+    mask_constant:
+      an optional `float`, the value in inputs to be considered as masked (e.g.
+      padding in a batch of sentences). `None` means no masking. Can also be
+      `jnp.nan`, `jnp.inf` etc.
 
   Returns:
     A :class:`MaskedArray` of `(masked_x, boolean_mask)`.
@@ -341,12 +342,12 @@ def _get_masked_array(
   elif isinstance(x, MaskedArray):
     x, mask_mat = x.masked_value, x.mask
 
-  elif isinstance(x, (onp.ndarray, np.ndarray, float, int)):
+  elif isinstance(x, (np.ndarray, jnp.ndarray, float, int)):
     if mask_constant is None:
       mask_mat = None
     else:
-      mask_mat = lax.cond(np.isnan(mask_constant),
-                          np.isnan,
+      mask_mat = lax.cond(jnp.isnan(mask_constant),
+                          jnp.isnan,
                           lambda x: x == mask_constant,
                           x)
   else:
@@ -361,7 +362,8 @@ _INPUT_REQ = 'input_req'
 
 def get_req(
     f: Callable,
-    default: Optional[frozendict.frozendict] = None) -> frozendict.frozendict:
+    default: Optional[frozendict.frozendict] = None
+) -> frozendict.frozendict:
   return getattr(f, _INPUT_REQ, default)
 
 
@@ -502,18 +504,22 @@ class Diagonal:
   __rand__ = __and__
 
 
-def _cov_diag_batch_diag_spatial(x: np.ndarray,
-                                 batch_axis: int,
-                                 channel_axis: int) -> np.ndarray:
-  ret = np.sum(x ** 2, axis=channel_axis)
+def _cov_diag_batch_diag_spatial(
+    x: jnp.ndarray,
+    batch_axis: int,
+    channel_axis: int
+) -> jnp.ndarray:
+  ret = jnp.sum(x ** 2, axis=channel_axis)
   new_batch_axis = batch_axis - (1 if batch_axis > channel_axis else 0)
-  ret = np.moveaxis(ret, new_batch_axis, 0)
+  ret = jnp.moveaxis(ret, new_batch_axis, 0)
   return ret
 
 
-def _cov_diag_batch_full_spatial(x: np.ndarray,
-                                 batch_axis: int,
-                                 channel_axis: int) -> np.ndarray:
+def _cov_diag_batch_full_spatial(
+    x: jnp.ndarray,
+    batch_axis: int,
+    channel_axis: int
+) -> jnp.ndarray:
   ret = lax.dot_general(x, x,
                         (((channel_axis,), (channel_axis,)),
                          ((batch_axis,), (batch_axis,)))
@@ -522,35 +528,42 @@ def _cov_diag_batch_full_spatial(x: np.ndarray,
   return ret
 
 
-def _cov_full_batch_full_spatial(x1: np.ndarray,
-                                 x2: np.ndarray,
-                                 batch_axis: int,
-                                 channel_axis: int) -> np.ndarray:
-  ret = np.tensordot(x1, x2, (channel_axis, channel_axis))
+def _cov_full_batch_full_spatial(
+    x1: jnp.ndarray,
+    x2: jnp.ndarray,
+    batch_axis: int,
+    channel_axis: int
+) -> jnp.ndarray:
+  ret = jnp.tensordot(x1, x2, (channel_axis, channel_axis))
   new_batch_axis = batch_axis - (1 if batch_axis > channel_axis else 0)
-  ret = np.moveaxis(ret, (new_batch_axis, x1.ndim - 1 + new_batch_axis), (0, 1))
+  ret = jnp.moveaxis(ret, (new_batch_axis, x1.ndim - 1 + new_batch_axis),
+                     (0, 1))
   ret = utils.zip_axes(ret, 2)
   return ret
 
 
-def _cov_full_batch_diag_spatial(x1: np.ndarray,
-                                 x2: np.ndarray,
-                                 batch_axis: int,
-                                 channel_axis: int) -> np.ndarray:
+def _cov_full_batch_diag_spatial(
+    x1: jnp.ndarray,
+    x2: jnp.ndarray,
+    batch_axis: int,
+    channel_axis: int
+) -> jnp.ndarray:
   diag_axes = tuple(i for i in range(x1.ndim)
                     if i != batch_axis and i != channel_axis)
   ret = lax.dot_general(x1, x2,
                         (((channel_axis,), (channel_axis,)),
                          (diag_axes, diag_axes))
                         )
-  ret = np.moveaxis(ret, (-2, -1), (0, 1))
+  ret = jnp.moveaxis(ret, (-2, -1), (0, 1))
   return ret
 
 
-def _cov_diag_batch(x: np.ndarray,
-                    diagonal_spatial: bool,
-                    batch_axis: int,
-                    channel_axis: int) -> np.ndarray:
+def _cov_diag_batch(
+    x: jnp.ndarray,
+    diagonal_spatial: bool,
+    batch_axis: int,
+    channel_axis: int
+) -> jnp.ndarray:
   if diagonal_spatial:
     ret = _cov_diag_batch_diag_spatial(x, batch_axis, channel_axis)
   else:
@@ -559,22 +572,23 @@ def _cov_diag_batch(x: np.ndarray,
 
 
 def _cov(
-    x1: np.ndarray,
-    x2: Optional[np.ndarray],
+    x1: jnp.ndarray,
+    x2: Optional[jnp.ndarray],
     diagonal_spatial: bool,
     batch_axis: int,
-    channel_axis: int) -> Optional[np.ndarray]:
+    channel_axis: int
+) -> Optional[jnp.ndarray]:
   """Computes uncentered covariance (nngp) between two batches of inputs.
 
   Args:
     x1:
-      a (2+S)D (S >= 0) `np.ndarray` of shape
+      a (2+S)D (S >= 0) `jnp.ndarray` of shape
       `(batch_size_1, <S spatial dimensions>, n_channels)`. `batch_size_1`,
       `n_channels` may be in different positions based on `batch_axis` and
       `channel_axis`.
 
     x2:
-      an optional `np.ndarray` that has the same shape as `a` apart from
+      an optional `jnp.ndarray` that has the same shape as `a` apart from
       possibly different batch (`batch_size_2`) dimension. `None` means
       `x2 == x1`.
 
@@ -614,8 +628,8 @@ def _cov(
 
 
 def _inputs_to_kernel(
-    x1: np.ndarray,
-    x2: Optional[np.ndarray],
+    x1: jnp.ndarray,
+    x2: Optional[jnp.ndarray],
     *,
     diagonal_batch: bool,
     diagonal_spatial: Union[bool, Diagonal],
@@ -641,7 +655,7 @@ def _inputs_to_kernel(
   dimensions is known to be 0 and is not tracked.
 
   Example:
-    >>> x = np.ones((10, 32, 16, 3))
+    >>> x = jnp.ones((10, 32, 16, 3))
     >>> o = _inputs_to_kernel(x, None,
     >>>                      diagonal_batch=True,
     >>>                      diagonal_spatial=False,
@@ -658,8 +672,8 @@ def _inputs_to_kernel(
     >>>                      channel_axis=-1)
     >>> o.cov1.shape, o.ntk.shape
     (10, 32, 16), (10, 10, 32, 16)
-    >>> x1 = np.ones((10, 128))
-    >>> x2 = np.ones((20, 128))
+    >>> x1 = jnp.ones((10, 128))
+    >>> x2 = jnp.ones((20, 128))
     >>> o = _inputs_to_kernel(x1, x2,
     >>>                      diagonal_batch=True,
     >>>                      diagonal_spatial=True,
@@ -671,13 +685,13 @@ def _inputs_to_kernel(
 
   Args:
     x1:
-      an `(S+2)`-dimensional `np.ndarray` of shape
+      an `(S+2)`-dimensional `jnp.ndarray` of shape
       `(batch_size_1, height, width, depth, ..., n_channels)` with `S` spatial
       dimensions (`S >= 0`). Dimensions may be in different order based on
       `batch_axis` and `channel_axis`.
 
     x2:
-      an optional `np.ndarray` with the same shape as `x1` apart from possibly
+      an optional `jnp.ndarray` with the same shape as `x1` apart from possibly
       different batch size. `None` means `x2 == x1`.
 
     diagonal_batch:
@@ -712,8 +726,8 @@ def _inputs_to_kernel(
     mask_constant:
       an optional `float`, the value in inputs to be considered as masked (e.g.
       padding in a batch of sentences). `None` means no masking. Can also be
-      `np.nan`, `np.inf` etc. Beware of floating point precision errors and try
-      to use an atypical for inputs value.
+      `jnp.nan`, `jnp.inf` etc. Beware of floating point precision errors and
+      try to use an atypical for inputs value.
 
     eps:
       a small number used to check whether x1 and x2 are the same up to `eps`.
@@ -726,11 +740,11 @@ def _inputs_to_kernel(
     The :class:`~neural_tangents.Kernel` object containing inputs covariance[s].
   """
 
-  if not (isinstance(x1, (onp.ndarray, np.ndarray)) and
-          (x2 is None or isinstance(x2, (onp.ndarray, np.ndarray)))):
+  if not (isinstance(x1, (np.ndarray, jnp.ndarray)) and
+          (x2 is None or isinstance(x2, (np.ndarray, jnp.ndarray)))):
     raise TypeError(('Wrong input types given. Found `x1` of type '
                      f'{type(x1)} and `x2` of type {type(x2)}, need both to be'
-                     f'`np.ndarray`s (`x2` can be `None`).'))
+                     f'`jnp.ndarray`s (`x2` can be `None`).'))
 
   batch_axis %= x1.ndim
   diagonal_spatial = bool(diagonal_spatial)
@@ -745,7 +759,7 @@ def _inputs_to_kernel(
     def flatten(x):
       if x is None:
         return x
-      return np.moveaxis(x, batch_axis, 0).reshape((x.shape[batch_axis], -1))
+      return jnp.moveaxis(x, batch_axis, 0).reshape((x.shape[batch_axis], -1))
 
     x1, x2 = flatten(x1), flatten(x2)
     batch_axis, channel_axis = 0, 1
@@ -766,7 +780,7 @@ def _inputs_to_kernel(
     x, mask = x.masked_value, x.mask
 
     # TODO(schsam): Think more about dtype automatic vs manual dtype promotion.
-    x = x.astype(jax.dtypes.canonicalize_dtype(np.float64))
+    x = x.astype(jax.dtypes.canonicalize_dtype(jnp.float64))
 
     if diagonal_batch:
       cov = _cov_diag_batch(x, diagonal_spatial, batch_axis, channel_axis)
@@ -779,34 +793,38 @@ def _inputs_to_kernel(
   x2, cov2, mask2 = get_x_cov_mask(x2)
   nngp = _cov(x1, x2, diagonal_spatial, batch_axis, channel_axis)
 
-  ntk = np.zeros((), nngp.dtype) if compute_ntk else None  # pytype: disable=attribute-error  # always-use-return-annotations
+  ntk = jnp.zeros((), nngp.dtype) if compute_ntk else None  # pytype: disable=attribute-error  # always-use-return-annotations
   is_gaussian = False
   is_reversed = False
   x1_is_x2 = utils.x1_is_x2(x1, x2, eps=eps)
   is_input = False
 
-  return Kernel(cov1=cov1,
-                cov2=cov2,
-                nngp=nngp,
-                ntk=ntk,
-                x1_is_x2=x1_is_x2,
-                is_gaussian=is_gaussian,
-                is_reversed=is_reversed,
-                is_input=is_input,
-                diagonal_batch=diagonal_batch,
-                diagonal_spatial=diagonal_spatial,
-                shape1=x1.shape,
-                shape2=x1.shape if x2 is None else x2.shape,
-                batch_axis=batch_axis,
-                channel_axis=channel_axis,
-                mask1=mask1,
-                mask2=mask2)  # pytype:disable=wrong-keyword-args
+  return Kernel(
+      cov1=cov1,
+      cov2=cov2,
+      nngp=nngp,
+      ntk=ntk,
+      x1_is_x2=x1_is_x2,
+      is_gaussian=is_gaussian,
+      is_reversed=is_reversed,
+      is_input=is_input,
+      diagonal_batch=diagonal_batch,
+      diagonal_spatial=diagonal_spatial,
+      shape1=x1.shape,
+      shape2=x1.shape if x2 is None else x2.shape,
+      batch_axis=batch_axis,
+      channel_axis=channel_axis,
+      mask1=mask1,
+      mask2=mask2,
+  )  # pytype:disable=wrong-keyword-args
 
 
-def _propagate_shape(init_fn: InitFn,
-                     apply_fn: ApplyFn,
-                     shaped: ShapedArray,
-                     **kwargs) -> ShapedArray:
+def _propagate_shape(
+    init_fn: InitFn,
+    apply_fn: ApplyFn,
+    shaped: ShapedArray,
+    **kwargs
+) -> ShapedArray:
   """Statically, abstractly, evaluate the init_fn to get shape information."""
   def init_and_apply(rng, x):
     _, params = init_fn(rng, tree_map(lambda x: x.shape, x))
@@ -825,12 +843,13 @@ def _propagate_shape(init_fn: InitFn,
   return shaped
 
 
-def _set_shapes(init_fn: InitFn,
-                apply_fn: ApplyFn,
-                in_kernel: NTTree[Kernel],
-                out_kernel: NTTree[Kernel],
-                **kwargs
-                ) -> NTTree[Kernel]:
+def _set_shapes(
+    init_fn: InitFn,
+    apply_fn: ApplyFn,
+    in_kernel: NTTree[Kernel],
+    out_kernel: NTTree[Kernel],
+    **kwargs
+) -> NTTree[Kernel]:
   """Apply a kernel_fn to a Kernel propagating side information."""
   is_leaf = lambda k: isinstance(k, Kernel)
 
@@ -896,7 +915,7 @@ def _preprocess_kernel_fn(
   Returns:
     A new `kernel_fn` that does the same computation but accepts additional
     arguments to flexibly specify the required computation, and can be applied
-    to either a `Kernel' or a pair of `np.ndarrray`s.
+    to either a `Kernel' or a pair of `jnp.ndarrray`s.
   """
   # Set empty requirements if none specified.
   if not _has_req(kernel_fn):
@@ -923,12 +942,12 @@ def _preprocess_kernel_fn(
     return _set_shapes(init_fn, apply_fn, kernel, out_kernel, **kwargs)
 
   @utils.get_namedtuple('AnalyticKernel')
-  def kernel_fn_any(x1_or_kernel: Union[NTTree[np.ndarray], NTTree[Kernel]],
-                    x2: Optional[NTTree[np.ndarray]] = None,
+  def kernel_fn_any(x1_or_kernel: Union[NTTree[jnp.ndarray], NTTree[Kernel]],
+                    x2: Optional[NTTree[jnp.ndarray]] = None,
                     get: Optional[Get] = None,
                     *,
-                    pattern: Optional[tuple[Optional[np.ndarray],
-                                            Optional[np.ndarray]]] = None,
+                    pattern: Optional[tuple[Optional[jnp.ndarray],
+                                            Optional[jnp.ndarray]]] = None,
                     mask_constant: Optional[float] = None,
                     diagonal_batch: Optional[bool] = None,
                     diagonal_spatial: Optional[bool] = None,
@@ -938,23 +957,28 @@ def _preprocess_kernel_fn(
     Args:
       x1_or_kernel:
         either an NTTree of the first batch of inputs.
+
       x2:
-        an optional NTTree of `np.ndarray` with the second batch of inputs.
+        an optional NTTree of `jnp.ndarray` with the second batch of inputs.
         `None` means `x2 == x1` or `x1_or_kernel is Kernel`.
+
       get:
         either `None`, a string, or a tuple of strings specifying which data
         should be returned by the kernel function. Can be "nngp", "ntk", "cov1",
         "cov2", "is_gaussian", "is_reversed", "diagonal_batch",
         "diagonal_spatial", etc.
+
       pattern:
-        either `None` or a tuple of two `np.ndarray`. The
+        either `None` or a tuple of two `jnp.ndarray`. The
         `pattern = (pattern1, pattern2)` is used to specify how the nodes in a
         graphical network is aggregated.
+
       mask_constant:
         an optional `float`, the value in inputs to be considered
         as masked (e.g. padding in a batch of sentences). `None` means no
-        masking. Can also be `np.nan`, `np.inf` etc. Beware of floating point
+        masking. Can also be `jnp.nan`, `jnp.inf` etc. Beware of floating point
         precision errors and try to use an atypical for inputs value.
+
       diagonal_batch:
         an optional boolean specifying whether `cov1` and `cov2` in all
         intermediary layers should store only the diagonal of the
@@ -966,6 +990,7 @@ def _preprocess_kernel_fn(
          `cov1.shape == (batch_size_1, batch_size_1, ...)`).
         Defaults to least compute-heavy setting necessary to compute the output
         `nngp` [and `ntk`] covariance.
+
       diagonal_spatial:
         an optional boolean specifying whether all (`cov1`, `ntk`, etc.)
         covariance matrcies in all intermediary layers should store only the
@@ -978,11 +1003,12 @@ def _preprocess_kernel_fn(
                          width, width, ...)`).
         Defaults to least compute-heavy setting necessary to compute the output
         `nngp` [and `ntk`] covariance.
+
       **kwargs:
         other arguments passed to all intermediary `kernel_fn` calls.
 
     Returns:
-      If `get` is a string, returns the requested `np.ndarray`. If `get` is a
+      If `get` is a string, returns the requested `jnp.ndarray`. If `get` is a
       tuple, returns an `AnalyticKernel` namedtuple containing only the
       requested information. If `get` is `None` then a `Kernel` object is
       returned containing all the data.
@@ -990,7 +1016,7 @@ def _preprocess_kernel_fn(
     def all_of(x, cls: type) -> bool:
 
       def is_leaf(x) -> bool:
-        return isinstance(x, (Kernel, np.ndarray, onp.ndarray))
+        return isinstance(x, (Kernel, jnp.ndarray, np.ndarray))
 
       return tree_all(
           tree_map(
@@ -1018,10 +1044,10 @@ def _preprocess_kernel_fn(
 
 
 def get_diagonal(
-    cov: Optional[np.ndarray],
+    cov: Optional[jnp.ndarray],
     diagonal_batch: bool,
     diagonal_spatial: bool
-) -> Optional[np.ndarray]:
+) -> Optional[jnp.ndarray]:
   """Extracts the diagonal of `cov` over all (sample, spatial) dimensions.
 
   Adapts computation if `cov` already stores only the diagonal along some
@@ -1038,15 +1064,15 @@ def get_diagonal(
 
 
 def get_diagonal_outer_prods(
-    cov1: np.ndarray,
-    cov2: Optional[np.ndarray],
+    cov1: jnp.ndarray,
+    cov2: Optional[jnp.ndarray],
     diagonal_batch: bool,
     diagonal_spatial: bool,
     operation: Callable[[float, float], float],
     axis: Sequence[int] = (),
-    mask1: Optional[np.ndarray] = None,
-    mask2: Optional[np.ndarray] = None
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    mask1: Optional[jnp.ndarray] = None,
+    mask2: Optional[jnp.ndarray] = None
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
   """Gets outer products of diagonals `cov1, cov1`, `cov1, cov2`, `cov2, cov2`.
 
   `prod11[x1, x2, h1, h2, ...]` =
@@ -1079,43 +1105,43 @@ def get_diagonal_outer_prods(
 
 
 def mean_and_var(
-    x: Optional[np.ndarray],
+    x: Optional[jnp.ndarray],
     axis: Optional[Axes] = None,
-    dtype: Optional[np.dtype] = None,
+    dtype: Optional[jnp.dtype] = None,
     out: Optional[None] = None,
     ddof: int = 0,
     keepdims: bool = False,
-    mask: Optional[np.ndarray] = None,
+    mask: Optional[jnp.ndarray] = None,
     get_var: bool = False
-) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-  """`np.mean` and `np.var` taking the `mask` information into account."""
+) -> tuple[Optional[jnp.ndarray], Optional[jnp.ndarray]]:
+  """`jnp.mean` and `jnp.var` taking the `mask` information into account."""
   var = None
   if x is None:
     return x, var
 
   if mask is None:
-    mean = np.mean(x, axis, dtype, out, keepdims)
+    mean = jnp.mean(x, axis, dtype, out, keepdims)
     if get_var:
-      var = np.var(x, axis, dtype, out, ddof, keepdims)
+      var = jnp.var(x, axis, dtype, out, ddof, keepdims)
 
   else:
     axis = tuple(utils.canonicalize_axis(axis, x))
     size = utils.size_at(x, axis)
-    mask = np.broadcast_to(mask, x.shape)
-    mask_size = np.count_nonzero(mask, axis)
+    mask = jnp.broadcast_to(mask, x.shape)
+    mask_size = jnp.count_nonzero(mask, axis)
     for i in axis:
-      mask_size = np.expand_dims(mask_size, i)
+      mask_size = jnp.expand_dims(mask_size, i)
     size -= mask_size
-    size = np.maximum(size, 1)
+    size = jnp.maximum(size, 1)
 
-    mean = np.sum(x, axis=axis, keepdims=True) / size
+    mean = jnp.sum(x, axis=axis, keepdims=True) / size
     if not keepdims:
-      mean = np.squeeze(mean, axis)
+      mean = jnp.squeeze(mean, axis)
 
     if get_var:
-      var = np.sum((x - mean)**2, axis=axis, keepdims=True) / (size - ddof)
+      var = jnp.sum((x - mean) ** 2, axis=axis, keepdims=True) / (size - ddof)
       if not keepdims:
-        var = np.squeeze(var, axis)
+        var = jnp.squeeze(var, axis)
 
   return mean, var
 

@@ -14,13 +14,13 @@
 
 """Tests for `neural_tangents/_src/batching.py`."""
 
-from absl.testing import absltest
-
 from functools import partial
+
+from absl.testing import absltest
 from jax import jit
-from jax.config import config
-import jax.numpy as np
 from jax import random
+from jax.config import config
+import jax.numpy as jnp
 from jax.tree_util import tree_map
 import neural_tangents as nt
 from neural_tangents import stax
@@ -369,7 +369,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
                   params,
                   _unused=None,
                   p=0.65):
-      res = np.abs(np.matmul(x1, x2))
+      res = jnp.abs(jnp.matmul(x1, x2))
       if do_square:
         res *= res
       if do_flip:
@@ -378,13 +378,13 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
       res *= random.uniform(keys) * p
       return [res, params]
 
-    params = (np.array([1., 0.3]), (np.array([1.2]), np.array([0.5])))
-    x2 = np.arange(0, 10).reshape((10,))
+    params = (jnp.array([1., 0.3]), (jnp.array([1.2]), jnp.array([0.5])))
+    x2 = jnp.arange(0, 10).reshape((10,))
     keys = random.PRNGKey(1)
 
     kernel_fn_pmapped = batching._jit_or_pmap_broadcast(kernel_fn,
                                                         device_count=0)
-    x1 = np.arange(0, 10).reshape((1, 10))
+    x1 = jnp.arange(0, 10).reshape((1, 10))
     for do_flip in [True, False]:
       for do_square in [True, False]:
         with self.subTest(do_flip=do_flip, do_square=do_square, device_count=0):
@@ -395,7 +395,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
           self.assertAllClose(res_1, res_2)
 
     test_utils.stub_out_pmap(batching, 1)
-    x1 = np.arange(0, 10).reshape((1, 10))
+    x1 = jnp.arange(0, 10).reshape((1, 10))
     kernel_fn_pmapped = batching._jit_or_pmap_broadcast(kernel_fn,
                                                         device_count=1)
     for do_flip in [True, False]:
@@ -407,15 +407,15 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
               x1, x2, do_flip, keys, do_square, params, _unused=None)
           self.assertAllClose(res_1[0], res_2[0])
           self.assertAllClose(
-              tree_map(partial(np.expand_dims, axis=0), res_1[1]), res_2[1])
+              tree_map(partial(jnp.expand_dims, axis=0), res_1[1]), res_2[1])
 
     kernel_fn_pmapped = batching._jit_or_pmap_broadcast(kernel_fn,
                                                         device_count=2)
-    x1 = np.arange(0, 20).reshape((2, 10))
+    x1 = jnp.arange(0, 20).reshape((2, 10))
     test_utils.stub_out_pmap(batching, 2)
 
     def broadcast(arg):
-      return np.broadcast_to(arg, (2,) + arg.shape)
+      return jnp.broadcast_to(arg, (2,) + arg.shape)
 
     for do_flip in [True, False]:
       for do_square in [True, False]:
@@ -545,7 +545,7 @@ class BatchTest(test_utils.NeuralTangentsTestCase):
       trace_axes,
       diagonal_axes
   ):
-    if any (t in diagonal_axes for t in trace_axes):
+    if any(t in diagonal_axes for t in trace_axes):
       raise absltest.SkipTest('Overlapping axes.')
 
     test_utils.stub_out_pmap(batching, 2)

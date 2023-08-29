@@ -111,7 +111,7 @@ key = random.PRNGKey(1)
 x = random.normal(key, (10, 100))
 _, params = init_fn(key, input_shape=x.shape)
 
-y = apply_fn(params, x)  # (10, 1) np.ndarray outputs of the neural network
+y = apply_fn(params, x)  # (10, 1) jnp.ndarray outputs of the neural network
 ```
 
 Neural Tangents is designed to serve as a drop-in replacement for `stax`, extending the `(init_fn, apply_fn)` tuple to a triple `(init_fn, apply_fn, kernel_fn)`, where `kernel_fn` is the kernel function of the infinite network (GP) of the given architecture. Below is an example of computing the covariances of the GP between two batches of inputs `x1` and `x2`.
@@ -137,8 +137,8 @@ Note that `kernel_fn` can compute _two_ covariance matrices corresponding to the
 
 ```python
 # Get kernel of a single type
-nngp = kernel_fn(x1, x2, 'nngp') # (10, 20) np.ndarray
-ntk = kernel_fn(x1, x2, 'ntk') # (10, 20) np.ndarray
+nngp = kernel_fn(x1, x2, 'nngp') # (10, 20) jnp.ndarray
+ntk = kernel_fn(x1, x2, 'ntk') # (10, 20) jnp.ndarray
 
 # Get kernels as a namedtuple
 both = kernel_fn(x1, x2, ('nngp', 'ntk'))
@@ -169,10 +169,10 @@ predict_fn = nt.predict.gradient_descent_mse_ensemble(kernel_fn, x_train,
                                                       y_train)
 
 y_test_nngp = predict_fn(x_test=x_test, get='nngp')
-# (20, 1) np.ndarray test predictions of an infinite Bayesian network
+# (20, 1) jnp.ndarray test predictions of an infinite Bayesian network
 
 y_test_ntk = predict_fn(x_test=x_test, get='ntk')
-# (20, 1) np.ndarray test predictions of an infinite continuous
+# (20, 1) jnp.ndarray test predictions of an infinite continuous
 # gradient descent trained network at convergence (t = inf)
 
 # Get predictions as a namedtuple
@@ -288,22 +288,22 @@ post-activations which are substantially more nonlinear.
 #### Example:
 
 ```python
-import jax.numpy as np
+import jax.numpy as jnp
 import neural_tangents as nt
 
 def apply_fn(params, x):
   W, b = params
-  return np.dot(x, W) + b
+  return jnp.dot(x, W) + b
 
-W_0 = np.array([[1., 0.], [0., 1.]])
-b_0 = np.zeros((2,))
+W_0 = jnp.array([[1., 0.], [0., 1.]])
+b_0 = jnp.zeros((2,))
 
 apply_fn_lin = nt.linearize(apply_fn, (W_0, b_0))
-W = np.array([[1.5, 0.2], [0.1, 0.9]])
+W = jnp.array([[1.5, 0.2], [0.1, 0.9]])
 b = b_0 + 0.2
 
-x = np.array([[0.3, 0.2], [0.4, 0.5], [1.2, 0.2]])
-logits = apply_fn_lin((W, b), x)  # (3, 2) np.ndarray
+x = jnp.array([[0.3, 0.2], [0.4, 0.5], [1.2, 0.2]])
+logits = apply_fn_lin((W, b), x)  # (3, 2) jnp.ndarray
 ```
 
 ### Function space:
@@ -314,17 +314,17 @@ Outputs of a linearized model [evolve identically to those of an infinite one](h
 
 ```python
 import jax.random as random
-import jax.numpy as np
+import jax.numpy as jnp
 import neural_tangents as nt
 
 
 def apply_fn(params, x):
   W, b = params
-  return np.dot(x, W) + b
+  return jnp.dot(x, W) + b
 
 
-W_0 = np.array([[1., 0.], [0., 1.]])
-b_0 = np.zeros((2,))
+W_0 = jnp.array([[1., 0.], [0., 1.]])
+b_0 = jnp.zeros((2,))
 params = (W_0, b_0)
 
 key1, key2 = random.split(random.PRNGKey(1), 2)
@@ -341,7 +341,7 @@ t = 5.
 y_train_0 = apply_fn(params, x_train)
 y_test_0 = apply_fn(params, x_test)
 y_train_t, y_test_t = mse_predictor(t, y_train_0, y_test_0, ntk_test_train)
-# (3, 2) and (4, 2) np.ndarray train and test outputs after `t` units of time
+# (3, 2) and (4, 2) jnp.ndarray train and test outputs after `t` units of time
 # training with continuous gradient descent
 ```
 

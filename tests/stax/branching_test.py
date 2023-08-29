@@ -20,7 +20,7 @@ from absl.testing import absltest
 from jax import default_backend
 from jax import random
 from jax.config import config
-import jax.numpy as np
+import jax.numpy as jnp
 import neural_tangents as nt
 from neural_tangents import stax
 from neural_tangents._src.empirical import _DEFAULT_TESTING_NTK_IMPLEMENTATION
@@ -89,7 +89,7 @@ class FanInTest(test_utils.NeuralTangentsTestCase):
       test_utils.skip_test(self)
 
     key = random.PRNGKey(1)
-    X0_1 = np.cos(random.normal(key, (4, 3)))
+    X0_1 = jnp.cos(random.normal(key, (4, 3)))
     X0_2 = None if same_inputs else random.normal(key, (8, 3))
 
     width = 1024

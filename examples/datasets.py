@@ -37,13 +37,15 @@ def _one_hot(x, k, dtype=np.float32):
   return np.array(x[:, None] == np.arange(k), dtype)
 
 
-def get_dataset(name,
-                n_train=None,
-                n_test=None,
-                permute_train=False,
-                do_flatten_and_normalize=True,
-                data_dir=None,
-                input_key='image'):
+def get_dataset(
+    name,
+    n_train=None,
+    n_test=None,
+    permute_train=False,
+    do_flatten_and_normalize=True,
+    data_dir=None,
+    input_key='image'
+):
   """Download, parse and process a dataset to unit scale and one-hot labels."""
   # Need this following http://cl/378185881 to prevent GPU test breakages.
   tf.config.set_visible_devices([], 'GPU')
@@ -112,10 +114,17 @@ def embed_glove(xs, glove_path, max_sentence_length=1000, mask_constant=1000.):
   Adapted from https://keras.io/examples/pretrained_word_embeddings/.
 
   Args:
-    xs: list of string numpy arrays to embed.
-    glove_path: path to the GloVe embedding file.
-    max_sentence_length: pad/truncate embeddings to this length.
-    mask_constant: mask padding with this constant.
+    xs:
+      list of string numpy arrays to embed.
+
+    glove_path:
+      path to the GloVe embedding file.
+
+    max_sentence_length:
+      pad/truncate embeddings to this length.
+
+    mask_constant:
+      mask padding with this constant.
 
   Returns:
     xs with words replaced by word embeddings, padded/truncated to a fixed
@@ -157,9 +166,14 @@ def _get_glove_embedding_layer(tokenizer, glove_path, max_sentence_length):
   Adapted from https://keras.io/examples/pretrained_word_embeddings/.
 
   Args:
-    tokenizer: the `keras.preprocessing.text.Tokenizer` used to tokenize inputs.
-    glove_path: path to the GloVe embedding file.
-    max_sentence_length: pad/truncate embeddings to this length.
+    tokenizer:
+      the `keras.preprocessing.text.Tokenizer` used to tokenize inputs.
+
+    glove_path:
+      path to the GloVe embedding file.
+
+    max_sentence_length:
+      pad/truncate embeddings to this length.
 
   Returns:
     Keras embedding layer for a given GloVe embeddings.

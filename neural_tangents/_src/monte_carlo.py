@@ -34,7 +34,7 @@ from typing import Generator, Iterable, Optional, Union
 from .batching import batch
 from .empirical import empirical_kernel_fn, NtkImplementation, DEFAULT_NTK_IMPLEMENTATION, _DEFAULT_NTK_FWD, _DEFAULT_NTK_S_RULES, _DEFAULT_NTK_J_RULES
 from jax import random
-import jax.numpy as np
+import jax.numpy as jnp
 from jax.tree_util import tree_map
 from .utils import utils
 from .utils.typing import ApplyFn, Axes, EmpiricalGetKernelFn, Get, InitFn, MonteCarloKernelFn, NTTree, PyTree, VMapAxes
@@ -52,8 +52,8 @@ def _sample_once_kernel_fn(
            device_count=device_count,
            store_on_device=store_on_device)
   def kernel_fn_sample_once(
-      x1: NTTree[np.ndarray],
-      x2: Optional[NTTree[np.ndarray]],
+      x1: NTTree[jnp.ndarray],
+      x2: Optional[NTTree[jnp.ndarray]],
       key: random.KeyArray,
       get: Get,
       **apply_fn_kwargs):
@@ -73,8 +73,8 @@ def _sample_many_kernel_fn(
     return tree_map(lambda sample: sample / n, sample)
 
   def get_samples(
-      x1: NTTree[np.ndarray],
-      x2: Optional[NTTree[np.ndarray]],
+      x1: NTTree[jnp.ndarray],
+      x2: Optional[NTTree[jnp.ndarray]],
       get: Get,
       **apply_fn_kwargs):
     _key = key
@@ -91,22 +91,22 @@ def _sample_many_kernel_fn(
   if get_generator:
     @utils.get_namedtuple('MonteCarloKernel')
     def get_sampled_kernel(
-        x1: np.ndarray,
-        x2: np.ndarray,
+        x1: jnp.ndarray,
+        x2: jnp.ndarray,
         get: Optional[Get] = None,
         **apply_fn_kwargs
-    ) -> Generator[Union[np.ndarray, tuple[np.ndarray, ...]], None, None]:
+    ) -> Generator[Union[jnp.ndarray, tuple[jnp.ndarray, ...]], None, None]:
       for n, sample in get_samples(x1, x2, get, **apply_fn_kwargs):
         if n in n_samples:
           yield normalize(sample, n)
   else:
     @utils.get_namedtuple('MonteCarloKernel')
     def get_sampled_kernel(
-        x1: np.ndarray,
-        x2: np.ndarray,
+        x1: jnp.ndarray,
+        x2: jnp.ndarray,
         get: Optional[Get] = None,
         **apply_fn_kwargs
-    ) -> Union[np.ndarray, tuple[np.ndarray, ...]]:
+    ) -> Union[jnp.ndarray, tuple[jnp.ndarray, ...]]:
       for n, sample in get_samples(x1, x2, get, **apply_fn_kwargs):
         pass
       return normalize(sample, n)

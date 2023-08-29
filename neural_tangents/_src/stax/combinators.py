@@ -192,7 +192,8 @@ def parallel(*layers: Layer) -> InternalLayer:
 
 def _get_input_req_attr(
     kernel_fns: list[LayerKernelFn],
-    fold: Callable[[Diagonal, Diagonal], Diagonal]) -> dict[str, Any]:
+    fold: Callable[[Diagonal, Diagonal], Diagonal]
+) -> dict[str, Any]:
   """Gets requirements of the combined layer based on individual requirements.
 
   Specifically, gets the requirements / allowances to the inputs to a `serial`
@@ -204,6 +205,7 @@ def _get_input_req_attr(
       list of `kernel_fn`s fed to the `kernel_fns` (e.g. a list of
       convolutional layers and nonlinearities to be chained together with the
       `serial` combinator) or evaluated in parallel (`parallel` combinator).
+
     fold:
       binary associative operator to combine allowances of consecutive
       individual `kernel_fn`s. Can be only `operator.rshift` (`>>`), i.e.

@@ -19,7 +19,7 @@ import random as prandom
 from absl.testing import absltest
 from jax import random
 from jax.config import config
-import jax.numpy as np
+import jax.numpy as jnp
 from neural_tangents import stax
 from tests import test_utils
 
@@ -85,7 +85,7 @@ class RepeatTest(test_utils.NeuralTangentsTestCase):
       layer
   ):
     rng_input, rng_params = random.split(random.PRNGKey(1), 2)
-    x1 = np.cos(random.normal(rng_input, (2, 3)))
+    x1 = jnp.cos(random.normal(rng_input, (2, 3)))
     x2 = None if same_inputs else random.normal(rng_input, (4, 3))
 
     self._test_repeat(x1, x2, layer, n, rng_params)
@@ -116,7 +116,7 @@ class RepeatTest(test_utils.NeuralTangentsTestCase):
       layer
   ):
     rng_input, rng_params = random.split(random.PRNGKey(1), 2)
-    x1 = np.cos(random.normal(rng_input, (2, 4, 4, 3)))
+    x1 = jnp.cos(random.normal(rng_input, (2, 4, 4, 3)))
     x2 = None if same_inputs else random.normal(rng_input, (4, 4, 4, 3))
 
     self._test_repeat(x1, x2, layer, n, rng_params)
@@ -149,7 +149,7 @@ class RepeatTest(test_utils.NeuralTangentsTestCase):
       layer
   ):
     rng_input, rng_params, rng_p1, rng_p2 = random.split(random.PRNGKey(1), 4)
-    x1 = np.cos(random.normal(rng_input, (2, 4, 3, 3)))
+    x1 = jnp.cos(random.normal(rng_input, (2, 4, 3, 3)))
     x2 = None if same_inputs else random.normal(rng_input, (4, 4, 3, 3))
 
     p1 = random.normal(rng_p1, x1.shape[:-1] + x1.shape[1:-1])

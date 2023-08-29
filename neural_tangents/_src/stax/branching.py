@@ -23,7 +23,7 @@ import functools
 from typing import Callable, Iterable, Optional, Sequence
 import warnings
 
-from jax import numpy as np
+from jax import numpy as jnp
 import jax.example_libraries.stax as ostax
 from .requirements import layer, supports_masking
 from ..utils.kernel import Kernel
@@ -89,22 +89,24 @@ def FanInSum() -> InternalLayerMasked:
     ntks = [k.ntk for k in ks]
     cov1, cov2, nngp, ntk = map(_mats_sum, (cov1s, cov2s, nngps, ntks))
 
-    return Kernel(cov1=cov1,
-                  cov2=cov2,
-                  nngp=nngp,
-                  ntk=ntk,
-                  x1_is_x2=ks[0].x1_is_x2,
-                  is_gaussian=is_gaussian,
-                  is_reversed=is_reversed,
-                  is_input=ks[0].is_input,
-                  diagonal_batch=ks[0].diagonal_batch,
-                  diagonal_spatial=ks[0].diagonal_spatial,
-                  shape1=ks[0].shape1,
-                  shape2=ks[0].shape2,
-                  batch_axis=ks[0].batch_axis,
-                  channel_axis=ks[0].channel_axis,
-                  mask1=None,
-                  mask2=None)  # pytype:disable=wrong-keyword-args
+    return Kernel(
+        cov1=cov1,
+        cov2=cov2,
+        nngp=nngp,
+        ntk=ntk,
+        x1_is_x2=ks[0].x1_is_x2,
+        is_gaussian=is_gaussian,
+        is_reversed=is_reversed,
+        is_input=ks[0].is_input,
+        diagonal_batch=ks[0].diagonal_batch,
+        diagonal_spatial=ks[0].diagonal_spatial,
+        shape1=ks[0].shape1,
+        shape2=ks[0].shape2,
+        batch_axis=ks[0].batch_axis,
+        channel_axis=ks[0].channel_axis,
+        mask1=None,
+        mask2=None,
+    )  # pytype:disable=wrong-keyword-args
 
   def mask_fn(mask, input_shape):
     return _sum_masks(mask)
@@ -127,7 +129,7 @@ def FanInProd() -> InternalLayerMasked:
   init_fn, _ = ostax.FanInSum
 
   def apply_fn(params, inputs, **kwargs):
-    return functools.reduce(np.multiply, inputs)
+    return functools.reduce(jnp.multiply, inputs)
 
   def kernel_fn(ks: Kernels, **kwargs) -> Kernel:
     ks, is_reversed = _preprocess_kernels_for_fan_in(ks)
@@ -139,7 +141,7 @@ def FanInProd() -> InternalLayerMasked:
 
     def _mats_prod(nngps, ntks):
       if None in ntks:
-        return functools.reduce(np.multiply, nngps), None
+        return functools.reduce(jnp.multiply, nngps), None
 
       nngp_prod, ntk_prod = 1., 0.
       for nngp, ntk in zip(nngps, ntks):
@@ -152,26 +154,28 @@ def FanInProd() -> InternalLayerMasked:
     nngps = [k.nngp for k in ks]
     ntks = [k.ntk for k in ks]
 
-    cov1 = functools.reduce(np.multiply, cov1s)
-    cov2 = None if None in cov2s else functools.reduce(np.multiply, cov2s)
+    cov1 = functools.reduce(jnp.multiply, cov1s)
+    cov2 = None if None in cov2s else functools.reduce(jnp.multiply, cov2s)
     nngp, ntk = _mats_prod(nngps, ntks)
 
-    return Kernel(cov1=cov1,
-                  cov2=cov2,
-                  nngp=nngp,
-                  ntk=ntk,
-                  x1_is_x2=ks[0].x1_is_x2,
-                  is_gaussian=is_gaussian,
-                  is_reversed=is_reversed,
-                  is_input=ks[0].is_input,
-                  diagonal_batch=ks[0].diagonal_batch,
-                  diagonal_spatial=ks[0].diagonal_spatial,
-                  shape1=None,
-                  shape2=None,
-                  batch_axis=ks[0].batch_axis,
-                  channel_axis=ks[0].channel_axis,
-                  mask1=None,
-                  mask2=None)  # pytype:disable=wrong-keyword-args
+    return Kernel(
+        cov1=cov1,
+        cov2=cov2,
+        nngp=nngp,
+        ntk=ntk,
+        x1_is_x2=ks[0].x1_is_x2,
+        is_gaussian=is_gaussian,
+        is_reversed=is_reversed,
+        is_input=ks[0].is_input,
+        diagonal_batch=ks[0].diagonal_batch,
+        diagonal_spatial=ks[0].diagonal_spatial,
+        shape1=None,
+        shape2=None,
+        batch_axis=ks[0].batch_axis,
+        channel_axis=ks[0].channel_axis,
+        mask1=None,
+        mask2=None,
+    )  # pytype:disable=wrong-keyword-args
 
   def mask_fn(mask, input_shape):
     return _sum_masks(mask)
@@ -297,7 +301,7 @@ def _map_tuples(fn: Callable, tuples: Iterable[tuple]) -> tuple:
   return tuple(map(fn, zip(*(t for t in tuples))))
 
 
-def _sum_masks(masks: list[Optional[np.ndarray]]) -> Optional[np.ndarray]:
+def _sum_masks(masks: list[Optional[jnp.ndarray]]) -> Optional[jnp.ndarray]:
   def add_two_masks(mask1, mask2):
     if mask1 is None:
       return mask2
@@ -312,14 +316,15 @@ def _sum_masks(masks: list[Optional[np.ndarray]]) -> Optional[np.ndarray]:
 
 
 def _concat_masks(
-    masks: list[Optional[np.ndarray]],
+    masks: list[Optional[jnp.ndarray]],
     input_shapes: Sequence[Sequence[int]],
-    axis: int) -> Optional[np.ndarray]:
+    axis: int
+) -> Optional[jnp.ndarray]:
   """Returns a mask which is a concatenation of `masks`.
 
   Since elements of `masks` can have any shapes broadcastable to respective
   elements of `input_shapes`, their concatenation may require broadcasting and
-  cannot be done with a single `np.concatenate` call.
+  cannot be done with a single `jnp.concatenate` call.
 
   Args:
     masks: list of masks to concatenate.
@@ -327,7 +332,7 @@ def _concat_masks(
     axis: concatenation axis.
 
   Returns:
-    A single `np.ndarray` mask applicable to the concatenated inputs.
+    A single `jnp.ndarray` mask applicable to the concatenated inputs.
   """
   if len(masks) != len(input_shapes):
     raise ValueError(f'Number of masks ({len(masks)}) and inputs '
@@ -340,7 +345,7 @@ def _concat_masks(
   axis %= len(input_shapes[0])
 
   # Expand the concatenation dimension of each mask.
-  masks = [m if m is None else np.broadcast_to(
+  masks = [m if m is None else jnp.broadcast_to(
       m,
       (m.shape[:axis] +
        tuple(input_shapes[i][axis: axis + 1]) +
@@ -354,15 +359,15 @@ def _concat_masks(
   max_shapes = [tuple(map(min, max_shape, i)) for i in input_shapes]
 
   masks = [
-      (np.broadcast_to(
+      (jnp.broadcast_to(
           m,
           max_shape[:axis] + m.shape[axis: axis + 1] + max_shape[axis + 1:])
        if m is not None
-       else np.zeros_like(max_shapes[i], dtype=np.bool_))
+       else jnp.zeros_like(max_shapes[i], dtype=jnp.bool_))
       for i, m in enumerate(masks)
   ]
 
-  return np.concatenate(masks, axis)
+  return jnp.concatenate(masks, axis)
 
 
 def _preprocess_kernels_for_fan_in(ks: Kernels) -> tuple[list[Kernel], bool]:
@@ -404,11 +409,12 @@ def _preprocess_kernels_for_fan_in(ks: Kernels) -> tuple[list[Kernel], bool]:
 
 
 def _concat_kernels(
-    mats: Sequence[Optional[np.ndarray]],
+    mats: Sequence[Optional[jnp.ndarray]],
     axis: int,
     diagonal_batch: bool,
     diagonal_spatial: bool,
-    widths: Sequence[int]) -> Optional[np.ndarray]:
+    widths: Sequence[int]
+) -> Optional[jnp.ndarray]:
   """Compute the covariance of concatenated activations with given covariances.
 
   Args:
@@ -437,7 +443,7 @@ def _concat_kernels(
     widths: list of integer channel widths of the finite model inputs.
 
   Returns:
-    A new `np.ndarray` representing covariance between concatenated activations.
+    New `jnp.ndarray` representing covariance between concatenated activations.
   """
   if mats[0] is None:
     return None
@@ -455,7 +461,7 @@ def _concat_kernels(
   elif ((axis == 0 and diagonal_batch) or
         (axis != 0 and diagonal_spatial)):
     concat_axis = axis + (0 if diagonal_batch else 1)
-    mat = np.concatenate(mats, concat_axis)
+    mat = jnp.concatenate(mats, concat_axis)
 
   # 2D concatenation with insertion of 0-blocks if the axis is present twice.
   else:
@@ -467,8 +473,7 @@ def _concat_kernels(
           sum(mats[j].shape[pad_axis] for j in range(i)),
           sum(mats[j].shape[pad_axis] for j in range(i + 1, n_mats))
       )
-      rows.append(np.pad(mat, pads))
-    mat = np.concatenate(rows, pad_axis + 1)
+      rows.append(jnp.pad(mat, pads))
+    mat = jnp.concatenate(rows, pad_axis + 1)
 
   return mat
-

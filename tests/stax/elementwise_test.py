@@ -22,7 +22,7 @@ from jax import default_backend
 from jax import grad, jacfwd, jacrev, jit, jvp, value_and_grad
 from jax import random
 from jax.config import config
-import jax.numpy as np
+import jax.numpy as jnp
 import neural_tangents as nt
 from neural_tangents import stax
 from neural_tangents._src.empirical import _DEFAULT_TESTING_NTK_IMPLEMENTATION
@@ -42,8 +42,8 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
 
   def _test_activation_fc(self, phi, get):
     key1, key2, key_mc = random.split(random.PRNGKey(1), 3)
-    x1 = np.cos(random.normal(key1, (3, 2)))
-    x2 = np.cos(random.normal(key2, (2, 2)))
+    x1 = jnp.cos(random.normal(key1, (3, 2)))
+    x2 = jnp.cos(random.normal(key2, (2, 2)))
 
     init_fn, apply_fn, kernel_fn = stax.serial(
         stax.Dense(1024),
@@ -63,7 +63,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
     )
 
     if get == 'cov1':
-      empirical_kernel = np.diag(mc_kernel_fn(x1, None, 'nngp'))
+      empirical_kernel = jnp.diag(mc_kernel_fn(x1, None, 'nngp'))
     else:
       empirical_kernel = mc_kernel_fn(x1, x2, get)
 
@@ -138,15 +138,15 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
 
       input_dim = kernels.shape1[1]
       cov1 = kernels.cov1
-      cov1 = np.reshape(cov1, (cov1.shape[0], 1))
+      cov1 = jnp.reshape(cov1, (cov1.shape[0], 1))
       cov2 = cov1 if kernels.cov2 is None else kernels.cov2
-      cov2 = np.reshape(cov2, (1, cov2.shape[0]))
+      cov2 = jnp.reshape(cov2, (1, cov2.shape[0]))
       nngp = kernels.nngp
 
       # TODO(schsam): Update cov1 and cov2 if we want to compose this kernel
       # with other kernels.
       return kernels.replace(
-          nngp=np.exp(-input_dim * gamma * (cov1 + cov2 - 2 * nngp)))
+          nngp=jnp.exp(-input_dim * gamma * (cov1 + cov2 - 2 * nngp)))
     return init_fn, apply_fn, kernel_fn
 
   def _test_activation(
@@ -235,7 +235,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
       abc=list(itertools.product(
           [2., 0.3],
           [1.5, 0.3],
-          [0., -np.pi/4., np.pi/2.]
+          [0., -jnp.pi / 4., jnp.pi / 2.]
       ))
   )
   def test_activation(
@@ -247,7 +247,7 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
       abc,
       approximate
   ):
-    if abc != [0.3, 1.5, -np.pi/4]:
+    if abc != [0.3, 1.5, -jnp.pi / 4]:
       test_utils.skip_test(self)
 
     if approximate and phi_name != 'Gelu':
@@ -302,13 +302,13 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
 
     key1, key2, key_mc = random.split(random.PRNGKey(1), 3)
     shape = (4, 3, 2)[:n] + (1,)
-    x1 = np.cos(random.normal(key1, (2,) + shape))
+    x1 = jnp.cos(random.normal(key1, (2,) + shape))
     if same_inputs is None:
       x2 = None
     elif same_inputs is True:
       x2 = x1
     else:
-      x2 = np.cos(random.normal(key2, (3,) + shape))
+      x2 = jnp.cos(random.normal(key2, (3,) + shape))
 
     k = kernel_fn(x1, x2)
     mc_kernel_fn = nt.monte_carlo_kernel_fn(init_fn, apply_fn, key_mc,
@@ -339,16 +339,16 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
 
             k_11 = kernel_fn(x1, None, get=get)
             self.assertEqual(k_11.shape, (x1.shape[0],) * 2)
-            self.assertGreater(np.min(np.linalg.eigvalsh(k_11)), 0)
+            self.assertGreater(jnp.min(jnp.linalg.eigvalsh(k_11)), 0)
 
             k_22 = kernel_fn(x2, None, get=get)
             self.assertEqual(k_22.shape, (x2.shape[0],) * 2)
-            self.assertGreater(np.min(np.linalg.eigvalsh(k_22)), 0)
+            self.assertGreater(jnp.min(jnp.linalg.eigvalsh(k_22)), 0)
 
   def test_exp_normalized_ntk(self):
     def nngp_fn(cov12, var1, var2):
-      prod = np.sqrt(var1 * var2)
-      return prod * np.exp(cov12 / prod - 1)
+      prod = jnp.sqrt(var1 * var2)
+      return prod * jnp.exp(cov12 / prod - 1)
 
     _, _, kernel_fn = stax.serial(stax.Dense(1),
                                   stax.Elementwise(nngp_fn=nngp_fn))
@@ -382,8 +382,8 @@ class ActivationTest(test_utils.NeuralTangentsTestCase):
       width = 10000
       n_samples = 100
 
-    x1 = np.cos(random.normal(key1, [2, 6, 6, 3]))
-    x2 = x1 if same_inputs else np.cos(random.normal(key2, [3, 6, 6, 3]))
+    x1 = jnp.cos(random.normal(key1, [2, 6, 6, 3]))
+    x2 = x1 if same_inputs else jnp.cos(random.normal(key2, [3, 6, 6, 3]))
 
     conv_layers = [
         stax.Conv(width, (3, 3), W_std=2., b_std=0.5),
@@ -432,20 +432,20 @@ class ElementwiseTest(test_utils.NeuralTangentsTestCase):
 
       elif 'Erf' in name:
         prod = (1 + 2 * var1) * (1 + 2 * var2)
-        res = np.arcsin(2 * cov12 / np.sqrt(prod)) * 2 / np.pi
+        res = jnp.arcsin(2 * cov12 / jnp.sqrt(prod)) * 2 / jnp.pi
 
       elif 'Sin' in name:
         sum_ = (var1 + var2)
-        s1 = np.exp((-0.5 * sum_ + cov12))
-        s2 = np.exp((-0.5 * sum_ - cov12))
+        s1 = jnp.exp((-0.5 * sum_ + cov12))
+        s2 = jnp.exp((-0.5 * sum_ - cov12))
         res = (s1 - s2) / 2
 
       elif 'Relu' in name:
         prod = var1 * var2
-        sqrt = np.sqrt(np.maximum(prod - cov12 ** 2, 1e-30))
-        angles = np.arctan2(sqrt, cov12)
-        dot_sigma = (1 - angles / np.pi) / 2
-        res = sqrt / (2 * np.pi) + dot_sigma * cov12
+        sqrt = jnp.sqrt(jnp.maximum(prod - cov12 ** 2, 1e-30))
+        angles = jnp.arctan2(sqrt, cov12)
+        dot_sigma = (1 - angles / jnp.pi) / 2
+        res = sqrt / (2 * jnp.pi) + dot_sigma * cov12
 
       else:
         raise NotImplementedError(name)
@@ -653,19 +653,19 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
       ]
   )
   def test_autodiff(self, get, same_inputs, phi):
-    x1 = np.cos(random.normal(random.PRNGKey(1), (3, 1, 2, 3)))
+    x1 = jnp.cos(random.normal(random.PRNGKey(1), (3, 1, 2, 3)))
     if same_inputs is None:
       x2 = None
     elif same_inputs is True:
       x2 = x1
     else:
-      x2 = np.cos(random.normal(random.PRNGKey(2), (4, 1, 2, 3)))
+      x2 = jnp.cos(random.normal(random.PRNGKey(2), (4, 1, 2, 3)))
 
     name = phi.__name__
     if name == 'LeakyRelu':
       phi = phi(0.1)
     elif name == 'ElementwiseNumerical':
-      phi = phi(fn=np.cos, deg=25)
+      phi = phi(fn=jnp.cos, deg=25)
     else:
       phi = phi()
 
@@ -700,7 +700,7 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
         # TODO(romann): understand why TPUs have high errors.
         tol = 0.21
       self.assertLess(
-          np.max(np.abs(x - y)) / (np.mean(np.abs(x)) + np.mean(np.abs(y))),
+          jnp.max(jnp.abs(x - y)) / (jnp.mean(jnp.abs(x)) + jnp.mean(jnp.abs(y))),
           tol)
 
     # k(x + dx) ~ k(x) + dk(x) dx + dx^T d2k(x) dx
@@ -722,14 +722,14 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
       # dk(x2, x1)/dx2 = dk(x1, x2)/dx1
       k_fwd_01 = jacfwd(k, 1)(x2, x1)
       k_rev_01 = jacrev(k, 1)(x2, x1)
-      assert_close(np.moveaxis(k_fwd_0, (0, 2, 4), (1, 3, 5)), k_fwd_01)
-      assert_close(np.moveaxis(k_rev_0, (0, 2, 4), (1, 3, 5)), k_rev_01)
+      assert_close(jnp.moveaxis(k_fwd_0, (0, 2, 4), (1, 3, 5)), k_fwd_01)
+      assert_close(jnp.moveaxis(k_rev_0, (0, 2, 4), (1, 3, 5)), k_rev_01)
 
       # dk(x2, x1)/dx1 = dk(x1, x2)/dx2
       k_fwd_10 = jacfwd(k)(x2, x1)
       k_rev_10 = jacrev(k)(x2, x1)
-      assert_close(np.moveaxis(k_fwd_1, (0, 2, 4), (1, 3, 5)), k_fwd_10)
-      assert_close(np.moveaxis(k_rev_1, (0, 2, 4), (1, 3, 5)), k_rev_10)
+      assert_close(jnp.moveaxis(k_fwd_1, (0, 2, 4), (1, 3, 5)), k_fwd_10)
+      assert_close(jnp.moveaxis(k_rev_1, (0, 2, 4), (1, 3, 5)), k_rev_10)
 
   @test_utils.product(
       get=[
@@ -823,13 +823,13 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
     def get_x(x_type, key):
       shape = (1, 2)
       if x_type == 'zeros':
-        x = np.zeros(shape)
+        x = jnp.zeros(shape)
       elif x_type == 'ones':
-        x = np.ones(shape)
+        x = jnp.ones(shape)
       elif x_type == 'random':
         x = random.normal(random.PRNGKey(key), shape)
       elif x_type == 'sin':
-        x = np.sin(random.normal(random.PRNGKey(key), shape))
+        x = jnp.sin(random.normal(random.PRNGKey(key), shape))
       elif x_type == 'none':
         return None
       else:
@@ -891,7 +891,7 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
     kernel_fn_emp_g = jit(value_and_grad(kernel_fn_emp), static_argnames='get')
 
     def kernel_scalar_mc_grad_mean(x1, x2):
-      x1: np.ndarray
+      x1: jnp.ndarray
       key = random.PRNGKey(4)
       n_samples = 2**9
       k, k_grad = 0., 0.
@@ -926,7 +926,7 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
     atol = 1e-2
 
     # Compare gradient of the analytic kernel to empirical kernel.
-    if np.max(np.abs(k2_grad - k_mc2_grad_mean)) > atol:
+    if jnp.max(jnp.abs(k2_grad - k_mc2_grad_mean)) > atol:
       test_utils.assert_close_matrices(self,
                                        k_mc2_grad_mean,
                                        k2_grad,
@@ -1013,7 +1013,7 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
     else:
       raise ValueError(architecture)
 
-    x1 = x2 = np.zeros((1, 8, 8, 3))
+    x1 = x2 = jnp.zeros((1, 8, 8, 3))
 
     def kernel_scalar(x1, x2):
       return kernel_fn(x1, x2, get)[0, 0]
@@ -1033,7 +1033,7 @@ class AutodiffTest(test_utils.NeuralTangentsTestCase):
     self.assertAllClose(k2_grad, k2_grad_fwd)
 
     # Compare to 0.
-    self.assertAllClose(grad(kernel_scalar)(x1, x2), np.zeros_like(x1))
+    self.assertAllClose(grad(kernel_scalar)(x1, x2), jnp.zeros_like(x1))
 
 
 if __name__ == '__main__':

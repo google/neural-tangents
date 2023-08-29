@@ -27,11 +27,11 @@ from jax.config import config
 from jax.core import Primitive
 from jax.core import ShapedArray
 from jax.interpreters import ad
-import jax.numpy as np
+import jax.numpy as jnp
 import more_itertools
 from neural_tangents._src.utils import rules
 from tests import test_utils
-import numpy as onp
+import numpy as np
 
 
 config.parse_flags_with_absl()
@@ -50,10 +50,10 @@ _PRECISIONS = [
 
 
 _DTYPES = [
-    # np.bfloat16,
-    # np.float16,
-    np.float32
-] + ([np.float64] if jax.dtypes.canonicalize_dtype(np.float64) == np.float64
+    # jnp.bfloat16,
+    # jnp.float16,
+    jnp.float32
+] + ([jnp.float64] if jax.dtypes.canonicalize_dtype(jnp.float64) == jnp.float64
      else [])
 
 
@@ -323,10 +323,10 @@ _UNARY_PRIMITIVES = {
             'weak_type': w
         } for d in set(
             jax.dtypes.canonicalize_dtype(t)
-            for t in [np.bfloat16, np.float16, np.float32, np.float64]
+            for t in [jnp.bfloat16, jnp.float16, jnp.float32, jnp.float64]
             if (jax.dtypes.canonicalize_dtype(t) != jax.dtypes.
                 canonicalize_dtype(dtype))) for w in [False] +
-                          ([True] if d != np.bfloat16 else [])],
+                          ([True] if d != jnp.bfloat16 else [])],
 
     lax.rev_p:
         lambda s, _: [{
@@ -341,7 +341,7 @@ _UNARY_PRIMITIVES = {
             'padding_value': v,
             'padding_config': c
         }
-                          for v in [onp.array(f, dtype) for f in [-0.1, 1.5]]
+                          for v in [np.array(f, dtype) for f in [-0.1, 1.5]]
                           for c in map(tuple, ([[]] if len(s) == 0 else [[
                               (1, 0, k) for k in range(len(s))
                           ], [(k, 1, 0) for k in range(len(s))
@@ -441,21 +441,21 @@ class JacobianRulesTest(test_utils.NeuralTangentsTestCase):
     c = j.shape[axis1]
     self.assertEqual(c, j.shape[axis2])
     mask_shape = [c if i in (axis1, axis2) else 1 for i in range(j.ndim)]
-    mask = np.eye(c, dtype=np.bool_).reshape(mask_shape)
+    mask = jnp.eye(c, dtype=jnp.bool_).reshape(mask_shape)
 
     # Check that removing the diagonal makes the array all 0.
-    j_masked = np.where(mask, np.zeros((), j.dtype), j)
-    self.assertAllClose(np.zeros_like(j, j.dtype), j_masked)
+    j_masked = jnp.where(mask, jnp.zeros((), j.dtype), j)
+    self.assertAllClose(jnp.zeros_like(j, j.dtype), j_masked)
 
     if constant_diagonal:
       # Check that diagonal is constant.
       if j.size != 0:
-        j_diagonals = np.diagonal(j, axis1=axis1, axis2=axis2)
-        self.assertAllClose(np.min(j_diagonals, -1), np.max(j_diagonals, -1))
+        j_diagonals = jnp.diagonal(j, axis1=axis1, axis2=axis2)
+        self.assertAllClose(jnp.min(j_diagonals, -1), jnp.max(j_diagonals, -1))
 
   def _assert_constant(self, j, axis):
     if axis is not None:
-      j = np.moveaxis(j, axis, 0)
+      j = jnp.moveaxis(j, axis, 0)
       j = list(j)
       for ji in j:
         self.assertAllClose(j[0], ji)
@@ -482,7 +482,7 @@ class JacobianRulesTest(test_utils.NeuralTangentsTestCase):
     else:
       if primitive == lax.reshape_p:
         # Reshape Jacobian is special-case defined as identity.
-        j_rule: np.ndarray
+        j_rule: jnp.ndarray
         j_rule = j_rule.reshape(j_fwd.shape)
 
       self.assertAllClose(j_fwd, j_rev)
@@ -535,11 +535,11 @@ class JacobianRulesTest(test_utils.NeuralTangentsTestCase):
       if primitive == lax.reshape_p:
         out_ndim = xs[0].ndim
         j = j.transpose(tuple(xs[0].ndim + i
-                              for i in onp.argsort(structure.in_trace)) +
-                        tuple(i for i in onp.argsort(structure.in_trace)))
+                              for i in np.argsort(structure.in_trace)) +
+                        tuple(i for i in np.argsort(structure.in_trace)))
         j = j.reshape(
             xs[0].shape +
-            tuple(xs[0].shape[i] for i in onp.argsort(structure.in_trace)))
+            tuple(xs[0].shape[i] for i in np.argsort(structure.in_trace)))
 
       else:
         out_ndim = out.ndim

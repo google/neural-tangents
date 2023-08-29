@@ -20,7 +20,7 @@ Neural Kernel Embeddings for General Activations
 """
 
 from absl import app
-from jax import numpy as np
+from jax import numpy as jnp
 from jax import random
 import jax.nn
 from neural_tangents import stax
@@ -50,8 +50,9 @@ def main(unused_argv):
   kernel_numerical = kernel_fn_numerical(x1, x2)
 
   # The two kernels are close!
-  assert np.max(np.abs(kernel_closed_form.nngp - kernel_numerical.nngp)) < 1e-3
-  assert np.max(np.abs(kernel_closed_form.ntk - kernel_numerical.ntk)) < 1e-3
+  assert jnp.max(jnp.abs(kernel_closed_form.nngp -
+                         kernel_numerical.nngp)) < 1e-3
+  assert jnp.max(jnp.abs(kernel_closed_form.ntk - kernel_numerical.ntk)) < 1e-3
   print('Gaussian quadrature approximation of the kernel is accurate!')
 
 

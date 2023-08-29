@@ -23,13 +23,13 @@ import warnings
 
 import jax
 from jax import lax
-from jax import numpy as np
+from jax import numpy as jnp
 from jax import ops
 from jax import random
 from jax import ShapeDtypeStruct, eval_shape, vmap
 from jax.core import ShapedArray
 import jax.example_libraries.stax as ostax
-import numpy as onp
+import numpy as np
 from .requirements import Bool, Diagonal, get_diagonal_outer_prods, layer, mean_and_var, requires, supports_masking
 from ..utils import utils
 from ..utils.kernel import Kernel
@@ -111,8 +111,8 @@ def Identity() -> InternalLayer:
 @supports_masking(remask_kernel=False)
 def DotGeneral(
     *,
-    lhs: Optional[Union[np.ndarray, float]] = None,
-    rhs: Optional[Union[np.ndarray, float]] = None,
+    lhs: Optional[Union[jnp.ndarray, float]] = None,
+    rhs: Optional[Union[jnp.ndarray, float]] = None,
     dimension_numbers: lax.DotDimensionNumbers = (((), ()), ((), ())),
     precision: Optional[lax.Precision] = None,
     batch_axis: int = 0,
@@ -132,7 +132,7 @@ def DotGeneral(
 
   Example:
     >>> from jax import random
-    >>> import jax.numpy as np
+    >>> import jax.numpy as jnp
     >>> from neural_tangents import stax
     >>> #
     >>> # Two time series stacked along the second (H) dimension.
@@ -151,7 +151,7 @@ def DotGeneral(
     >>>     stax.Conv(128, (1, 3)),
     >>>     stax.Relu(),
     >>>     stax.DotGeneral(
-    >>>         rhs=np.array([1., -1.]),
+    >>>         rhs=jnp.array([1., -1.]),
     >>>         dimension_numbers=(((1,), (0,)), ((), ()))),  # (5, 30, 128)
     >>>     stax.GlobalAvgPool()                              # (5, 128)
     >>> )
@@ -161,7 +161,7 @@ def DotGeneral(
     >>>     stax.Conv(128, (1, 3)),
     >>>     stax.Relu(),
     >>>     stax.DotGeneral(
-    >>>         lhs=np.array([[0., 1.], [1., 0.]]),
+    >>>         lhs=jnp.array([[0., 1.], [1., 0.]]),
     >>>         dimension_numbers=(((1,), (1,)), ((), ()))),  # (5, 2, 30, 128)
     >>>     stax.GlobalAvgPool()                              # (5, 128)
     >>> )
@@ -206,7 +206,7 @@ def DotGeneral(
                      ', since the other factor is considered to be the layer '
                      '`inputs`.')
   is_lhs = rhs is None
-  other = np.array(lhs if is_lhs else rhs)
+  other = jnp.array(lhs if is_lhs else rhs)
 
   def dot_fn(x):
     args = (x, other.astype(x.dtype))[::(-1 if is_lhs else 1)]
@@ -238,7 +238,7 @@ def DotGeneral(
   def mask_fn(mask, input_shape):
     mask_shape = list(input_shape)
     mask_shape[channel_axis] = mask.shape[channel_axis]
-    return ~dot_fn(~np.broadcast_to(mask, mask_shape))
+    return ~dot_fn(~jnp.broadcast_to(mask, mask_shape))
 
   return init_fn, apply_fn, kernel_fn, mask_fn
 
@@ -249,7 +249,7 @@ def Aggregate(
     aggregate_axis: Optional[Axes] = None,
     batch_axis: int = 0,
     channel_axis: int = -1,
-    to_dense: Optional[Callable[[np.ndarray], np.ndarray]] = lambda p: p,
+    to_dense: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = lambda p: p,
     implementation: str = AggregateImplementation.DENSE.value
 ) -> InternalLayer:
   r"""Aggregation operator (graphical neural network).
@@ -458,10 +458,10 @@ def Aggregate(
 
   @functools.partial(vmap, in_axes=(0, None))
   def make_indices(index_array, agg_shape):
-    index_array = np.moveaxis(index_array, -1, 0)
-    raveled = np.ravel_multi_index(index_array, agg_shape, 'wrap')
+    index_array = jnp.moveaxis(index_array, -1, 0)
+    raveled = jnp.ravel_multi_index(index_array, agg_shape, 'wrap')
     # We mask edges where either sender or receiver is negative.
-    return np.where(np.all(index_array >= 0, axis=0), raveled, -1)
+    return jnp.where(jnp.all(index_array >= 0, axis=0), raveled, -1)
 
   def get_senders_receivers(pattern, batch_size: int, agg_ndim: int):
     """Unpack `pattern` and make sure it has correct shape."""
@@ -473,7 +473,7 @@ def Aggregate(
     # Allow for `(batch, n_edges, 2)` shape for single aggregation
     # dimension `K == 1`.
     if agg_ndim == 1 and s.ndim == 2:
-      s, r = np.expand_dims(s, -1), np.expand_dims(r, -1)
+      s, r = jnp.expand_dims(s, -1), jnp.expand_dims(r, -1)
 
     if s.ndim != 3:
       raise ValueError(f'Tails and heads need to be 3-dimensional, '
@@ -491,9 +491,9 @@ def Aggregate(
     return s, r
 
   def apply_fn(params,
-               inputs: np.ndarray,
+               inputs: jnp.ndarray,
                *,
-               pattern: Optional[np.ndarray] = None,
+               pattern: Optional[jnp.ndarray] = None,
                **kwargs):
     """Compute the transformed tensors after an aggregation layer.
 
@@ -554,9 +554,9 @@ def Aggregate(
       out_c_axis = utils.axis_after_dot(channel_axis % ndim, dn[0][0], dn[1][0])
       out_b_axis = utils.axis_after_dot(batch_axis % ndim, dn[0][0], dn[1][0])
 
-      out = np.moveaxis(out,
-                        (out_b_axis, out_c_axis) + tuple(range(-agg_ndim, 0)),
-                        (batch_axis, channel_axis) + agg_axes)
+      out = jnp.moveaxis(out,
+                         (out_b_axis, out_c_axis) + tuple(range(-agg_ndim, 0)),
+                         (batch_axis, channel_axis) + agg_axes)
 
     elif implementation == AggregateImplementation.SPARSE:
       # Sparse implementation through `jax.ops.segment_sum`.
@@ -566,7 +566,7 @@ def Aggregate(
       src_axes = (batch_axis,) + agg_axes + (channel_axis,)
       dst_axes = (0,) + tuple(range(1, agg_ndim + 1)) + (-1,)
 
-      inputs = np.moveaxis(inputs, src_axes, dst_axes)
+      inputs = jnp.moveaxis(inputs, src_axes, dst_axes)
       input_shape = inputs.shape
       inputs = inputs.reshape((inputs.shape[0],
                                functools.reduce(
@@ -585,7 +585,7 @@ def Aggregate(
 
       out = pass_messages(s, r, inputs)
       out = out.reshape(input_shape)
-      out = np.moveaxis(out, dst_axes, src_axes)
+      out = jnp.moveaxis(out, dst_axes, src_axes)
 
     else:
       raise ValueError(f'Unrecognized `implementation == {implementation}.')
@@ -597,8 +597,8 @@ def Aggregate(
             diagonal_spatial=Diagonal(input=Bool.NO, output=Bool.NO))
   def kernel_fn(k: Kernel,
                 *,
-                pattern: tuple[Optional[np.ndarray],
-                               Optional[np.ndarray]] = (None, None),
+                pattern: tuple[Optional[jnp.ndarray],
+                               Optional[jnp.ndarray]] = (None, None),
                 **kwargs):
     """Compute the transformed kernels after an aggregation kernel layer.
 
@@ -672,7 +672,7 @@ def Aggregate(
         k = utils.unzip_axes(k, start_axis)
         b, agg_1, agg_2, non_agg_1, non_agg_2 = bucket_axes(k.ndim, start_axis)
         permutation = b + non_agg_1 + agg_1 + non_agg_2 + agg_2
-        k = np.transpose(k, onp.argsort(permutation))
+        k = jnp.transpose(k, np.argsort(permutation))
         return utils.zip_axes(k, start_axis)
 
       k = k.replace(
@@ -718,7 +718,7 @@ def Aggregate(
         k = utils.unzip_axes(k, start_axis)
         b, agg_1, agg_2, non_agg_1, non_agg_2 = bucket_axes(k.ndim, start_axis)
         permutation = b + agg_1 + agg_2 + non_agg_1 + non_agg_2
-        k = np.transpose(k, permutation)
+        k = jnp.transpose(k, permutation)
         k_shape = k.shape
         k = k.reshape(
             k.shape[:start_axis] +
@@ -728,7 +728,7 @@ def Aggregate(
         fn = pass_messages_self if diagonal_batch else pass_messages_cross
         k = fn(s1, s2, r1, r2, k)
         k = k.reshape(k_shape)
-        k = np.transpose(k, onp.argsort(permutation))
+        k = jnp.transpose(k, np.argsort(permutation))
         return utils.zip_axes(k, start_axis)
 
       nngp = agg(k.nngp, False, s1, r1, s2, r2)
@@ -867,8 +867,8 @@ def Dense(
 
   def apply_fn(params, inputs, **kwargs):
     W, b = params
-    prod = np.moveaxis(np.tensordot(W, inputs, (0, channel_axis)),
-                       0, channel_axis)
+    prod = jnp.moveaxis(jnp.tensordot(W, inputs, (0, channel_axis)),
+                        0, channel_axis)
 
     if parameterization == 'ntk':
       norm = W_std / inputs.shape[channel_axis]**0.5
@@ -914,7 +914,7 @@ def Dense(
                      is_input=False)
 
   def mask_fn(mask, input_shape):
-    return np.all(mask, axis=channel_axis, keepdims=True)
+    return jnp.all(mask, axis=channel_axis, keepdims=True)
 
   return init_fn, apply_fn, kernel_fn, mask_fn
 
@@ -1236,12 +1236,12 @@ def _Conv(
                 padding=init_padding.name,
                 dimension_numbers=dimension_numbers
             ),
-            ShapedArray(input_shape, np.float32),
-            ShapedArray(conv_kernel_shape, np.float32)
+            ShapedArray(input_shape, jnp.float32),
+            ShapedArray(conv_kernel_shape, jnp.float32)
         ).shape
 
         kernel_shape = [out_chan if c == 'O' else
-                        onp.prod(conv_kernel_shape) // out_chan if c == 'I' else
+                        np.prod(conv_kernel_shape) // out_chan if c == 'I' else
                         output_shape[out_spec.index(c)] for c in rhs_spec]
         bias_shape = [output_shape[i] if c != 'N' else 1
                       for i, c in enumerate(out_spec)]
@@ -1251,7 +1251,7 @@ def _Conv(
         return output_shape, (W, b)
 
   def get_fan_in(input_shape):
-    return input_shape[lhs_spec.index('C')] * onp.prod(filter_shape)
+    return input_shape[lhs_spec.index('C')] * np.prod(filter_shape)
 
   def standard_init_fn(rng, input_shape):
     output_shape, (W, b) = ntk_init_fn(rng, input_shape)
@@ -1365,7 +1365,7 @@ def _Conv(
               shape = [1] * out.ndim
               size = out.shape[i]
               shape[i] = size
-              idx += (np.arange(size).reshape(shape),) * 2
+              idx += (jnp.arange(size).reshape(shape),) * 2
             out = out.at[idx].add(shift)
 
       return out
@@ -1416,7 +1416,7 @@ def _Conv(
 
     # Collapse channel dimension of masks, since an FC layer is applied at each
     # spatial location.
-    mask = np.all(mask, axis=channel_axis, keepdims=True)
+    mask = jnp.all(mask, axis=channel_axis, keepdims=True)
 
     if transpose:
       rhs_shape = list(filter_shape)
@@ -1424,7 +1424,7 @@ def _Conv(
         rhs_shape.insert(rhs_spec.index(c), 1)
 
       # TODO(romann): revisit based on http://b/235531081.
-      rhs = np.ones(
+      rhs = jnp.ones(
           rhs_shape,
           dtype=None if jax.default_backend() == 'gpu' else mask.dtype)
       mask = lax.conv_transpose(
@@ -1437,7 +1437,7 @@ def _Conv(
     else:
       mask = _pool_mask(mask, filter_shape, strides, init_padding,
                         batch_axis, channel_axis)
-      mask = np.transpose(mask, (out_spec.index(c) for c in lhs_spec))
+      mask = jnp.transpose(mask, (out_spec.index(c) for c in lhs_spec))
 
     return mask
 
@@ -1446,12 +1446,14 @@ def _Conv(
 
 @layer
 @supports_masking(remask_kernel=True)
-def AvgPool(window_shape: Sequence[int],
-            strides: Optional[Sequence[int]] = None,
-            padding: str = Padding.VALID.name,
-            normalize_edges: bool = False,
-            batch_axis: int = 0,
-            channel_axis: int = -1) -> InternalLayerMasked:
+def AvgPool(
+    window_shape: Sequence[int],
+    strides: Optional[Sequence[int]] = None,
+    padding: str = Padding.VALID.name,
+    normalize_edges: bool = False,
+    batch_axis: int = 0,
+    channel_axis: int = -1
+) -> InternalLayerMasked:
   """Average pooling.
 
   Based on :obj:`jax.example_libraries.stax.AvgPool`.
@@ -1481,11 +1483,13 @@ def AvgPool(window_shape: Sequence[int],
 
 @layer
 @supports_masking(remask_kernel=True)
-def SumPool(window_shape: Sequence[int],
-            strides: Optional[Sequence[int]] = None,
-            padding: str = Padding.VALID.name,
-            batch_axis: int = 0,
-            channel_axis: int = -1) -> InternalLayerMasked:
+def SumPool(
+    window_shape: Sequence[int],
+    strides: Optional[Sequence[int]] = None,
+    padding: str = Padding.VALID.name,
+    batch_axis: int = 0,
+    channel_axis: int = -1
+) -> InternalLayerMasked:
   """Sum pooling.
 
   Based on :obj:`jax.example_libraries.stax.SumPool`.
@@ -1516,7 +1520,8 @@ def _Pool(
     padding: str,
     normalize_edges: bool,
     batch_axis: int,
-    channel_axis: int) -> InternalLayerMasked:
+    channel_axis: int
+) -> InternalLayerMasked:
   """General pooling.
 
   Based on :obj:`jax.example_libraries.stax.AvgPool` and
@@ -1581,7 +1586,7 @@ def _Pool(
   else:
     def rescaler(dims, strides, padding):
       del dims, strides, padding  # Unused.
-      return lambda outputs, inputs, spec: outputs / onp.prod(window_shape)
+      return lambda outputs, inputs, spec: outputs / np.prod(window_shape)
 
     pool_fn = _pooling_layer(lax.add, 0., rescaler)
     init_fn, apply_fn = pool_fn(window_shape, strides, padding.name, spec)
@@ -1703,7 +1708,7 @@ def _GlobalPool(
   if pool_type == _Pooling.AVG:
     pool_fn = lambda x, axis, mask: mean_and_var(x, axis, mask=mask)[0]
   elif pool_type == _Pooling.SUM:
-    pool_fn = lambda x, axis, mask: np.sum(x, axis)
+    pool_fn = lambda x, axis, mask: jnp.sum(x, axis)
   else:
     raise ValueError(f'Invalid pooling type {pool_type}.')
 
@@ -1758,7 +1763,7 @@ def _GlobalPool(
     non_spatial_axes = (batch_axis % mask.ndim, channel_axis % mask.ndim)
     spatial_axes = tuple(i for i in range(mask.ndim)
                          if i not in non_spatial_axes)
-    return np.all(mask, spatial_axes)
+    return jnp.all(mask, spatial_axes)
 
   return init_fn, apply_fn, kernel_fn, mask_fn
 
@@ -1812,7 +1817,7 @@ def Flatten(
 
   def apply_fn(params, inputs, **kwargs):
     output_shape = get_output_shape(inputs.shape)
-    inputs = np.moveaxis(inputs, batch_axis, -batch_axis_out)
+    inputs = jnp.moveaxis(inputs, batch_axis, -batch_axis_out)
     return inputs.reshape(output_shape)
 
   @requires(batch_axis=batch_axis,
@@ -1828,11 +1833,11 @@ def Flatten(
 
       if k.diagonal_spatial:
         spatial_axes = tuple(range(x.ndim)[batch_ndim:])
-        x = np.mean(x, spatial_axes)
+        x = jnp.mean(x, spatial_axes)
 
       else:
         while x.ndim > batch_ndim:
-          x = np.trace(x, axis1=-2, axis2=-1) / x.shape[-1]
+          x = jnp.trace(x, axis1=-2, axis2=-1) / x.shape[-1]
 
       return x
 
@@ -1852,9 +1857,9 @@ def Flatten(
                      diagonal_spatial=False)
 
   def mask_fn(mask, input_shape):
-    mask = np.broadcast_to(mask, input_shape)
+    mask = jnp.broadcast_to(mask, input_shape)
     output_shape = get_output_shape(mask.shape)
-    return np.moveaxis(mask, batch_axis, batch_axis_out).reshape(output_shape)
+    return jnp.moveaxis(mask, batch_axis, batch_axis_out).reshape(output_shape)
 
   return init_fn, apply_fn, kernel_fn, mask_fn
 
@@ -1905,8 +1910,8 @@ class AttentionMechanism(enum.Enum):
     return {
         'softmax': ostax.softmax,
         'identity': lambda x: x,
-        'abs': np.abs,
-        'relu': lambda x: np.maximum(x, 0.)
+        'abs': jnp.abs,
+        'relu': lambda x: jnp.maximum(x, 0.)
     }[self.name.lower()]
 
 
@@ -1931,7 +1936,8 @@ def GlobalSelfAttention(
     W_pos_emb_std: float = 1.0,
     val_pos_emb: bool = False,
     batch_axis: int = 0,
-    channel_axis: int = -1) -> InternalLayerMasked:
+    channel_axis: int = -1
+) -> InternalLayerMasked:
   """Global scaled dot-product self-attention.
 
   Infinite width results based on
@@ -2095,7 +2101,7 @@ def GlobalSelfAttention(
       size = utils.size_at(spatial_shape)
       R = _pos_emb_pdist(spatial_shape, pos_emb_p_norm, pos_emb_decay_fn)
       R = utils.unzip_axes(R)
-      L = np.linalg.cholesky(np.reshape(R, (size,) * 2)).reshape(R.shape)
+      L = jnp.linalg.cholesky(jnp.reshape(R, (size,) * 2)).reshape(R.shape)
       return L
 
   def init_fn(rng, input_shape):
@@ -2150,9 +2156,9 @@ def GlobalSelfAttention(
             (query_matrices, key_matrices, val_matrices, W_out, b, pos_emb))
 
   def apply_fn(params: PyTree,
-               inputs: np.ndarray,
-               mask: Optional[np.ndarray] = None,
-               **kwargs) -> np.ndarray:
+               inputs: jnp.ndarray,
+               mask: Optional[jnp.ndarray] = None,
+               **kwargs) -> jnp.ndarray:
     query_matrices, key_matrices, val_matrices, W_out, b, pos_emb = params
 
     spatial_shape, spatial_axes = _shape_and_axes(inputs.shape,
@@ -2165,12 +2171,12 @@ def GlobalSelfAttention(
         L = get_pos_emb_L(spatial_shape)
         first = tuple(range(L.ndim // 2))
         last = tuple(range(L.ndim // 2, L.ndim))
-        pos_emb = np.tensordot(L, pos_emb, (last, spatial_axes))
-        pos_emb = np.moveaxis(pos_emb, first, spatial_axes)
+        pos_emb = jnp.tensordot(L, pos_emb, (last, spatial_axes))
+        pos_emb = jnp.moveaxis(pos_emb, first, spatial_axes)
 
       # Mask positional embeddings.
       if mask is not None:
-        pos_emb = np.where(mask, np.zeros((), pos_emb.dtype), pos_emb)
+        pos_emb = jnp.where(mask, jnp.zeros((), pos_emb.dtype), pos_emb)
 
       pos_emb *= W_pos_emb_std
 
@@ -2184,11 +2190,11 @@ def GlobalSelfAttention(
       _n_chan_pos_emb = (inputs.shape[channel_axis] if n_chan_pos_emb is None
                          else n_chan_pos_emb)
       _channel_axis = channel_axis % inputs.ndim
-      pos_emb = np.broadcast_to(
+      pos_emb = jnp.broadcast_to(
           pos_emb,
           inputs.shape[:_channel_axis] + (_n_chan_pos_emb,) +
           inputs.shape[_channel_axis + 1:])
-      inputs = np.concatenate([inputs, pos_emb], axis=channel_axis)
+      inputs = jnp.concatenate([inputs, pos_emb], axis=channel_axis)
 
     elif pos_emb_type == PositionalEmbedding.NONE:
       inputs_val = None
@@ -2196,17 +2202,17 @@ def GlobalSelfAttention(
     # Prepare separate inputs for values if asked to not add positional
     # embeddings to values.
     if inputs_val is not None:
-      inputs_val = np.moveaxis(inputs_val, (batch_axis, channel_axis), (0, -1))
+      inputs_val = jnp.moveaxis(inputs_val, (batch_axis, channel_axis), (0, -1))
       inputs_val = inputs_val.reshape((n, -1, inputs_val.shape[-1]))
 
     # Flatten all spatial dimensions and make input of shape
     # `(batch_size, total_spatial_size, n_channels)`.
-    inputs = np.moveaxis(inputs, (batch_axis, channel_axis), (0, -1))
+    inputs = jnp.moveaxis(inputs, (batch_axis, channel_axis), (0, -1))
     inputs = inputs.reshape((n, -1, inputs.shape[-1]))
 
     def _inputs_dot(matrices, _inputs=inputs):
-      ret = np.dot(_inputs, matrices)
-      return np.moveaxis(ret, 2, 0)
+      ret = jnp.dot(_inputs, matrices)
+      return jnp.moveaxis(ret, 2, 0)
 
     # Drop positional embedding information for value matrices if requested.
     if inputs_val is not None:
@@ -2222,34 +2228,34 @@ def GlobalSelfAttention(
     else:
       queries = _inputs_dot(query_matrices)
 
-    G_mat = np.matmul(queries, np.moveaxis(keys, -1, -2))
+    G_mat = jnp.matmul(queries, jnp.moveaxis(keys, -1, -2))
     norm = inputs.shape[-1] * n_chan_key ** (1 if linear_scaling else 0.5)
     G_mat *= QK_std / norm
 
     if mask is not None:
-      mask = np.all(mask, axis=channel_axis, keepdims=True)
-      mask = np.moveaxis(mask, (batch_axis, channel_axis), (0, -1))
+      mask = jnp.all(mask, axis=channel_axis, keepdims=True)
+      mask = jnp.moveaxis(mask, (batch_axis, channel_axis), (0, -1))
       mask = mask.reshape((1, mask.shape[0], 1, -1))
 
       if attention_mechanism == AttentionMechanism.SOFTMAX:
-        G_mat = np.where(mask, _NEG_INF, G_mat)
+        G_mat = jnp.where(mask, _NEG_INF, G_mat)
       elif attention_mechanism in (AttentionMechanism.IDENTITY,
                                    AttentionMechanism.RELU,
                                    AttentionMechanism.ABS):
-        G_mat = np.where(mask, np.zeros((), G_mat.dtype), G_mat)
+        G_mat = jnp.where(mask, jnp.zeros((), G_mat.dtype), G_mat)
       else:
         raise NotImplementedError(attention_mechanism, mask)
 
     G_mat = attention_mechanism.fn()(G_mat)
-    heads = np.matmul(G_mat, values)
-    heads = np.moveaxis(heads, 0, -1)
-    heads = np.reshape(heads, heads.shape[:-2] + (-1,))
+    heads = jnp.matmul(G_mat, values)
+    heads = jnp.moveaxis(heads, 0, -1)
+    heads = jnp.reshape(heads, heads.shape[:-2] + (-1,))
 
-    outputs = np.matmul(heads, W_out)
+    outputs = jnp.matmul(heads, W_out)
     outputs *= OV_std / (n_chan_val * n_heads * n_chan_in) ** 0.5
 
-    outputs = np.reshape(outputs, (n,) + spatial_shape + (n_chan_out,))
-    outputs = np.moveaxis(outputs, (0, -1), (batch_axis, channel_axis))
+    outputs = jnp.reshape(outputs, (n,) + spatial_shape + (n_chan_out,))
+    outputs = jnp.moveaxis(outputs, (0, -1), (batch_axis, channel_axis))
     if b is not None:
       outputs += b_std * b
     return outputs
@@ -2302,21 +2308,21 @@ def GlobalSelfAttention(
           return None
 
         if not k.diagonal_batch:
-          mat = np.moveaxis(np.diagonal(mat, axis1=0, axis2=1), -1, 0)
+          mat = jnp.moveaxis(jnp.diagonal(mat, axis1=0, axis2=1), -1, 0)
 
         if mask is not None:
-          mask = np.all(mask, axis=channel_axis, keepdims=True)
-          mask = np.squeeze(np.moveaxis(mask, (batch_axis, channel_axis),
-                                        (0, -1)), -1)
+          mask = jnp.all(mask, axis=channel_axis, keepdims=True)
+          mask = jnp.squeeze(jnp.moveaxis(mask, (batch_axis, channel_axis),
+                                          (0, -1)), -1)
           if k.is_reversed:
-            mask = np.moveaxis(mask,
-                               range(1, mask.ndim),
-                               range(mask.ndim -1, 0, -1))
+            mask = jnp.moveaxis(mask,
+                                range(1, mask.ndim),
+                                range(mask.ndim -1, 0, -1))
           mask = utils.interleave_ones(mask, 1, mask.ndim, x_first=False)
           if attention_mechanism == AttentionMechanism.SOFTMAX:
-            mat = np.where(mask, _NEG_INF, mat)
+            mat = jnp.where(mask, _NEG_INF, mat)
           else:
-            mat = np.where(mask, np.zeros((), mat.dtype), mat)
+            mat = jnp.where(mask, jnp.zeros((), mat.dtype), mat)
 
         if attention_mechanism == AttentionMechanism.SOFTMAX:
           axes = tuple(range(mat.ndim))
@@ -2347,8 +2353,8 @@ def GlobalSelfAttention(
             mat_dims = (0, -1) + mat_dims
             res_dims = (0, -1) + res_dims
 
-          mat = np.einsum(G1, G1_dims, mat, mat_dims, G2, G2_dims, res_dims,
-                          optimize=True)
+          mat = jnp.einsum(G1, G1_dims, mat, mat_dims, G2, G2_dims, res_dims,
+                           optimize=True)
         return _affine(mat, OV_std, b_std)
 
       G1 = _get_weighting(cov1_interp, k.mask1)
@@ -2373,9 +2379,9 @@ def GlobalSelfAttention(
 
         c_axes = tuple(range(1 if diagonal_batch else 2, lhs.ndim))
         if rhs is None:
-          return np.sum(lhs**2, axis=c_axes, keepdims=True)
+          return jnp.sum(lhs ** 2, axis=c_axes, keepdims=True)
 
-        rhs = np.broadcast_to(rhs, lhs.shape)
+        rhs = jnp.broadcast_to(rhs, lhs.shape)
         b_axes = (0,) if diagonal_batch else (0, 1)
         res = lax.dot_general(lhs, rhs, ((c_axes, c_axes), (b_axes, b_axes)))
         return res.reshape(res.shape + (1,) * len(c_axes))
@@ -2420,7 +2426,7 @@ def GlobalSelfAttention(
                      is_gaussian=True)
 
   def mask_fn(mask, input_shape):
-    return np.all(mask, channel_axis, keepdims=True)
+    return jnp.all(mask, channel_axis, keepdims=True)
 
   return init_fn, apply_fn, kernel_fn, mask_fn
 
@@ -2431,7 +2437,8 @@ def LayerNorm(
     axis: Axes = -1,
     eps: float = 1e-12,
     batch_axis: int = 0,
-    channel_axis: int = -1) -> InternalLayer:
+    channel_axis: int = -1
+) -> InternalLayer:
   """Layer normalisation.
 
   Args:
@@ -2456,7 +2463,7 @@ def LayerNorm(
     _axis = utils.canonicalize_axis(axis, inputs)
     mean, var = mean_and_var(inputs, _axis, keepdims=True, mask=mask,
                              get_var=True)
-    return (inputs - mean) / np.sqrt(eps + var)
+    return (inputs - mean) / jnp.sqrt(eps + var)
 
   @requires(batch_axis=batch_axis, channel_axis=channel_axis)
   def kernel_fn(k: Kernel, **kwargs):
@@ -2502,9 +2509,9 @@ def LayerNorm(
         raise NotImplementedError('`LayerNorm` with different per-channel masks'
                                   'not implemented in the infinite limit.')
 
-      m = np.squeeze(m, channel_axis)
+      m = jnp.squeeze(m, channel_axis)
       if k.is_reversed:
-        m = np.moveaxis(m, range(1, m.ndim), range(m.ndim - 1, 0, -1))
+        m = jnp.moveaxis(m, range(1, m.ndim), range(m.ndim - 1, 0, -1))
 
       return m
 
@@ -2519,14 +2526,14 @@ def LayerNorm(
         mask2=prepare_mask(k.mask2),
         )
 
-    nngp /= np.sqrt(prod12)
+    nngp /= jnp.sqrt(prod12)
 
     if ntk is not None:
-      ntk /= np.sqrt(prod12)
+      ntk /= jnp.sqrt(prod12)
 
-    cov1 /= np.sqrt(prod11)
+    cov1 /= jnp.sqrt(prod11)
     if cov2 is not None:
-      cov2 /= np.sqrt(prod22)
+      cov2 /= jnp.sqrt(prod22)
 
     return k.replace(cov1=cov1, nngp=nngp, cov2=cov2, ntk=ntk)
 
@@ -2572,7 +2579,7 @@ def Dropout(rate: float, mode: str = 'train') -> InternalLayer:
     cov1 = _diag_mul(cov1, factor, k.diagonal_batch, k.diagonal_spatial)
     cov2 = _diag_mul(cov2, factor, k.diagonal_batch, k.diagonal_spatial)
 
-    new_factor = np.where(k.x1_is_x2, factor, 1.)
+    new_factor = jnp.where(k.x1_is_x2, factor, 1.)
     nngp = _diag_mul(nngp, new_factor, False, k.diagonal_spatial)
     ntk = _diag_mul(ntk, new_factor, False, k.diagonal_spatial)
 
@@ -2661,7 +2668,7 @@ def ImageResize(
       `True`. Has no effect when upsampling.
 
     precision:
-      `np.einsum` precision.
+      `jnp.einsum` precision.
 
     batch_axis:
       batch axis for `inputs`. Defaults to `0`, the leading axis.
@@ -2696,15 +2703,15 @@ def ImageResize(
     input as fully masked. This can lead to mask growing unexpectedly, e.g.
     consider a 5x5 image with a single masked pixel in the center:
 
-      >>> mask = np.array([[0, 0, 0, 0, 0],
-      >>>                 [0, 0, 0, 0, 0],
-      >>>                 [0, 0, 1, 0, 0],
-      >>>                 [0, 0, 0, 0, 0],
-      >>>                 [0, 0, 0, 0, 0]], dtype=np.bool_)
+      >>> mask = jnp.array([[0, 0, 0, 0, 0],
+      >>>                   [0, 0, 0, 0, 0],
+      >>>                   [0, 0, 1, 0, 0],
+      >>>                   [0, 0, 0, 0, 0],
+      >>>                   [0, 0, 0, 0, 0]], dtype=jnp.bool_)
 
     Downsampling this mask to 2x2 will mark all output pixels as masked!
 
-      >>> jax.image.resize(mask, (2, 2), method='bilinear').astype(np.bool_)
+      >>> jax.image.resize(mask, (2, 2), method='bilinear').astype(jnp.bool_)
       DeviceArray([[ True,  True],
                    [ True,  True]], dtype=bool)
 
@@ -2718,7 +2725,7 @@ def ImageResize(
                              shape=_shape(mask.shape),
                              method=method,
                              antialias=antialias,
-                             precision=precision).astype(np.bool_)
+                             precision=precision).astype(jnp.bool_)
 
   batch_axis, channel_axis = utils.mod((batch_axis, channel_axis), shape)
 
@@ -2884,9 +2891,10 @@ _CONV_KERNEL_DIMENSION_NUMBERS = ('NCHW', 'OIHW', 'NCHW')
 
 
 def _affine(
-    mat: Optional[np.ndarray],
+    mat: Optional[jnp.ndarray],
     W_std: float,
-    b_std: Optional[float]) -> Optional[np.ndarray]:
+    b_std: Optional[float]
+) -> Optional[jnp.ndarray]:
   """Get covariances of affine outputs if inputs have covariances `nngp`.
 
   The output is assumed to be `xW + b`, where `x` is the input, `W` is a matrix
@@ -2895,7 +2903,7 @@ def _affine(
 
   Args:
     mat:
-      a `np.ndarray` containing sample-[sample-]position[-position] covariances
+      a `jnp.ndarray` containing sample-[sample-]position[-position] covariances
       of inputs.
     W_std:
       standard deviation of a fully-connected layer weights.
@@ -2904,7 +2912,7 @@ def _affine(
       `None` means no bias.
 
   Returns:
-    a `np.ndarray` containing sample-[sample-]position[-position] covariances
+    a `jnp.ndarray` containing sample-[sample-]position[-position] covariances
     of FC outputs. Has the same shape as `nngp`.
   """
   if mat is not None:
@@ -2917,12 +2925,12 @@ def _affine(
 
 
 def _same_pad_for_filter_shape(
-    x: np.ndarray,
+    x: jnp.ndarray,
     filter_shape: Sequence[int],
     strides: Sequence[int],
     axes: Sequence[int],
     mode: str = 'wrap',
-) -> np.ndarray:
+) -> jnp.ndarray:
   """Padding imitating :attr:`Padding.SAME` padding with :attr:`Padding.VALID`.
 
   See `Returns` section for details. This function is usually needed to
@@ -2931,7 +2939,7 @@ def _same_pad_for_filter_shape(
 
   Args:
     x:
-      `np.ndarray` to pad, e.g. a 4D `NHWC` image.
+      `jnp.ndarray` to pad, e.g. a 4D `NHWC` image.
 
     filter_shape:
       tuple of positive integers, the convolutional filters spatial shape (e.g.
@@ -2950,25 +2958,25 @@ def _same_pad_for_filter_shape(
       https://docs.scipy.org/doc/numpy/reference/generated/numpy.pad.html.
 
   Returns:
-    A `np.ndarray` of the same dimensionality as `x` padded to a potentially
+    A `jnp.ndarray` of the same dimensionality as `x` padded to a potentially
     larger shape such that a `"VALID"` convolution with `filter_shape` applied
     to `x` over `axes` outputs an array of the same shape as `x`.
   """
-  axes_shape = tuple(np.size(x, axis) for axis in axes)
+  axes_shape = tuple(jnp.size(x, axis) for axis in axes)
   axes_pads = lax.padtype_to_pads(axes_shape, filter_shape, strides,
                                   Padding.SAME.name)
   pads = [(0, 0)] * x.ndim
   for i, axis in enumerate(axes):
     pads[axis] = axes_pads[i]
-  x = np.pad(x, pads, mode)
+  x = jnp.pad(x, pads, mode)
   return x
 
 
 def _same_pad_for_filter_shape_transpose(
-    x: np.ndarray,
+    x: jnp.ndarray,
     axes: Sequence[int],
     out_shape: Sequence[int]
-) -> np.ndarray:
+) -> jnp.ndarray:
   """Transpose of the `_same_pad_for_filter_shape` function.
 
   Unpads (crops) the array and fills each coordinate with the sum of all
@@ -2977,7 +2985,7 @@ def _same_pad_for_filter_shape_transpose(
 
   Args:
     x:
-      `np.ndarray` to pad, e.g. a 4D `NHWC` image.
+      `jnp.ndarray` to pad, e.g. a 4D `NHWC` image.
     axes:
       non-negative integers, the spatial axes to apply convolution
       over (e.g. `(1, 2)` for an `NHWC` image).
@@ -2985,17 +2993,17 @@ def _same_pad_for_filter_shape_transpose(
       target shape after cropping.
 
   Returns:
-    A `np.ndarray` of shape `output_shape`.
+    A `jnp.ndarray` of shape `output_shape`.
   """
   window_dimensions = tuple(
-      int(onp.ceil(x.shape[i] / out_shape[i])) // 2 * 2 + 1
+      int(np.ceil(x.shape[i] / out_shape[i])) // 2 * 2 + 1
       if i in axes else 1 for i in range(x.ndim))
 
   dilation = tuple(out_shape[i] if i in axes else 1 for i in range(x.ndim))
 
   x = lax.reduce_window(
       operand=x,
-      init_value=onp.zeros((), x.dtype),
+      init_value=np.zeros((), x.dtype),
       computation=lax.add,
       window_dimensions=window_dimensions,
       window_strides=(1,) * x.ndim,
@@ -3018,26 +3026,26 @@ def _same_pad_for_filter_shape_transpose(
 
 
 def _pool_transpose(
-    x: np.ndarray,
+    x: jnp.ndarray,
     filter_shape: Sequence[int],
     strides: Sequence[int],
     axes: Sequence[int],
     padding: Padding
-) -> np.ndarray:
+) -> jnp.ndarray:
   """Transpose convolution with an all-ones filter."""
   n_spatial = len(axes)
-  x = np.moveaxis(x, axes, range(-n_spatial, 0))
+  x = jnp.moveaxis(x, axes, range(-n_spatial, 0))
   split = -n_spatial or x.ndim
   x_preshape = x.shape[:split]
   x = x.reshape((-1, 1) + x.shape[split:])
-  rhs = np.ones(tuple(filter_shape) + (1, 1), x.dtype)
+  rhs = jnp.ones(tuple(filter_shape) + (1, 1), x.dtype)
   x = lax.conv_transpose(x,
                          rhs,
                          strides,
                          padding.name,
                          dimension_numbers=_get_dimension_numbers(n_spatial))
   x = x.reshape(x_preshape + x.shape[2:])
-  x = np.moveaxis(x, range(-n_spatial, 0), axes)
+  x = jnp.moveaxis(x, range(-n_spatial, 0), axes)
   return x
 
 
@@ -3056,19 +3064,19 @@ def _get_dimension_numbers(
 
 
 def _conv_kernel_full_spatial_shared(
-    lhs: Optional[np.ndarray],
+    lhs: Optional[jnp.ndarray],
     filter_shape: Sequence[int],
     strides: Sequence[int],
     padding: Padding,
     batch_ndim: int
-) -> Optional[np.ndarray]:
+) -> Optional[jnp.ndarray]:
   """Compute covariance of the CNN outputs given inputs with covariance `lhs`.
 
   Used when `kernel.diagonal_spatial == False`.
 
   Args:
     lhs:
-      a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
+      a `(2*S+batch_ndim)`-dimensional `jnp.ndarray` containing
       sample-[sample-]position-position covariances of CNN inputs, where `S` is
       the number of spatial dimensions (e.g. 2 for images). Has shape
       `(batch_size_1, [batch_size_2,] height, height, width, width, depth,
@@ -3089,7 +3097,7 @@ def _conv_kernel_full_spatial_shared(
       number of batch dimensions, 1 or 2.
 
   Returns:
-    a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
+    a `(2*S+batch_ndim)`-dimensional `jnp.ndarray` containing
     sample-[sample-]position-position covariances of CNN outputs, where `S` is
     the number of spatial dimensions (e.g. 2 for images). Has shape
     `(batch_size_1, [batch_size_2,] new_width, new_width, new_height,
@@ -3156,12 +3164,12 @@ def _conv_kernel_full_spatial_shared(
 
 
 def _conv_kernel_full_spatial_unshared(
-    lhs: Optional[np.ndarray],
+    lhs: Optional[jnp.ndarray],
     filter_shape: Sequence[int],
     strides: Sequence[int],
     padding: Padding,
     batch_ndim: int,
-) -> Optional[np.ndarray]:
+) -> Optional[jnp.ndarray]:
   """Compute covariance of unshared CNN given inputs with covariance `lhs`.
 
   Used when `kernel.diagonal_spatial == False`. Has the same outputs on the
@@ -3171,7 +3179,7 @@ def _conv_kernel_full_spatial_unshared(
 
   Args:
     lhs:
-      a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
+      a `(2*S+batch_ndim)`-dimensional `jnp.ndarray` containing
       sample-[sample-]position-position covariances of CNN inputs, where `S` is
       the number of spatial dimensions (e.g. 2 for images). Has shape
       `(batch_size_1, [batch_size_2,] height, height, width, width, depth,
@@ -3192,7 +3200,7 @@ def _conv_kernel_full_spatial_unshared(
       number of batch dimensions, 1 or 2.
 
   Returns:
-    a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
+    a `(2*S+batch_ndim)`-dimensional `jnp.ndarray` containing
     sample-[sample-]position-position covariances of CNN outputs, where `S` is
     the number of spatial dimensions (e.g. 2 for images). Has shape
     `(batch_size_1, [batch_size_2,] new_width, new_width, new_height,
@@ -3205,8 +3213,8 @@ def _conv_kernel_full_spatial_unshared(
   lhs_diag = utils.diagonal_between(lhs, batch_ndim)
   out_diag = _conv_kernel_diagonal_spatial(lhs_diag, filter_shape, strides,
                                            padding, batch_ndim)
-  out_diag_flat = out_diag.reshape((onp.prod(out_diag.shape[:batch_ndim]), -1))
-  out_flat = vmap(np.diag)(out_diag_flat)
+  out_diag_flat = out_diag.reshape((np.prod(out_diag.shape[:batch_ndim]), -1))
+  out_flat = vmap(jnp.diag)(out_diag_flat)
   out = out_flat.reshape(out_diag.shape[:batch_ndim] +
                          out_diag.shape[batch_ndim:] * 2)
   out = utils.zip_axes(out, batch_ndim)
@@ -3214,19 +3222,19 @@ def _conv_kernel_full_spatial_unshared(
 
 
 def _conv_kernel_full_spatial_transpose(
-    lhs: Optional[np.ndarray],
+    lhs: Optional[jnp.ndarray],
     filter_shape: Sequence[int],
     strides: Sequence[int],
     padding: Padding,
     batch_ndim: int
-) -> Optional[np.ndarray]:
+) -> Optional[jnp.ndarray]:
   """Compute covariance of the CNN transpose given inputs with covariance `lhs`.
 
   Used when `kernel.diagonal_spatial == False`.
 
   Args:
     lhs:
-      a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
+      a `(2*S+batch_ndim)`-dimensional `jnp.ndarray` containing
       sample-[sample-]position-position covariances of CNN inputs, where `S` is
       the number of spatial dimensions (e.g. 2 for images). Has shape
       `(batch_size_1, [batch_size_2,] height, height, width, width, depth,
@@ -3247,7 +3255,7 @@ def _conv_kernel_full_spatial_transpose(
       number of batch dimensions, 1 or 2.
 
   Returns:
-    a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
+    a `(2*S+batch_ndim)`-dimensional `jnp.ndarray` containing
     sample-[sample-]position-position covariances of CNN outputs, where `S` is
     the number of spatial dimensions (e.g. 2 for images). Has shape
     `(batch_size_1, [batch_size_2,] new_width, new_width, new_height,
@@ -3285,18 +3293,18 @@ def _conv_kernel_full_spatial_transpose(
 
 
 def _conv_kernel_full_spatial_loop(
-    lhs: np.ndarray,
+    lhs: jnp.ndarray,
     filter_shape: Sequence[int],
     strides: Sequence[int],
     padding: Padding,
     lax_conv: Callable[
-        [np.ndarray, np.ndarray, tuple[int, ...], str], np.ndarray],
+        [jnp.ndarray, jnp.ndarray, tuple[int, ...], str], jnp.ndarray],
     get_n_channels: Callable[[int], int]
-) -> np.ndarray:
+) -> jnp.ndarray:
   padding = Padding.VALID if padding == Padding.CIRCULAR else padding
 
-  def get_rhs(n_channels: int, filter_size: int) -> np.ndarray:
-    rhs = np.diag(np.full((filter_size,), 1. / filter_size, lhs.dtype))
+  def get_rhs(n_channels: int, filter_size: int) -> jnp.ndarray:
+    rhs = jnp.diag(jnp.full((filter_size,), 1. / filter_size, lhs.dtype))
     rhs_shape = ()
     for c in _CONV_KERNEL_DIMENSION_NUMBERS[1]:
       if c == 'O':
@@ -3305,14 +3313,14 @@ def _conv_kernel_full_spatial_loop(
         rhs_shape += (1,)
       else:
         rhs_shape += (filter_size,)
-    rhs = np.broadcast_to(rhs, rhs_shape)
+    rhs = jnp.broadcast_to(rhs, rhs_shape)
     return rhs
 
   batch_ndim = lhs.ndim - len(filter_shape) * 2
   for i in range(lhs.ndim - 1, batch_ndim, -2):
     spatial_i = (i - batch_ndim) // 2
 
-    lhs = np.moveaxis(lhs, (i - 1, i), (-2, -1))
+    lhs = jnp.moveaxis(lhs, (i - 1, i), (-2, -1))
     preshape = lhs.shape[:-2]
     n_channels = get_n_channels(utils.size_at(preshape))
     lhs = lhs.reshape((-1, n_channels, lhs.shape[-2], lhs.shape[-1]))
@@ -3325,19 +3333,19 @@ def _conv_kernel_full_spatial_loop(
 
 
 def _conv_kernel_diagonal_spatial(
-    lhs: Optional[np.ndarray],
+    lhs: Optional[jnp.ndarray],
     filter_shape: Sequence[int],
     strides: Sequence[int],
     padding: Padding,
     batch_ndim: int
-) -> Optional[np.ndarray]:
+) -> Optional[jnp.ndarray]:
   """Compute covariance of the CNN outputs given inputs with covariance `lhs`.
 
   Used when `kernel.diagonal_spatial == True`.
 
   Args:
     lhs:
-      an `(S+batch_ndim)`-dimensional `np.ndarray` containing
+      an `(S+batch_ndim)`-dimensional `jnp.ndarray` containing
       sample-sample-(same position) covariances of CNN inputs. Has `batch_ndim`
       batch and `S` spatial dimensions with the shape of `(batch_size_1,
       [batch_size_2,] height, width, depth, ...)`.
@@ -3357,7 +3365,7 @@ def _conv_kernel_diagonal_spatial(
       number of leading batch dimensions, 1 or 2.
 
   Returns:
-    an `(S+batch_ndim)`-dimensional `np.ndarray` containing
+    an `(S+batch_ndim)`-dimensional `jnp.ndarray` containing
     sample-sample-(same position) covariances of CNN outputs. Has `batch_ndim`
     batch and `S` spatial dimensions with the shape of `(batch_size_1,
     [batch_size_2,] new_height, new_width, new_depth, ...)`.
@@ -3373,7 +3381,7 @@ def _conv_kernel_diagonal_spatial(
 
   lhs = lax.reduce_window(
       operand=lhs,
-      init_value=onp.zeros((), lhs.dtype),
+      init_value=np.zeros((), lhs.dtype),
       computation=lax.add,
       window_dimensions=(1,) * batch_ndim + tuple(filter_shape),
       window_strides=(1,) * batch_ndim + tuple(strides),
@@ -3384,19 +3392,19 @@ def _conv_kernel_diagonal_spatial(
 
 
 def _conv_kernel_diagonal_spatial_transpose(
-    lhs: Optional[np.ndarray],
+    lhs: Optional[jnp.ndarray],
     filter_shape: Sequence[int],
     strides: Sequence[int],
     padding: Padding,
     batch_ndim: int
-) -> Optional[np.ndarray]:
+) -> Optional[jnp.ndarray]:
   """Compute covariance of the CNN transpose given inputs with covariance `lhs`.
 
   Used when `kernel.diagonal_spatial == True`.
 
   Args:
     lhs:
-      an `(S+batch_ndim)`-dimensional `np.ndarray` containing
+      an `(S+batch_ndim)`-dimensional `jnp.ndarray` containing
       sample-sample-(same position) covariances of CNN inputs. Has `batch_ndim`
       batch and `S` spatial dimensions with the shape of `(batch_size_1,
       [batch_size_2,] height, width, depth, ...)`.
@@ -3416,7 +3424,7 @@ def _conv_kernel_diagonal_spatial_transpose(
       number of leading batch dimensions, 1 or 2.
 
   Returns:
-    an `(S+batch_ndim)`-dimensional `np.ndarray` containing
+    an `(S+batch_ndim)`-dimensional `jnp.ndarray` containing
     sample-sample-(same position) covariances of CNN outputs. Has `batch_ndim`
     batch and `S` spatial dimensions with the shape of `(batch_size_1,
     [batch_size_2,] new_height, new_width, new_depth, ...)`.
@@ -3443,19 +3451,19 @@ def _conv_kernel_diagonal_spatial_transpose(
 
 
 def _pool_kernel(
-    lhs: np.ndarray,
+    lhs: jnp.ndarray,
     pool_type: _Pooling,
     window_shape: Sequence[int],
     strides: Sequence[int],
     padding: Padding,
     normalize_edges: bool,
     batch_ndim: int
-) -> np.ndarray:
+) -> jnp.ndarray:
   """Get covariances of pooling outputs given inputs covariances `lhs`.
 
   Args:
     lhs:
-      a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
+      a `(2*S+batch_ndim)`-dimensional `jnp.ndarray` containing
       sample-[sample-]position-position covariances of pooling inputs, where `S`
       is the number of spatial dimensions (e.g. 2 for images). Has shape
       `(batch_size_1, [batch_size_2,]
@@ -3483,7 +3491,7 @@ def _pool_kernel(
       number of leading batch dimensions, 1 or 2.
 
   Returns:
-      a `(2*S+batch_ndim)`-dimensional `np.ndarray` containing
+      a `(2*S+batch_ndim)`-dimensional `jnp.ndarray` containing
       sample-[sample-]position-position covariances of pooling outputs, where
       `S` is the number of spatial dimensions (e.g. 2 for images). Has shape
       `(batch_size_1, [batch_size_2,]
@@ -3509,19 +3517,20 @@ def _normalize(lhs, out, normalize_edges, padding, strides, window_shape):
   if padding == Padding.SAME and normalize_edges:
     # `SAME` padding in :obj:`jax.example_libraries.stax.AvgPool` normalizes by
     # actual window size, which is smaller at the edges.
-    one = np.ones_like(lhs, lhs.dtype)
+    one = jnp.ones_like(lhs, lhs.dtype)
     window_sizes = lax.reduce_window(one, 0., lax.add, window_shape, strides,
                                      padding.name)
     out /= window_sizes
   else:
-    out /= onp.prod(window_shape)
+    out /= np.prod(window_shape)
   return out
 
 
 def _diag_mul_full_spatial(
-    x: np.ndarray,
+    x: jnp.ndarray,
     factor: float,
-    diagonal_batch: bool) -> np.ndarray:
+    diagonal_batch: bool
+) -> jnp.ndarray:
   if diagonal_batch:
     idx = (slice(None),)
     batch_ndim = 1
@@ -3536,33 +3545,35 @@ def _diag_mul_full_spatial(
     shape = [1] * ndims
     size = x.shape[2 - batch_ndim + 2 * i]
     shape[i] = size
-    idx += (np.arange(size).reshape(shape),) * 2
+    idx += (jnp.arange(size).reshape(shape),) * 2
 
   x = x.at[idx].mul(factor)
   return x
 
 
 def _diag_mul_diagonal_spatial(
-    x: np.ndarray,
+    x: jnp.ndarray,
     factor: float,
-    diagonal_batch: bool) -> np.ndarray:
+    diagonal_batch: bool
+) -> jnp.ndarray:
   if diagonal_batch:
     x *= factor
 
   else:
     if x.shape[0] != x.shape[1]:
       return x
-    idx = np.diag_indices(x.shape[0]) + (Ellipsis,)
+    idx = jnp.diag_indices(x.shape[0]) + (Ellipsis,)
     x = x.at[idx].mul(factor)
 
   return x
 
 
 def _diag_mul(
-    x: Optional[np.ndarray],
+    x: Optional[jnp.ndarray],
     factor: float,
     diagonal_batch: bool,
-    diagonal_spatial: bool) -> Optional[np.ndarray]:
+    diagonal_spatial: bool
+) -> Optional[jnp.ndarray]:
   if x is None:
     return x
 
@@ -3572,12 +3583,14 @@ def _diag_mul(
   return _diag_mul_full_spatial(x, factor, diagonal_batch)
 
 
-def _vmap_2d(fn: Callable[[float, float, float], float],
-             cov12: np.ndarray,
-             var1: np.ndarray,
-             var2: Optional[np.ndarray],
-             diagonal_batch: bool,
-             diagonal_spatial: bool) -> np.ndarray:
+def _vmap_2d(
+    fn: Callable[[float, float, float], float],
+    cov12: jnp.ndarray,
+    var1: jnp.ndarray,
+    var2: Optional[jnp.ndarray],
+    diagonal_batch: bool,
+    diagonal_spatial: bool
+) -> jnp.ndarray:
   """Effectively a "2D vmap" of `fn(cov12, var1, var2)`.
 
   Applicable for all possible kernel layouts.
@@ -3620,14 +3633,14 @@ def _vmap_2d(fn: Callable[[float, float, float], float],
 
   fn = vmap(
       vmap(
-          np.vectorize(fn),
+          jnp.vectorize(fn),
           in_axes=(start, None, start),
           out_axes=start
       ),
       in_axes=(start, start, None),
       out_axes=start
   )
-  out = fn(_cov12, var1, var2)  # type: np.ndarray
+  out = fn(_cov12, var1, var2)  # type: jnp.ndarray
   out_shape = (cov12.shape[:start] +
                cov12.shape[start:cov_end:2] +
                cov12.shape[start + 1:cov_end:2] +
@@ -3640,10 +3653,10 @@ def _vmap_2d(fn: Callable[[float, float, float], float],
 # MASKING
 
 
-_NEG_INF = -1e20  # softmax raises an error if all entries are -np.inf
+_NEG_INF = -1e20  # softmax raises an error if all entries are -jnp.inf
 
 
-def _check_is_implemented(mask: np.ndarray, channel_axis: int) -> None:
+def _check_is_implemented(mask: jnp.ndarray, channel_axis: int) -> None:
   if mask.shape[channel_axis] != 1:
     raise NotImplementedError(
         'Different channel-wise masks as inputs to '
@@ -3653,12 +3666,13 @@ def _check_is_implemented(mask: np.ndarray, channel_axis: int) -> None:
 
 
 def _pool_mask(
-    mask: np.ndarray,
+    mask: jnp.ndarray,
     window_shape: Sequence[int],
     strides: Sequence[int],
     padding: Padding,
     batch_axis: int,
-    channel_axis: int) -> np.ndarray:
+    channel_axis: int
+) -> jnp.ndarray:
   window_shape = list(window_shape)
   strides = list(strides)
 
@@ -3670,7 +3684,7 @@ def _pool_mask(
   # Get the output shape.
   out_shape = eval_shape(lambda x: lax.reduce_window(
       operand=x,
-      init_value=np.zeros((), x.dtype),
+      init_value=jnp.zeros((), x.dtype),
       computation=op.or_,
       window_dimensions=window_shape,
       window_strides=strides,
@@ -3732,43 +3746,43 @@ def _pooling_layer(reducer, init_val, rescaler=None):
 # POSITIONAL EMBEDDINGS
 
 
-def _pos_emb_identity(shape: Sequence[int]) -> np.ndarray:
+def _pos_emb_identity(shape: Sequence[int]) -> jnp.ndarray:
   size = utils.size_at(shape)  # pytype: disable=wrong-arg-types  # jax-ndarray
-  R = np.eye(size).reshape(tuple(shape) * 2)
+  R = jnp.eye(size).reshape(tuple(shape) * 2)
   R = utils.zip_axes(R)
   return R
 
 
-def _pos_emb_pdist(shape: Sequence[int],
-                   pos_emb_p_norm: Optional[float],
-                   pos_emb_decay_fn: Optional[Callable[[float], float]]
-                   ) -> np.ndarray:
+def _pos_emb_pdist(
+    shape: Sequence[int],
+    pos_emb_p_norm: Optional[float],
+    pos_emb_decay_fn: Optional[Callable[[float], float]]
+) -> jnp.ndarray:
   if pos_emb_decay_fn is None:
     # Identity / one-hot positional embeddings.
     return _pos_emb_identity(shape)
 
   # Pairwise distance-based positional embeddings.
   ndim = len(shape)
-  R = np.zeros((1,) * (ndim * 2))
+  R = jnp.zeros((1,) * (ndim * 2))
   for axis in range(ndim):
-    d = np.arange(shape[axis])
+    d = jnp.arange(shape[axis])
     pd = utils.outer_prod(d, d, 0, d.ndim, op.sub)
     pd = pd.reshape((1,) * (2 * axis) +
                     pd.shape +
                     (1,) * (2 * (ndim - axis - 1)))
-    R += np.abs(pd) ** pos_emb_p_norm
+    R += jnp.abs(pd) ** pos_emb_p_norm
 
   R = pos_emb_decay_fn(R)
   return R  # pytype: disable=bad-return-type  # jax-ndarray
 
 
-def _get_all_pos_emb(k: Kernel,
-                     pos_emb_type: PositionalEmbedding,
-                     pos_emb_p_norm: float,
-                     pos_emb_decay_fn: Optional[Callable[[float], float]]
-                     ) -> tuple[Optional[np.ndarray],
-                                Optional[np.ndarray],
-                                Optional[np.ndarray]]:
+def _get_all_pos_emb(
+    k: Kernel,
+    pos_emb_type: PositionalEmbedding,
+    pos_emb_p_norm: float,
+    pos_emb_decay_fn: Optional[Callable[[float], float]]
+) -> tuple[Optional[jnp.ndarray], Optional[jnp.ndarray], Optional[jnp.ndarray]]:
   if pos_emb_type == PositionalEmbedding.NONE:
     return None, None, None
 
@@ -3779,8 +3793,8 @@ def _get_all_pos_emb(k: Kernel,
     R = utils.reverse_zipped(R)
 
   batch_ndim = 1 if k.diagonal_batch else 2
-  R11 = np.expand_dims(R, tuple(range(batch_ndim)))
-  R12 = R11 if batch_ndim == 2 else np.expand_dims(R, (0, 1))
+  R11 = jnp.expand_dims(R, tuple(range(batch_ndim)))
+  R12 = R11 if batch_ndim == 2 else jnp.expand_dims(R, (0, 1))
   R22 = None if k.cov2 is None else R11
 
   mask11, mask12, mask22 = k._get_mask_prods(k.mask1, k.mask2)

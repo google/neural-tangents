@@ -24,7 +24,7 @@ from jax import grad
 from jax import jit
 from jax import random
 from jax.example_libraries import optimizers
-import jax.numpy as np
+import jax.numpy as jnp
 import neural_tangents as nt
 from neural_tangents import stax
 from examples import datasets
@@ -58,7 +58,7 @@ def main(unused_argv):
   state = opt_init(params)
 
   # Create an mse loss function and a gradient function.
-  loss = lambda fx, y_hat: 0.5 * np.mean((fx - y_hat) ** 2)
+  loss = lambda fx, y_hat: 0.5 * jnp.mean((fx - y_hat) ** 2)
   grad_loss = jit(grad(lambda params, x, y: loss(apply_fn(params, x), y)))
 
   # Create an MSE predictor to solve the NTK equation in function space.
