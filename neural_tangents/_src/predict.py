@@ -30,7 +30,7 @@ set / timesteps.
 
 import collections
 from functools import lru_cache
-from typing import Callable, Generator, Iterable, NamedTuple, Optional, Any, Union
+from typing import Callable, Generator, Iterable, NamedTuple, Optional, Any, Union, Protocol
 
 import jax
 from jax import grad
@@ -40,7 +40,6 @@ import jax.scipy as jsp
 from jax.tree_util import tree_all, tree_map
 import numpy as np
 import scipy as sp
-from typing_extensions import Protocol
 from .utils import dataclasses, utils
 from .utils.typing import Axes, Get, KernelFn
 
