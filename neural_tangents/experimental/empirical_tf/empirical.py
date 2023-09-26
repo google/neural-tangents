@@ -101,7 +101,7 @@ import tf2jax
 
 
 def empirical_ntk_fn_tf(
-    f: Union[tf.Module, tf.types.experimental.PolymorphicFunction],
+    f: Union[tf.Module, tf.types.experimental.GenericFunction],
     trace_axes: Axes = (-1,),
     diagonal_axes: Axes = (),
     vmap_axes: VMapAxes = None,
@@ -243,7 +243,7 @@ def empirical_ntk_fn_tf(
   if isinstance(f, tf.Module):
     apply_fn, _ = get_apply_fn_and_params(f)
 
-  elif isinstance(f, tf.types.experimental.PolymorphicFunction):
+  elif isinstance(f, tf.types.experimental.GenericFunction):
     apply_fn = tf2jax.convert_functional(f, *f.input_signature)
 
   else:
