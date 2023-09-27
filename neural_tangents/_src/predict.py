@@ -1091,7 +1091,7 @@ def gradient_descent_mse_ensemble(
       else:
         out[g] = mean
 
-    return out
+    return out  # pytype: disable=bad-return-type  # jnp-type
 
   return predict_fn
 

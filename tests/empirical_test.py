@@ -631,10 +631,10 @@ _functions: dict[str, Callable[[PyTree, PyTree], PyTree]] = {
     'p[1] * p[0]': lambda p, x: p[1] * p[0],
     'p[1] / p[0]': lambda p, x: p[1] / p[0],
 
-    'p[1] * np.expand_dims(np.arange(p[1].shape[1]))': lambda p, x: p[1] * jnp.expand_dims(jnp.arange(p[1].shape[1])),
-    'p[1] * np.expand_dims(p[0][0])': lambda p, x: p[1] * jnp.expand_dims(p[0][0]),
-    'p[1] / np.expand_dims(np.arange(p[1].shape[1]))': lambda p, x: p[1] / jnp.expand_dims(jnp.arange(p[1].shape[1])),
-    'p[1] / np.expand_dims(p[0][0])': lambda p, x: p[1] / jnp.expand_dims(p[0][0]),
+    'p[1] * np.expand_dims(np.arange(p[1].shape[1]))': lambda p, x: p[1] * jnp.expand_dims(jnp.arange(p[1].shape[1])),  # pytype: disable=missing-parameter  # jnp-type
+    'p[1] * np.expand_dims(p[0][0])': lambda p, x: p[1] * jnp.expand_dims(p[0][0]),  # pytype: disable=missing-parameter  # jnp-type
+    'p[1] / np.expand_dims(np.arange(p[1].shape[1]))': lambda p, x: p[1] / jnp.expand_dims(jnp.arange(p[1].shape[1])),  # pytype: disable=missing-parameter  # jnp-type
+    'p[1] / np.expand_dims(p[0][0])': lambda p, x: p[1] / jnp.expand_dims(p[0][0]),  # pytype: disable=missing-parameter  # jnp-type
 
     '[p[0], p[1], p[0] / p[1], 2 * p[0], -p[1] + p[0]]': lambda p, x: [p[0], p[1], p[0] / p[1], 2 * p[0], -p[1] + p[0]],
     '[np.sum(p[0], axis=0), np.sum(p[0], axis=1)]': lambda p, x: [jnp.sum(p[0], axis=0), jnp.sum(p[0], axis=1)],

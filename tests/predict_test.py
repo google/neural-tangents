@@ -263,7 +263,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
 
   @classmethod
   def _cov_empirical(cls, x):
-    return jnp.einsum('itjk,itlk->tjl', x, x, optimize=True) / (x.shape[0] *
+    return jnp.einsum('itjk,itlk->tjl', x, x, optimize=True) / (x.shape[0] *  # pytype: disable=wrong-arg-types  # jnp-type
                                                                 x.shape[-1])
 
   @test_utils.product(
@@ -676,7 +676,7 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
 
         mean_emp = jnp.mean(ensemble_fx, axis=0, keepdims=True)
         mean_subtracted = ensemble_fx - mean_emp
-        cov_emp = jnp.einsum(
+        cov_emp = jnp.einsum(  # pytype: disable=wrong-arg-types  # jnp-type
             'ijk,ilk->jl', mean_subtracted, mean_subtracted, optimize=True) / (
                 mean_subtracted.shape[0] * mean_subtracted.shape[-1])
 

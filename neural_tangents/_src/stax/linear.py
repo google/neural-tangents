@@ -459,7 +459,7 @@ def Aggregate(
   @functools.partial(vmap, in_axes=(0, None))
   def make_indices(index_array, agg_shape):
     index_array = jnp.moveaxis(index_array, -1, 0)
-    raveled = jnp.ravel_multi_index(index_array, agg_shape, 'wrap')
+    raveled = jnp.ravel_multi_index(index_array, agg_shape, 'wrap')  # pytype: disable=wrong-arg-types  # jnp-type
     # We mask edges where either sender or receiver is negative.
     return jnp.where(jnp.all(index_array >= 0, axis=0), raveled, -1)
 
@@ -1437,7 +1437,7 @@ def _Conv(
     else:
       mask = _pool_mask(mask, filter_shape, strides, init_padding,
                         batch_axis, channel_axis)
-      mask = jnp.transpose(mask, (out_spec.index(c) for c in lhs_spec))
+      mask = jnp.transpose(mask, (out_spec.index(c) for c in lhs_spec))  # pytype: disable=wrong-arg-types  # jnp-type
 
     return mask
 
@@ -2353,7 +2353,7 @@ def GlobalSelfAttention(
             mat_dims = (0, -1) + mat_dims
             res_dims = (0, -1) + res_dims
 
-          mat = jnp.einsum(G1, G1_dims, mat, mat_dims, G2, G2_dims, res_dims,
+          mat = jnp.einsum(G1, G1_dims, mat, mat_dims, G2, G2_dims, res_dims,  # pytype: disable=wrong-arg-types  # jnp-type
                            optimize=True)
         return _affine(mat, OV_std, b_std)
 
@@ -3773,7 +3773,7 @@ def _pos_emb_pdist(
                     (1,) * (2 * (ndim - axis - 1)))
     R += jnp.abs(pd) ** pos_emb_p_norm
 
-  R = pos_emb_decay_fn(R)
+  R = pos_emb_decay_fn(R)  # pytype: disable=wrong-arg-types  # jnp-type
   return R  # pytype: disable=bad-return-type  # jax-ndarray
 
 

@@ -399,7 +399,7 @@ def assert_close_matrices(self, expected, actual, rtol, atol=0.1):
     if (jnp.isnan(relative_error) or
         relative_error > rtol or
         absolute_error > atol):
-      _log(relative_error, absolute_error, expected, actual, False)
+      _log(relative_error, absolute_error, expected, actual, False)  # pytype: disable=wrong-arg-types  # jnp-type
       self.fail(self.failureException('Relative ERROR: ',
                                       float(relative_error),
                                       'EXPECTED:' + ' ' * 50,
@@ -410,7 +410,7 @@ def assert_close_matrices(self, expected, actual, rtol, atol=0.1):
                                       'Absolute ERROR: ',
                                       float(absolute_error)))
     else:
-      _log(relative_error, absolute_error, expected, actual, True)
+      _log(relative_error, absolute_error, expected, actual, True)  # pytype: disable=wrong-arg-types  # jnp-type
 
   jax.tree_map(assert_close, expected, actual)
 

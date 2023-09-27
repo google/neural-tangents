@@ -403,7 +403,7 @@ class Kernel:
         other2_dims = get_other_dims(batch_ndim, False)
         operands += (other2, other2_dims)
 
-      return jnp.einsum(*operands, get_out_dims(batch_ndim), optimize=True)
+      return jnp.einsum(*operands, get_out_dims(batch_ndim), optimize=True)  # pytype: disable=wrong-arg-types  # jnp-type
 
     cov1 = dot(self.cov1, 1 if self.diagonal_batch else 2, other1, other1)
     cov2 = dot(self.cov2, 1 if self.diagonal_batch else 2, other2, other2)

@@ -169,8 +169,8 @@ def FanInProd() -> InternalLayerMasked:
         is_input=ks[0].is_input,
         diagonal_batch=ks[0].diagonal_batch,
         diagonal_spatial=ks[0].diagonal_spatial,
-        shape1=ks[0].shape1,
-        shape2=ks[0].shape2,
+        shape1=None,
+        shape2=None,
         batch_axis=ks[0].batch_axis,
         channel_axis=ks[0].channel_axis,
         mask1=None,
@@ -281,8 +281,8 @@ def FanInConcat(axis: int = -1) -> InternalLayerMasked:
                   is_input=ks[0].is_input,
                   diagonal_batch=diagonal_batch,
                   diagonal_spatial=diagonal_spatial,
-                  shape1=shape1,
-                  shape2=shape2,
+                  shape1=None,
+                  shape2=None,
                   batch_axis=batch_axis,
                   channel_axis=channel_axis,
                   mask1=None,
@@ -363,7 +363,7 @@ def _concat_masks(
           m,
           max_shape[:axis] + m.shape[axis: axis + 1] + max_shape[axis + 1:])
        if m is not None
-       else jnp.zeros_like(max_shapes[i], dtype=jnp.bool_))
+       else jnp.zeros_like(max_shapes[i], dtype=jnp.bool_))  # pytype: disable=wrong-arg-types  # jnp-type
       for i, m in enumerate(masks)
   ]
 

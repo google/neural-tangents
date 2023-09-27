@@ -338,7 +338,7 @@ def _dot_general_j(
   self_nc_dims = tuple(i for i in range(self.ndim)
                        if i not in self_c_dims)
 
-  j = jnp.moveaxis(
+  j = jnp.moveaxis(  # pytype: disable=wrong-arg-types  # jnp-type
       other,
       other_b_dims + tuple(d[1]
                            for d in sorted(zip(self_c_dims, other_c_dims))),

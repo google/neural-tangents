@@ -1197,7 +1197,7 @@ def ElementwiseNumerical(
       q11, q22 = jnp.expand_dims(q11, xy_axes), jnp.expand_dims(q22, xy_axes)
 
       def integrate(f):
-        fvals = f(_sqrt(2 * q11) * x) * f(
+        fvals = f(_sqrt(2 * q11) * x) * f(  # pytype: disable=wrong-arg-types  # jnp-type
             nngp / _sqrt(q11 / 2, 1e-30) * x + _sqrt(
                 2*(q22 - nngp**2/q11)) * y)
         return jnp.tensordot(grid, fvals, (xy_axes, xy_axes)) / jnp.pi
