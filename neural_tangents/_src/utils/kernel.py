@@ -135,8 +135,8 @@ class Kernel:
   diagonal_batch: bool = dataclasses.field(pytree_node=False)
   diagonal_spatial: bool = dataclasses.field(pytree_node=False)
 
-  shape1: tuple[int, ...] = dataclasses.field(pytree_node=False)
-  shape2: tuple[int, ...] = dataclasses.field(pytree_node=False)
+  shape1: Optional[tuple[int, ...]] = dataclasses.field(pytree_node=False)
+  shape2: Optional[tuple[int, ...]] = dataclasses.field(pytree_node=False)
 
   batch_axis: int = dataclasses.field(pytree_node=False)
   channel_axis: int = dataclasses.field(pytree_node=False)
