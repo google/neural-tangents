@@ -33,6 +33,7 @@ from typing import Generator, Iterable, Optional, Union
 
 from .batching import batch
 from .empirical import empirical_kernel_fn, NtkImplementation, DEFAULT_NTK_IMPLEMENTATION, _DEFAULT_NTK_FWD, _DEFAULT_NTK_S_RULES, _DEFAULT_NTK_J_RULES
+import jax
 from jax import random
 import jax.numpy as jnp
 from jax.tree_util import tree_map
@@ -54,7 +55,7 @@ def _sample_once_kernel_fn(
   def kernel_fn_sample_once(
       x1: NTTree[jnp.ndarray],
       x2: Optional[NTTree[jnp.ndarray]],
-      key: random.KeyArray,
+      key: jax.Array,
       get: Get,
       **apply_fn_kwargs):
     init_key, dropout_key = random.split(key, 2)
@@ -66,7 +67,7 @@ def _sample_once_kernel_fn(
 
 def _sample_many_kernel_fn(
     kernel_fn_sample_once,
-    key: random.KeyArray,
+    key: jax.Array,
     n_samples: set[int],
     get_generator: bool):
   def normalize(sample: PyTree, n: int) -> PyTree:
@@ -117,7 +118,7 @@ def _sample_many_kernel_fn(
 def monte_carlo_kernel_fn(
     init_fn: InitFn,
     apply_fn: ApplyFn,
-    key: random.KeyArray,
+    key: jax.Array,
     n_samples: Union[int, Iterable[int]],
     batch_size: int = 0,
     device_count: int = -1,

@@ -16,7 +16,7 @@
 
 from typing import Any, Generator, Optional, Sequence, TYPE_CHECKING, TypeVar, Union, Protocol
 
-from jax import random
+import jax
 import jax.numpy as jnp
 
 from .kernel import Kernel
@@ -77,7 +77,7 @@ class InitFn(Protocol):
 
   def __call__(
       self,
-      rng: random.KeyArray,
+      rng: jax.Array,
       input_shape: Shapes,
       **kwargs
   ) -> tuple[Shapes, PyTree]:

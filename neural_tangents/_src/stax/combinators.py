@@ -19,6 +19,7 @@ from typing import Any, Callable
 import warnings
 
 import frozendict
+import jax
 from jax import random, lax
 import jax.example_libraries.stax as ostax
 from .requirements import Diagonal, get_req, layer, requires
@@ -174,7 +175,7 @@ def parallel(*layers: Layer) -> InternalLayer:
   init_fns, apply_fns, kernel_fns = zip(*layers)
   init_fn_stax, apply_fn_stax = ostax.parallel(*zip(init_fns, apply_fns))
 
-  def init_fn(rng: random.KeyArray, input_shape: Shapes):
+  def init_fn(rng: jax.Array, input_shape: Shapes):
     return type(input_shape)(init_fn_stax(rng, input_shape))
 
   def apply_fn(params, inputs, **kwargs):

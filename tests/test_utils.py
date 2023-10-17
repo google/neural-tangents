@@ -428,7 +428,7 @@ def mask(
     x: jnp.ndarray,
     mask_constant: Optional[float],
     mask_axis: Sequence[int],
-    key: jax.random.KeyArray,
+    key: jax.Array,
     p: float
 ) -> jnp.ndarray:
   if mask_constant is not None:
