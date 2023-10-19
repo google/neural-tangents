@@ -16,7 +16,7 @@
 
 from absl.testing import absltest
 
-from jax.config import config
+from jax import config
 from examples import elementwise_numerical
 from tests import test_utils
 

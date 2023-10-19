@@ -16,8 +16,8 @@
 
 from absl.testing import absltest
 import jax
+from jax import config
 from jax import random
-from jax.config import config
 import jax.numpy as jnp
 import neural_tangents as nt
 from neural_tangents import stax

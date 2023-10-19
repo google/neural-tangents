@@ -23,7 +23,7 @@ import warnings
 from absl.testing import absltest
 import jax
 from jax import lax
-from jax.config import config
+from jax import config
 from jax.core import Primitive
 from jax.core import ShapedArray
 from jax.interpreters import ad

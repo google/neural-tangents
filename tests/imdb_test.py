@@ -16,7 +16,7 @@
 """Tests for `examples/imdb.py`."""
 
 from absl.testing import absltest
-from jax.config import config
+from jax import config
 from examples import imdb
 from tests import test_utils
 

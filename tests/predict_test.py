@@ -21,7 +21,7 @@ from jax import grad
 from jax import jit
 from jax import random
 from jax import vmap
-from jax.config import config
+from jax import config
 from jax.example_libraries import optimizers
 from jax.flatten_util import ravel_pytree
 import jax.numpy as jnp

@@ -28,7 +28,7 @@ from jax import lax
 from jax import random
 from jax import remat
 from jax import tree_map
-from jax.config import config
+from jax import config
 import jax.numpy as jnp
 from jax.tree_util import tree_reduce
 import neural_tangents as nt

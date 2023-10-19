@@ -18,8 +18,8 @@ from functools import partial
 
 from absl.testing import absltest
 from jax import jit
+from jax import config
 from jax import random
-from jax.config import config
 import jax.numpy as jnp
 from jax.tree_util import tree_map
 import neural_tangents as nt
