@@ -19,10 +19,10 @@ import itertools
 import random as prandom
 
 from absl.testing import absltest
+from jax import config
 from jax import default_backend
 from jax import jit
 from jax import random
-from jax.config import config
 import jax.numpy as jnp
 import neural_tangents as nt
 from neural_tangents import stax

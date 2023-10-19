@@ -25,7 +25,7 @@ from jax import jit
 from jax import lax
 from jax import random
 from jax import vjp
-from jax.config import config
+from jax import config
 import jax.numpy as jnp
 import more_itertools
 import neural_tangents as nt

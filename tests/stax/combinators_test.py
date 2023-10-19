@@ -17,8 +17,8 @@
 import random as prandom
 
 from absl.testing import absltest
+from jax import config
 from jax import random
-from jax.config import config
 import jax.numpy as jnp
 from neural_tangents import stax
 from tests import test_utils
