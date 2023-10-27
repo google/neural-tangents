@@ -114,7 +114,6 @@ from jax import jacobian
 from jax import jvp
 from jax import lax
 from jax import linear_transpose
-from jax import linear_util as lu
 from jax import vjp
 from jax import vmap
 from jax.core import Jaxpr
@@ -146,6 +145,12 @@ from .utils.typing import EmpiricalKernelFn
 from .utils.typing import PyTree
 from .utils.typing import VMapAxes
 from .utils.typing import VMapAxisTriple
+
+try:
+  # jax >=0.4.16
+  from jax.extend import linear_util as lu
+except ImportError:
+  from jax import linear_util as lu
 
 
 # LINEARIZATION AND TAYLOR EXPANSION
