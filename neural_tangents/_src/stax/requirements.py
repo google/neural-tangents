@@ -1093,6 +1093,8 @@ def get_diagonal_outer_prods(
   cov1, _ = mean_and_var(cov1, axis=axis, keepdims=True, mask=mask1)
   cov2, _ = mean_and_var(cov2, axis=axis, keepdims=True, mask=mask2)
 
+  if cov1 is None:
+    raise ValueError('cov1 is None')
   end_axis = 1 if diagonal_spatial else cov1.ndim
   prod12 = utils.outer_prod(cov1, cov2, 0, end_axis, operation)
 

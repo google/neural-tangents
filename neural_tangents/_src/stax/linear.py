@@ -2331,7 +2331,7 @@ def GlobalSelfAttention(
           return attention_mechanism.fn()(QK_std * mat)
 
       def _weigh_kernel(mat, G1, G2=None):
-        if mat is not None and mat.ndim != 0:
+        if mat is not None and mat.ndim != 0 and G1 is not None:
           G2 = G1 if G2 is None else G2
 
           # Spatial axes
@@ -3213,6 +3213,8 @@ def _conv_kernel_full_spatial_unshared(
   lhs_diag = utils.diagonal_between(lhs, batch_ndim)
   out_diag = _conv_kernel_diagonal_spatial(lhs_diag, filter_shape, strides,
                                            padding, batch_ndim)
+  if out_diag is None:
+    raise ValueError('_conv_kernel_diagonal_spatial returned None')
   out_diag_flat = out_diag.reshape((np.prod(out_diag.shape[:batch_ndim]), -1))
   out_flat = vmap(jnp.diag)(out_diag_flat)
   out = out_flat.reshape(out_diag.shape[:batch_ndim] +
