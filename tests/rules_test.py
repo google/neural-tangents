@@ -582,7 +582,7 @@ class JacobianRulesTest(test_utils.NeuralTangentsTestCase):
   def test_unary(self, primitive: Optional[Primitive], shape, dtype, params):
     if primitive == lax.device_put_p:
       # Can't instantiate devices at test generation time; using subtests.
-      devices = [None] + jax.devices() + jax.devices('cpu')
+      devices = [None] + jax.devices() + jax.local_devices(backend='cpu')
       for device in devices:
         for src in devices:
           with self.subTest(device=device, src=src):
