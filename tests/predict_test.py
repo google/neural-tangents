@@ -857,9 +857,11 @@ class PredictTest(test_utils.NeuralTangentsTestCase):
                 def is_on_cpu(x):
                   return jax.tree_util.tree_all(
                       jax.tree_map(
-                          lambda x: 'cpu' in str(x.device_buffer.device()
-                                                 ).lower(),
-                          x))
+                          lambda x: 'cpu'
+                          in str(x.addressable_shards[0].device).lower(),
+                          x,
+                      )
+                  )
 
                 self.assertEqual(on_cpu, is_on_cpu(predict_inf))
                 self.assertEqual(on_cpu, is_on_cpu(predict_none))

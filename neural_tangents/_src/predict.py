@@ -1347,7 +1347,10 @@ def _is_on_cpu(x: PyTree) -> bool:
   def _arr_is_on_cpu(x: jnp.ndarray) -> bool:
     # TODO(romann): revisit when https://github.com/google/jax/issues/1431 and
     # https://github.com/google/jax/issues/1432 are fixed.
-    if hasattr(x, 'device_buffer'):
+    if hasattr(x, 'addressable_shards'):
+      # device_buffer is deprecated, so try addressable_shards first.
+      return 'cpu' in str(x.addressable_shards[0].device).lower()
+    elif hasattr(x, 'device_buffer'):
       return 'cpu' in str(x.device_buffer.device()).lower()
 
     if isinstance(x, (np.ndarray, jnp.ndarray)):
