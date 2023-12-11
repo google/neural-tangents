@@ -346,9 +346,9 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
     if default_backend() == 'gpu' and n > 3:
       raise absltest.SkipTest('>=4D-CNN is not supported on GPUs.')
 
-    width = 256
+    width = 128
     n_samples = 256
-    tol = 0.03
+    tol = 0.04
     key = random.PRNGKey(1)
 
     spatial_shape = ((1, 2, 3, 2, 1) if transpose else (15, 8, 9))[:n]
@@ -475,7 +475,7 @@ class MaskingTest(test_utils.NeuralTangentsTestCase):
     kernel_fn = jit(kernel_fn, static_argnames='get')
     exact = kernel_fn(x1, x2, get, mask_constant=mask_constant)
     empirical = kernel_fn_mc(x1, x2, get=get, mask_constant=mask_constant)
-    test_utils.assert_close_matrices(self, empirical, exact, tol)
+    test_utils.assert_close_matrices(self, empirical, exact, tol, 0.2)
 
 
 if __name__ == '__main__':

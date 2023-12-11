@@ -22,13 +22,13 @@ from typing import Any, Callable, Optional, Sequence
 from absl.testing import absltest
 from flax import linen as nn
 import jax
+from jax import config
 from jax import jacobian
 from jax import jit
 from jax import lax
 from jax import random
 from jax import remat
 from jax import tree_map
-from jax import config
 import jax.numpy as jnp
 from jax.tree_util import tree_reduce
 import neural_tangents as nt
@@ -631,10 +631,10 @@ _functions: dict[str, Callable[[PyTree, PyTree], PyTree]] = {
     'p[1] * p[0]': lambda p, x: p[1] * p[0],
     'p[1] / p[0]': lambda p, x: p[1] / p[0],
 
-    'p[1] * np.expand_dims(np.arange(p[1].shape[1]))': lambda p, x: p[1] * jnp.expand_dims(jnp.arange(p[1].shape[1])),  # pytype: disable=missing-parameter  # jnp-type
-    'p[1] * np.expand_dims(p[0][0])': lambda p, x: p[1] * jnp.expand_dims(p[0][0]),  # pytype: disable=missing-parameter  # jnp-type
-    'p[1] / np.expand_dims(np.arange(p[1].shape[1]))': lambda p, x: p[1] / jnp.expand_dims(jnp.arange(p[1].shape[1])),  # pytype: disable=missing-parameter  # jnp-type
-    'p[1] / np.expand_dims(p[0][0])': lambda p, x: p[1] / jnp.expand_dims(p[0][0]),  # pytype: disable=missing-parameter  # jnp-type
+    'p[1] * np.expand_dims(np.arange(p[1].shape[1]))': lambda p, x: p[1] * jnp.expand_dims(jnp.arange(1, p[1].shape[1] + 1), axis=-1),
+    'p[1] * np.expand_dims(p[0][0])': lambda p, x: p[1] * jnp.expand_dims(p[0][0], axis=-1),
+    'p[1] / np.expand_dims(np.arange(p[1].shape[1]))': lambda p, x: p[1] / jnp.expand_dims(jnp.arange(1, p[1].shape[1] + 1), axis=-1),
+    'p[1] / np.expand_dims(p[0][0])': lambda p, x: p[1] / jnp.expand_dims(p[0][0], axis=-1),
 
     '[p[0], p[1], p[0] / p[1], 2 * p[0], -p[1] + p[0]]': lambda p, x: [p[0], p[1], p[0] / p[1], 2 * p[0], -p[1] + p[0]],
     '[np.sum(p[0], axis=0), np.sum(p[0], axis=1)]': lambda p, x: [jnp.sum(p[0], axis=0), jnp.sum(p[0], axis=1)],
@@ -1232,7 +1232,7 @@ class _ResNet(nn.Module):
   num_classes: int
   num_filters: int = 4
   dtype: Any = jnp.float32
-  act: Callable = nn.relu
+  act: Callable[[jax.Array], jax.Array] = nn.relu
   conv: _ModuleDef = nn.Conv
 
   @nn.compact

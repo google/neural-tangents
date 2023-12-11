@@ -94,8 +94,15 @@ from typing import Callable, Optional, Union
 import warnings
 
 from jax.experimental import jax2tf
-from neural_tangents._src.empirical import NtkImplementation, empirical_ntk_fn, DEFAULT_NTK_IMPLEMENTATION, _DEFAULT_NTK_FWD, _DEFAULT_NTK_J_RULES, _DEFAULT_NTK_S_RULES
-from neural_tangents._src.utils.typing import Axes, PyTree, VMapAxes
+from neural_tangents._src.empirical import _DEFAULT_NTK_FWD
+from neural_tangents._src.empirical import _DEFAULT_NTK_J_RULES
+from neural_tangents._src.empirical import _DEFAULT_NTK_S_RULES
+from neural_tangents._src.empirical import DEFAULT_NTK_IMPLEMENTATION
+from neural_tangents._src.empirical import empirical_ntk_fn
+from neural_tangents._src.empirical import NtkImplementation
+from neural_tangents._src.utils.typing import Axes
+from neural_tangents._src.utils.typing import PyTree
+from neural_tangents._src.utils.typing import VMapAxes
 import tensorflow as tf
 import tf2jax
 

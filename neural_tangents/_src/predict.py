@@ -27,21 +27,25 @@ set / timesteps.
   note that closed-form kernels currently only support a single `channel_axis`).
 """
 
-
 import collections
 from functools import lru_cache
-from typing import Callable, Generator, Iterable, NamedTuple, Optional, Any, Union, Protocol
+from typing import Any, Callable, Generator, Iterable, NamedTuple, Optional, Protocol, Union
 
 import jax
 from jax import grad
 from jax.experimental import ode
 import jax.numpy as jnp
 import jax.scipy as jsp
-from jax.tree_util import tree_all, tree_map
+from jax.tree_util import tree_all
+from jax.tree_util import tree_map
 import numpy as np
 import scipy as sp
-from .utils import dataclasses, utils
-from .utils.typing import Axes, Get, KernelFn
+
+from .utils import dataclasses
+from .utils import utils
+from .utils.typing import Axes
+from .utils.typing import Get
+from .utils.typing import KernelFn
 
 
 PyTree = Any

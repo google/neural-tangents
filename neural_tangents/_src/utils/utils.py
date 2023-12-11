@@ -29,7 +29,8 @@ import jax
 from jax import core
 from jax import random
 import jax.numpy as jnp
-from jax.tree_util import tree_all, tree_map
+from jax.tree_util import tree_all
+from jax.tree_util import tree_map
 import numpy as np
 
 

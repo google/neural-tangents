@@ -14,7 +14,7 @@
 
 """Common Type Definitions."""
 
-from typing import Any, Generator, Optional, Sequence, TYPE_CHECKING, TypeVar, Union, Protocol
+from typing import Any, Generator, Optional, Protocol, Sequence, TYPE_CHECKING, TypeVar, Union
 
 import jax
 import jax.numpy as jnp

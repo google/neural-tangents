@@ -26,19 +26,34 @@ parallelized. You don't need to apply the :obj:`~neural_tangents.batch` or
 kernel function is JITted internally.
 """
 
-
 from functools import partial
 import operator
 from typing import Generator, Iterable, Optional, Union
 
-from .batching import batch
-from .empirical import empirical_kernel_fn, NtkImplementation, DEFAULT_NTK_IMPLEMENTATION, _DEFAULT_NTK_FWD, _DEFAULT_NTK_S_RULES, _DEFAULT_NTK_J_RULES
 import jax
 from jax import random
 import jax.numpy as jnp
 from jax.tree_util import tree_map
+
+from .batching import batch
+
+from .empirical import _DEFAULT_NTK_FWD
+from .empirical import _DEFAULT_NTK_J_RULES
+from .empirical import _DEFAULT_NTK_S_RULES
+from .empirical import DEFAULT_NTK_IMPLEMENTATION
+from .empirical import empirical_kernel_fn
+from .empirical import NtkImplementation
+
 from .utils import utils
-from .utils.typing import ApplyFn, Axes, EmpiricalGetKernelFn, Get, InitFn, MonteCarloKernelFn, NTTree, PyTree, VMapAxes
+from .utils.typing import ApplyFn
+from .utils.typing import Axes
+from .utils.typing import EmpiricalGetKernelFn
+from .utils.typing import Get
+from .utils.typing import InitFn
+from .utils.typing import MonteCarloKernelFn
+from .utils.typing import NTTree
+from .utils.typing import PyTree
+from .utils.typing import VMapAxes
 
 
 def _sample_once_kernel_fn(

@@ -24,15 +24,24 @@ from typing import Callable, Optional, Sequence
 import warnings
 
 import jax
-from jax import custom_jvp, grad, vmap
+from jax import custom_jvp
+from jax import grad
 from jax import numpy as jnp
+from jax import vmap
 from jax.scipy.special import erf
 import numpy as np
-from .requirements import Diagonal, get_diagonal, get_diagonal_outer_prods, layer, requires, supports_masking
 import scipy as sp
+
 from ..utils import utils
 from ..utils.kernel import Kernel
-from ..utils.typing import InternalLayer, LayerKernelFn
+from ..utils.typing import InternalLayer
+from ..utils.typing import LayerKernelFn
+from .requirements import Diagonal
+from .requirements import get_diagonal
+from .requirements import get_diagonal_outer_prods
+from .requirements import layer
+from .requirements import requires
+from .requirements import supports_masking
 
 
 @layer

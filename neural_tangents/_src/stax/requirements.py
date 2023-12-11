@@ -14,23 +14,34 @@
 
 """Requirement management for :obj:`~neural_tangents.stax` layers."""
 
+import dataclasses
 import enum
 from typing import Callable, Optional, Sequence, Union
 import warnings
 
 import frozendict
 import jax
+from jax import eval_shape
 from jax import lax
 from jax import numpy as jnp
-from jax import eval_shape
 from jax.core import ShapedArray
-from jax.tree_util import tree_map, tree_all
-from ..utils import utils
-import dataclasses
-from ..utils import dataclasses as nt_dataclasses
-from ..utils.kernel import Kernel
-from ..utils.typing import AnalyticKernelFn, Axes, Get, InitFn, ApplyFn, InternalLayer, Layer, LayerKernelFn, NTTree, PyTree
+from jax.tree_util import tree_all
+from jax.tree_util import tree_map
 import numpy as np
+
+from ..utils import dataclasses as nt_dataclasses
+from ..utils import utils
+from ..utils.kernel import Kernel
+from ..utils.typing import AnalyticKernelFn
+from ..utils.typing import ApplyFn
+from ..utils.typing import Axes
+from ..utils.typing import Get
+from ..utils.typing import InitFn
+from ..utils.typing import InternalLayer
+from ..utils.typing import Layer
+from ..utils.typing import LayerKernelFn
+from ..utils.typing import NTTree
+from ..utils.typing import PyTree
 
 
 # Public decorators

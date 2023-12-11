@@ -18,16 +18,19 @@ These layers split an input into multiple branches or fuse multiple inputs from
 several branches into one.
 """
 
-
 import functools
 from typing import Callable, Iterable, Optional, Sequence
 import warnings
 
 from jax import numpy as jnp
 import jax.example_libraries.stax as ostax
-from .requirements import layer, supports_masking
+
 from ..utils.kernel import Kernel
-from ..utils.typing import InternalLayer, InternalLayerMasked, Kernels
+from ..utils.typing import InternalLayer
+from ..utils.typing import InternalLayerMasked
+from ..utils.typing import Kernels
+from .requirements import layer
+from .requirements import supports_masking
 
 
 @layer

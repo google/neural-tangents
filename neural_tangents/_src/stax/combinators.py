@@ -20,11 +20,21 @@ import warnings
 
 import frozendict
 import jax
-from jax import random, lax
+from jax import lax
+from jax import random
 import jax.example_libraries.stax as ostax
-from .requirements import Diagonal, get_req, layer, requires
+
 from ..utils.kernel import Kernel
-from ..utils.typing import InternalLayer, Layer, LayerKernelFn, NTTree, NTTrees, Shapes
+from ..utils.typing import InternalLayer
+from ..utils.typing import Layer
+from ..utils.typing import LayerKernelFn
+from ..utils.typing import NTTree
+from ..utils.typing import NTTrees
+from ..utils.typing import Shapes
+from .requirements import Diagonal
+from .requirements import get_req
+from .requirements import layer
+from .requirements import requires
 
 
 @layer

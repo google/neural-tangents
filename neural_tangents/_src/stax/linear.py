@@ -22,18 +22,30 @@ from typing import Callable, Iterable, Optional, Sequence, Union
 import warnings
 
 import jax
+from jax import eval_shape
 from jax import lax
 from jax import numpy as jnp
 from jax import ops
 from jax import random
-from jax import ShapeDtypeStruct, eval_shape, vmap
+from jax import ShapeDtypeStruct
+from jax import vmap
 from jax.core import ShapedArray
 import jax.example_libraries.stax as ostax
 import numpy as np
-from .requirements import Bool, Diagonal, get_diagonal_outer_prods, layer, mean_and_var, requires, supports_masking
+
 from ..utils import utils
 from ..utils.kernel import Kernel
-from ..utils.typing import Axes, InternalLayer, InternalLayerMasked, PyTree
+from ..utils.typing import Axes
+from ..utils.typing import InternalLayer
+from ..utils.typing import InternalLayerMasked
+from ..utils.typing import PyTree
+from .requirements import Bool
+from .requirements import Diagonal
+from .requirements import get_diagonal_outer_prods
+from .requirements import layer
+from .requirements import mean_and_var
+from .requirements import requires
+from .requirements import supports_masking
 
 
 # Enums

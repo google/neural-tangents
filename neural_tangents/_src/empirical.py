@@ -116,16 +116,22 @@ from jax import lax
 from jax import linear_transpose
 from jax import vjp
 from jax import vmap
+
 from jax.core import Jaxpr
 from jax.core import JaxprEqn
 from jax.core import Literal
 from jax.core import ShapedArray
 from jax.core import Value
 from jax.core import Var
+
+from jax.extend import linear_util as lu
+
 from jax.interpreters import ad
 from jax.interpreters.ad import UndefinedPrimal
 from jax.interpreters.ad import Zero
+
 import jax.numpy as jnp
+
 from jax.tree_util import tree_flatten
 from jax.tree_util import tree_map
 from jax.tree_util import tree_reduce
@@ -134,6 +140,7 @@ from jax.tree_util import tree_transpose
 from jax.tree_util import tree_unflatten
 from jax.util import safe_map as map
 from jax.util import safe_zip as zip
+
 import numpy as np
 
 from .utils import rules
@@ -145,12 +152,6 @@ from .utils.typing import EmpiricalKernelFn
 from .utils.typing import PyTree
 from .utils.typing import VMapAxes
 from .utils.typing import VMapAxisTriple
-
-try:
-  # jax >=0.4.16
-  from jax.extend import linear_util as lu
-except ImportError:
-  from jax import linear_util as lu
 
 
 # LINEARIZATION AND TAYLOR EXPANSION

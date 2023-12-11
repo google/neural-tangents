@@ -14,17 +14,25 @@
 
 """Structured derivatives rules."""
 
-from .dataclasses import dataclass, field
 import functools
-from typing import Callable, Optional, Any, Union
+from typing import Any, Callable, Optional, Union
 
-from . import utils
 import jax
 from jax import lax
-from jax.core import JaxprEqn, ShapedArray, Primitive, Jaxpr, Var, AbstractValue, Literal
+from jax.core import AbstractValue
+from jax.core import Jaxpr
+from jax.core import JaxprEqn
+from jax.core import Literal
+from jax.core import Primitive
+from jax.core import ShapedArray
+from jax.core import Var
 from jax.interpreters import ad
 import jax.numpy as jnp
 import numpy as np
+
+from . import utils
+from .dataclasses import dataclass
+from .dataclasses import field
 
 
 # pytype: disable=wrong-keyword-args

@@ -46,16 +46,20 @@ from typing import Any, Callable, Iterable, Optional, TypeVar, Union
 import warnings
 
 import jax
+
 from jax import device_put
 from jax import devices
 from jax import jit
 from jax import pmap
 from jax import random
+
 import jax.numpy as jnp
+
 from jax.tree_util import tree_all
 from jax.tree_util import tree_flatten
 from jax.tree_util import tree_map
 from jax.tree_util import tree_unflatten
+
 import numpy as np
 
 from .utils import utils
