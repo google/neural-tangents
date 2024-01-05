@@ -262,8 +262,6 @@ _UNARY_PRIMITIVES = {
 
     jax.lax.copy_p: lambda s, _: [{}],
 
-    ad.zeros_like_p: lambda s, _: [{}],
-
     lax.neg_p: lambda s, _: [{}],
 
     lax.transpose_p: lambda s, _: [
@@ -372,10 +370,6 @@ _UNARY_PRIMITIVES = {
 
 
 _BINARY_PRIMITIVES = {
-    # TODO(romann): what is the purpose of this primitive?
-    ad.add_jaxvals_p:
-        lambda s1, s2: ([{}] if s1 == s2 else []),
-
     lax.mul_p:
         lambda s1, s2: ([{}] if _is_broadcastable(s1, s2) else []),
 
