@@ -128,7 +128,7 @@ def DotGeneral(
     dimension_numbers: lax.DotDimensionNumbers = (((), ()), ((), ())),
     precision: Optional[lax.Precision] = None,
     batch_axis: int = 0,
-    channel_axis: int = -1
+    channel_axis: int = -1,
 ) -> InternalLayerMasked:
   r"""Constant (non-trainable) rhs/lhs Dot General.
 
@@ -262,7 +262,7 @@ def Aggregate(
     batch_axis: int = 0,
     channel_axis: int = -1,
     to_dense: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = lambda p: p,
-    implementation: str = AggregateImplementation.DENSE.value
+    implementation: str = AggregateImplementation.DENSE.value,
 ) -> InternalLayer:
   r"""Aggregation operator (graphical neural network).
 
@@ -1124,7 +1124,7 @@ def _Conv(
     parameterization: str,
     s: tuple[int, int],
     transpose: bool,
-    shared_weights: bool
+    shared_weights: bool,
 ) -> InternalLayerMasked:
   """General convolution.
 
@@ -1435,16 +1435,14 @@ def _Conv(
       for c in ('O', 'I'):
         rhs_shape.insert(rhs_spec.index(c), 1)
 
-      # TODO(romann): revisit based on http://b/235531081.
-      rhs = jnp.ones(
-          rhs_shape,
-          dtype=None if jax.default_backend() == 'gpu' else mask.dtype)
+      rhs = jnp.ones(rhs_shape, mask.dtype)
       mask = lax.conv_transpose(
-          mask.astype(rhs.dtype),
+          mask,
           rhs,
           strides,
           init_padding.name,
-          dimension_numbers=dimension_numbers).astype(mask.dtype)
+          dimension_numbers=dimension_numbers,
+      )
 
     else:
       mask = _pool_mask(mask, filter_shape, strides, init_padding,
@@ -1464,27 +1462,36 @@ def AvgPool(
     padding: str = Padding.VALID.name,
     normalize_edges: bool = False,
     batch_axis: int = 0,
-    channel_axis: int = -1
+    channel_axis: int = -1,
 ) -> InternalLayerMasked:
   """Average pooling.
 
   Based on :obj:`jax.example_libraries.stax.AvgPool`.
 
   Args:
-    window_shape: The number of pixels over which pooling is to be performed.
-    strides: The stride of the pooling window. `None` corresponds to a stride of
+    window_shape:
+      The number of pixels over which pooling is to be performed.
+
+    strides:
+      The stride of the pooling window. `None` corresponds to a stride of
       `(1, 1)`.
-    padding: Can be `VALID`, `SAME`, or `CIRCULAR` padding. Here `CIRCULAR`
-      uses periodic boundary conditions on the image.
-    normalize_edges: `True` to normalize output by the effective receptive
-      field, `False` to normalize by the window size. Only has effect at the
-      edges when `SAME` padding is used. Set to `True` to retain correspondence
-      to `ostax.AvgPool`.
-    batch_axis: Specifies the batch dimension. Defaults to `0`, the leading
-      axis.
-    channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
-      the trailing axis. For `kernel_fn`, channel size is considered to be
-      infinite.
+
+    padding:
+      Can be `VALID`, `SAME`, or `CIRCULAR` padding. Here `CIRCULAR` uses
+      periodic boundary conditions on the image.
+
+    normalize_edges:
+      `True` to normalize output by the effective receptive field, `False` to
+      normalize by the window size. Only has effect at the edges when `SAME`
+      padding is used. Set to `True` to retain correspondence to
+      :obj:`jax.example_libraries.stax.AvgPool`.
+
+    batch_axis:
+      Specifies the batch dimension. Defaults to `0`, the leading axis.
+
+    channel_axis:
+      Specifies the channel / feature dimension. Defaults to `-1`, the trailing
+      axis. For `kernel_fn`, channel size is considered to be infinite.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -1500,23 +1507,30 @@ def SumPool(
     strides: Optional[Sequence[int]] = None,
     padding: str = Padding.VALID.name,
     batch_axis: int = 0,
-    channel_axis: int = -1
+    channel_axis: int = -1,
 ) -> InternalLayerMasked:
   """Sum pooling.
 
   Based on :obj:`jax.example_libraries.stax.SumPool`.
 
   Args:
-    window_shape: The number of pixels over which pooling is to be performed.
-    strides: The stride of the pooling window. `None` corresponds to a stride of
+    window_shape:
+      The number of pixels over which pooling is to be performed.
+
+    strides:
+      The stride of the pooling window. `None` corresponds to a stride of
       `(1, ..., 1)`.
-    padding: Can be `VALID`, `SAME`, or `CIRCULAR` padding. Here `CIRCULAR`
-      uses periodic boundary conditions on the image.
-    batch_axis: Specifies the batch dimension. Defaults to `0`, the leading
-      axis.
-    channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
-      the trailing axis. For `kernel_fn`, channel size is considered to be
-      infinite.
+
+    padding:
+      Can be `VALID`, `SAME`, or `CIRCULAR` padding. Here `CIRCULAR` uses
+      periodic boundary conditions on the image.
+
+    batch_axis:
+      Specifies the batch dimension. Defaults to `0`, the leading axis.
+
+    channel_axis:
+      Specifies the channel / feature dimension. Defaults to `-1`, the trailing
+      axis. For `kernel_fn`, channel size is considered to be infinite.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -1532,7 +1546,7 @@ def _Pool(
     padding: str,
     normalize_edges: bool,
     batch_axis: int,
-    channel_axis: int
+    channel_axis: int,
 ) -> InternalLayerMasked:
   """General pooling.
 
@@ -1540,22 +1554,33 @@ def _Pool(
   :obj:`jax.example_libraries.stax.SumPool`.
 
   Args:
-    pool_type: specifies whether average or sum pooling should be performed.
+    pool_type:
+      specifies whether average or sum pooling should be performed.
       (`Pooling.AVG` or `Pooling.SUM`)
-    window_shape: The number of pixels over which pooling is to be performed.
-    strides: The stride of the pooling window. `None` corresponds to a stride of
+
+    window_shape:
+      The number of pixels over which pooling is to be performed.
+
+    strides:
+      The stride of the pooling window. `None` corresponds to a stride of
       `(1, 1)`.
-    padding: Can be `VALID`, `SAME`, or `CIRCULAR` padding. Here `CIRCULAR`
-      uses periodic boundary conditions on the image.
-    normalize_edges: `True` to normalize output by the effective receptive
-      field, `False` to normalize by the window size. Only has effect at the
-      edges when `SAME` padding is used. Set to `True` to retain correspondence
-      to `ostax.AvgPool`.
-    batch_axis: Specifies the batch dimension. Defaults to `0`, the leading
-      axis.
-    channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
-      the trailing axis. For `kernel_fn`, channel size is considered to be
-      infinite.
+
+    padding:
+      Can be `VALID`, `SAME`, or `CIRCULAR` padding. Here `CIRCULAR` uses
+      periodic boundary conditions on the image.
+
+    normalize_edges:
+      `True` to normalize output by the effective receptive field, `False` to
+      normalize by the window size. Only has effect at the edges when `SAME`
+      padding is used. Set to `True` to retain correspondence
+      to :obj:`jax.example_libraries.stax.AvgPool`.
+
+    batch_axis:
+      Specifies the batch dimension. Defaults to `0`, the leading axis.
+
+    channel_axis:
+      Specifies the channel / feature dimension. Defaults to `-1`, the trailing
+      axis. For `kernel_fn`, channel size is considered to be infinite.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -1650,7 +1675,7 @@ def _Pool(
 @supports_masking(remask_kernel=False)
 def GlobalSumPool(
     batch_axis: int = 0,
-    channel_axis: int = -1
+    channel_axis: int = -1,
 ) -> InternalLayerMasked:
   """Global sum pooling.
 
@@ -1658,11 +1683,12 @@ def GlobalSumPool(
   the order of batch and channel axes.
 
   Args:
-    batch_axis: Specifies the batch dimension. Defaults to `0`, the leading
-      axis.
-    channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
-      the trailing axis. For `kernel_fn`, channel size is considered to be
-      infinite.
+    batch_axis:
+      Specifies the batch dimension. Defaults to `0`, the leading axis.
+
+    channel_axis:
+      Specifies the channel / feature dimension. Defaults to `-1`, the trailing
+      axis. For `kernel_fn`, channel size is considered to be infinite.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -1674,7 +1700,7 @@ def GlobalSumPool(
 @supports_masking(remask_kernel=False)
 def GlobalAvgPool(
     batch_axis: int = 0,
-    channel_axis: int = -1
+    channel_axis: int = -1,
 ) -> InternalLayerMasked:
   """Global average pooling.
 
@@ -1682,11 +1708,12 @@ def GlobalAvgPool(
   preserving the order of batch and channel axes.
 
   Args:
-    batch_axis: Specifies the batch dimension. Defaults to `0`, the leading
-      axis.
-    channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
-      the trailing axis. For `kernel_fn`, channel size is considered to be
-      infinite.
+    batch_axis:
+      Specifies the batch dimension. Defaults to `0`, the leading axis.
+
+    channel_axis:
+      Specifies the channel / feature dimension. Defaults to `-1`, the trailing
+      axis. For `kernel_fn`, channel size is considered to be infinite.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -1697,7 +1724,7 @@ def GlobalAvgPool(
 def _GlobalPool(
     pool_type: _Pooling,
     batch_axis: int,
-    channel_axis: int
+    channel_axis: int,
 ) -> InternalLayerMasked:
   """General global pooling.
 
@@ -1705,13 +1732,16 @@ def _GlobalPool(
     the order of batch and channel axes.
 
   Args:
-    pool_type: specifies whether average or sum pooling should be performed.
+    pool_type:
+      specifies whether average or sum pooling should be performed.
       (`Pooling.AVG` or `Pooling.SUM`).
-    batch_axis: Specifies the batch dimension. Defaults to `0`, the leading
-      axis.
-    channel_axis: Specifies the channel / feature dimension. Defaults to `-1`,
-      the trailing axis. For `kernel_fn`, channel size is considered to be
-      infinite.
+
+    batch_axis:
+      Specifies the batch dimension. Defaults to `0`, the leading axis.
+
+    channel_axis:
+      Specifies the channel / feature dimension. Defaults to `-1`, the trailing
+      axis. For `kernel_fn`, channel size is considered to be infinite.
 
   Returns:
     `(init_fn, apply_fn, kernel_fn)`.
@@ -1784,7 +1814,7 @@ def _GlobalPool(
 @supports_masking(remask_kernel=False)
 def Flatten(
     batch_axis: int = 0,
-    batch_axis_out: int = 0
+    batch_axis_out: int = 0,
 ) -> InternalLayerMasked:
   """Flattening all non-batch dimensions.
 
@@ -1948,7 +1978,7 @@ def GlobalSelfAttention(
     W_pos_emb_std: float = 1.0,
     val_pos_emb: bool = False,
     batch_axis: int = 0,
-    channel_axis: int = -1
+    channel_axis: int = -1,
 ) -> InternalLayerMasked:
   """Global scaled dot-product self-attention.
 
@@ -2449,18 +2479,21 @@ def LayerNorm(
     axis: Axes = -1,
     eps: float = 1e-12,
     batch_axis: int = 0,
-    channel_axis: int = -1
+    channel_axis: int = -1,
 ) -> InternalLayer:
   """Layer normalisation.
 
   Args:
     axis:
       dimensions over which to normalize.
+
     eps:
       (small) positive constant to be added to the variance estimates in order
       to prevent division by zero.
+
     batch_axis:
       batch dimension. Defaults to `0`, the leading axis.
+
     channel_axis:
       channel / feature dimension. Defaults to `-1`, the trailing axis. For
       `kernel_fn`, channel size is considered to be infinite.
@@ -2615,7 +2648,7 @@ def ImageResize(
     antialias: bool = True,
     precision: lax.Precision = lax.Precision.HIGHEST,
     batch_axis: int = 0,
-    channel_axis: int = -1
+    channel_axis: int = -1,
 ) -> InternalLayerMasked:
   """Image resize function mimicking :obj:`jax.image.resize`.
 
@@ -2810,7 +2843,7 @@ def ImageResize(
 def Index(
     idx: utils.SliceType,
     batch_axis: int = 0,
-    channel_axis: int = -1
+    channel_axis: int = -1,
 ) -> InternalLayerMasked:
   """Index into the array mimicking :class:`numpy.ndarray` indexing.
 
@@ -2905,7 +2938,7 @@ _CONV_KERNEL_DIMENSION_NUMBERS = ('NCHW', 'OIHW', 'NCHW')
 def _affine(
     mat: Optional[jnp.ndarray],
     W_std: float,
-    b_std: Optional[float]
+    b_std: Optional[float],
 ) -> Optional[jnp.ndarray]:
   """Get covariances of affine outputs if inputs have covariances `nngp`.
 
@@ -2917,8 +2950,10 @@ def _affine(
     mat:
       a `jnp.ndarray` containing sample-[sample-]position[-position] covariances
       of inputs.
+
     W_std:
       standard deviation of a fully-connected layer weights.
+
     b_std:
       standard deviation of a fully-connected layer biases.
       `None` means no bias.
@@ -2987,7 +3022,7 @@ def _same_pad_for_filter_shape(
 def _same_pad_for_filter_shape_transpose(
     x: jnp.ndarray,
     axes: Sequence[int],
-    out_shape: Sequence[int]
+    out_shape: Sequence[int],
 ) -> jnp.ndarray:
   """Transpose of the `_same_pad_for_filter_shape` function.
 
@@ -2998,9 +3033,11 @@ def _same_pad_for_filter_shape_transpose(
   Args:
     x:
       `jnp.ndarray` to pad, e.g. a 4D `NHWC` image.
+
     axes:
       non-negative integers, the spatial axes to apply convolution
       over (e.g. `(1, 2)` for an `NHWC` image).
+
     out_shape:
       target shape after cropping.
 
@@ -3042,7 +3079,7 @@ def _pool_transpose(
     filter_shape: Sequence[int],
     strides: Sequence[int],
     axes: Sequence[int],
-    padding: Padding
+    padding: Padding,
 ) -> jnp.ndarray:
   """Transpose convolution with an all-ones filter."""
   n_spatial = len(axes)
@@ -3080,7 +3117,7 @@ def _conv_kernel_full_spatial_shared(
     filter_shape: Sequence[int],
     strides: Sequence[int],
     padding: Padding,
-    batch_ndim: int
+    batch_ndim: int,
 ) -> Optional[jnp.ndarray]:
   """Compute covariance of the CNN outputs given inputs with covariance `lhs`.
 
@@ -3240,7 +3277,7 @@ def _conv_kernel_full_spatial_transpose(
     filter_shape: Sequence[int],
     strides: Sequence[int],
     padding: Padding,
-    batch_ndim: int
+    batch_ndim: int,
 ) -> Optional[jnp.ndarray]:
   """Compute covariance of the CNN transpose given inputs with covariance `lhs`.
 
@@ -3313,7 +3350,7 @@ def _conv_kernel_full_spatial_loop(
     padding: Padding,
     lax_conv: Callable[
         [jnp.ndarray, jnp.ndarray, tuple[int, ...], str], jnp.ndarray],
-    get_n_channels: Callable[[int], int]
+    get_n_channels: Callable[[int], int],
 ) -> jnp.ndarray:
   padding = Padding.VALID if padding == Padding.CIRCULAR else padding
 
@@ -3351,7 +3388,7 @@ def _conv_kernel_diagonal_spatial(
     filter_shape: Sequence[int],
     strides: Sequence[int],
     padding: Padding,
-    batch_ndim: int
+    batch_ndim: int,
 ) -> Optional[jnp.ndarray]:
   """Compute covariance of the CNN outputs given inputs with covariance `lhs`.
 
@@ -3410,7 +3447,7 @@ def _conv_kernel_diagonal_spatial_transpose(
     filter_shape: Sequence[int],
     strides: Sequence[int],
     padding: Padding,
-    batch_ndim: int
+    batch_ndim: int,
 ) -> Optional[jnp.ndarray]:
   """Compute covariance of the CNN transpose given inputs with covariance `lhs`.
 
@@ -3471,7 +3508,7 @@ def _pool_kernel(
     strides: Sequence[int],
     padding: Padding,
     normalize_edges: bool,
-    batch_ndim: int
+    batch_ndim: int,
 ) -> jnp.ndarray:
   """Get covariances of pooling outputs given inputs covariances `lhs`.
 
@@ -3543,7 +3580,7 @@ def _normalize(lhs, out, normalize_edges, padding, strides, window_shape):
 def _diag_mul_full_spatial(
     x: jnp.ndarray,
     factor: float,
-    diagonal_batch: bool
+    diagonal_batch: bool,
 ) -> jnp.ndarray:
   if diagonal_batch:
     idx = (slice(None),)
@@ -3568,7 +3605,7 @@ def _diag_mul_full_spatial(
 def _diag_mul_diagonal_spatial(
     x: jnp.ndarray,
     factor: float,
-    diagonal_batch: bool
+    diagonal_batch: bool,
 ) -> jnp.ndarray:
   if diagonal_batch:
     x *= factor
@@ -3586,7 +3623,7 @@ def _diag_mul(
     x: Optional[jnp.ndarray],
     factor: float,
     diagonal_batch: bool,
-    diagonal_spatial: bool
+    diagonal_spatial: bool,
 ) -> Optional[jnp.ndarray]:
   if x is None:
     return x
@@ -3603,7 +3640,7 @@ def _vmap_2d(
     var1: jnp.ndarray,
     var2: Optional[jnp.ndarray],
     diagonal_batch: bool,
-    diagonal_spatial: bool
+    diagonal_spatial: bool,
 ) -> jnp.ndarray:
   """Effectively a "2D vmap" of `fn(cov12, var1, var2)`.
 
@@ -3685,7 +3722,7 @@ def _pool_mask(
     strides: Sequence[int],
     padding: Padding,
     batch_axis: int,
-    channel_axis: int
+    channel_axis: int,
 ) -> jnp.ndarray:
   window_shape = list(window_shape)
   strides = list(strides)
@@ -3770,7 +3807,7 @@ def _pos_emb_identity(shape: Sequence[int]) -> jnp.ndarray:
 def _pos_emb_pdist(
     shape: Sequence[int],
     pos_emb_p_norm: Optional[float],
-    pos_emb_decay_fn: Optional[Callable[[float], float]]
+    pos_emb_decay_fn: Optional[Callable[[float], float]],
 ) -> jnp.ndarray:
   if pos_emb_decay_fn is None:
     # Identity / one-hot positional embeddings.
@@ -3795,7 +3832,7 @@ def _get_all_pos_emb(
     k: Kernel,
     pos_emb_type: PositionalEmbedding,
     pos_emb_p_norm: float,
-    pos_emb_decay_fn: Optional[Callable[[float], float]]
+    pos_emb_decay_fn: Optional[Callable[[float], float]],
 ) -> tuple[Optional[jnp.ndarray], Optional[jnp.ndarray], Optional[jnp.ndarray]]:
   if pos_emb_type == PositionalEmbedding.NONE:
     return None, None, None
@@ -3820,7 +3857,7 @@ def _get_all_pos_emb(
 
 def _shape_and_axes(
     x: tuple[int, ...],
-    ignore_axes: Iterable[int] = ()
+    ignore_axes: Iterable[int] = (),
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ndim = len(x)
   ignore_axes = tuple(i % ndim for i in ignore_axes)
