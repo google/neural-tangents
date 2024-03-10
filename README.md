@@ -425,6 +425,7 @@ please [file a bug](https://github.com/google/neural-tangents/issues/new)!
 
 
 
+
 ### Myrtle network
 
 Colab notebook [Performance Benchmark](https://colab.research.google.com/github/google/neural-tangents/blob/main/notebooks/myrtle_kernel_with_neural_tangents.ipynb)
